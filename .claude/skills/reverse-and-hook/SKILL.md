@@ -93,3 +93,12 @@ hook 是运行时内存修改——注入目标进程改方法行为，app 重�
 - **加固壳需脱壳**：hook 目标若加壳，需先脱壳拿真实 dex
 - **native 逻辑需 frida/IDA**：so 内逻辑非 Xposed Java 层 hook
 - **内存级不持久**：app 重启重新 hook，不改 apk 文件（持久改 apk 需重打包，非本方法论范围）
+
+## 版本错位根因排查
+
+真机 UI 行为与逆向分析结论对不上时，**第一步验证版本**，不要直接怀疑 hook 逻辑：
+
+- 对版本：`adb shell dumpsys package <pkg> | grep -i versionName` vs 逆向基线 apk 的版本（`aapt2 dump badging <apk>`）。版本不同 → 基线分析整篇作废重做，不是调 hook 能救的。
+- 为什么悄无声息：libxposed 挂载容错"目标类/方法找不到只打 WARN（`installed N/M`）"——类名漂移/版本错位被静默吞掉，hook 不生效也不崩；**installed N/M 里 N 明显小于 M 是版本错位实锤**。
+- 实证：MagicOS 10（v3.2）与 MagicOS 11（v4.0）安装器混淆完全不同，装错版本不崩、静默失效；参考插件 README 版本与 manifest 版本对不上的文档漂移也出现过。
+- 排查顺序：先对版本 → 再看 installed N/M 命中率 → 最后才动 hook 实现。

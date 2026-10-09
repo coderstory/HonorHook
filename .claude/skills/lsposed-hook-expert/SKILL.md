@@ -129,3 +129,19 @@ Rain 用 DexKit（`libdexkit.so`）查找 hook 点。DexKit 按 dex 特征匹配
 - **服务端校验绕不过**：VIP 权益等服务端校验，hook 只能改本地状态（isVip=true），实际权益由服务端决定（fanqie-purify 免登录说明）。
 - **加固壳需脱壳**：hook 目标若加壳，需先脱壳拿到真实 dex。
 - **native 逻辑**：so 内逻辑 hook 需 frida 等，非 Xposed Java 层 hook。
+
+## 门类方法放行原则
+
+按钮显隐类"门"方法（`isXxxShow`/`needShowXxx`）只是**入口判断**，不是最终仲裁者——门通过后还有真正的仲裁链决定显示什么。hook 门本身（尤其拦死返 false）会连后续更新逻辑一起掐掉，UI 停在初始态"看似没变"，且易误伤其他路径。
+
+- 正确姿势：门方法放行，干预真正的仲裁者——服务端下发的按钮类型（`buttonType`/`getXxxType`）。
+- 实证（主题商店 20.1.63.305，`docs/theme-ui-real-chain.md`）：`OnlinePreviewBaseActivity` 门通过后，`updateButtons` 按 `IncentiveData.getThemeDetailButtonType()` switch 决定显示哪组按钮；hook 门返 false 跳过 updateButtons，按钮停在 XML 初始 visible 态。
+- 门后可能有**平行判定副本**：`ToolBarGroupLayout.needShowBuyButton()`、`WallpaperDetailView.needShowBuyButton()` 与 `isBuyBtnShow` 逻辑几乎逐行相同但是独立方法，需逐个覆盖才算完整。
+
+## 移植前真机基线校验
+
+迁移任何参考 hook 代码（同类插件/旧项目）前，先拿**真机实际安装的 apk** 反编译出基线，逐点验证类/方法存在性，再决定迁移哪些点：
+
+- 无效点/历史兼容分支不迁移；README 宣传 ≠ 代码事实，以基线 apk 实际代码为准。
+- 案例（荣耀三插件整合，`docs/honor-plugins-integration.md`）：`HonorInstallerPurify` 8 组 hook 真机基线**全命中**可整体移植；其 README 声称的"降级安装"hook 在 v4.0 全文件不存在（残留宣传），不迁移。
+- 版本先对齐：不同 MagicOS 版本类名混淆完全不同（MagicOS 10 v3.2 vs MagicOS 11 v4.0），装错版本不崩但静默失效——迁移前先 `adb dumpsys package` 对版本。

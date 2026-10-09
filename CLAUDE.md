@@ -14,7 +14,7 @@
 | `reference/` | 参考项目（4 个子项目） | 含完整源码，只读 |
 | `system-files/` | 荣耀系统资源，hook 研究对象，内部资源需处理后才能静态分析 | Rain 逆向产物（apktool/jadx/xposed 配置）+ `rain-strings-decrypted.md`（43 处解密串全还原：SandHook/签名绕过等）；荣耀系统资源待设备连接拉取 |
 | `tools/` | 依赖软件（全部用户级便携，无需管理员安装） | `platform-tools/`（adb）、`apktool.jar`、`jadx/`、`rain-decrypt.py`（Rain 字符串批量解密脚本） |
-| `docs/` | 调研/逆向分析报告留档 | `rain-analysis.md`、`ui-template-research.md`、`ai-lsposed-temlate-report.md`、`skill-audit-fixes.md`（skill 修正记录 27 条）、`rain-hook-architecture.md`（Rain 分发链/DexKit 双轨/字符串解密破解）、`hc-hook-structure.md`（HC 入口分发/UI↔hook 远程 prefs 配置通信链路） |
+| `docs/` | 调研/逆向分析报告留档（索引见 `docs/README.md`，共 14 份） | 逆向（Rain×2/主题付费/下载链/UI真实链/荣耀预研/插件整合）、调研（UI 模板/HC 结构/AI 模板/gap 分析）、需求、审计（skill 修正） |
 
 **路径全英文铁律**：所有目录用英文名。中文路径在 aapt2 / NDK / Windows GBK 终端 / git 下会踩坑（编译报错、输出乱码、路径转义）。本项目已从中文目录名改为英文，后续新增目录一律英文。
 

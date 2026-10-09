@@ -122,3 +122,19 @@ fanqie-purify `adscan.py` 思路：按关键词（广告/弹窗/会员/hybrid br
 - 方法名 + 签名（参数/返回值/重载选择）
 - hook 策略（before/after/replace；短路返回 void / 改返回值）
 - 依据（字符串/调用关系/继承链证据）
+
+## 静态点 ≠ 运行时关键点（观测验证铁律）
+
+jadx/smali 静态分析找出的"疑似 hook 点"只是候选，**必须经过运行时调用观测验证才算数**——静态存在 ≠ 运行时被调用 ≠ 决定最终表现。主题商店真机轮（2026-10-09，见 `docs/theme-ui-real-chain.md`）三个实证案例：
+
+### 实证案例
+
+1. **`isBuyBtnShow` 是"门"非"开关"**：它是详情页按钮区的入口门，不是按钮展示的仲裁者。hook 它常返 false 会跳过后续 `updateButtons`/`hideLayout` 更新逻辑，按钮停在 XML 初始 visible 态——看起来"没变"，实为"更新逻辑没跑到"。
+2. **`getExpireTimeTimestamp` 全库仅 1 个消费方**：表面上它直接决定会员过期时间，但真正消费链走的是 `getDisplayTime`/`getDisplayTimeTimestamp`——静态看着最"像"的 hook 点未必是生效路径，hook 前先数清楚消费方。
+3. **`fetchShouldDialogByDefault`/`fetchShouldDialogByCloud` 在目标版本全工程零调用**：消费链（`VipCheckRepo.getShouldDialog` → `VipCheckVM.refreshShouldDialog` → `HwThemeManagerActivity.showVipCheckDialog`）除定义外零调用方 = **休眠代码**，hook 拦的是一个根本不触发的弹窗，挂载成功也无效。
+
+### 修正法
+
+- intercept 进入时先 log 方法名（挂载/命中各打一条），确认 hook 方法在真实流程里确实被调用；
+- 真机把详情页/弹窗/付费各路径完整点一轮 UI，对照日志统计哪些 hook 命中、哪些从未触发；
+- 命中率低（多组 hook 只有少数产生日志）= 选点错误或版本错位，回静态层重新定位，不要盲目加 hook。
