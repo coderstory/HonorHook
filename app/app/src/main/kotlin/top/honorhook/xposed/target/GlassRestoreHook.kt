@@ -17,7 +17,8 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import top.honorhook.data.KEY_F7_GLASS_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
-import top.honorhook.data.REMOTE_PREFERENCE_GROUP
+import top.honorhook.xposed.MethodResolver
+import top.honorhook.xposed.RemotePrefsHolder
 
 /**
  * 荣耀 SystemUI 目标（F7 液态玻璃恢复）——移植自 reference/HonorLiquidGlassRestore v2.5.18
@@ -105,6 +106,14 @@ object GlassRestoreHook : TargetHook {
     ) : TargetHook {
         override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) =
             delegate.install(module, param)
+
+        // 与委托对象等值（组归属语义，非引用身份）：同一 object 的 3 包名键视为同一目标组——
+        // ① TargetRegistry.installed 对象级判定跨键生效（别名共享进程时第二个键回调不重复 install，防 double mount）；
+        // ② groupedTargetCount() 玻璃三键归 1 组（=4，与应用 tab 4 行口径一致）。
+        override fun equals(other: Any?): Boolean =
+            other === delegate || (other is PkgAlias && other.delegate === delegate)
+
+        override fun hashCode(): Int = delegate.hashCode()
     }
 
     // ---------- 目标类（与源码 MainHook.java L90-115 逐字一致；框架类 com.hihonor.android.* 为 bootclasspath，进程内可加载） ----------
@@ -196,16 +205,18 @@ object GlassRestoreHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         // 注意：libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（无 classLoader 属性，ThemeStoreHook 同款写法）
         val loader = param.defaultClassLoader
-        // 每个 intercept 现读远程 prefs（daemon 快照缓存于本地 map，开销极小，照 HC DockWmsHook.kt:113-115）
-        val prefs = runCatching { module.getRemotePreferences(REMOTE_PREFERENCE_GROUP) }
-            .onFailure { module.log(Log.WARN, TAG, "读取远程 prefs 失败，F7 开关固定为关（hook 全部放行原逻辑）", it) }
-            .getOrNull()
+        // DexKit 兜底用的目标 APK 路径（MethodResolver 第二轨依赖；null 时仅直连重试）
+        apkPath = param.applicationInfo?.sourceDir
+        // 远程 prefs 不走 install 期一次性捕获（RemotePrefsHolder：进程级缓存 + 失败自动重读自愈——
+        // 修复「install 期读取失败 → null 被闭包捕获冻结」缺陷，与 ThemeStoreHook 同构；此处调用仅作缓存预热，
+        // 实际读取在各 intercept 函数体内现读 obtain()）
+        RemotePrefsHolder.obtain(module)
 
         retryRounds = 0
         okCount = 0
         totalCount = 0
         failedIds.clear()
-        sMinDegree = readDegreeProp(loader)
+        sMinDegree = readDegreeProp(loader) // 首次兜底读取（此后每 2s 由 refreshProps 热刷新覆盖，见 refreshProps）
 
         // 挂载表 18 项 = 面板 10 组 hook（docs §4.4；锁屏链 4 组二期未入表）
         val pending = mutableListOf<MountTask>()
@@ -291,7 +302,7 @@ object GlassRestoreHook : TargetHook {
         )
         totalCount = pending.size
 
-        attemptMount(pending, module, loader, prefs)
+        attemptMount(pending, module, loader)
     }
 
     /** 挂载项执行结果：[NOT_RESOLVED] 类/方法未解析到——可随类加载重试；[FAILED] hook 挂载异常——重试无意义。 */
@@ -345,11 +356,10 @@ object GlassRestoreHook : TargetHook {
         pending: MutableList<MountTask>,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ) {
         val unresolved = mutableListOf<MountTask>()
         for (task in pending) {
-            when (mountOne(task, module, loader, prefs)) {
+            when (mountOne(task, module, loader)) {
                 MountResult.OK -> okCount++
                 MountResult.FAILED -> failedIds += task.description
                 MountResult.NOT_RESOLVED -> unresolved += task
@@ -369,7 +379,7 @@ object GlassRestoreHook : TargetHook {
             retryRounds++
             val delay = if (retryRounds == 1) RETRY_DELAY_MS else RETRY_FINAL_DELAY_MS
             Handler(Looper.getMainLooper()).postDelayed({
-                runCatching { attemptMount(unresolved, module, loader, prefs) }
+                runCatching { attemptMount(unresolved, module, loader) }
                     .onFailure { t -> module.log(Log.ERROR, TAG, "懒加载重试挂载异常", t) }
             }, delay)
         }
@@ -380,12 +390,15 @@ object GlassRestoreHook : TargetHook {
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ): MountResult {
         val executable = if (task.ctor) {
+            // 构造器保持直连 findCtor（resolveCtor 与直连等价，DexKit 兜底收益低——最小改动）
             findCtor(loader, task.className, task.paramCount)
         } else {
+            // 直连失败 → MethodResolver 双轨兜底（第二轨 DexKit 按特征查磁盘 dex，对抗 OTA 混淆漂移；
+            // apkPath 缺失时 resolveMethod 自动跳过第二轨，等价纯直连重试）
             findMethod(loader, task.className, task.methodName, task.paramCount)
+                ?: MethodResolver.resolveMethod(loader, task.className, task.methodName, task.paramCount, apkPath = apkPath)
         }
         if (executable == null) {
             module.log(Log.WARN, TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
@@ -395,7 +408,7 @@ object GlassRestoreHook : TargetHook {
             val builder = module.hook(executable)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE) // 拦截器异常不炸宿主进程（boot-loop 纪律）
                 .setId(task.id)
-            builder.intercept { chain -> interceptBody(chain, module, loader, prefs, task) }
+            builder.intercept { chain -> interceptBody(chain, module, loader, task) }
         }.fold(
             onSuccess = {
                 // 挂载成功日志**始终输出**（不受 debug 门控）——真机验证凭它确认命中（对应插件 "hook ... ok" 行）
@@ -425,9 +438,11 @@ object GlassRestoreHook : TargetHook {
         chain: XposedInterface.Chain,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
         task: MountTask,
     ): Any? {
+        // 每次触发现读远程 prefs（RemotePrefsHolder 进程级缓存，拿到后零开销）——不等 install 期一次性捕获：
+        // 修复「install 期读取失败 → null 被闭包捕获冻结」缺陷（null 时每次触发自动重读自愈，成功一次即缓存）
+        val prefs = RemotePrefsHolder.obtain(module)
         if (!featureEnabled(prefs)) return chain.proceed()   // 总开关/F7 关 → 原逻辑放行
         return when (task.kind) {
             // 常量短路：不调原方法，恒返 value（returnConstant 语义；isFrostedBlurType/isHighMachine/isCompatMachine/材质特效位）
@@ -792,6 +807,12 @@ object GlassRestoreHook : TargetHook {
     }.getOrNull()
 
     // ---------------- 枚举常量懒解析（mount 期 NOT_RESOLVED 之外的运行期兜底：解析失败 = 该 hook 本次不生效） ----------------
+    // 纪律（boot-loop 事故史）：[loader.loadClass] 不触发类初始化，但 `.enumConstants`/`values()` 会触发目标枚举
+    // 的 <clinit>（静态初始化）——这三个函数**仅允许在 intercept 期调用**：调用点（MACHINE_TYPE_HIGH / STYLE_FLIP
+    // 分支）已处于 featureEnabled 门控之后，且整条链被挂载期 PROTECTIVE 模式 + 运行期 runCatching 双重包裹，
+    // <clinit> 触发即是最坏后果。**禁止从挂载/重试线程（attemptMount/mountOne）调用**——挂载期若走枚举解析
+    // 即把 <clinit> 提前到进程注入阶段，扩大 boot-loop 事故面。首次解析失败（runCatching 兜底）返回 null =
+    // 该 hook 本次不生效（原逻辑放行，下次触发重试）。
 
     private fun machineHigh(loader: ClassLoader): Any? {
         sMachineHigh?.let { return it }
@@ -802,6 +823,7 @@ object GlassRestoreHook : TargetHook {
         return high
     }
 
+    // 同上纪律：enumConstants 触发 StyleType <clinit>，仅允许 intercept 期调用（featureEnabled 门控后、PROTECTIVE + runCatching 包裹），禁挂载/重试线程调用
     private fun styleLiquid(loader: ClassLoader): Any? {
         sStyleLiquid?.let { return it }
         val v = runCatching {
@@ -811,6 +833,7 @@ object GlassRestoreHook : TargetHook {
         return v
     }
 
+    // 同上纪律：enumConstants 触发 StyleType <clinit>，仅允许 intercept 期调用（featureEnabled 门控后、PROTECTIVE + runCatching 包裹），禁挂载/重试线程调用
     private fun styleFrosted(loader: ClassLoader): Any? {
         sStyleFrosted?.let { return it }
         val v = runCatching {
@@ -837,6 +860,9 @@ object GlassRestoreHook : TargetHook {
         sRimScale = readFloatProp(loader, RIM_PROP, DEFAULT_RIM, 0.15f, 1.0f)
         sFolderMode = readFloatProp(loader, FOLDER_PROP, DEFAULT_FOLDER, 0.0f, 1.0f) > 0.5f
         sTileBlurScale = readFloatProp(loader, TBLUR_PROP, DEFAULT_TBLUR, 0.1f, 2.0f)
+        // degree 与其余 11 属性同走 2s TTL 热刷新（修复「install 期一次性读」后 setprop persist.sys.lgr.degree
+        // 改了不生效——与类注释「2s TTL setprop 通道」矛盾；install 期的首次读取保留作兜底）
+        sMinDegree = readDegreeProp(loader)
     }
 
     private fun readFloatProp(loader: ClassLoader, name: String, def: Float, min: Float, max: Float): Float = runCatching {
@@ -854,6 +880,9 @@ object GlassRestoreHook : TargetHook {
     }.getOrDefault(DEFAULT_DEGREE)
 
     // ---------------- 目标解析（类/方法不存在返回 null → NOT_RESOLVED 懒加载重试；loadClass 不触发初始化——boot-loop 纪律） ----------------
+
+    /** 目标 APK 的 sourceDir（install 期记录，覆盖式更新；null 时 [MethodResolver] 跳过 DexKit 兜底，等价纯直连） */
+    private var apkPath: String? = null
 
     private fun findMethod(
         loader: ClassLoader,

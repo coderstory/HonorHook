@@ -11,7 +11,8 @@ import java.lang.reflect.Method
 import java.util.ArrayList
 import top.honorhook.data.KEY_F5_MARKET_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
-import top.honorhook.data.REMOTE_PREFERENCE_GROUP
+import top.honorhook.xposed.MethodResolver
+import top.honorhook.xposed.RemotePrefsHolder
 
 /**
  * 荣耀应用市场目标（F5 市场净化——核心组）——移植自 reference/HonorMarketTamer（API 102 改写，
@@ -85,12 +86,11 @@ object MarketHook : TargetHook {
     private const val CLS_MULTI_ASSEMBLY_RESP = "$PKG.network.response.MultiAssemblyDataResp"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
-        // libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（HonorInstallerHook 同款写法）
+        // libxposed 102 的 PackageLoadedParam 提供 defaultClassLoader 与 applicationInfo（apkPath 供 DexKit 兜底，照 HC ScreenRecorderModule.kt:85）
         val loader = param.defaultClassLoader
-        // 每个 intercept 现读远程 prefs（daemon 快照缓存于本地 map，开销极小，照 HC DockWmsHook.kt:113-115）
-        val prefs = runCatching { module.getRemotePreferences(REMOTE_PREFERENCE_GROUP) }
-            .onFailure { module.log(Log.WARN, TAG, "读取远程 prefs 失败，F5 开关固定为关（hook 全部放行原逻辑）", it) }
-            .getOrNull()
+        apkPath = param.applicationInfo?.sourceDir
+        // prefs 不再一次性读取捕获：RemotePrefsHolder 进程级缓存，intercept 内现读、null 自动重试（此调用仅为预热缓存）
+        RemotePrefsHolder.obtain(module)
 
         retryRounds = 0
         okCount = 0
@@ -179,7 +179,7 @@ object MarketHook : TargetHook {
         )
         totalCount = pending.size
 
-        attemptMount(pending, module, loader, prefs)
+        attemptMount(pending, module, loader)
     }
 
     /** 挂载项执行结果：[NOT_RESOLVED] 类/方法未解析到——可随类加载重试；[FAILED] hook 挂载异常——重试无意义。 */
@@ -194,8 +194,10 @@ object MarketHook : TargetHook {
      *   → 原生空数据分支，避免 error 态残留「加载失败」占位）；
      * [RESULT_ERROR_RESP] 返回 errorCode=-1 的 BaseResp（请求源头 → 与原生 execute 失败分支同形态，
      *   下游全链路判空安全）；
-     * [PUSH_TYPE_AWARE] 推送到达（c 1 参）：pushNotifyType 以 "1" 开头的更新族放行，其余置 null；
-     * [NOTIFY_TYPE_AWARE] 系统通知展示（a 3 参静态）：服务对象 D() 类型以 "1" 开头的更新族放行，其余置 null。
+     * [PUSH_TYPE_AWARE] 推送到达（c 1 参）：pushNotifyType 以 "1" 开头的更新族放行；类型探测失败亦放行
+     *   （fail-open，宁放过不误杀更新通知），其余置 null；
+     * [NOTIFY_TYPE_AWARE] 系统通知展示（a 3 参静态）：服务对象 D() 类型以 "1" 开头的更新族放行；
+     *   类型探测失败亦放行（fail-open），其余置 null。
      */
     private enum class MountKind { NULL, NULL_IF_ARG_SUFFIX, ARG_EMPTY_LIST, ARG_EMPTY_SUCCESS_RESP, RESULT_ERROR_RESP, PUSH_TYPE_AWARE, NOTIFY_TYPE_AWARE }
 
@@ -216,6 +218,8 @@ object MarketHook : TargetHook {
     private var okCount = 0
     private var totalCount = 0
     private val failedIds = mutableListOf<String>()
+    /** 目标 APK 路径（install 取 sourceDir；MethodResolver 第二轨 DexKit 兜底用，null 时跳过）。 */
+    private var apkPath: String? = null
 
     private const val MAX_RETRY_ROUNDS = 2
     private const val RETRY_DELAY_MS = 500L
@@ -230,11 +234,10 @@ object MarketHook : TargetHook {
         pending: MutableList<MountTask>,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ) {
         val unresolved = mutableListOf<MountTask>()
         for (task in pending) {
-            when (mountOne(task, module, loader, prefs)) {
+            when (mountOne(task, module, loader)) {
                 MountResult.OK -> okCount++
                 MountResult.FAILED -> failedIds += task.description
                 MountResult.NOT_RESOLVED -> unresolved += task
@@ -254,7 +257,7 @@ object MarketHook : TargetHook {
             retryRounds++
             val delay = if (retryRounds == 1) RETRY_DELAY_MS else RETRY_FINAL_DELAY_MS
             Handler(Looper.getMainLooper()).postDelayed({
-                runCatching { attemptMount(unresolved, module, loader, prefs) }
+                runCatching { attemptMount(unresolved, module, loader) }
                     .onFailure { t -> module.log(Log.ERROR, TAG, "懒加载重试挂载异常", t) }
             }, delay)
         }
@@ -265,16 +268,17 @@ object MarketHook : TargetHook {
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ): MountResult {
+        // 第一轨直连失败 → MethodResolver 第二轨 DexKit 兜底（对抗混淆漂移；两轨全失败归 NOT_RESOLVED 懒加载重试）
         val method = findMethod(loader, task.className, task.methodName, task.paramCount)
+            ?: MethodResolver.resolveMethod(loader, task.className, task.methodName, task.paramCount, apkPath = apkPath)
         if (method == null) {
             module.log(Log.WARN, TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
             return MountResult.NOT_RESOLVED
         }
         return runCatching {
             val builder = module.hook(method).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId(task.id)
-            builder.intercept { chain -> interceptBody(chain, module, loader, prefs, task) }
+            builder.intercept { chain -> interceptBody(chain, module, loader, task) }
         }.fold(
             onSuccess = {
                 // 挂载成功日志**始终输出**（不受 debug 门控）——真机验证凭它确认命中（对应插件 "hookedAll ... armed" 行）
@@ -304,9 +308,10 @@ object MarketHook : TargetHook {
         chain: XposedInterface.Chain,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
         task: MountTask,
     ): Any? {
+        // 每个 intercept 现读远程 prefs（RemotePrefsHolder：进程级缓存，null 时每次自动重读——防 install 期一次性读取失败后 null 冻结）
+        val prefs = RemotePrefsHolder.obtain(module)
         if (!featureEnabled(prefs)) return chain.proceed()   // 总开关/F5 关 → 原逻辑放行
         return when (task.kind) {
             // 短路置 null：不调原方法（开屏/弹窗/自启/工具页/推荐流请求核心；对应插件 before setResult(null)）
@@ -351,10 +356,14 @@ object MarketHook : TargetHook {
                 module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 请求源头短路（BaseResp errorCode=-1${if (resp == null) "，构造失败返回 null" else ""}）")
                 resp
             }
-            // 推送到达入口（c 1 参）：更新族（pushNotifyType 以 "1" 开头）放行，其余营销推送置 null
+            // 推送到达入口（c 1 参）：类型探测失败（fail-open：宁可放过不可误杀更新通知）与更新族
+            // （pushNotifyType 以 "1" 开头）放行，其余营销推送置 null
             MountKind.PUSH_TYPE_AWARE -> {
                 val (type, action) = probePushType(chain.args?.getOrNull(0))
-                if (type != null && type.startsWith("1")) {
+                if (type == null) {
+                    module.log(Log.WARN, TAG, "[market] ${task.id} 类型不可读，放行（fail-open：宁可放过不可误杀更新通知）")
+                    chain.proceed()
+                } else if (type.startsWith("1")) {
                     module.log(Log.INFO, TAG, "[market] ${task.id} 放行（更新族）type=$type action=$action")
                     chain.proceed()
                 } else {
@@ -362,14 +371,18 @@ object MarketHook : TargetHook {
                     null
                 }
             }
-            // 系统通知展示总入口（a 3 参静态）：仅拦 ActivityPushNotificationService 通道，更新族放行
+            // 系统通知展示总入口（a 3 参静态）：仅拦 ActivityPushNotificationService 通道；服务类型探测
+            // 失败（fail-open）与更新族（D() 以 "1" 开头）放行，其余置 null
             MountKind.NOTIFY_TYPE_AWARE -> {
                 val p1 = chain.args?.getOrNull(1)
                 if (p1 == null || !p1.javaClass.name.endsWith("ActivityPushNotificationService")) {
                     return chain.proceed()
                 }
                 val type = runCatching { p1.javaClass.getMethod("D").invoke(p1)?.toString() }.getOrNull()
-                if (type != null && type.startsWith("1")) {
+                if (type == null) {
+                    module.log(Log.WARN, TAG, "[market] ${task.id} 服务类型不可读，放行（fail-open：宁可放过不可误杀更新通知）")
+                    chain.proceed()
+                } else if (type.startsWith("1")) {
                     module.log(Log.INFO, TAG, "[market] ${task.id} 放行（更新族）type=$type")
                     chain.proceed()
                 } else {
@@ -406,19 +419,26 @@ object MarketHook : TargetHook {
         return type to action
     }
 
-    /** 从 JSON 文本里取字符串字段值（插件 extractJsonString 直移，无转义处理，够用于日志与分类）。 */
+    /** 从 JSON 文本里取字段值（支持字符串与数值两种值形态；无转义处理，够用于日志与分类）。 */
     private fun extractJsonString(json: String, key: String): String? {
         val needle = "\"$key\":"
         val i = json.indexOf(needle)
         if (i < 0) return null
-        var start = json.indexOf('"', i + needle.length)
-        if (start < 0 || start > i + needle.length + 2) {
-            start = json.indexOf('"', i + needle.length)
-            if (start < 0) return null
+        // 跳过冒号后的空白，定位值起点
+        var start = i + needle.length
+        while (start < json.length && (json[start] == ' ' || json[start] == '\t' || json[start] == '\r' || json[start] == '\n')) start++
+        if (start >= json.length) return null
+        if (json[start] == '"') {
+            // 字符串值：截到下一个 '"'
+            val end = json.indexOf('"', start + 1)
+            if (end < 0) return null
+            return json.substring(start + 1, end)
         }
-        val end = json.indexOf('"', start + 1)
-        if (end < 0) return null
-        return json.substring(start + 1, end)
+        // 数值/布尔值（如 "pushNotifyType":1001）：截到下一个 ',' 或 '}'，trim 返回
+        var end = start
+        while (end < json.length && json[end] != ',' && json[end] != '}') end++
+        val raw = json.substring(start, end).trim()
+        return raw.ifEmpty { null }
     }
 
     /** 构造 errorCode=-1 的 BaseResp（SearchActivationViewModel#o 请求源头短路；失败返回 null 由下游判空兜底）。 */
@@ -444,10 +464,10 @@ object MarketHook : TargetHook {
     }.getOrNull()
 
     /**
-     * 直连反射解析目标方法（HookEntry.resolveTargetMethod 第一轨的等价物；真机 16.1.9.302 已对全部
-     * 15 个目标类/方法实证存在，故不再走 DexKit 兜底）。类/方法不存在返回 null（版本差异容错，只记
-     * 日志 + 懒加载重试）。按方法名 + 参数个数匹配（照旧版 findAndHookMethod 语义；各目标无同名同参个数
-     * 的 overloading，实证见类注释）。
+     * 第一轨：直连反射解析目标方法（HookEntry.resolveTargetMethod 第一轨等价物；真机 16.1.9.302 已对全部
+     * 15 个目标类/方法实证存在）。类/方法不存在返回 null——mountOne 处接 MethodResolver 第二轨 DexKit 兜底
+     * （对抗 OTA 混淆漂移），两轨全失败归懒加载重试。按方法名 + 参数个数匹配（照旧版 findAndHookMethod
+     * 语义；各目标无同名同参个数的 overloading，实证见类注释）。
      */
     private fun findMethod(
         loader: ClassLoader,

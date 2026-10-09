@@ -23,7 +23,7 @@ class HookEntry : XposedModule() {
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
         log(Log.DEBUG, TAG, "onPackageLoaded: ${param.packageName}")
-        // 目标分发 = 下方 TargetRegistry 段（isFirstPackage 门控 + 注册表按包名查 + installed 防重装）
+        // 目标分发 = 下方 TargetRegistry 段（每包回调分发 + 注册表按包名查 + installed 对象级防重装）
         // TODO(逆向后): 早期 hook 点（如 ActivityThread 阶段）在此注册
         runCatching {
             // 照 HC HyperSystemUiModule L663：每次回调现读远程 prefs（hook 侧只读实现）
@@ -37,20 +37,21 @@ class HookEntry : XposedModule() {
         }
 
         // ---------- 目标分发骨架（融合 Rain 入口链 + HC 防重装，docs/rain-hook-architecture.md §1.1 / docs/hc-hook-structure.md §1.2）----------
-        // 分发链：isFirstPackage 门控（非首进程跳过，防多进程重复注入，Rain m591 语义）
-        //   → TargetRegistry.find 按包名查 → 命中且未安装 → target.install(this, param) + 标记已装（HC xxxInstalled 模式）。
+        // 分发链：每包回调都尝试 find + install（**无 isFirstPackage 门控**——GlassRestoreHook 同一 object 注册 3 包名键，
+        //   别名包共享进程时首包回调即被门控拦掉，其余键永不装载；每包回调带各自包的 loader，类解析按包分进程命中）。
+        //   防重装交给注册表**对象级判定**（installed 存目标对象，同一对象多键共享安装状态）：find 返回值对象即判定对象。
+        //   → TargetRegistry.find 按包名查 → 命中且目标对象未安装 → target.install(this, param) + 标记已装。
+        //   跨进程语义不变：每个 hook 进程有独立 TargetRegistry 静态副本（setId 幂等防同进程重复挂载）。
         // 新增目标：新建 TargetHook 实现并注册进 TargetRegistry（静态注册），此处零改动。
-        if (param.isFirstPackage()) {
-            runCatching {
-                val target = TargetRegistry.find(param.packageName)
-                if (target != null && !TargetRegistry.isInstalled(target.packageName)) {
-                    target.install(this, param)
-                    TargetRegistry.markInstalled(target.packageName)
-                    log(Log.INFO, TAG, "target installed: ${target.packageName}")
-                }
-            }.onFailure { error ->
-                log(Log.ERROR, TAG, "target install failed for ${param.packageName}", error)
+        runCatching {
+            val target = TargetRegistry.find(param.packageName)
+            if (target != null && !TargetRegistry.isInstalled(target)) {
+                target.install(this, param)
+                TargetRegistry.markInstalled(target)
+                log(Log.INFO, TAG, "target installed: ${target.packageName}")
             }
+        }.onFailure { error ->
+            log(Log.ERROR, TAG, "target install failed for ${param.packageName}", error)
         }
     }
 

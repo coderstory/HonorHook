@@ -14,7 +14,8 @@ import top.honorhook.data.KEY_F2_FREE_ENABLED
 import top.honorhook.data.KEY_F3_TRIAL_ENABLED
 import top.honorhook.data.KEY_F4_NO_RESET_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
-import top.honorhook.data.REMOTE_PREFERENCE_GROUP
+import top.honorhook.xposed.MethodResolver
+import top.honorhook.xposed.RemotePrefsHolder
 
 /**
  * 荣耀主题商店目标（F1-F4）——docs/honorhook-theme-requirements.md 功能需求落地。
@@ -184,10 +185,12 @@ object ThemeStoreHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         // 注意：libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（无 classLoader 属性，HookEntry 同款写法）
         val loader = param.defaultClassLoader
-        // 每个 intercept 现读远程 prefs（daemon 快照缓存于本地 map，开销极小，照 HC DockWmsHook.kt:113-115）
-        val prefs = runCatching { module.getRemotePreferences(REMOTE_PREFERENCE_GROUP) }
-            .onFailure { module.log(Log.WARN, TAG, "读取远程 prefs 失败，所有开关固定为关（hook 全部放行原逻辑）", it) }
-            .getOrNull()
+        // DexKit 兜底轨（MethodResolver 第二轨，见 mountOne findMethod 兜底）需要目标 APK 磁盘路径；
+        // libxposed 102 实码：param.applicationInfo.sourceDir（HC ScreenRecorderModule.kt:85 实证）
+        apkPath = param.applicationInfo?.sourceDir
+        // 预热远程 prefs（RemotePrefsHolder：拿到后进程级缓存、失败每次调用自动重读——修复「install 期
+        // 一次性读取失败后 null 冻结」缺陷）；每个 intercept 仍在调用时现读 obtain()，不持有 install 期引用
+        RemotePrefsHolder.obtain(module)
 
         retryRounds = 0
         okCount = 0
@@ -207,7 +210,7 @@ object ThemeStoreHook : TargetHook {
         collectApplyStateHooks(pending)     // F4 C7（PERMANENT 延迟解析）+ F3 C9
         totalCount = pending.size
 
-        attemptMount(pending, module, loader, prefs)
+        attemptMount(pending, module, loader)
     }
 
     // ---------------- F2：全部资源免费（功能位 key = KEY_F2_FREE_ENABLED） ----------------
@@ -415,6 +418,9 @@ object ThemeStoreHook : TargetHook {
         // 2=SINGLE_WITH_SAVE 会员卡。常返会员卡是最直接路径（兜底 T5 的 vipStatus 值）。枚举是 MineVipCardView
         // 内部类 `MineVipCardView$VipCardType`（L261 实证），用 resolveValue 延迟到挂载时解析（照 C7 PERMANENT 模式）；
         // 解析失败归入懒加载重试（NOT_RESOLVED）。
+        // 注意：enumConstants 会触发目标枚举类 <clinit>（invoke 静态 values()）——已由下方 runCatching 包裹（Throwable
+        // 全捕获），且仅运行于主题商店进程挂载/重试线程（非 SystemUI/launcher 启动路径，v2.3 boot-loop 事故模式不适用）；
+        // 解析失败（类加载/取值异常）归 NOT_RESOLVED 重试。
         pending += MountTask(
             kind = MountKind.CONST,
             className = CLS_MINE_VIP_CARD,
@@ -502,6 +508,9 @@ object ThemeStoreHook : TargetHook {
     private fun collectApplyStateHooks(pending: MutableList<MountTask>) {
         // C7：主题应用状态 → PERMANENT（永非试用态，不回退）。PERMANENT 枚举解析依赖 ThemeApplyState 类加载，
         // 用 resolveValue 延迟到每次挂载尝试时解析（类未加载时归入懒加载重试）。
+        // 注意：enumConstants 会触发目标枚举类 <clinit>（invoke 静态 values()）——已由下方 runCatching 包裹（Throwable
+        // 全捕获），且仅运行于主题商店进程挂载/重试线程（非 SystemUI/launcher 启动路径，v2.3 boot-loop 事故模式不适用）；
+        // 解析失败（类加载/取值异常）归 NOT_RESOLVED 重试。
         pending += MountTask(
             kind = MountKind.CONST,
             className = CLS_THEME_RES_MANAGER,
@@ -571,6 +580,8 @@ object ThemeStoreHook : TargetHook {
     private var okCount = 0
     private var totalCount = 0
     private val failedIds = mutableListOf<String>()
+    /** 目标 APK 磁盘路径（install 期写入，MethodResolver 第二轨 DexKit 兜底用；null 时跳过 DexKit 兜底）。 */
+    private var apkPath: String? = null
 
     private const val MAX_RETRY_ROUNDS = 2
     private const val RETRY_DELAY_MS = 500L
@@ -623,11 +634,10 @@ object ThemeStoreHook : TargetHook {
         pending: MutableList<MountTask>,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ) {
         val unresolved = mutableListOf<MountTask>()
         for (task in pending) {
-            when (mountOne(task, module, loader, prefs)) {
+            when (mountOne(task, module, loader)) {
                 MountResult.OK -> okCount++
                 MountResult.FAILED -> failedIds += task.description
                 MountResult.NOT_RESOLVED -> unresolved += task
@@ -647,7 +657,7 @@ object ThemeStoreHook : TargetHook {
             retryRounds++
             val delay = if (retryRounds == 1) RETRY_DELAY_MS else RETRY_FINAL_DELAY_MS
             Handler(Looper.getMainLooper()).postDelayed({
-                runCatching { attemptMount(unresolved, module, loader, prefs) }
+                runCatching { attemptMount(unresolved, module, loader) }
                     .onFailure { t -> module.log(Log.ERROR, TAG, "懒加载重试挂载异常", t) }
             }, delay)
         }
@@ -658,7 +668,6 @@ object ThemeStoreHook : TargetHook {
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ): MountResult {
         val resolved = task.resolveValue?.invoke(loader)
         if (task.resolveValue != null && resolved == null) {
@@ -666,6 +675,7 @@ object ThemeStoreHook : TargetHook {
             return MountResult.NOT_RESOLVED
         }
         val method = findMethod(loader, task.className, task.methodName, task.paramCount, task.returnType)
+            ?: MethodResolver.resolveMethod(loader, task.className, task.methodName, task.paramCount, task.returnType, apkPath)
         if (method == null) {
             module.log(Log.WARN, TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
             return MountResult.NOT_RESOLVED
@@ -676,10 +686,13 @@ object ThemeStoreHook : TargetHook {
             when (task.kind) {
                 // 常量短路：路由激活 → 直接返回 value（不调用原方法，改返回值语义）；未激活 → 原逻辑放行
                 MountKind.CONST -> builder.intercept { chain ->
+                    // 每次调用现读远程 prefs（RemotePrefsHolder 缓存/自愈）——不捕获 install 期 prefs，防 null 冻结
+                    val prefs = RemotePrefsHolder.obtain(module)
                     if (routeActive(chain, prefs, module, task)) value else chain.proceed()
                 }
                 // 参数强制（setter 写点 / 下载类型路由点）：路由激活 → 第 forceArgIndex 参强制为 value 后放行原逻辑；未激活 → 原逻辑放行
                 MountKind.FORCE_ARG -> builder.intercept { chain ->
+                    val prefs = RemotePrefsHolder.obtain(module)
                     if (routeActive(chain, prefs, module, task)) {
                         val args = chain.args?.toTypedArray() ?: arrayOfNulls<Any?>(task.forceArgIndex + 1)
                         args[task.forceArgIndex] = value
@@ -691,6 +704,7 @@ object ThemeStoreHook : TargetHook {
                 // void 空实现阻断（挽留弹窗 F1）：路由激活 → 返回 null 不调原方法（弹窗不展示）；
                 // 触发判据日志不受 DEBUG_LOGGING 门控；未激活 → 原逻辑放行（弹窗照常）
                 MountKind.BLOCK -> builder.intercept { chain ->
+                    val prefs = RemotePrefsHolder.obtain(module)
                     if (routeActive(chain, prefs, module, task)) {
                         module.log(Log.INFO, TAG, "挽留弹窗已拦截: ${task.methodName}")
                         null
@@ -704,6 +718,7 @@ object ThemeStoreHook : TargetHook {
                 // after 阶段 finish 先例；HC 的 finish+不 proceed 模式不采用——语义见 libxposed 102
                 // "拦截不 proceed 可能致 Activity 生命周期异常，proceed 后 finish 更稳"，见类注释 F2）
                 MountKind.FINISH_ACTIVITY -> builder.intercept { chain ->
+                    val prefs = RemotePrefsHolder.obtain(module)
                     if (routeActive(chain, prefs, module, task)) {
                         val result = chain.proceed()
                         (chain.thisObject as? Activity)?.finish()
@@ -793,10 +808,12 @@ object ThemeStoreHook : TargetHook {
 
     /**
      * 条件路由的 uri 判空：按 [UriOwner] 从 chain 取 DownloadInfo 实例，反射读 public String uri
-     * （DownloadInfo.java:145 实证）判空。
-     * - 实例本身为 null → 视为空（H2 场景 DownloadInfo 参数为 null 时原下载入口本就提前 return，路由无害）；
-     * - uri 字段读为 null / 空串 → 空（服务端不下发直链的典型形态，触发路由）；
-     * - 反射异常（NoSuchField/NoSuchMethod/版本漂移）→ 放行原逻辑（安全默认：不误伤正常资源）。
+     * （DownloadInfo.java:145 实证）判空。三种情况分开处理：
+     * - ① 实例本身为 null → 视为空（H2 场景 DownloadInfo 参数为 null 时原下载入口本就提前 return，路由无害）；
+     * - ② uri 字段值为 null / 空串 → 空（服务端不下发直链的典型形态，触发路由）——字段值 null 是
+     *   「读到了 null」并非反射异常，必须走判空分支（修复：原实现把字段值 null 误判成反射异常放行）；
+     * - ③ 反射异常（getField/get 抛出 NoSuchField 等版本漂移，含 GET_DOWNLOAD_INFO 探测失败）→ 放行原逻辑
+     *   （安全默认：探测失败不激活路由，不误伤正常资源）。
      */
     private fun isUriBlank(chain: XposedInterface.Chain, task: MountTask): Boolean {
         val info: Any? = when (task.uriOwner) {
@@ -804,16 +821,18 @@ object ThemeStoreHook : TargetHook {
             UriOwner.ARG -> chain.args?.getOrNull(task.uriArgIndex)
             UriOwner.GET_DOWNLOAD_INFO -> runCatching {
                 chain.thisObject?.javaClass?.getMethod("getDownloadInfo")?.invoke(chain.thisObject)
-            }.getOrNull()
+            }.getOrElse { return false }  // ③ 探测异常（版本漂移）→ 放行原逻辑（安全默认）
         }
-        val owner = info ?: return true  // 实例为 null：视为空（H2 场景 DownloadInfo 参数 null 时原入口本就提前 return，路由无害）
-        val uri = runCatching { owner.javaClass.getField("uri").get(owner) }.getOrNull() ?: return false
-        return (uri as? String).isNullOrEmpty()
+        val owner = info ?: return true  // ① 实例为 null：视为空（H2 场景 DownloadInfo 参数 null 时原入口本就提前 return，路由无害）
+        val uri = runCatching { owner.javaClass.getField("uri").get(owner) }
+            .getOrElse { return false }  // ③ 反射异常（NoSuchField/版本漂移）→ 放行原逻辑（安全默认）
+        return (uri as? String).isNullOrEmpty()  // ② 字段值 null / 空串 → 空（触发路由）
     }
 
     /**
-     * 直连反射解析目标方法（HookEntry.resolveTargetMethod 第一轨的等价物；报告 §6 明确目标类
-     * "全部可读、不会混淆漂移"，故不再走 DexKit 兜底）。类/方法不存在返回 null（版本差异容错，只记日志）。
+     * 直连反射解析目标方法（双轨第一轨，HookEntry.resolveTargetMethod 同构）。直连未命中时 mountOne 转
+     * [MethodResolver.resolveMethod] 第二轨 DexKit 按特征兜底（对抗 OTA 混淆漂移，需 install 期写入 [apkPath]；
+     * apkPath 为 null 时跳过兜底）。类/方法不存在返回 null（版本差异容错，只记日志）。
      */
     private fun findMethod(
         loader: ClassLoader,

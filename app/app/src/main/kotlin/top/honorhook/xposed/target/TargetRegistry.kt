@@ -5,13 +5,14 @@ package top.honorhook.xposed.target
  * docs/rain-hook-architecture.md §1.2 / docs/hc-hook-structure.md §1.2）。
  *
  * - [find]：按包名查表（Rain va.a 线性查的等价物，Map 直查；目标规模小无需进一步优化）；
- * - [installed]：已完成首次 install 的包集合——同包二次回调跳过 install，
- *   （照 HC 每个 hook 一组 xxxInstalled 布尔防重装的集中形态）。
+ * - [installed]：已完成首次 install 的**目标对象**集合——对象级判定，同一对象注册多个包名键
+ *   （如 GlassRestoreHook 三键一组）共享安装状态，跨键不重复 install
+ *   （照 HC 每个 hook 一组 xxxInstalled 布尔防重装的集中形态；别名共享进程防双装）。
  */
 object TargetRegistry {
 
     private val targets = mutableMapOf<String, TargetHook>()
-    private val installed = mutableSetOf<String>()
+    private val installed = mutableSetOf<TargetHook>()
 
     init {
         // 静态注册所有目标（Rain va.<clinit> 硬编码单例的等价物）：
@@ -41,11 +42,21 @@ object TargetRegistry {
     /** 按包名查目标；未注册返回 null——进程被注入但无适配器时静默忽略（照 Rain scope 声明但无适配器的情形） */
     fun find(packageName: String): TargetHook? = targets[packageName]
 
-    /** 该包是否已完成首次 install（防重装门控） */
-    fun isInstalled(packageName: String): Boolean = packageName in installed
+    /**
+     * 该目标对象是否已完成首次 install（对象级判定，防重装门控）。
+     * 同一对象注册多个包名键（GlassRestoreHook 三键一组，含 PkgAlias 与委托等值）共享安装状态——
+     * 别名包共享进程时第二个包回调不重复 install，防 double mount（setId 钩子参数双重缩放/重试计数器互相污染）。
+     */
+    fun isInstalled(target: TargetHook): Boolean = target in installed
 
-    /** 标记该包已完成 install */
-    fun markInstalled(packageName: String) {
-        installed += packageName
+    /** 标记该目标对象已完成 install */
+    fun markInstalled(target: TargetHook) {
+        installed += target
     }
+
+    /**
+     * 按对象去重的目标组数 = 4（主题商店/安装器/玻璃三键一组/市场），与应用 tab 的 4 行口径一致。
+     * （GlassRestoreHook 的 PkgAlias 与委托对象等值——见其 equals/hashCode——同一 object 的多包名键归为一组。）
+     */
+    fun groupedTargetCount(): Int = targets.values.toSet().size
 }

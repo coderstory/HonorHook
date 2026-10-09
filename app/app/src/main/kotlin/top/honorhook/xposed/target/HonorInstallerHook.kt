@@ -13,7 +13,8 @@ import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import top.honorhook.data.KEY_F6_INSTALLER_PURIFY_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
-import top.honorhook.data.REMOTE_PREFERENCE_GROUP
+import top.honorhook.xposed.MethodResolver
+import top.honorhook.xposed.RemotePrefsHolder
 
 /**
  * 荣耀安装器目标（F6 安装器净化）——移植自 reference/HonorInstallerPurify v4.0 单文件 MainHook.java
@@ -80,12 +81,11 @@ object HonorInstallerHook : TargetHook {
     private const val CLS_DIVERSION_RESP = "com.hihonor.packageinstaller.entity.resp.DiversionResp"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
-        // 注意：libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（无 classLoader 属性，ThemeStoreHook 同款写法）
+        // 注意：libxposed 102 的 PackageLoadedParam 提供 defaultClassLoader 与 applicationInfo（无 classLoader 属性；apkPath 供 DexKit 兜底，照 HC ScreenRecorderModule.kt:85）
         val loader = param.defaultClassLoader
-        // 每个 intercept 现读远程 prefs（daemon 快照缓存于本地 map，开销极小，照 HC DockWmsHook.kt:113-115）
-        val prefs = runCatching { module.getRemotePreferences(REMOTE_PREFERENCE_GROUP) }
-            .onFailure { module.log(Log.WARN, TAG, "读取远程 prefs 失败，F6 开关固定为关（hook 全部放行原逻辑）", it) }
-            .getOrNull()
+        apkPath = param.applicationInfo?.sourceDir
+        // prefs 不再一次性读取捕获：RemotePrefsHolder 进程级缓存，intercept 内现读、null 自动重试（此调用仅为预热缓存）
+        RemotePrefsHolder.obtain(module)
 
         retryRounds = 0
         okCount = 0
@@ -136,7 +136,7 @@ object HonorInstallerHook : TargetHook {
         )
         totalCount = pending.size
 
-        attemptMount(pending, module, loader, prefs)
+        attemptMount(pending, module, loader)
     }
 
     /** 挂载项执行结果：[NOT_RESOLVED] 类/方法未解析到——可随类加载重试；[FAILED] hook 挂载异常——重试无意义。 */
@@ -170,6 +170,8 @@ object HonorInstallerHook : TargetHook {
     private var okCount = 0
     private var totalCount = 0
     private val failedIds = mutableListOf<String>()
+    /** 目标 APK 路径（install 取 sourceDir；MethodResolver 第二轨 DexKit 兜底用，null 时跳过）。 */
+    private var apkPath: String? = null
 
     private const val MAX_RETRY_ROUNDS = 2
     private const val RETRY_DELAY_MS = 500L
@@ -184,11 +186,10 @@ object HonorInstallerHook : TargetHook {
         pending: MutableList<MountTask>,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ) {
         val unresolved = mutableListOf<MountTask>()
         for (task in pending) {
-            when (mountOne(task, module, loader, prefs)) {
+            when (mountOne(task, module, loader)) {
                 MountResult.OK -> okCount++
                 MountResult.FAILED -> failedIds += task.description
                 MountResult.NOT_RESOLVED -> unresolved += task
@@ -208,7 +209,7 @@ object HonorInstallerHook : TargetHook {
             retryRounds++
             val delay = if (retryRounds == 1) RETRY_DELAY_MS else RETRY_FINAL_DELAY_MS
             Handler(Looper.getMainLooper()).postDelayed({
-                runCatching { attemptMount(unresolved, module, loader, prefs) }
+                runCatching { attemptMount(unresolved, module, loader) }
                     .onFailure { t -> module.log(Log.ERROR, TAG, "懒加载重试挂载异常", t) }
             }, delay)
         }
@@ -219,16 +220,17 @@ object HonorInstallerHook : TargetHook {
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
     ): MountResult {
+        // 第一轨直连失败 → MethodResolver 第二轨 DexKit 兜底（对抗混淆漂移；两轨全失败归 NOT_RESOLVED 懒加载重试）
         val method = findMethod(loader, task.className, task.methodName, task.paramCount)
+            ?: MethodResolver.resolveMethod(loader, task.className, task.methodName, task.paramCount, apkPath = apkPath)
         if (method == null) {
             module.log(Log.WARN, TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
             return MountResult.NOT_RESOLVED
         }
         return runCatching {
             val builder = module.hook(method).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId(task.id)
-            builder.intercept { chain -> interceptBody(chain, module, loader, prefs, task) }
+            builder.intercept { chain -> interceptBody(chain, module, loader, task) }
         }.fold(
             onSuccess = {
                 // 挂载成功日志**始终输出**（不受 debug 门控）——真机验证凭它确认命中（对应插件 "hook ... ok" 行）
@@ -258,9 +260,10 @@ object HonorInstallerHook : TargetHook {
         chain: XposedInterface.Chain,
         module: XposedModule,
         loader: ClassLoader,
-        prefs: SharedPreferences?,
         task: MountTask,
     ): Any? {
+        // 每个 intercept 现读远程 prefs（RemotePrefsHolder：进程级缓存，null 时每次自动重读——防 install 期一次性读取失败后 null 冻结）
+        val prefs = RemotePrefsHolder.obtain(module)
         if (!featureEnabled(prefs)) return chain.proceed()   // 总开关/F6 关 → 原逻辑放行
         return when (task.kind) {
             // 常量短路：路由激活 → 直接返回 value（不调原方法）
@@ -363,9 +366,9 @@ object HonorInstallerHook : TargetHook {
         hookEnabled(prefs) && (prefs?.getBoolean(KEY_F6_INSTALLER_PURIFY_ENABLED, false) ?: false)
 
     /**
-     * 直连反射解析目标方法（HookEntry.resolveTargetMethod 第一轨的等价物；真机 14.0.37.301 已对全部
-     * 8 组目标类/方法实证存在，混淆名与本版本一致，故不再走 DexKit 兜底）。类/方法不存在返回 null
-     * （版本差异容错，只记日志 + 懒加载重试）。按方法名 + 参数个数匹配（照旧版 findAndHookMethod 只匹配
+     * 第一轨：直连反射解析目标方法（HookEntry.resolveTargetMethod 第一轨等价物；真机 14.0.37.301 已对全部
+     * 8 组目标类/方法实证存在）。类/方法不存在返回 null——mountOne 处接 MethodResolver 第二轨 DexKit 兜底
+     * （对抗混淆漂移），两轨全失败归懒加载重试。按方法名 + 参数个数匹配（照旧版 findAndHookMethod 只匹配
      * 名称+参数类型、不匹配返回值的语义；各目标无同名同参个数的 overloading，实证见类注释）。
      */
     private fun findMethod(
