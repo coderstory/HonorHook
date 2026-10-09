@@ -2,8 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- miuix-preference 若声明更高 minSdk，合并时以 overrideLibrary 放行（照 LSPFRIDA/HC uses-sdk 写法） -->
-    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.preference" />
+    <!-- miuix-preference / miuix-blur 声明更高 minSdk（blur AAR 实测无自带 tools:overrideLibrary，与 build.gradle.kts 注释不符），
+         合并时以 overrideLibrary 放行（照 LSPFRIDA/HC uses-sdk 写法；运行时 blur 组件有 API<33 降级 gate，见 build.gradle.kts:81-82） -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.preference,top.yukonga.miuix.kmp.blur" />
 
     <application
         android:name=".HookApplication"
