@@ -41,7 +41,7 @@ class HookApplication : Application(), XposedServiceHelper.OnServiceListener {
     }
 }
 
-/** 框架激活状态（照 LSPFRIDA FrameworkState 极简版：只保留激活标记与 API 版本）。 */
+/** 框架激活状态（照 LSPFRIDA FrameworkState 极简版：激活标记 + API 版本 + 框架名/版本，供首页详情行）。 */
 object FrameworkState {
 
     private val _active = MutableStateFlow(false)
@@ -52,9 +52,19 @@ object FrameworkState {
     /** 框架 API 版本（如 102）。 */
     val apiVersion = _apiVersion.asStateFlow()
 
+    private val _frameworkName = MutableStateFlow("")
+    /** 框架名称（如 "LSPosed"；未绑定为空串）。 */
+    val frameworkName = _frameworkName.asStateFlow()
+
+    private val _frameworkVersion = MutableStateFlow("")
+    /** 框架版本字符串（如 "v2.2.0"；未绑定为空串）。 */
+    val frameworkVersion = _frameworkVersion.asStateFlow()
+
     @Synchronized
     fun onServiceBound(service: XposedService) {
         _apiVersion.value = service.apiVersion
+        _frameworkName.value = service.frameworkName
+        _frameworkVersion.value = service.frameworkVersion
         _active.value = true
     }
 
@@ -62,5 +72,7 @@ object FrameworkState {
     fun onServiceDied() {
         _active.value = false
         _apiVersion.value = 0
+        _frameworkName.value = ""
+        _frameworkVersion.value = ""
     }
 }

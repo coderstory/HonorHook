@@ -1,5 +1,7 @@
 package top.honorhook.ui.screen
 
+import android.annotation.SuppressLint
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import top.honorhook.BuildConfig
 import top.honorhook.FrameworkState
 import top.honorhook.R
 import top.honorhook.data.HookSettings
@@ -36,6 +39,7 @@ import top.honorhook.ui.component.UiTokens
 import top.honorhook.xposed.target.TargetRegistry
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -47,19 +51,37 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 首页 Module 页（对齐 Rain Module 页，docs/rain-ui-layout.md §2）：
- * 模块状态卡 + 适配目标计数卡 + 启用功能计数卡。
+ * 模块状态卡 + 适配目标计数卡 + 启用功能计数卡 + 设备信息详情卡（五行真实数据）。
  * - 状态卡两态（Rain 三态中的 "Not connected / Working"；"Read failed" 态需读取框架信息，
  *   本项目无该读取路径，不做）；
  * - 适配卡数值 = TargetRegistry 静态注册目标数；
- * - 启用卡数值 = HookSettings F1-F4 开启数（n/4，照 FrameworkState 的 StateFlow + collectAsState 模式）。
+ * - 启用卡数值 = HookSettings F1-F4 开启数（n/4，照 FrameworkState 的 StateFlow + collectAsState 模式）；
+ * - 详情卡五行 = 系统版本 / Android 版本 / LSP 版本 / 构建时间 / 设备型号（对齐 demo Tab1 detaillist，
+ *   上下两行结构；LSP 版本来自 FrameworkState 框架信息，未绑定显示"未知"）。
  */
 @Composable
 fun HomeScreen() {
     val active by FrameworkState.active.collectAsState()
     val apiVersion by FrameworkState.apiVersion.collectAsState()
+    val frameworkName by FrameworkState.frameworkName.collectAsState()
+    val frameworkVersion by FrameworkState.frameworkVersion.collectAsState()
     val features by HookSettings.features.collectAsState()
     val adaptedCount = remember { registeredTargetCount() }
     val enabledFeatureCount = features.count { it.value }
+
+    // 详情行数据（设备/系统信息静态取一次；LSP 版本随框架绑定状态实时变化）
+    val unknown = stringResource(R.string.home_detail_unknown)
+    val systemVersion = remember { systemVersionValue() }.ifBlank { unknown }
+    val androidVersion = stringResource(
+        R.string.home_detail_android_format, Build.VERSION.RELEASE, Build.VERSION.SDK_INT,
+    )
+    val lspVersion = if (frameworkName.isNotBlank()) {
+        stringResource(R.string.home_detail_lsp_format, frameworkName, frameworkVersion, apiVersion)
+    } else {
+        unknown
+    }
+    val buildTime = BuildConfig.BUILD_TIME.ifBlank { unknown }
+    val deviceModel = remember { "${Build.BRAND} ${Build.MODEL}" }
 
     Scaffold(
         containerColor = MiuixPageBackground(),
@@ -94,6 +116,17 @@ fun HomeScreen() {
                         icon = MiuixIcons.SelectAll,
                         title = stringResource(R.string.home_enabled_count_title),
                         count = stringResource(R.string.home_enabled_count_format, enabledFeatureCount),
+                    )
+                }
+            }
+            item {
+                Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
+                    DetailCard(
+                        systemVersion = systemVersion,
+                        androidVersion = androidVersion,
+                        lspVersion = lspVersion,
+                        buildTime = buildTime,
+                        deviceModel = deviceModel,
                     )
                 }
             }
@@ -225,3 +258,71 @@ private fun registeredTargetCount(): Int = runCatching {
     val targets = clazz.getDeclaredField("targets").apply { isAccessible = true }[instance] as Map<*, *>
     targets.size
 }.getOrDefault(0)
+
+/**
+ * 设备信息详情卡（对齐 demo Tab1 detaillist：五行"上下两行结构"，行间 1dp 分隔线）。
+ * 每行 = 标题在上（14sp 中等字重主色）、值在下（caption 弱化色），上下两行；
+ * 数值由调用方传入（静态数据 remember 一次，LSP 版本随绑定实时更新）。
+ */
+@Composable
+private fun DetailCard(
+    systemVersion: String,
+    androidVersion: String,
+    lspVersion: String,
+    buildTime: String,
+    deviceModel: String,
+) {
+    val unknown = stringResource(R.string.home_detail_unknown)
+    val rows = listOf(
+        stringResource(R.string.home_detail_system_version) to systemVersion,
+        stringResource(R.string.home_detail_android_version) to androidVersion,
+        stringResource(R.string.home_detail_lsp_version) to lspVersion,
+        stringResource(R.string.home_detail_build_time) to buildTime,
+        stringResource(R.string.home_detail_device_model) to deviceModel,
+    )
+    Column {
+        rows.forEachIndexed { index, (title, value) ->
+            if (index > 0) {
+                HorizontalDivider(Modifier.padding(horizontal = UiTokens.CardMarginH))
+            }
+            DetailRow(title, value.ifBlank { unknown })
+        }
+    }
+}
+
+/** 单行详情（demo .drow：t 在上 / c 在下，行内上下间距 4dp）。 */
+@Composable
+private fun DetailRow(title: String, value: String) {
+    Column(
+        Modifier.padding(
+            horizontal = UiTokens.CardMarginH,
+            vertical = UiTokens.CardMarginV,
+        ),
+    ) {
+        Text(
+            title,
+            fontSize = 14.sp, // demo .t 15px/600，取 UiTokens 中档值
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            value,
+            fontSize = UiTokens.CaptionSize,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+    }
+}
+
+/**
+ * 系统版本（demo 显示 MagicOS 10.0.1 类系统增量号）。
+ * android.os.SystemProperties 是 @hide 系统类，反射取稳定的 get(String) 读属性，读不到返回空串。
+ * TODO(真机验证)：荣耀专属属性名未实证——当前首选 ro.build.version.incremental；
+ * 候选 ro.honor.build.version.incremental / ro.build.display.id，真机比对输出后定稿。
+ */
+@SuppressLint("PrivateApi")
+private fun systemVersionValue(): String = runCatching {
+    val clazz = Class.forName("android.os.SystemProperties")
+    val get = clazz.getMethod("get", String::class.java)
+    get.invoke(null, "ro.build.version.incremental") as String
+}.getOrNull().orEmpty().trim()
