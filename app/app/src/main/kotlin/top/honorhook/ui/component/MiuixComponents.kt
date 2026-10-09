@@ -50,12 +50,8 @@ import top.yukonga.miuix.kmp.squircle.squircleClip
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 页面/Scaffold 底色（Miuix 语义 token，浅深自适应）：
- * - 浅色 = background（官方浅色 #FFFFFF 白，与卡片 surfaceContainer 有层次）；
- * - 深色 = surface（官方深色 surface=Black，background 与卡片同色无层次）。
- * （照 LSPFRIDA MiuixComponents.kt:82-89）
- */
+/** 页面/Scaffold 底色（Miuix 语义 token 浅深自适应）：浅色 background（白），深色 surface
+ * （官方深色 background 与卡片同色无层次）。照 LSPFRIDA MiuixComponents.kt:82-89。 */
 @Composable
 fun MiuixPageBackground(): Color {
     val dark = when (MiuixTheme.colorSchemeMode) {
@@ -71,42 +67,33 @@ fun MiuixPageBackground(): Color {
  */
 object UiTokens {
 
-    /** 页面水平留白（8dp 栅格） */
     val PagePadding = 12.dp
 
-    /** 卡片之间的段落间距 */
     val CardSpacing = 12.dp
 
     /** 卡片统一圆角（Miuix Card 内部即 squircleSurface） */
     val CardRadius = 12.dp
 
-    /** 卡片内边距：水平 14dp、垂直 12dp */
     val CardMarginH = 14.dp
     val CardMarginV = 12.dp
 
     /** 玻璃悬浮底栏胶囊圆角（照 LSPFRIDA UiTokens.kt:39 保持 22dp 不变） */
     val BarRadius = 22.dp
 
-    /** 玻璃拟态模糊半径（dp；Liquid Glass 适中强度，避免过糊丢失内容识别） */
+    /** 玻璃拟态模糊半径（Liquid Glass 适中强度，避免过糊） */
     val GlassBlurRadius = 20f
 
     // ===== 排版层级（大标题 24sp 由 TopAppBar largeTitle 承担，此处为内容层） =====
 
-    /** 卡片/区块标题 */
     val TitleSize = 17.sp
 
-    /** 副标/次级说明 */
     val SubtitleSize = 13.sp
 
-    /** 元信息/说明（caption） */
     val CaptionSize = 12.sp
 }
 
-/**
- * 超椭圆（Superellipse/squircle）[Shape]：以公开 API [addSquircleRect] 构建轮廓，
- * 供 blur 区域剪切等必须传入 [Shape] 的场景使用（剪裁类用 [top.yukonga.miuix.kmp.squircle.squircleClip]）。
- * （照 LSPFRIDA UiTokens.kt:56-81）
- */
+/** 超椭圆（squircle）[Shape]：供 blur 剪裁等必须传 [Shape] 的场景（剪裁类用 squircleClip）。
+ * 照 LSPFRIDA UiTokens.kt:56-81。 */
 class SquircleShape(
     private val cornerRadius: Dp,
     private val extension: Float = SquircleDefaults.Extension,
@@ -125,15 +112,9 @@ class SquircleShape(
 }
 
 /**
- * 玻璃拟态表面（Miuix Liquid Glass 模式）：
- * `Modifier.layerBackdrop(backdrop)` 捕获内容 → [textureBlur]（RuntimeShader 高斯模糊 +
- * 自适应降采样 + 噪声抖动防色带）→ 半透明表面色 [tint] 叠在模糊之上。
- *
- * 门槛与降级（照 LSPFRIDA GlassSurface.kt:18-70）：
- * - blur 管线全部基于 RuntimeShader，`isRuntimeShaderSupported()` = API<33 自动无操作；
- * - 低于门槛时 [tint] 按不透纯色直接绘制（与 Miuix TopAppBar 默认 surface 实色一致，无视觉回归）。
- *
- * 性能：只用于小区域（底栏胶囊），禁止叠加大区域。
+ * 玻璃拟态表面（Miuix Liquid Glass）：layerBackdrop 捕获 → textureBlur 模糊 → 半透明 [tint] 叠加。
+ * 门槛与降级（照 LSPFRIDA GlassSurface.kt:18-70）：blur 依赖 RuntimeShader，API<33 时
+ * [tint] 退化为不透纯色（与 TopAppBar 实色一致，无视觉回归）。性能：只用于小区域，禁叠加大区域。
  */
 @Composable
 fun Modifier.glassSurface(
@@ -153,31 +134,21 @@ fun Modifier.glassSurface(
             backdrop = backdrop,
             shape = shape,
             blurRadius = blurRadius,
-            // 显式关闭顶部高光（Highlight）——浅色/动态内容下高光渐变会显现为
-            // 左侧灰色"一块模糊"伪影（照 LSPFRIDA GlassSurface.kt:59-61）
+            // 显式关掉顶部高光：浅色/动态内容下高光渐变显为左侧灰色模糊伪影（照 LSPFRIDA GlassSurface.kt:59-61）
             highlight = null,
         ).background(
             color = tint.copy(alpha = if (dark) 0.70f else 0.75f),
             shape = shape,
         )
     } else {
-        // API<33 降级纯色（不透）：等同于旧实色表面
         background(color = tint, shape = shape)
     }
 }
 
 /**
- * 悬浮底栏（自绘）——玻璃拟态版（照 LSPFRIDA MiuixComponents.kt:105-220）：
- * 容器 = 超椭圆（SquircleShape 22dp）玻璃胶囊（blur + 半透明 surfaceContainer），
- * 仅每项 icon+text + **单一 pill 滑动指示器**（secondaryContainer + 300ms 位置动画，
- * 无颜色动画=无"双灰"交叉 fade）。
- *
- * glassSurface 已内置 API<33 降级（不透纯色胶囊）。
- * 指示器容器同步用 squircleClip（超椭圆；API<33 自动降级 RoundedCornerShape）。
- *
- * 调用方（AppRoot）负责：
- *   val backdrop = rememberLayerBackdrop()
- *   内容容器 .layerBackdrop(backdrop)（不含本底栏，避免自模糊回环）。
+ * 悬浮底栏（自绘）玻璃胶囊版（照 LSPFRIDA MiuixComponents.kt:105-220）：
+ * 单一 pill 滑动指示器（secondaryContainer + 300ms 位移动画；无颜色动画避免"双灰"交叉 fade）。
+ * backdrop 由调用方（AppRoot）经 layerBackdrop 提供，且不含底栏自身（避免自模糊回环）。
  */
 @Composable
 fun FloatingMiuixNavigationBar(
@@ -191,15 +162,13 @@ fun FloatingMiuixNavigationBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp), // 底部偏移 12dp + 水平 16dp 悬浮边距
+            .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
     ) {
-        // 单一 pill 的 x 偏移（相对胶囊容器左上角）；与 Row(SpaceEvenly, 16dp 水平 padding) 槽位公式对齐
         val pillOffsetX by animateDpAsState(
             targetValue = singlePillOffsetX(items.size, selected, maxWidth),
             animationSpec = tween(300),
             label = "navSinglePillOffsetX",
         )
-        // 玻璃胶囊容器（超椭圆 Shape；模糊区域剪裁与内容底色同形）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -209,7 +178,6 @@ fun FloatingMiuixNavigationBar(
                     tint = MiuixTheme.colorScheme.surfaceContainer,
                 ),
         ) {
-            // 指示器层（置于 Row 之下，实体整体滑动，无交叉 fade）
             Box(
                 modifier = Modifier
                     .offset(x = pillOffsetX, y = 8.dp) // 8dp = Row vertical padding
@@ -239,14 +207,12 @@ fun FloatingMiuixNavigationBar(
 /** 单一 pill 在 [index] 槽位上的 x 偏移（Dp），与 Row 的 SpaceEvenly + 76dp 槽位布局精确对齐。 */
 private fun singlePillOffsetX(itemCount: Int, index: Int, containerWidth: Dp): Dp {
     if (itemCount <= 0) return 0.dp
-    // 越界时 clamp（与旧实现"无选中项"行为兼容，不抛异常）
+    // clamp 越界（与旧实现"无选中项"行为兼容）
     val safeIndex = index.coerceIn(0, itemCount - 1)
     val itemWidth = 76.dp            // item 槽位宽（照 LSPFRIDA singlePillOffsetX:166）
     val rowContentWidth = containerWidth - 32.dp // Row horizontal padding 16dp × 2
-    // SpaceEvenly：剩余空间均分到 (itemCount + 1) 个间隙（含两端）
     val gap = (rowContentWidth - itemWidth * itemCount) / (itemCount + 1)
     val itemStartX = 16.dp + gap + (itemWidth + gap) * safeIndex
-    // 胶囊 64dp 在 76dp 槽位内水平居中
     return itemStartX + (itemWidth - 64.dp) / 2
 }
 
@@ -256,14 +222,13 @@ private fun FloatingNavItem(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    // 标签背景静止透明（指示器上移到单一 pill 层），仅 icon/text 做色彩动画，
-    // 选中 primary 高亮 vs 未选中 onSurface（照 LSPFRIDA FloatingNavItem:175-220）。
+    // 标签背景静止透明（指示器已上移到 pill 层），仅 icon/text 做色彩动画（照 LSPFRIDA FloatingNavItem:175-220）
     val tint by animateColorAsState(
         targetValue = if (isSelected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
         animationSpec = tween(300),
         label = "navTint",
     )
-    // item 容器 76dp 宽，胶囊 64×56，胶囊内边距 4dp；圆角 22dp 与 300ms 过渡（照 LSPFRIDA 原值）
+    // 尺寸照 LSPFRIDA 原值：76dp 槽位 / 64×56 胶囊 / 4dp 内边距 / 22dp 圆角 / 300ms 过渡
     Column(
         modifier = Modifier.width(76.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

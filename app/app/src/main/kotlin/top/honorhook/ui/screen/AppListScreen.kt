@@ -41,9 +41,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 应用列表页（Tab2 一级，照 LSPosed Manager Modules 列表模式，demo p-hook 页）：
- * 总开关卡（Hook 总开关）+ "Hook 目标"分组卡 4 行（主题商店 4 功能 / 软件包安装程序 1 /
- * 系统界面 2 / 应用市场 1）。每行 = badge 图标 + 名称 + "已启用 n/m"（读 [HookSettings.features]
- * 动态算）+ 右侧箭头；点击导航到该应用的二级功能页（[AppFunctionsScreen]）。
+ * 总开关卡 + "Hook 目标"分组卡 4 行，点击进入二级功能页（[AppFunctionsScreen]）。
  */
 @Composable
 fun AppListScreen(onTargetClick: (String) -> Unit) {
@@ -69,7 +67,7 @@ fun AppListScreen(onTargetClick: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(UiTokens.CardSpacing),
             contentPadding = PaddingValues(bottom = UiTokens.PagePadding),
         ) {
-            // 总开关卡（Hook 总开关：总关 = 全部功能放行原逻辑；经 LSPosed 远程配置推送，hook 进程监听变化即时生效）
+            // 总开关：关闭即全部功能放行原逻辑（经 LSPosed 远程配置推送，hook 进程即时生效）
             item {
                 Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
                     SwitchPreference(
@@ -81,7 +79,6 @@ fun AppListScreen(onTargetClick: (String) -> Unit) {
                     )
                 }
             }
-            // Hook 目标分组卡（每行"已启用 n/m · tagline"，n/m 由 features 动态计算）
             item {
                 Group(stringResource(R.string.app_list_target_group)) {
                     AppTargets.forEach { target ->
@@ -102,8 +99,7 @@ fun AppListScreen(onTargetClick: (String) -> Unit) {
     }
 }
 
-/** 图标位（Rain Apps 行结构：左侧图标；36dp 圆底 surfaceVariant + 20dp primary 图标，照 LSPFRIDA IconBadge）。
- *  internal：AppListScreen（一级列表行）与 AppFunctionsScreen（二级功能行）共用。 */
+/** 图标位（照 LSPFRIDA IconBadge；internal：一级列表行与二级功能行共用）。 */
 @Composable
 internal fun IconBadge(icon: ImageVector) {
     Box(
@@ -122,7 +118,7 @@ internal fun IconBadge(icon: ImageVector) {
     }
 }
 
-/** 设置分组：分组标题 + 卡片容器（照 HC MainActivity Group 模式简化，圆角用 UiTokens）。 */
+/** 设置分组（照 HC MainActivity Group 模式）。 */
 @Composable
 private fun Group(
     title: String,

@@ -17,3 +17,11 @@
 -keep,allowoptimization public class top.honorhook.xposed.HookEntry {
     public <init>();
 }
+
+# 入口覆写方法显式锁（LSPosed 框架反射调用，R8 无静态调用方可见）：mapping.txt 实证 onPackageLoaded
+# 存活依赖 R8 对覆写 compile-only 基类方法的默认处理而非规则保证，且 onPackageReady 空方法体已被
+# dead-code 消除——未来填充逻辑会被静默裁掉。规则锁定后不随 R8/AGP 升级漂移。
+-keepclassmembers class top.honorhook.xposed.HookEntry {
+    public void onPackageLoaded(io.github.libxposed.api.XposedModuleInterface$PackageLoadedParam);
+    public void onPackageReady(io.github.libxposed.api.XposedModuleInterface$PackageReadyParam);
+}

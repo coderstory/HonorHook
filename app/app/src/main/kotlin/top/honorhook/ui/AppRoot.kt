@@ -43,10 +43,8 @@ import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.Scaffold
 
-/**
- * 根组件：NavHost（底部三页主界面 + appfn / theme_settings / about 二级页）。
- * 二级页路径照 LSPFRIDA MainActivity AppRoot 结构（返回 = popBackStack）。
- */
+/** 根组件：NavHost（底部三页主界面 + appfn/theme_settings/about 二级页，路由结构照 LSPFRIDA
+ * MainActivity AppRoot，二级页返回 = popBackStack）。 */
 @Composable
 fun AppRoot() {
     val navController = rememberNavController()
@@ -58,7 +56,7 @@ fun AppRoot() {
                 onNavigateToAbout = { navController.navigate("about") },
             )
         }
-        // 应用功能二级页（Tab2 一级应用列表点击进入；targetId = AppTargets.id）
+        // 应用功能二级页（targetId = AppTargets.id，Tab2 一级列表点击进入）
         composable("appfn/{targetId}") { backStackEntry ->
             AppFunctionsScreen(
                 targetId = backStackEntry.arguments?.getString("targetId").orEmpty(),
@@ -75,10 +73,9 @@ fun AppRoot() {
 }
 
 /**
- * 主壳：底部导航双形态，由"悬浮底栏"开关（HookSettings.uiToggles）compose 状态驱动：
- * - 开 = 悬浮玻璃胶囊底栏（FloatingMiuixNavigationBar，覆盖式，照 LSPFRIDA MainActivity.kt:366-432）；
- * - 关 = 贴底通栏（miuix 原生 NavigationBar 于 Scaffold bottomBar 槽位，原实现照旧）。
- * 两形态共用同一 HorizontalPager（pagerState 在形态分支外 remembered，切换时保留当前页）。
+ * 主壳：底部导航双形态，由"悬浮底栏"开关（HookSettings.uiToggles）驱动——
+ * 开 = 悬浮玻璃胶囊（FloatingMiuixNavigationBar，照 LSPFRIDA MainActivity.kt:366-432），
+ * 关 = miuix 原生贴底通栏。两形态共用同一 pagerState，切换时保留当前页。
  */
 @Composable
 private fun MainScaffold(
@@ -90,7 +87,7 @@ private fun MainScaffold(
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
 
-    // 悬浮底栏开关（ThemeSettingsScreen 切换 → HookSettings.uiToggles → 此处即时切换形态）
+    // 开关在 ThemeSettingsScreen 切换，此处经 uiToggles 即时响应
     val uiToggles by HookSettings.uiToggles.collectAsState()
     val floatingEnabled = uiToggles[KEY_FLOATING_BOTTOM_BAR_ENABLED] ?: false
 
@@ -101,7 +98,7 @@ private fun MainScaffold(
         NavigationItem("设置", ImageVector.vectorResource(R.drawable.honor_ic_settings)),
     )
 
-    // 滑动 → 选中项跟随：selectedTab 只由 pager 状态回写，点击侧 animateScrollToPage
+    // selectedTab 只由 pager 回写；点击侧走 animateScrollToPage
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             selectedTab = page
@@ -121,10 +118,9 @@ private fun MainScaffold(
 
     if (floatingEnabled) {
         // ===== 悬浮形态（照 LSPFRIDA MainActivity.kt:366-432）=====
-        // 底栏玻璃拟态捕获层（含全部页面内容但**不含底栏自身**，避免模糊回环）。
-        // 悬浮底栏作为兄弟节点绘制在其上，drawBackdrop 按坐标采样本层内容做模糊。
+        // 捕获层含全部页面内容但不含底栏自身，避免自模糊回环
         val backdrop = rememberLayerBackdrop()
-        // 外层容器色 = 页面底色（治"黑一下"：Pager 滑动/切换帧之间透出的窗口背景为黑）
+        // 外层底色 = 页面底色（防 Pager 滑动/切换帧间透出黑底）
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -133,12 +129,11 @@ private fun MainScaffold(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .layerBackdrop(backdrop), // 捕获层：Pager 三页内容（不含底栏）
+                    .layerBackdrop(backdrop),
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    // LSPFRIDA 页面在各自 contentPadding 预留 128dp 避免末项被胶囊遮挡；
-                    // 本工程各页面只留 12dp，故在容器补等效 bottom padding（末项显示在胶囊上方）
+                    // 页面自身只留 12dp，容器补 128dp 等效 padding 防末项被悬浮胶囊遮挡（LSPFRIDA 在各页面预留同值）
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(bottom = 128.dp),
@@ -147,7 +142,7 @@ private fun MainScaffold(
                     pagerContent(page)
                 }
             }
-            // 悬浮底栏（覆盖式）：Align BottomCenter，自身含 navigationBarsPadding + 12dp 底部偏移
+            // 覆盖式悬浮（非 bottomBar 槽位）；自身含 navigationBarsPadding + 12dp 偏移
             FloatingMiuixNavigationBar(
                 items = navigationItems,
                 selected = selectedTab,
@@ -157,7 +152,6 @@ private fun MainScaffold(
             )
         }
     } else {
-        // ===== 贴底通栏形态（原实现照旧）=====
         Scaffold(
             containerColor = MiuixPageBackground(),
             contentWindowInsets = WindowInsets(0),

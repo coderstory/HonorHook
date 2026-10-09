@@ -23,7 +23,7 @@ import top.yukonga.miuix.kmp.theme.darkColorScheme
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 沉浸式：透明系栏（照 LSPFRIDA MainActivity.kt:84-99）
+        // 沉浸式：透明系统栏（照 LSPFRIDA MainActivity.kt:84-99）
         enableEdgeToEdge(
             statusBarStyle = androidx.activity.SystemBarStyle.auto(
                 android.graphics.Color.TRANSPARENT,
@@ -41,9 +41,7 @@ class MainActivity : ComponentActivity() {
         }
         super.onCreate(savedInstanceState)
         setContent {
-            // 主题模式+种子色+Monet 取色+纯黑由 ThemeModeStore 状态流驱动；任一变化 →
-            // collectAsState 触发重组 → remember(mode, keyColor) 重建 ThemeController
-            // → MiuixTheme 全局即时生效（照 LSPFRIDA MainActivity.kt:101-143 抄改）。
+            // 主题由 ThemeModeStore 状态流驱动（照 LSPFRIDA MainActivity.kt:101-143 抄改）
             val mode by ThemeModeStore.mode.collectAsState()
             val keyColorHex by ThemeModeStore.keyColor.collectAsState()
             val wallpaperMonet by ThemeModeStore.wallpaperMonet.collectAsState()
@@ -53,11 +51,9 @@ class MainActivity : ComponentActivity() {
                     runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(it)) }.getOrNull()
                 }
             }
-            // Monet 跟随系统取色（用户明确引入 M3 的目的）：M3 dynamicColorScheme 读取系统壁纸
-            // 动态色的主色作为种子；开启时优先于手选色板。⚠ dynamicColorScheme 系列是
-            // @Composable——不能在 runCatching/remember 等普通 lambda 中调用（LSPFRIDA 已踩）；
-            // API<31 无动态壁纸色→null。
-            // 当前明暗模式单一来源：纯黑判定与下方 Monet 种子取色共用（不重复定义，避免两处漂移）
+            // Monet（M3 dynamicColorScheme）壁纸主色为种子，优先于手选色板；API<31 无动态色→null。
+            // dynamicColorScheme 是 @Composable，不能进 remember/runCatching（LSPFRIDA 已踩）。
+            // isDark 单一来源：纯黑判定与 Monet 种子共用，避免两处漂移
             val isDark = when (mode) {
                 ColorSchemeMode.Dark -> true
                 ColorSchemeMode.Light -> false
@@ -66,9 +62,7 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val dynamicSeed: androidx.compose.ui.graphics.Color? =
                 if (wallpaperMonet && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    // 暗色种子取自暗色动态调色板（dynamicDarkColorScheme），避免暗色强调色派生自
-                    // 浅色壁纸色系；二者是 @Composable 不能进 remember，保持 composition 内直接
-                    // 调用，切明暗时的一次性重组开销为已知取舍
+                    // 暗色种子取暗色动态调色板（避免强调色派生自浅色壁纸色系）；切明暗一次性重组为已知取舍
                     if (isDark) {
                         dynamicDarkColorScheme(context).primary
                     } else {
@@ -76,10 +70,8 @@ class MainActivity : ComponentActivity() {
                     }
                 } else null
             val effectiveSeed = dynamicSeed ?: keyColor
-            // Miuix ThemeController 源码实读（LSPFRIDA R2a 注释）：lightColors/darkColors 只在
-            // System/Light/Dark 模式下使用，keyColor **仅 Monet* 模式生效**——无种子色用原三态；
-            // 有种子色时合成对应 Monet 模式（跟随系统深浅/强制浅/强制深），
-            // 否则"选了色但模式不变=色不变"。
+            // ThemeController 源码实读：keyColor 仅 Monet* 模式生效（LSPFRIDA R2a）——有种子色时合成
+            // 对应 Monet 模式（跟随系统深浅/强制浅/强制深），否则「选了色但模式不变=色不变」
             val effectiveMode = if (effectiveSeed != null) {
                 when (mode) {
                     ColorSchemeMode.Light -> ColorSchemeMode.MonetLight
@@ -96,12 +88,9 @@ class MainActivity : ComponentActivity() {
                     colorSpec = ThemeColorSpec.Spec2021,
                 )
             }
-            // 纯黑模式（暗色下生效）：controller 层不改色（Miuix ThemeController 的
-            // lightColors/darkColors 仅非 Monet 模式生效；Colors 槽位 setter/updateColorsFrom
-            // 均为 internal，公开 API 无法对计算板改槽位），故用 MiuixTheme(colors=...) 覆盖层：
-            // 由公开工厂 darkColorScheme() 直接构造纯黑暗色板——仅背景族槽位黑化
-            // （background/surface/surfaceContainer*/surfaceVariant，对齐 demo --bg:#000/
-            // --card:#0C0C0E），onSurface 等文本槽位走 Miuix 暗色默认，黑底上依旧可读；
+            // 纯黑（暗色下生效）：Miuix Colors 槽位 setter/updateColorsFrom 均 internal，公开 API 无法改计算板
+            // （controller 层不改色）→ MiuixTheme(colors=...) 覆盖层：仅背景族槽位黑化（对齐 demo
+            // --bg:#000/--card:#0C0C0E），文本槽位走 Miuix 暗色默认，黑底上依旧可读；
             // 已知取舍：主色/强调色回退 Miuix 内置暗色默认（不复用 keyColor/Monet 种子色）。
             MiuixTheme(controller = controller) {
                 if (pureBlack && isDark) {

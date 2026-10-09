@@ -32,11 +32,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 关于页（对齐 Rain About，docs/rain-ui-layout.md §5 o6.b）：
- * 版本徽章卡（about_version）+ 开发卡（留空占位）+ 信息区（模块定位一句话）。
- * Rain 的 parallax 220dp 收合头等重效果不做（记为可选优化；Links/三方库页等未引入）。
- */
+/** 关于页（对齐 Rain About，docs/rain-ui-layout.md §5）：版本徽章卡 + 开发卡占位 + 信息区；
+ * Rain 的 parallax 收合头不做（可选优化），Links/三方库页未引入。 */
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
@@ -61,7 +58,7 @@ fun AboutScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(UiTokens.CardSpacing),
             contentPadding = PaddingValues(bottom = UiTokens.PagePadding),
         ) {
-            // 版本徽章卡（Rain about_version 等价：应用名 + "Version v%1$s (%2$d)" 徽章）
+            // 版本徽章卡（照 Rain about_version）
             item {
                 Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
                     Column(
@@ -88,7 +85,7 @@ fun AboutScreen(onBack: () -> Unit) {
                     }
                 }
             }
-            // 开发卡（Rain about_developer 等价；开发者信息留空占位）
+            // 开发卡（照 Rain about_developer）
             item {
                 Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
                     Column(
@@ -107,7 +104,6 @@ fun AboutScreen(onBack: () -> Unit) {
                     }
                 }
             }
-            // 信息区（模块定位一句话）
             item {
                 Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
                     Column(

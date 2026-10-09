@@ -51,13 +51,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 首页 Module 页（对齐 Rain Module 页，docs/rain-ui-layout.md §2）：
- * 模块状态卡 + 适配目标计数卡 + 启用功能计数卡 + 设备信息详情卡（五行真实数据）。
- * - 状态卡两态（Rain 三态中的 "Not connected / Working"；"Read failed" 态需读取框架信息，
- *   本项目无该读取路径，不做）；
- * - 适配卡数值 = TargetRegistry 公开 API 目标组数（按对象去重，4 组与应用 tab 4 行口径一致；不依赖反射，release 混淆安全）；
- * - 启用卡数值 = HookSettings 功能位开启数与总数（n/N，照 FrameworkState 的 StateFlow + collectAsState 模式）；
- * - 详情卡五行 = 系统版本 / Android 版本 / LSP 版本 / 构建时间 / 设备型号（对齐 demo Tab1 detaillist，
- *   上下两行结构；LSP 版本来自 FrameworkState 框架信息，未绑定显示"未知"）。
+ * 模块状态卡 + 适配目标计数卡 + 启用功能计数卡 + 设备信息详情卡。
+ * 状态卡只做激活/未激活两态（"Read failed" 态需读框架信息，本项目无该路径）；
+ * 适配计数 = TargetRegistry 公开 API，4 组与应用 tab 4 行口径一致（不依赖反射，混淆安全）；
+ * 详情卡五行对齐 demo Tab1 detaillist（LSP 版本未绑定时显示"未知"）。
  */
 @Composable
 fun HomeScreen() {
@@ -189,7 +186,7 @@ private fun StatusCard(active: Boolean, apiVersion: Int) {
                     color = summaryColor,
                 )
                 Spacer(Modifier.height(8.dp))
-                // 动作文本（Rain 三态卡的动作列；本模块只做激活/未激活两态）
+                // 动作列（Rain 三态卡；本模块只做两态）
                 Text(
                     action,
                     fontSize = UiTokens.SubtitleSize,
@@ -208,9 +205,7 @@ private fun StatusCard(active: Boolean, apiVersion: Int) {
     }
 }
 
-/**
- * 计数卡（Rain 计数卡样式，ck0.i/t0 模式：图标(16dp) + title + 大数字，无副标题时数字居中）。
- */
+/** 计数卡（照 Rain 计数卡样式，ck0.i/t0 模式）。 */
 @Composable
 private fun CountCard(icon: ImageVector, title: String, count: String) {
     Column(
@@ -244,11 +239,7 @@ private fun CountCard(icon: ImageVector, title: String, count: String) {
     }
 }
 
-/**
- * 设备信息详情卡（对齐 demo Tab1 detaillist：五行"上下两行结构"，行间 1dp 分隔线）。
- * 每行 = 标题在上（14sp 中等字重主色）、值在下（caption 弱化色），上下两行；
- * 数值由调用方传入（静态数据 remember 一次，LSP 版本随绑定实时更新）。
- */
+/** 设备信息详情卡（对齐 demo 的五行"上下两行"结构；数值由调用方传入）。 */
 @Composable
 private fun DetailCard(
     systemVersion: String,
@@ -275,7 +266,7 @@ private fun DetailCard(
     }
 }
 
-/** 单行详情（demo .drow：t 在上 / c 在下，行内上下间距 4dp）。 */
+/** 单行详情（照 demo .drow）。 */
 @Composable
 private fun DetailRow(title: String, value: String) {
     Column(
@@ -300,10 +291,9 @@ private fun DetailRow(title: String, value: String) {
 }
 
 /**
- * 系统版本（demo 显示 MagicOS 10.0.1 类系统增量号）。
- * android.os.SystemProperties 是 @hide 系统类，反射取稳定的 get(String) 读属性，读不到返回空串。
- * TODO(真机验证)：荣耀专属属性名未实证——当前首选 ro.build.version.incremental；
- * 候选 ro.honor.build.version.incremental / ro.build.display.id，真机比对输出后定稿。
+ * 系统版本（demo 对齐 MagicOS 增量号；SystemProperties 为 @hide，故反射 get(String)，读不到返回空串）。
+ * TODO(真机验证)：属性名未实证——首选 ro.build.version.incremental，候选 ro.honor.build.version.incremental /
+ * ro.build.display.id，真机比对后定稿。
  */
 @SuppressLint("PrivateApi")
 private fun systemVersionValue(): String = runCatching {

@@ -22,11 +22,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 目标应用列表页。
- * 骨架阶段只有空态提示；逆向分析确定目标后按 Rain “Adapted apps” 结构填充列表
- * （每项：图标 + 包名 + 适配状态）。
- */
+/** 目标应用列表页（骨架阶段，仅空态提示；目标确定后按 Rain "Adapted apps" 结构填充）。 */
 @Composable
 fun TargetsScreen() {
     Scaffold(

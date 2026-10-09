@@ -8,11 +8,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 
 /**
- * 主题设置（模式/种子色/跟随系统取色/纯黑）持久化存储。
- * 由 HookApplication.onCreate 初始化；变更即时写入 StateFlow，
- * MainActivity 在 setContent 中 collectAsState 驱动 ThemeController 重建 → MiuixTheme 全局即时生效。
- * （照 LSPFRIDA ThemeModeStore.kt:16-93 完整版抄改包名：mode + keyColor + wallpaperMonet；
- * 另按需求新增 pureBlack；砍调色板风格 paletteStyle——本主题组未用，缺省走 Miuix 默认。）
+ * 主题设置（模式/种子色/Monet 取色/纯黑）持久化。
+ * 照 LSPFRIDA ThemeModeStore.kt:16-93 抄改：mode + keyColor + wallpaperMonet；新增 pureBlack，砍未用的 paletteStyle。
  */
 object ThemeModeStore {
 
@@ -29,22 +26,22 @@ object ThemeModeStore {
     private var prefs: SharedPreferences? = null
 
     private val _mode = MutableStateFlow(ColorSchemeMode.System)
-    /** 当前主题模式（只读 StateFlow；修改只有 [set]）。 */
+    /** 当前主题模式。 */
     val mode: StateFlow<ColorSchemeMode> = _mode.asStateFlow()
 
     private val _keyColor = MutableStateFlow<String?>(null)
-    /** 种子色（#RRGGBB 大写 Hex；null=默认（Miuix 内置）。只读 StateFlow）。 */
+    /** 种子色（#RRGGBB 大写 Hex；null=Miuix 内置默认）。 */
     val keyColor: StateFlow<String?> = _keyColor.asStateFlow()
 
     private val _wallpaperMonet = MutableStateFlow(false)
-    /** Monet 跟随系统取色（M3 dynamicColorScheme 取系统壁纸主色作为种子，优先于手选色板）。只读 StateFlow）。 */
+    /** Monet 跟随系统取色（M3 dynamicColorScheme 壁纸主色为种子，优先于手选色板）。 */
     val wallpaperMonet: StateFlow<Boolean> = _wallpaperMonet.asStateFlow()
 
     private val _pureBlack = MutableStateFlow(false)
-    /** 纯黑模式（暗色下用纯黑背景，AMOLED 省电）。只读 StateFlow）。 */
+    /** 纯黑模式（暗色下纯黑背景，AMOLED 省电）。 */
     val pureBlack: StateFlow<Boolean> = _pureBlack.asStateFlow()
 
-    /** 必须在首次访问 [mode]/[set] 前调用（HookApplication.onCreate）。 */
+    /** 首次访问 StateFlow/写方法前调用（HookApplication.onCreate）。 */
     fun init(context: Context) {
         val p = context.applicationContext.getSharedPreferences(PREFS_CFG, Context.MODE_PRIVATE)
         prefs = p
@@ -57,19 +54,18 @@ object ThemeModeStore {
     fun current(): ColorSchemeMode = _mode.value
     fun currentKeyColor(): String? = _keyColor.value
 
-    /** 持久化并即时更新全局状态（设置页 → MainActivity 生效链路）。 */
+    /** 设置主题模式（持久化并即时生效）。 */
     fun set(mode: ColorSchemeMode) {
         prefs?.edit()?.putString(KEY_MODE, encode(mode))?.apply()
         _mode.value = mode
     }
 
-    /** 设置/清除种子色；null=恢复 Miuix 默认。正值即时生效（ThemeController remember(keyColor) 重建）。 */
+    /** 设置/清除种子色；null=恢复 Miuix 默认。 */
     fun setKeyColor(hex: String?) {
         prefs?.edit()?.apply { if (hex == null) remove(KEY_KEY_COLOR) else putString(KEY_KEY_COLOR, hex) }?.apply()
         _keyColor.value = hex
     }
 
-    /** Monet 跟随系统取色开关（M3 动态种子色优先于手选色板）。 */
     fun setWallpaperMonet(enabled: Boolean) {
         prefs?.edit()?.putBoolean(KEY_WALLPAPER, enabled)?.apply()
         _wallpaperMonet.value = enabled

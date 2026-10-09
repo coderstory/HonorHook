@@ -54,17 +54,9 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 主题设置二级页（对齐 Rain Theme settings / HonorHook-ui-demo.html p-theme 结构：
- * 卡 1=其他（Rain 三项：悬浮底栏/跟随系统取色/隐藏桌面图标），卡 2=外观（manager 主题组：
- * 暗色模式三态单选 + 主题色色板 + 纯黑模式开关））。
- * 1. 悬浮底栏开关（HookSettings key 持久化 + uiToggles StateFlow 驱动 AppRoot 双形态渲染：
- *    开 = FloatingMiuixNavigationBar 玻璃胶囊悬浮，关 = miuix 原生 NavigationBar 贴底通栏）；
- * 2. 跟随系统取色开关（ThemeModeStore.wallpaperMonet：M3 dynamicColorScheme 壁纸主色作种子，
- *    优先于手选色板，MainActivity 构建链即时生效）；
- * 3. 隐藏桌面图标开关（照 Rain setComponentEnabledSetting 模式，o1.java:707-717）；
- * 4. 外观组：暗色模式三态（RadioButtonPreference 照现有模式）+ 主题色色板（照 LSPFRIDA
- *    SettingsScreenV093 ThemeColorDot 圆点行，12 色对齐 demo 精选 + 默认项）
- *    + 纯黑模式开关（ThemeModeStore.pureBlack，暗色下生效，渲染见 MainActivity 覆盖层）。
+ * 主题设置二级页（对齐 Rain p-theme / demo p-theme 结构）：卡 1 = 其他（悬浮底栏 /
+ * 跟随系统取色 / 隐藏桌面图标），卡 2 = 外观（暗色三态 + 主题色色板 + 纯黑）。
+ * 各开关机制见下方对应行注释。
  */
 @Composable
 fun ThemeSettingsScreen(onBack: () -> Unit) {
@@ -75,7 +67,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
     val service by HookApplication.service.collectAsState()
     val uiToggles by HookSettings.uiToggles.collectAsState()
 
-    // 隐藏桌面图标：实际状态以 PackageManager 为准（Rain vv0.l 同源：PM 状态派生的 StateFlow），HookSettings key 为持久化记录
+    // 图标隐藏态以 PackageManager 为准，HookSettings key 仅作持久化记录
     val context = LocalContext.current
     val launcherAlias = remember { ComponentName(context, "top.honorhook.LauncherActivity") }
     val packageManager = remember { context.packageManager }
@@ -112,17 +104,14 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                         onCheckedChange = { value ->
                             HookSettings.setUiToggle(KEY_FLOATING_BOTTOM_BAR_ENABLED, value, service)
                         },
-                        // 渲染切换：AppRoot 收集 HookSettings.uiToggles 读取本 key，开关变化即时切换
-                        // 悬浮胶囊（FloatingMiuixNavigationBar）/ 贴底通栏双形态（组件照 LSPFRIDA
-                        // MiuixComponents.kt:105-220 玻璃胶囊 + pill 滑动指示器）。
+                        // AppRoot 订阅本 key 即时切换悬浮/贴底双形态（组件照 LSPFRIDA MiuixComponents.kt:105-220）
                     )
                     SwitchPreference(
                         title = stringResource(R.string.theme_settings_wallpaper_monet),
                         summary = stringResource(R.string.theme_settings_wallpaper_monet_summary),
                         checked = wallpaperMonet,
                         onCheckedChange = { ThemeModeStore.setWallpaperMonet(it) },
-                        // 跟随系统取色：接 ThemeModeStore.wallpaperMonet（demo p-theme 卡 1 第 2 行）；
-                        // 开启后 MainActivity dynamicLightColorScheme 取壁纸主色作种子，优先于手选色板。
+                        // 开启后 MainActivity 以壁纸主色为 dynamicColorScheme 种子，优先于手选色板
                     )
                     SwitchPreference(
                         title = stringResource(R.string.theme_settings_hide_icon),
@@ -137,7 +126,6 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                 }
             }
             item {
-                // 外观组（manager 主题组四项：暗色模式/主题色/纯黑模式）
                 Group(stringResource(R.string.theme_settings_appearance_group)) {
                     ThemeModeOption(
                         stringResource(R.string.theme_settings_color_system),
@@ -154,8 +142,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                         stringResource(R.string.theme_settings_color_dark_summary),
                         ColorSchemeMode.Dark, themeMode,
                     )
-                    // 主题色色板（照 LSPFRIDA SettingsScreenV093 L141-165：标题 + 圆点行；
-                    // 12 色精选对齐 demo COLORS，色名对齐 manager ThemeUtil 19 色）
+                    // 色板（照 LSPFRIDA SettingsScreenV093 圆点行）
                     Text(
                         stringResource(R.string.theme_settings_key_color),
                         fontSize = UiTokens.SubtitleSize,
@@ -168,7 +155,6 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp),
                     )
-                    // 12 色分两行（6/6）；默认项放在第一行最前（照 LSPFRIDA 默认圆点 + 色点并排）
                     PRESET_KEY_COLORS.chunked(6).forEachIndexed { rowIndex, rowColors ->
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -195,8 +181,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                         summary = stringResource(R.string.theme_settings_pure_black_summary),
                         checked = pureBlack,
                         onCheckedChange = { ThemeModeStore.setPureBlack(it) },
-                        // 纯黑模式：接 ThemeModeStore.pureBlack（demo p-theme 外观组第 3 行），
-                        // 暗色下生效——MainActivity MiuixTheme(colors) 覆盖层黑化背景色槽（见其注释）。
+                        // 暗色下生效：MainActivity MiuixTheme 覆盖层黑化背景色槽（见其注释）
                     )
                 }
             }
@@ -205,11 +190,9 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
 }
 
 /**
- * 隐藏/显示桌面图标（照 Rain o1.java:707-717 的 setComponentEnabledSetting 模式，
- * 参数实证：状态 disabled=2 / enabled=1，flags=DONT_KILL_APP=1）。
- * 隐藏的是 LAUNCHER alias（AndroidManifest 的 .LauncherActivity），
- * LSPosed 模块设置入口（.MainActivity MODULE_SETTINGS）不受影响，
- * 因此隐藏后仍可从 LSPosed Manager 打开本页面。
+ * 隐藏/显示桌面图标（照 Rain o1.java:707-717 setComponentEnabledSetting 模式，
+ * 参数实证：disabled=2 / enabled=1 / DONT_KILL_APP=1）。
+ * 只隐藏 LAUNCHER alias，模块设置入口（.MainActivity）不受影响——隐藏后仍可从 LSPosed Manager 打开。
  */
 private fun applyIconHidden(pm: PackageManager, componentName: ComponentName, hidden: Boolean) {
     pm.setComponentEnabledSetting(
@@ -219,11 +202,10 @@ private fun applyIconHidden(pm: PackageManager, componentName: ComponentName, hi
     )
 }
 
-/** 图标是否处于隐藏态（PM 判定；未设置过（DEFAULT）视为未隐藏）。 */
 private fun isIconHidden(pm: PackageManager, componentName: ComponentName): Boolean =
     pm.getComponentEnabledSetting(componentName) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED
 
-/** 主题模式单选行（从 SettingsScreen 搬入，照 LSPFRIDA SettingsScreenV093 ThemeModeOption）。 */
+/** 主题模式单选行（照 LSPFRIDA SettingsScreenV093 ThemeModeOption）。 */
 @Composable
 private fun ThemeModeOption(
     title: String,
@@ -239,18 +221,15 @@ private fun ThemeModeOption(
     )
 }
 
-/**
- * 预设主题色（12 色精选，对齐 HonorHook-ui-demo.html COLORS 色值；
- * 色名对齐 manager ThemeUtil.java:48-66 的 19 色：红/粉/紫/深紫/靛蓝/青/绿/橙/琥珀/灰蓝，
- * 默认蓝/茶为 demo 自定义）。Hex 带 # 前缀（ThemeModeStore.keyColor 文档格式）。
- */
+/** 预设主题色（12 色精选：色值对齐 demo COLORS，色名对齐 manager ThemeUtil 19 色；
+ * 默认蓝/茶为 demo 自定义；Hex 带 # 前缀与 ThemeModeStore 格式一致）。 */
 private val PRESET_KEY_COLORS: List<Pair<String, String>> = listOf(
     "默认蓝" to "#3E7BFA", "红" to "#E5484D", "粉" to "#E5599A", "紫" to "#8E4EC6",
     "深紫" to "#6E56CF", "靛蓝" to "#3E63DD", "青" to "#12A594", "绿" to "#29A383",
     "橙" to "#F76B15", "琥珀" to "#FFB224", "茶" to "#9D6B53", "灰蓝" to "#4C5AAB",
 )
 
-/** 主题色圆点（hex=null 为默认项）；选中描边 primary；默认项中心小点标记（照 LSPFRIDA S121-129）。 */
+/** 主题色圆点（hex=null 为默认项；照 LSPFRIDA S121-129）。 */
 @Composable
 private fun ThemeColorDot(hex: String?, selected: Boolean, onClick: () -> Unit) {
     val dotColor = if (hex != null) {
@@ -279,7 +258,7 @@ private fun ThemeColorDot(hex: String?, selected: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 设置分组：分组标题 + 卡片容器（照 HC MainActivity Group 模式简化，圆角用 UiTokens）。 */
+/** 设置分组（照 HC MainActivity Group 模式）。 */
 @Composable
 private fun Group(
     title: String,

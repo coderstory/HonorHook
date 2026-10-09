@@ -19,11 +19,7 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 
-/**
- * 设置页（对齐 Rain Settings 页，docs/rain-ui-layout.md §4 y92.f）：
- * 只保留入口行（主题设置 / 关于），具体开关全部收进二级页
- * （主题设置 → ThemeSettingsScreen；关于 → AboutScreen）。
- */
+/** 设置页（对齐 Rain Settings 页，docs/rain-ui-layout.md §4）：只留入口行，开关全部收进二级页。 */
 @Composable
 fun SettingsScreen(
     onNavigateToThemeSettings: () -> Unit,

@@ -48,11 +48,8 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 
 /**
  * 应用功能二级页（照 LSPosed Manager 模块详情模式，demo p-appfn 页）：
- * TopAppBar（返回 + 应用名）+ 该应用的功能开关列表（数据驱动 [AppTargets]）。
- *
- * 每个功能位一行：badge 图标 + 名称 + summary + 右侧开关（照 Rain Apps 行结构）。
- * - [AppFn.key] 非空 = 真实功能位，开关读写 [HookSettings] features（key 双写本地+远程，同旧 HookSettingsScreen）；
- * - [AppFn.key] 为 null = 未实现占位（市场净化「整合中」/ 锁屏玻璃「二期」）——开关禁用不亮、不持久化。
+ * 功能列表数据驱动 [AppTargets]。[AppFn.key] 为 null = 未实现占位（整合中/二期），
+ * 开关禁用不亮、不持久化。
  */
 @Composable
 fun AppFunctionsScreen(targetId: String, onBack: () -> Unit) {
@@ -93,12 +90,7 @@ fun AppFunctionsScreen(targetId: String, onBack: () -> Unit) {
     }
 }
 
-/**
- * 功能位开关行（badge + 标题 + summary + 右侧开关）：
- * checked 读 [HookSettings.features]（可观察，与总开关同模式），变更走
- * [HookSettings.setFeatureEnabled] 双写（本地 SP + 远程 prefs；总开关仍是上位语义）。
- * key 为 null 的占位行：enabled=false 禁用开关（灰显不亮），不持久化。
- */
+/** 功能位开关行：key 为 null 时禁用开关（占位不持久化）。 */
 @Composable
 private fun FeatureSwitch(
     fn: AppFn,
@@ -115,10 +107,6 @@ private fun FeatureSwitch(
     )
 }
 
-/**
- * 应用功能项：{名称, summary, 功能位 key, 图标}。
- * [key] = HookSettings.features 的 key（F1-F4/F6/F7）；null = 未实现占位（整合中/二期），开关禁用。
- */
 data class AppFn(
     val name: String,
     val summary: String,
@@ -126,29 +114,24 @@ data class AppFn(
     val icon: ImageVector,
 )
 
-/**
- * Hook 目标应用（照 LSPosed Manager 模块详情模式一级列表项）：{id, 名称, 包名, 图标, 功能列表}。
- * 包名对齐 xposed/target 的 TargetHook.packageName（GlassRestoreHook 主键 com.hihonor.desktop.systemui，
- * 另两个别名 com.android.systemui / com.hihonor.android.launcher 见其类注释）。
- */
+/** 应用目标（包名对齐 xposed/target 的 TargetHook.packageName，见其类注释）。 */
 data class AppTarget(
     val id: String,
     val name: String,
     val packageName: String,
-    /** 行内 tagline（demo summary 的"· 主题/壁纸/字体"段） */
     val tagline: String,
     val icon: ImageVector,
     val fns: List<AppFn>,
 )
 
-/** 目标当前已启用功能数（只计有 key 的功能位；未实现占位不计入启用）。 */
+/** 已启用功能数（只计有 key 的位；占位不计入）。 */
 internal fun AppTarget.enabledCount(features: Map<String, Boolean>): Int =
     fns.count { it.key != null && (features[it.key] ?: true) }
 
 /**
- * UI 侧目标注册表（与 xposed/target/TargetRegistry 一一对应，展示级数据驱动源）。
- * 功能标题/summary 照旧 HookSettingsScreen 既有文案（docs/honorhook-theme-requirements.md 功能表）；
- * 市场 F5 已落地（MarketHook 15 点核心组，真机 16.1.9.302 基线实证，scope.list 已声明）。
+ * UI 侧目标注册表（与 xposed/target/TargetRegistry 一一对应）。
+ * 文案照旧 HookSettingsScreen（docs/honorhook-theme-requirements.md 功能表）；
+ * 市场 F5 真机 16.1.9.302 基线 15 点实证。
  */
 val AppTargets: List<AppTarget> = listOf(
     AppTarget(
