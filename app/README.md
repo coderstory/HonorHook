@@ -43,9 +43,9 @@ cd app
 - [x] UI↔hook **配置通信链路**（HookSettings 远程 prefs 双写 + hook 侧热监听 + intercept 现读，HC 模式）
 - [x] **DexKit 双轨解析**基建（DexKitHelper 特征查询 + HookEntry 反射优先 / DexKit 兜底，Rain 模式；APK 含四架构 libdexkit.so）
 - [x] **目标分发骨架**（TargetHook 接口 + TargetRegistry 注册表；新增目标 = 新建实现 + 注册表追加一行，入口零改动）
-- [x] **主题商店 F1-F4 hook**（ThemeStoreHook 46 个挂载点覆盖 F1 开启 VIP / F2 全部资源免费 / F3 试用无倒计时 / F4 永不恢复默认；功能位独立开关 + 懒加载重试 + 挂载汇总，见 `../docs/honorhook-theme-requirements.md`）
+- [x] **主题商店 F1-F4 hook**（ThemeStoreHook 38 个挂载点（哲学审计收敛 46→38）覆盖 F1 开启 VIP / F2 全部资源免费 / F3 试用无倒计时 / F4 永不恢复默认；功能位独立开关 + 懒加载重试 + 挂载汇总，见 `../docs/honorhook-theme-requirements.md`）
 - [x] **安装器净化 hook**（HonorInstallerHook 已注册、scope.list 已含 packageinstaller，10 个挂载点，见 `../docs/honor-system-preliminary.md`）
-- [x] **玻璃恢复 hook**（GlassRestoreHook 注册 3 键，18 个挂载点 = 面板 10 组）
+- [x] **玻璃恢复 hook**（GlassRestoreHook 注册 3 键，15 个挂载点（审计删 G9b/c/d 冗余））
 - [x] **应用市场 hook**（MarketHook 15 个挂载点，真机基线逐点命中）
 
 ## 上层目录说明

@@ -101,7 +101,7 @@ miuix 常用组件：`Scaffold` / `SmallTopAppBar` / `Card` / `Button` / `Naviga
 
 ### 已完成（当日）
 - [x] 工程主体 + 构建 + UI↔hook 通信 + DexKit 双轨 + 目标分发框架（app/ 内，包 top.honorhook）
-- [x] 主题 hook v1（46 挂载点：F1-F4 + 到期 2088 + 下载试用路由 H1/H2/H2b + 挽留弹窗双保险 + T1-T10 按钮机制修正 + 独立开关）
+- [x] 主题 hook v1（38 挂载点：F1-F4 + 到期 2088 + 下载试用路由 H1/H2/H2b + 挽留弹窗双保险 + T1-T10 按钮机制修正 + 独立开关；哲学审计收敛 46→38：VipState 七点散读合并双漏斗 + 删休眠点/深签名点）
 - [x] InstallerPurify 整合（F6，10 点，真机基线校验 8 组全命中，混淆类名一致）
 - [x] UI 资源抄改（Rain 底栏三图标 + Rain launcher 全套 + manager 对勾 + 状态卡浅绿大对勾实现；零自绘）
 - [x] demo UI 定稿（桌面 HonorHook-ui-demo.html：三 tab / Tab2 app→功能二级 / 主题设置含 manager 主题组 19 色板 / 液态玻璃 pill 底栏 / 彩蛋）
@@ -121,7 +121,7 @@ miuix 常用组件：`Scaffold` / `SmallTopAppBar` / `Card` / `Button` / `Naviga
 4. [x] **第三批 MarketTamer 整合** ✅（commit 362ffe2：MarketHook 464 行 15 点真机基线 15/15 命中，F5）
 5. [x] 版本适配脚本 ✅（tools/adapt_new_version.py，基线 56/56 全存活留档）
 6. [x] release 签名配置 ✅（commit 62666ec：混淆+收缩，**release 2.8MB**（-82%），混淆正确性验证全 PASS——java_init.list 改写对齐、注册链 keep、字符串常量完好）
-7. [ ] **真机验证闭环（T1 门禁 / T10 全量验收）**——用户装桌面包（debug 或 release）→ LSPosed 日志五判据：`installed N/M`（主题 46/46、安装器 10/10、玻璃 18/18、市场 15/15）/ `theme-download-chain 路由触发` / `挽留弹窗已拦截` / 重启不回退 / F5-F7 行为 → 反馈现象逐点迭代
+7. [ ] **真机验证闭环（T1 门禁 / T10 全量验收）**——用户装桌面包（debug 或 release）→ LSPosed 日志五判据：`installed N/M`（主题 38/38、安装器 10/10、玻璃 15/15、市场 15/15）/ `theme-download-chain 路由触发` / `vip-state 漏斗改写` / `挽留弹窗已拦截` / 重启不回退 / F5-F7 行为 → 反馈现象逐点迭代
 8. [ ] 第四个插件整合（HonorLsposedFix？待用户确认）
 9. [ ] skill 沉淀更新（观测验证铁律/门类放行/真机基线校验/版本错位排查——✅ 已完成；二期候选锁屏玻璃 600 行、MarketTamer 细分开关、Monet 九风格）
 
