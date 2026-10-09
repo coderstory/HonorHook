@@ -28,12 +28,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpSize
@@ -192,17 +191,25 @@ private fun StatusCard(
             modifier = Modifier.padding(CardPadding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
+            // 已激活对勾是 Rain 抄来的 webp 位图——vectorResource 只收矢量 XML（真机 FC 实证：
+            // IllegalArgumentException: Only VectorDrawables and rasterized asset types are supported），
+            // 位图走 painterResource + ColorFilter.tint 染 onPrimary
+            if (active) {
+                Image(
+                    painter = painterResource(R.drawable.honor_ic_check_circle),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onPrimary),
+                )
+            } else {
                 // 未连态 error 图标用 Report（circle+!，miuix 图标集中近 error 语义）
-                imageVector = if (active) {
-                    ImageVector.vectorResource(R.drawable.honor_ic_check_circle)
-                } else {
-                    MiuixIcons.Report
-                },
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = MiuixTheme.colorScheme.onPrimary,
-            )
+                Icon(
+                    imageVector = MiuixIcons.Report,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MiuixTheme.colorScheme.onPrimary,
+                )
+            }
             Spacer(Modifier.width(24.dp))
             Column {
                 Text(
