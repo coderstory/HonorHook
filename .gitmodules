@@ -1,3 +1,6 @@
 [submodule "reference/HonorMarketTamer"]
 	path = reference/HonorMarketTamer
 	url = https://github.com/mengwuzhuanshou/HonorMarketTamer.git
+[submodule "reference/HonorInstallerPurify"]
+	path = reference/HonorInstallerPurify
+	url = https://github.com/VoreulCH/HonorInstallerPurify.git
