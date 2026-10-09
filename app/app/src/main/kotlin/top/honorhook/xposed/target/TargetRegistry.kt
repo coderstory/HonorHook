@@ -21,6 +21,16 @@ object TargetRegistry {
         // 8 组 hook 已按 docs/honor-plugins-integration.md §三 移植完成（真机 14.0.37.301 基线实证全部命中），
         // 配套 scope.list 已声明 com.android.packageinstaller。
         register(HonorInstallerHook)
+        // GlassRestoreHook（F7 液态玻璃恢复）：同一 object 注册 3 键（docs §5.1——TargetRegistry 按单包名查，
+        // 挂载按类解析分进程命中）。主键 = 真机基线实际包名 com.hihonor.desktop.systemui（系统界面_15.0.0.0.apk
+        // manifest 实证）；别名 com.android.systemui（系统用户界面_17.0.0.1.apk，magic 包类全部在此）/
+        // com.hihonor.android.launcher（桌面 com.hihonor 进程的 uikit 框架类子集）。配套 scope.list 已声明三包。
+        register(GlassRestoreHook)
+        GlassRestoreHook.aliases().forEach(::register)
+        // MarketHook（F5 市场净化——核心组 15 点）：真机 16.1.9.302 基线实证全部命中
+        // （system-files/market-jadx，类/方法/参数个数逐点对照，见 MarketHook 类注释），
+        // 配套 scope.list 已声明 com.hihonor.appmarket。
+        register(MarketHook)
     }
 
     /** 注册目标实现；同包重复注册以最后一次为准（正常流程每个目标只注册一次） */

@@ -22,6 +22,7 @@ import top.honorhook.data.KEY_F1_VIP_ENABLED
 import top.honorhook.data.KEY_F2_FREE_ENABLED
 import top.honorhook.data.KEY_F3_TRIAL_ENABLED
 import top.honorhook.data.KEY_F4_NO_RESET_ENABLED
+import top.honorhook.data.KEY_F5_MARKET_ENABLED
 import top.honorhook.data.KEY_F6_INSTALLER_PURIFY_ENABLED
 import top.honorhook.data.KEY_F7_GLASS_ENABLED
 import top.honorhook.ui.component.MiuixPageBackground
@@ -146,8 +147,8 @@ internal fun AppTarget.enabledCount(features: Map<String, Boolean>): Int =
 
 /**
  * UI 侧目标注册表（与 xposed/target/TargetRegistry 一一对应，展示级数据驱动源）。
- * 功能标题/summary 照旧 HookSettingsScreen 既有文案（docs/honorhook-theme-requirements.md 功能表），
- * 市场 F5 为占位（MarketHook 未建，scope 未声明；包名 com.hihonor.appmarket 为荣耀应用市场真名）。
+ * 功能标题/summary 照旧 HookSettingsScreen 既有文案（docs/honorhook-theme-requirements.md 功能表）；
+ * 市场 F5 已落地（MarketHook 15 点核心组，真机 16.1.9.302 基线实证，scope.list 已声明）。
  */
 val AppTargets: List<AppTarget> = listOf(
     AppTarget(
@@ -228,8 +229,8 @@ val AppTargets: List<AppTarget> = listOf(
         fns = listOf(
             AppFn(
                 "市场净化",
-                "去开屏广告 · 屏蔽弹窗 · 推送管理 · 整合中（MarketHook 未实现）",
-                null,
+                "去开屏广告/运营弹窗/营销推送 · 拦截插电/WiFi/开机自启与外部 content:// 唤醒 · 搜索热词与工具页运营入口屏蔽 · 「我的」/搜索发现页推荐流请求源头拦截（应用更新与搜索应用不受影响）。真机 16.1.9.302 基线 15 点实证。默认关闭——改动面大，开启后请过一遍主要页面确认无广告残留",
+                KEY_F5_MARKET_ENABLED,
                 MiuixIcons.Filter,
             ),
         ),

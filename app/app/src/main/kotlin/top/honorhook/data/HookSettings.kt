@@ -19,8 +19,14 @@ const val KEY_F2_FREE_ENABLED = "f2_free_enabled"
 const val KEY_F3_TRIAL_ENABLED = "f3_trial_enabled"
 const val KEY_F4_NO_RESET_ENABLED = "f4_no_reset_enabled"
 
+/** F5 市场净化功能位开关 key（默认 false——改动面大（开屏/弹窗/推送/自启/推荐流），默认关，见 docs §5.2；开即按 MarketTamer 推荐配置整体生效）。 */
+const val KEY_F5_MARKET_ENABLED = "f5_market_enabled"
+
 /** F6 安装器净化功能位开关 key（默认 false——安全敏感：跳过安全检测削弱恶意应用拦截，默认关，见 docs §5.2）。 */
 const val KEY_F6_INSTALLER_PURIFY_ENABLED = "f6_installer_purify_enabled"
+
+/** F7 液态玻璃恢复功能位开关 key（默认 false——有 boot-loop 事故史（v2.3 事故：Class.forName 触发系统类 <clinit>），保守默认关，见 docs §5.2）。 */
+const val KEY_F7_GLASS_ENABLED = "f7_glass_enabled"
 
 /** 悬浮底栏开关 key（UI 侧持久化；渲染切换 TODO 后续实现，见 ThemeSettingsScreen）。hook 侧不读。 */
 const val KEY_FLOATING_BOTTOM_BAR_ENABLED = "floating_bottom_bar_enabled"
@@ -34,7 +40,9 @@ private val FEATURE_DEFAULTS = mapOf(
     KEY_F2_FREE_ENABLED to true,
     KEY_F3_TRIAL_ENABLED to true,
     KEY_F4_NO_RESET_ENABLED to true,
+    KEY_F5_MARKET_ENABLED to false, // 改动面大（开屏/弹窗/推送/自启/推荐流），默认关
     KEY_F6_INSTALLER_PURIFY_ENABLED to false, // 安全敏感（跳过安全检测削弱恶意应用拦截），默认关
+    KEY_F7_GLASS_ENABLED to false, // boot-loop 事故史（v2.3：Class.forName 触发系统类初始化），保守默认关
 )
 
 /** UI 侧开关默认值表（悬浮底栏/隐藏桌面图标；默认全关，hook 侧不读这两个 key）。 */
@@ -61,7 +69,7 @@ object HookSettings {
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
     private val _features = MutableStateFlow(FEATURE_DEFAULTS)
-    /** F1-F4/F6 功能位开关当前值（只读 StateFlow；修改只有 [setFeatureEnabled]，与 [syncRemote] 同步覆盖）。 */
+    /** F1-F7 功能位开关当前值（只读 StateFlow；修改只有 [setFeatureEnabled]，与 [syncRemote] 同步覆盖）。 */
     val features: StateFlow<Map<String, Boolean>> = _features.asStateFlow()
 
     private val _uiToggles = MutableStateFlow(UI_TOGGLE_DEFAULTS)
@@ -122,7 +130,7 @@ object HookSettings {
     }
 
     /**
-     * 更新功能位开关（F1-F4/F6）：双写模式同 [setEnabled]（先写本地，service 为 null 降级为纯本地）。
+     * 更新功能位开关（F1-F7）：双写模式同 [setEnabled]（先写本地，service 为 null 降级为纯本地）。
      * hook 侧 intercept 每次现读各自 feature key（总开关仍是上位语义：总关 = 全部放行）。
      */
     fun setFeatureEnabled(key: String, enabled: Boolean, service: XposedService?) {
