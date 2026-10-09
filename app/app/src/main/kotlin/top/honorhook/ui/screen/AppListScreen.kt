@@ -23,15 +23,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.github.libxposed.service.XposedService
 import top.honorhook.HookApplication
 import top.honorhook.R
 import top.honorhook.data.HookSettings
-import top.honorhook.data.KEY_F1_VIP_ENABLED
-import top.honorhook.data.KEY_F2_FREE_ENABLED
-import top.honorhook.data.KEY_F3_TRIAL_ENABLED
-import top.honorhook.data.KEY_F4_NO_RESET_ENABLED
-import top.honorhook.data.KEY_F6_INSTALLER_PURIFY_ENABLED
 import top.honorhook.ui.component.MiuixPageBackground
 import top.honorhook.ui.component.UiTokens
 import top.yukonga.miuix.kmp.basic.Card
@@ -40,22 +34,19 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Blocklist
-import top.yukonga.miuix.kmp.icon.extended.Lock
 import top.yukonga.miuix.kmp.icon.extended.Settings
-import top.yukonga.miuix.kmp.icon.extended.Store
-import top.yukonga.miuix.kmp.icon.extended.Timer
-import top.yukonga.miuix.kmp.icon.extended.Unlock
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * Hook 设置页：功能分组（Hook 总开关 + F1-F4/F6 功能位独立开关，HookSettings 驱动）。
- * 行结构对齐 Rain Apps 页行（rain-ui-layout.md §3 y92.b）：图标位 + 标题 + summary + 右侧开关。
- * 页面骨架照 HomeScreen 模式（Scaffold + TopAppBar + LazyColumn + UiTokens 间距）。
+ * 应用列表页（Tab2 一级，照 LSPosed Manager Modules 列表模式，demo p-hook 页）：
+ * 总开关卡（Hook 总开关）+ "Hook 目标"分组卡 4 行（主题商店 4 功能 / 软件包安装程序 1 /
+ * 系统界面 2 / 应用市场 1）。每行 = badge 图标 + 名称 + "已启用 n/m"（读 [HookSettings.features]
+ * 动态算）+ 右侧箭头；点击导航到该应用的二级功能页（[AppFunctionsScreen]）。
  */
 @Composable
-fun HookSettingsScreen() {
+fun AppListScreen(onTargetClick: (String) -> Unit) {
     val hookEnabled by HookSettings.enabled.collectAsState()
     val features by HookSettings.features.collectAsState()
     val service by HookApplication.service.collectAsState()
@@ -65,8 +56,8 @@ fun HookSettingsScreen() {
         contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
-                title = stringResource(R.string.hook_settings_title),
-                largeTitle = stringResource(R.string.hook_settings_title),
+                title = stringResource(R.string.app_list_title),
+                largeTitle = stringResource(R.string.app_list_title),
             )
         },
     ) { padding ->
@@ -78,77 +69,43 @@ fun HookSettingsScreen() {
             verticalArrangement = Arrangement.spacedBy(UiTokens.CardSpacing),
             contentPadding = PaddingValues(bottom = UiTokens.PagePadding),
         ) {
+            // 总开关卡（Hook 总开关：总关 = 全部功能放行原逻辑；经 LSPosed 远程配置推送，hook 进程监听变化即时生效）
             item {
-                Group("功能") {
+                Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
                     SwitchPreference(
                         title = "Hook 总开关",
-                        summary = "总开关（上位语义）：总关 = 全部功能放行原逻辑；经 LSPosed 远程配置推送，hook 进程监听变化即时生效",
+                        summary = "关闭后全部功能恢复原逻辑",
                         checked = hookEnabled,
                         onCheckedChange = { value -> HookSettings.setEnabled(value, service) },
                         startAction = { IconBadge(MiuixIcons.Settings) },
                     )
-                    FeatureSwitch(
-                        "开启 VIP",
-                        "会员状态判定全部改为 VIP（到期/状态判定 → 永久有效）",
-                        KEY_F1_VIP_ENABLED, features, service,
-                        icon = MiuixIcons.Unlock,
-                    )
-                    FeatureSwitch(
-                        "全部资源免费",
-                        "付费判定全部放行、价格归零、购买/VIP 按钮隐藏",
-                        KEY_F2_FREE_ENABLED, features, service,
-                        icon = MiuixIcons.Store,
-                    )
-                    FeatureSwitch(
-                        "试用无倒计时",
-                        "试用不因时间/次数到期而中断",
-                        KEY_F3_TRIAL_ENABLED, features, service,
-                        icon = MiuixIcons.Timer,
-                    )
-                    FeatureSwitch(
-                        "永不恢复默认",
-                        "授权校验失败/试用结束等一切回退路径全部阻断",
-                        KEY_F4_NO_RESET_ENABLED, features, service,
-                        icon = MiuixIcons.Lock,
-                    )
-                    FeatureSwitch(
-                        "安装器净化",
-                        "跳过联网安全检测与安装前指纹、禁止安装器联网、隐藏安全卡片/广告横幅。安全敏感：默认关闭——跳过检测会削弱系统对恶意应用的拦截，请仅对来源可信的 APK 开启",
-                        KEY_F6_INSTALLER_PURIFY_ENABLED, features, service,
-                        icon = MiuixIcons.Blocklist,
-                    )
+                }
+            }
+            // Hook 目标分组卡（每行"已启用 n/m · tagline"，n/m 由 features 动态计算）
+            item {
+                Group(stringResource(R.string.app_list_target_group)) {
+                    AppTargets.forEach { target ->
+                        ArrowPreference(
+                            title = target.name,
+                            summary = stringResource(
+                                R.string.app_list_enabled_format,
+                                target.enabledCount(features),
+                                target.fns.size,
+                            ) + " · " + target.tagline,
+                            startAction = { IconBadge(target.icon) },
+                            onClick = { onTargetClick(target.id) },
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-/**
- * 功能位独立开关（中文标题照 docs/honorhook-theme-requirements.md 功能表 / docs/honor-plugins-integration.md §5.2）：
- * checked 读 [HookSettings.features]（可观察，与总开关同模式），变更走
- * [HookSettings.setFeatureEnabled] 双写（本地 SP + 远程 prefs；总开关仍是上位语义）。
- */
+/** 图标位（Rain Apps 行结构：左侧图标；36dp 圆底 surfaceVariant + 20dp primary 图标，照 LSPFRIDA IconBadge）。
+ *  internal：AppListScreen（一级列表行）与 AppFunctionsScreen（二级功能行）共用。 */
 @Composable
-private fun FeatureSwitch(
-    title: String,
-    summary: String,
-    key: String,
-    features: Map<String, Boolean>,
-    service: XposedService?,
-    icon: ImageVector,
-) {
-    SwitchPreference(
-        title = title,
-        summary = summary,
-        checked = features[key] ?: true,
-        onCheckedChange = { value -> HookSettings.setFeatureEnabled(key, value, service) },
-        startAction = { IconBadge(icon) },
-    )
-}
-
-/** 图标位（Rain Apps 行结构：左侧图标；36dp 圆底 surfaceVariant + 20dp primary 图标，照 LSPFRIDA IconBadge）。 */
-@Composable
-private fun IconBadge(icon: ImageVector) {
+internal fun IconBadge(icon: ImageVector) {
     Box(
         modifier = Modifier
             .size(36.dp)

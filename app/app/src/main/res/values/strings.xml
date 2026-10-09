@@ -4,8 +4,14 @@
     <string name="module_description">荣耀系统增强模块：基于 LSPosed 框架的系统定制</string>
     <string name="targets_title">目标应用</string>
     <string name="settings_title">设置</string>
-    <string name="hook_settings_title">Hook 设置</string>
+    <string name="app_list_title">应用</string>
     <string name="about_title">关于</string>
+
+    <!-- 应用列表页（Tab2 一级，照 LSPosed Manager Modules 列表模式，demo p-hook 页） -->
+    <string name="app_list_target_group">Hook 目标</string>
+    <string name="app_list_enabled_format">已启用 %1$d/%2$d</string>
+    <!-- 应用功能二级页（demo p-appfn 页） -->
+    <string name="appfn_back">返回</string>
 
     <!-- 首页 Module 页（对齐 Rain 模块状态卡 + 计数卡，docs/rain-ui-layout.md §2） -->
     <string name="home_status_title_active">模块已激活</string>
@@ -17,6 +23,15 @@
     <string name="home_adapted_count_title">适配目标</string>
     <string name="home_enabled_count_title">启用功能</string>
     <string name="home_enabled_count_format">%1$d/4</string>
+    <!-- 首页设备信息详情行（对齐 demo Tab1 detaillist 五行：标题+值上下两行，行间分隔线） -->
+    <string name="home_detail_system_version">系统版本</string>
+    <string name="home_detail_android_version">Android 版本</string>
+    <string name="home_detail_lsp_version">LSP 版本</string>
+    <string name="home_detail_build_time">构建时间</string>
+    <string name="home_detail_device_model">设备型号</string>
+    <string name="home_detail_unknown">未知</string>
+    <string name="home_detail_android_format">Android %1$s（SDK %2$d）</string>
+    <string name="home_detail_lsp_format">%1$s %2$s（API %3$d）</string>
 
     <!-- 设置页入口行（对齐 Rain Settings 页，rain-ui-layout.md §4：只放入口，开关全进二级页） -->
     <string name="settings_theme_entry">主题设置</string>
