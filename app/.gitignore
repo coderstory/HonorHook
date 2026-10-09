@@ -1,0 +1,13 @@
+# 标准 Android / Gradle 忽略清单
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store
+*.apk
+output.json

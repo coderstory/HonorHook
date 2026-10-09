@@ -1,0 +1,21 @@
+package top.honorhook.xposed.target
+
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface
+
+/**
+ * hook 目标接口（照 Rain oa 适配器接口，docs/rain-hook-architecture.md §1.3）。
+ *
+ * 每个荣耀目标应用/系统进程一个实现：
+ * - [packageName] 是注册表查键（Rain oa.getPackageName 的等价物）；
+ * - [install] 由 HookEntry 在 isFirstPackage 门控 + 注册表命中后调用，同一包只调用一次
+ *   （防重装由 [TargetRegistry] 的 installed 状态集合保证，HC xxxInstalled 布尔模式）。
+ */
+interface TargetHook {
+
+    /** hook 目标包名（注册表键，如 com.android.packageinstaller） */
+    val packageName: String
+
+    /** 安装本目标的全部 hook；幂等性由调用方（TargetRegistry.installed）保证，实现内不需要自加 installed 标志 */
+    fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam)
+}

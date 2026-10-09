@@ -1,0 +1,31 @@
+# HonorHook 版本目录（版本组合照 HyperChanger：AGP 9.2.1 / Kotlin 2.3.21 / Gradle 9.6.1）
+[versions]
+agp = "9.2.1"
+kotlin = "2.3.21"
+composeBom = "2026.03.00"
+activityCompose = "1.12.3"
+navigationCompose = "2.8.9"
+coroutines = "1.10.2"
+miuix = "0.9.3"
+libxposed = "102.0.0"
+dexkit = "2.2.0"
+
+[libraries]
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+miuix-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-ui-android", version.ref = "miuix" }
+miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference-android", version.ref = "miuix" }
+miuix-icons = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }
+# 玻璃拟态（悬浮底栏），照 LSPFRIDA gradle/libs.versions.toml:37
+miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur-android", version.ref = "miuix" }
+libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
+libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed" }
+dexkit = { group = "org.luckypray", name = "dexkit", version.ref = "dexkit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

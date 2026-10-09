@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HonorHook</string>
+    <string name="module_description">荣耀系统增强模块：基于 LSPosed 框架的系统定制</string>
+    <string name="targets_title">目标应用</string>
+    <string name="settings_title">设置</string>
+    <string name="hook_settings_title">Hook 设置</string>
+    <string name="about_title">关于</string>
+
+    <!-- 首页 Module 页（对齐 Rain 模块状态卡 + 计数卡，docs/rain-ui-layout.md §2） -->
+    <string name="home_status_title_active">模块已激活</string>
+    <string name="home_status_title_inactive">未激活</string>
+    <string name="home_status_summary_active">已通过 libxposed API %1$d 与 LSPosed 框架建立连接</string>
+    <string name="home_status_summary_inactive">未检测到 LSPosed 框架连接——请在 LSPosed Manager 中启用本模块</string>
+    <string name="home_status_action_active">框架已连接</string>
+    <string name="home_status_action_inactive">未检测到框架</string>
+    <string name="home_adapted_count_title">适配目标</string>
+    <string name="home_enabled_count_title">启用功能</string>
+    <string name="home_enabled_count_format">%1$d/4</string>
+
+    <!-- 设置页入口行（对齐 Rain Settings 页，rain-ui-layout.md §4：只放入口，开关全进二级页） -->
+    <string name="settings_theme_entry">主题设置</string>
+    <string name="settings_theme_entry_summary">自定义界面选项</string>
+    <string name="settings_about_entry">关于</string>
+    <string name="settings_about_entry_summary">版本 v%1$s</string>
+
+    <!-- 主题设置二级页（对齐 Rain Theme settings，rain-ui-layout.md §5） -->
+    <string name="theme_settings_title">主题设置</string>
+    <string name="theme_settings_color_mode_group">颜色模式</string>
+    <string name="theme_settings_color_system">跟随系统</string>
+    <string name="theme_settings_color_system_summary">与系统深浅色设置保持一致</string>
+    <string name="theme_settings_color_light">浅色</string>
+    <string name="theme_settings_color_light_summary">始终使用浅色主题</string>
+    <string name="theme_settings_color_dark">深色</string>
+    <string name="theme_settings_color_dark_summary">始终使用深色主题</string>
+    <string name="theme_settings_other_group">其他</string>
+    <string name="theme_settings_floating_bar">悬浮底栏</string>
+    <string name="theme_settings_floating_bar_summary">将底部导航栏与页面内容分离，悬浮显示</string>
+    <string name="theme_settings_hide_icon">隐藏桌面图标</string>
+    <string name="theme_settings_hide_icon_summary">隐藏后仍可从 LSPosed 模块设置中打开本页面</string>
+
+    <!-- 关于页（对齐 Rain About，rain-ui-layout.md §5：版本徽章 + 开发卡 + 信息区；parallax 不做） -->
+    <string name="about_version_badge">版本 v%1$s（%2$d）</string>
+    <string name="about_developer_title">开发</string>
+    <string name="about_developer_placeholder">开发者信息待补充</string>
+    <string name="about_info_title">信息</string>
+    <string name="about_info_body">HonorHook 是基于 LSPosed 框架（libxposed API 102）的荣耀系统增强模块，通过对荣耀系统应用进行 hook 定制，实现主题商店免费等增强功能。</string>
+</resources>
