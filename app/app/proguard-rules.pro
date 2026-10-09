@@ -5,10 +5,15 @@
 # libxposed 注解只存在于 compileOnly 的 api jar，运行期无类，忽略告警
 -dontwarn io.github.libxposed.annotation.**
 
-# java_init.list 里的入口类名会被 R8 重命名，此指令让 R8 改写 list 文件内容同步新类名
+# 入口类用具名 keep（不混淆）、R8 不改类名、java_init.list 保持全限定名，此指令无替换发生；
+# 保留作兜底：若未来新增允许混淆的 XposedModule 子类，其类名仍可被同步改写进 list。
 -adaptresourcefilecontents META-INF/xposed/java_init.list
 
-# 保留 XposedModule 入口（按 java_init.list 硬编码类名反射实例化，不可混淆、不可删构造器）
--keep,allowoptimization,allowobfuscation public class * extends io.github.libxposed.api.XposedModule {
+# 入口类必须具名且不混淆（禁止 allowobfuscation）——通配 + allowobfuscation 属锁步脆弱设计：
+# - R8 曾把 HookEntry 改名进默认包（release 产物 java_init.list 变成 'r10'），全靠上面指令
+#   同步改写，两步严格锁步：AGP/R8 升级改变改名行为时，LSPosed 会静默跳过模块且构建零报错；
+# - 通配模式匹配任意 XposedModule 子类，未来新增第二个入口类会静默错配注册；
+# - 具名固定后 debug/release 日志过滤口径一致（同一全限定名）。
+-keep,allowoptimization public class top.honorhook.xposed.HookEntry {
     public <init>();
 }
