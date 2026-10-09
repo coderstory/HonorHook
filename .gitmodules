@@ -7,3 +7,6 @@
 [submodule "reference/HonorLiquidGlassRestore"]
 	path = reference/HonorLiquidGlassRestore
 	url = https://github.com/VoreulCH/HonorLiquidGlassRestore.git
+[submodule "reference/AI-lsposed-temlate"]
+	path = reference/AI-lsposed-temlate
+	url = https://github.com/bujianxingyun/AI-lsposed-temlate
