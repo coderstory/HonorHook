@@ -30,11 +30,13 @@ android {
 
     buildTypes {
         release {
-            // 初版不开 minify（hook 目标未定、UI 处于原型阶段）；
-            // proguard-rules.pro 已备好启用混淆时必需的规则
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // 混淆 + 资源收缩 + debug 签名直出（照 AI-lsposed-temlate release 范本）：
+            // 本机无正式 keystore，debug 签名包可安装覆盖升级；proguard-rules.pro 已备
+            // java_init.list 改写（-adaptresourcefilecontents）+ XposedModule 入口 keep 规则。
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
