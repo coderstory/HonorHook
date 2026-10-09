@@ -1,13 +1,9 @@
 package top.honorhook.xposed.target
 
 /**
- * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装，
- * docs/rain-hook-architecture.md §1.2 / docs/hc-hook-structure.md §1.2）。
- *
- * - [find]：按包名查表（Rain va.a 线性查的等价物，Map 直查；目标规模小无需进一步优化）；
- * - [installed]：已完成首次 install 的**目标对象**集合——对象级判定，同一对象注册多个包名键
- *   （如 GlassRestoreHook 三键一组）共享安装状态，跨键不重复 install
- *   （照 HC 每个 hook 一组 xxxInstalled 布尔防重装的集中形态；别名共享进程防双装）。
+ * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；docs/rain-hook-architecture.md §1.2）。
+ * [find] 按包名查表；[installed] 是完成首次 install 的**目标对象**集合——对象级判定：
+ * 同一对象注册多个包名键（GlassRestoreHook 三键一组）共享安装状态，防别名包共享进程双装。
  */
 object TargetRegistry {
 
@@ -15,48 +11,39 @@ object TargetRegistry {
     private val installed = mutableSetOf<TargetHook>()
 
     init {
-        // 静态注册所有目标（Rain va.<clinit> 硬编码单例的等价物）：
-        // 新增目标 = 新建 TargetHook 实现 + 此处追加一行，HookEntry 零改动。
+        // 静态注册（Rain va.<clinit> 硬编码单例的等价物）：新增目标 = 新建 TargetHook + 此处一行，HookEntry 零改动。
         register(ThemeStoreHook)
-        // HonorInstallerHook（com.android.packageinstaller，F6 安装器净化）：
-        // 8 组 hook 已按 docs/honor-plugins-integration.md §三 移植完成（真机 14.0.37.301 基线实证全部命中），
-        // 配套 scope.list 已声明 com.android.packageinstaller。
+        // F6 安装器净化（真机 14.0.37.301 基线实证 8 组全命中；scope.list 已声明 com.android.packageinstaller）
         register(HonorInstallerHook)
-        // GlassRestoreHook（F7 液态玻璃恢复）：同一 object 注册 3 键（docs §5.1——TargetRegistry 按单包名查，
-        // 挂载按类解析分进程命中）。主键 = 真机基线实际包名 com.hihonor.desktop.systemui（系统界面_15.0.0.0.apk
-        // manifest 实证）；别名 com.android.systemui（系统用户界面_17.0.0.1.apk，magic 包类全部在此）/
-        // com.hihonor.android.launcher（桌面 com.hihonor 进程的 uikit 框架类子集）。配套 scope.list 已声明三包。
-        register(GlassRestoreHook)
-        GlassRestoreHook.aliases().forEach(::register)
-        // MarketHook（F5 市场净化——核心组 15 点）：真机 16.1.9.302 基线实证全部命中
-        // （system-files/market-jadx，类/方法/参数个数逐点对照，见 MarketHook 类注释），
-        // 配套 scope.list 已声明 com.hihonor.appmarket。
+        // GlassRestoreHook（F7 液态玻璃）：3 键全 PkgAlias（docs §5.1）。主键 = 真机基线包名
+        // com.hihonor.desktop.systemui（15.0.0.0.apk manifest 实证）；别名 com.android.systemui
+        // （17.0.0.1.apk 内 magic 包类）、com.hihonor.android.launcher（uikit 框架类子集）；scope.list 已声明三包。
+        // PkgAlias equals/hashCode 基于同一 delegate：Set 去重方向无关，任意装载顺序防共享进程双挂；
+        // groupedTargetCount() 稳定归 4 组（= 应用 tab 4 行口径，HomeScreen.adaptedCount）。
+        GlassRestoreHook.registryKeys().forEach(::register)
+        // MarketHook（F5 市场净化 15 点）：真机 16.1.9.302 基线实证全命中（system-files/market-jadx 逐点对照）
         register(MarketHook)
     }
 
-    /** 注册目标实现；同包重复注册以最后一次为准（正常流程每个目标只注册一次） */
+    /** 注册目标（同包重复注册以最后一次为准）。 */
     fun register(target: TargetHook) {
         targets[target.packageName] = target
     }
 
-    /** 按包名查目标；未注册返回 null——进程被注入但无适配器时静默忽略（照 Rain scope 声明但无适配器的情形） */
+    /** 按包名查目标（未注册返回 null：被注入但无适配器时静默，照 Rain 同情形）。 */
     fun find(packageName: String): TargetHook? = targets[packageName]
 
     /**
-     * 该目标对象是否已完成首次 install（对象级判定，防重装门控）。
-     * 同一对象注册多个包名键（GlassRestoreHook 三键一组，含 PkgAlias 与委托等值）共享安装状态——
-     * 别名包共享进程时第二个包回调不重复 install，防 double mount（setId 钩子参数双重缩放/重试计数器互相污染）。
+     * 目标对象是否已装（对象级防重装门控）：多键共享安装状态，别名包共享进程时防 double mount。
      */
     fun isInstalled(target: TargetHook): Boolean = target in installed
 
-    /** 标记该目标对象已完成 install */
     fun markInstalled(target: TargetHook) {
         installed += target
     }
 
     /**
-     * 按对象去重的目标组数 = 4（主题商店/安装器/玻璃三键一组/市场），与应用 tab 的 4 行口径一致。
-     * （GlassRestoreHook 的 PkgAlias 与委托对象等值——见其 equals/hashCode——同一 object 的多包名键归为一组。）
+     * 按对象去重的目标组数（= 应用 tab 行数口径；玻璃三键同 delegate 稳定归 1 组，与装载顺序无关）。
      */
     fun groupedTargetCount(): Int = targets.values.toSet().size
 }

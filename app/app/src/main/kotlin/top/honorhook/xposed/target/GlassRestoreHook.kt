@@ -1,8 +1,6 @@
 package top.honorhook.xposed.target
 
 import android.content.SharedPreferences
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
@@ -18,66 +16,65 @@ import kotlin.math.roundToInt
 import top.honorhook.data.KEY_F7_GLASS_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
 import top.honorhook.xposed.MethodResolver
+import top.honorhook.xposed.MountScheduler
 import top.honorhook.xposed.RemotePrefsHolder
 
 /**
  * 荣耀 SystemUI 目标（F7 液态玻璃恢复）——移植自 reference/HonorLiquidGlassRestore v2.5.18
- * 单文件 MainHook.java（旧版 Xposed API → libxposed 102 改写，对应关系见 docs/honor-plugins-integration.md §5.4；
- * 面板 10 组 hook 核心直移；锁屏合成链 ~600 行标二期，未移植——见 "二期（未移植）" 节）。
+ * 单文件 MainHook.java（旧版 Xposed API → libxposed 102 改写，对应 docs/honor-plugins-integration.md §5.4；
+ * 面板 10 组 hook 核心直移；锁屏合成链 ~600 行二期未移植）。
  *
  * 真机基线校验（2026-10-09，system-files 双 SystemUI 包）：
- * - 系统界面_15.0.0.0.apk → **com.hihonor.desktop.systemui**（本目标主包名，appt2 dump badging 实证）；
+ * - 系统界面_15.0.0.0.apk → **com.hihonor.desktop.systemui**（本目标主包名，aapt2 dump badging 实证）；
  * - 系统用户界面_17.0.0.1.apk → com.android.systemui（**magic 包类全部在此包**，本目标别名注册）。
- * 面板 10 组 hook 逐点对照反编译产物（systemui-jadx = 15.0.0.0 全量；17.0.0.1 按需 jadx 单类），
- * **全部命中、签名一致**，迁移/丢弃清单：
+ * 面板 10 组 hook 逐点对照反编译产物（systemui-jadx = 15.0.0.0 全量；17.0.0.1 按需 jadx 单类），全部命中、签名一致：
  * 1. TransparentModeManager（com.hihonor.systemui.magic.transparentmode，仅 17.0.0.1）：
- *    getTransparentModeState(Configuration,String) L154（大方法，string building + 多调用，AOT 不内联）、
+ *    getTransparentModeState(Configuration,String) L154（大方法，AOT 不内联）、
  *    isLiquidBlurType() L176 / isFrostedBlurType() L172（`mIsTransparentModeOn && mBlurType==0x10000`）、
  *    getTransparentBlurRadius(int) L102；字段 mBlurType L9 / mIsTransparentModeOn L11；
- *    位域常量与插件完全一致（0xF0000 mask / 0x10000 FROSTED / 0x20000 LIQUID，源码 `& 983040` 实证）✓
+ *    位域常量与插件一致（0xF0000 mask / 0x10000 FROSTED / 0x20000 LIQUID，源码 `& 983040` 实证）
  * 2. BlurParametersConfig（magic.blur，仅 17.0.0.1）：initBulrParams(int,BitmapVisualEffectStyle,boolean) L306
  *    大方法 + 24 个字段全部命中（liauidGlass*×3、control*×4、slider*×2、button*×2、multi*×4、
- *    dynamicCardGradient*×2、refraction/depth/thickness/dispersion/blurRadius/dynamicCardBlurRadius/mContext）✓
- * 3. ShotBlurView（com.android.magic.blur，仅 17.0.0.1）：setBlurParams(float,int) L402 ✓
+ *    dynamicCardGradient*×2、refraction/depth/thickness/dispersion/blurRadius/dynamicCardBlurRadius/mContext）
+ * 3. ShotBlurView（com.android.magic.blur，仅 17.0.0.1）：setBlurParams(float,int) L402
  * 4. EdgeLightParamEx（com.hihonor.android.graphics.material.atomiceffect——**框架 bootclasspath 类**，
  *    两个 APK dex 均只有引用；uikit 变体 com.hihonor.uikit.hnmagicsystem.graphics.material.atomiceffect.
- *    EdgeLightParamEx 经 HwReflectUtil 反射委托构造框架版，间接实证其存在）：2 参构造器 (int,float) + setColor(int) ✓
+ *    EdgeLightParamEx 经 HwReflectUtil 反射委托构造框架版，间接实证其存在）：2 参构造器 (int,float) + setColor(int)
  * 5. AbsHighGradeDegreeAlgorithm（uikit transparency，15.0.0.0 L88 / 17.0.0.1 L30 同签名）：
- *    withTransparency(IGradeParamsRepo,int) 大方法 + 字段 mHighGradeParamsRepo（两版都存在，17.0.0.1 L7/L34）；
- *    BlurParam{radius,alphas,RGBs,maskColors} 四字段命中（jadx 实证 L14-19）；ColorHelper.composeColors(int[],int[]) ✓
- * 6. UiModeManagerEx（com.hihonor.android.app——框架类，uikit wrapper 反射委托实证存在）：getTransparentTexture/getTransparentDegree ✓
+ *    withTransparency(IGradeParamsRepo,int) 大方法 + 字段 mHighGradeParamsRepo（两版均存在，17.0.0.1 L7/L34）；
+ *    BlurParam{radius,alphas,RGBs,maskColors} 四字段命中（jadx 实证 L14-19）；ColorHelper.composeColors(int[],int[])
+ * 6. UiModeManagerEx（com.hihonor.android.app——框架类，uikit wrapper 反射委托实证存在）：getTransparentTexture/getTransparentDegree
  * 7. MachineConfig（uikit，15.0.0.0 实证）：getInstance(Context)、isHighMachine/isCompatMachine/getMachineType
- *    + 字段 transparencyMaterialLevel/isSupportTransConfig/machineType 三字段全命中（jadx L9-11）；MachineType.HIGH ✓
- * 8. StyleType（uikit，15.0.0.0 L29）：getMaterialType() + 常量 FROSTED_GLASS_TRANSPARENCY(2)/LIQUID_GLASS_TRANSPARENT(4) ✓
- *    ——**版本差异一处**：插件调 uikit UiModeManagerEx.getTransparentMode 为 callStaticMethod，真机 15/17 该方法是
- *    **instance 方法**（jadx 实证 L45，需 getInstance() 后调用），本移植双轨容错（static 优先 → instance 兜底）
- * 9. TransparencyFeatureConfig（uikit，15.0.0.0 L62）：getConfigTransparentModeMaterial(Context) 恒返 3 ✓
- * 10. ConfigurationEx（com.hihonor.android.content.res——框架类，17.0.0.1 TransparentModeManager L156 直接
- *     `new ConfigurationEx(configuration)` 实证存在）：getTransparentMode() 位改写 ✓
+ *    + 字段 transparencyMaterialLevel/isSupportTransConfig/machineType 三字段全命中（jadx L9-11）；MachineType.HIGH
+ * 8. StyleType（uikit，15.0.0.0 L29）：getMaterialType() + 常量 FROSTED_GLASS_TRANSPARENCY(2)/LIQUID_GLASS_TRANSPARENT(4)
+ *    ——**版本差异一处**：插件调 getTransparentMode 为 callStaticMethod，真机 15/17 是 **instance 方法**
+ *    （jadx 实证 L45，需 getInstance() 后调用），本移植双轨容错（static 优先 → instance 兜底）
+ * 9. TransparencyFeatureConfig（uikit，15.0.0.0 L62）：getConfigTransparentModeMaterial(Context) 恒返 3
+ * 10. ConfigurationEx（com.hihonor.android.content.res——框架类，17.0.0.1 TransparentModeManager L156
+ *     `new ConfigurationEx(configuration)` 实证存在）：getTransparentMode() 位改写
  * 无效点/版本不匹配点：**无**——10 组全部照移；唯一行为差异点 = 上表 #8 的 instance 适配（已处理）。
  *
  * 二期（未移植，标 f7_glass_keyguard 子位）：
- * - 锁屏玻璃位图合成链：KeyguardWallpaper.getCurrentBlurBitmapForBg / processWallpaperChange / ensureLightBitmap /
- *   captureStockBitmap / fireKgReapply / reapplyIconTargets（原 MainHook.java L1043-1582）；
- * - 锁屏快捷按钮玻璃：ViewBlur.blurIcon 5 参重定向 + IconTarget 追踪（原 L1186-1290）；
- * - 锁屏卡 kbshade 配方（initBulrParams 内 case=2 && z=true 分支，原 L478-524）+ NotificationBackgroundViewModel
- *   turnOnViewBlur 边光门（原 L273-293）+ EdgeLightParamEx 构造器 kedge 分支（本文件 EDGE_CTOR 已剔除 sKgCardNow）；
+ * - 锁屏玻璃位图合成链（KeyguardWallpaper.getCurrentBlurBitmapForBg / processWallpaperChange / ensureLightBitmap /
+ *   captureStockBitmap / fireKgReapply / reapplyIconTargets，原 L1043-1582）；
+ * - 锁屏快捷按钮玻璃（ViewBlur.blurIcon 5 参重定向 + IconTarget 追踪，原 L1186-1290）；
+ * - 锁屏卡 kbshade 配方（initBulrParams case=2 && z=true 分支，原 L478-524）+ NotificationBackgroundViewModel.turnOnViewBlur
+ *   边光门（原 L273-293）+ EdgeLightParamEx 构造器 kedge 分支（本文件 EDGE_CTOR 已剔除 sKgCardNow）；
  * - 纯观测 kdiag 链（KeyguardBlurUtils/ViewBlur/KeyguardWallpaper/BokehDrawable/KeyguardBusinessDataProvider/
  *   ToolBoxView/GlassParamEx/HnMaterialManager，原 L1679-1912）；
  * - 对应持久化属性 kbg/kbblur/kveil/kbbright/kedge/keng/kicon/kdiag。
  *
  * Boot-loop 纪律（v2.3 事故史，原 MainHook.java L75-84 安全规则全量继承）：
  * - 禁 Class.forName(initialize=true)：全部类解析走 [loader.loadClass]（不触发 <clinit>）；
- * - 禁硬编码资源 id：nmask 底色调色与面板遮罩全部走反射字段读写，无资源 id 参与（原 kbshade 的
- *   resolveStockColor 属二期，未移植）；
+ * - 禁硬编码资源 id：nmask 底调与面板遮罩全走反射字段读写（原 kbshade 的 resolveStockColor 属二期，未移植）；
  * - 每个 hook 体独立 try/catch（[mountOne] + 各 intercept body 的 runCatching），单点失败绝不崩宿主；
  * - 未验证 hook 默认关：**F7 默认 false**，开启后再看 [glass] 挂载汇总。
  *
  * AOT 内联免疫设计（照原 MainHook.java L38-40 只挂大方法/构造器 + 改字段不改返回值）：
- * 核心机制 = getTransparentModeState / initBulrParams / withTransparency 三个大方法 after 改写
- * **缓存字段**（mBlurType / 各遮罩色 / blurRadius），后续内联读取点全命中；
- * isLiquidBlurType/isFrostedBlurType/isHighMachine 等小 getter 的常量替换为尽力而为（可能被 AOT 内联绕过，
- * 但同字段改写已让内联读者直接见修正值）；EdgeLightParamEx 走构造器（永不内联）；所有挂点与源码一致未改小。
+ * getTransparentModeState / initBulrParams / withTransparency 三个大方法 after 改写**缓存字段**
+ * （mBlurType / 各遮罩色 / blurRadius），后续内联读取点全命中；isLiquidBlurType/isFrostedBlurType/isHighMachine
+ * 等小 getter 的常量替换为尽力而为（可能被 AOT 内联绕过，但同字段改写已让内联读者直接见修正值）；
+ * EdgeLightParamEx 走构造器（永不内联）；所有挂点与源码一致未改小。
  *
  * 开关语义（照 HC 模式 + F6 同构）：挂载无条件（onPackageLoaded 时机），每个 intercept 内**现读**远程 prefs
  * （[KEY_HOOK_ENABLED] 总开关 × [KEY_F7_GLASS_ENABLED]）决定本次是否生效——总关 = 原逻辑放行；F7 默认关
@@ -85,21 +82,33 @@ import top.honorhook.xposed.RemotePrefsHolder
  * **保持 setprop 通道**（persist.sys.lgr.*，2s TTL 缓存，需 root 的 adb 操作），不进 UI——UI 只放 F7 总开关
  * （docs §5.2 决策）。
  *
- * 挂载健壮性（照 HonorInstallerHook 模式）：类/方法未解析的挂载项收集，Handler postDelayed 约 500ms 重试一轮、
- * 再失败约 2s 最后一轮，仍失败 WARN 放弃；收尾始终输出 `GlassRestoreHook: installed N/M` 汇总。
+ * 挂载健壮性（照 HonorInstallerHook 模式）：直连失败入 pending，MountScheduler 后台线程按约 500ms / 2s
+ * postDelayed 重试 2 轮（不占目标进程主线程，见 MountScheduler），仍失败 WARN 放弃；收尾始终输出
+ * `GlassRestoreHook: installed N/M` 汇总。
  * **挂载成功始终输出日志**（不受 debug 门控）——真机从 LSPosed 日志（TAG HonorHook）过滤 "[glass]"
  * 确认各 hook 命中（对应插件 "hook ... ok / skip" 行的定位作用）。
  */
 object GlassRestoreHook : TargetHook {
 
-    /** 真机基线实际包名（系统界面_15.0.0.0.apk manifest 实证）；同名实现另注册 com.android.systemui / com.hihonor.android.launcher 两键，见 [aliases]。 */
+    /** 真机基线实际包名（系统界面_15.0.0.0.apk manifest 实证）；另两别名见 [registryKeys]。 */
     override val packageName = "com.hihonor.desktop.systemui"
 
-    /** com.android.systemui / com.hihonor.android.launcher 别名注册（docs §5.1：同一 object 注册 3 键——TargetRegistry 按单包名查；挂载按类解析，进程天然各取所需）。 */
-    fun aliases(): List<TargetHook> = listOf("com.android.systemui", "com.hihonor.android.launcher")
-        .map { PkgAlias(it, this) }
+    /**
+     * 注册键清单（docs §5.1：同一 object 注册 3 键——TargetRegistry 按单包名查；挂载按类解析，进程天然各取所需）。
+     * 包名分布：主键 [packageName] = com.hihonor.desktop.systemui；别名 com.android.systemui
+     * （系统用户界面_17.0.0.1.apk，magic 包类全部在此）/ com.hihonor.android.launcher（桌面
+     * com.hihonor 进程的 uikit 框架类子集）。配套 scope.list 已声明三包。
+     *
+     * **三键全部 PkgAlias 包装（对称等值）**：若非包装（object 本体入表、对象身份比较），Set 去重
+     * （新键 .equals(已存键)）就有方向依赖——"alias 先装载、主键后查询/归组"顺序下 false：
+     * 共享进程双挂载防不住、toSet() 归组返回 5 非 4；全包装后任意装载顺序去重成立、
+     * groupedTargetCount() 稳定归 4 组（与应用 tab 4 行口径一致）。
+     */
+    fun registryKeys(): List<TargetHook> =
+        listOf(packageName, "com.android.systemui", "com.hihonor.android.launcher")
+            .map { PkgAlias(it, this) }
 
-    /** 包名委托适配器：install 委托给同一实现（其结果按 [param.packageName] 与类解析分进程命中）。 */
+    /** 包名委托适配器：install 委托给同一实现，按 [param.packageName] 分进程命中。 */
     private class PkgAlias(
         override val packageName: String,
         private val delegate: TargetHook,
@@ -107,9 +116,9 @@ object GlassRestoreHook : TargetHook {
         override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) =
             delegate.install(module, param)
 
-        // 与委托对象等值（组归属语义，非引用身份）：同一 object 的 3 包名键视为同一目标组——
-        // ① TargetRegistry.installed 对象级判定跨键生效（别名共享进程时第二个键回调不重复 install，防 double mount）；
-        // ② groupedTargetCount() 玻璃三键归 1 组（=4，与应用 tab 4 行口径一致）。
+        // 与委托对象等值（组归属语义，非引用身份）：跨键生效防 double mount（共享进程第二个键回调不重复
+        // install）且 groupedTargetCount() 玻璃三键归 1 组（=4，与应用 tab 4 行口径一致）；三键全 PkgAlias
+        // 包装，equals/hashCode 基于同一 delegate，任意装载顺序对称去重。
         override fun equals(other: Any?): Boolean =
             other === delegate || (other is PkgAlias && other.delegate === delegate)
 
@@ -125,7 +134,6 @@ object GlassRestoreHook : TargetHook {
     private const val COLOR_HELPER_CLASS = "com.hihonor.uikit.transparency.utils.ColorHelper"
     private const val CFG_CLASS = "com.hihonor.uikit.transparency.configuration.TransparencyFeatureConfig"
     private const val MACHINE_CLASS = "com.hihonor.uikit.transparency.configuration.MachineConfig"
-    private const val MACHINE_TYPE_CLASS = "com.hihonor.uikit.transparency.configuration.MachineType"
     private const val STYLE_TYPE_CLASS = "com.hihonor.uikit.transparency.style.StyleType"
     private const val UIMODE_WRAPPER_CLASS = "com.hihonor.uikit.hnmagicsystem.app.UiModeManagerEx"
     private const val UIMODE_FW_CLASS = "com.hihonor.android.app.UiModeManagerEx"
@@ -163,7 +171,7 @@ object GlassRestoreHook : TargetHook {
     private const val DEFAULT_DISP = 0.25f
     private const val DEFAULT_FOLDER = 1.0f
 
-    // ---------- 日志计数节流（照源码各 sXxxCount，只打前几次防刷屏） ----------
+    // ---------- 日志计数节流（照源码，只打前几次防刷屏） ----------
     private var sFlipLogged = false
     private var sTextureLogged = false
     private var sDegreeLogged = false
@@ -197,41 +205,38 @@ object GlassRestoreHook : TargetHook {
     private var sTileBlurScale = DEFAULT_TBLUR
     private var sMinDegree = DEFAULT_DEGREE
 
-    // 枚举常量解析缓存（进程内稳定，挂载/触发时懒解析）
-    @Volatile private var sMachineHigh: Any? = null
     @Volatile private var sStyleLiquid: Any? = null
     @Volatile private var sStyleFrosted: Any? = null
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
-        // 注意：libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（无 classLoader 属性，ThemeStoreHook 同款写法）
+        // libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（无 classLoader 属性，ThemeStoreHook 同款）
         val loader = param.defaultClassLoader
         // DexKit 兜底用的目标 APK 路径（MethodResolver 第二轨依赖；null 时仅直连重试）
         apkPath = param.applicationInfo?.sourceDir
         // 远程 prefs 不走 install 期一次性捕获（RemotePrefsHolder：进程级缓存 + 失败自动重读自愈——
-        // 修复「install 期读取失败 → null 被闭包捕获冻结」缺陷，与 ThemeStoreHook 同构；此处调用仅作缓存预热，
-        // 实际读取在各 intercept 函数体内现读 obtain()）
+        // 修复「install 期读取失败 → null 被闭包捕获冻结」缺陷，与 ThemeStoreHook 同构）；实际读取在各 intercept 现读 obtain()
         RemotePrefsHolder.obtain(module)
 
         retryRounds = 0
         okCount = 0
         totalCount = 0
         failedIds.clear()
-        sMinDegree = readDegreeProp(loader) // 首次兜底读取（此后每 2s 由 refreshProps 热刷新覆盖，见 refreshProps）
+        sMinDegree = readDegreeProp(loader) // 首次兜底读取（此后 refreshProps 每 2s 热刷新覆盖）
 
-        // 挂载表 18 项 = 面板 10 组 hook（docs §4.4；锁屏链 4 组二期未入表）
+        // 挂载表 15 项 = 面板 10 组 hook（docs §4.4；锁屏链 4 组二期未入表）
         val pending = mutableListOf<MountTask>()
-        // 组 1-3：TransparentModeManager（核心 LIQUID 状态）
+        // 组 1-3：TransparentModeManager
         pending += MountTask(
             kind = MountKind.STATE_FIX, className = TMM_CLASS, methodName = "getTransparentModeState", paramCount = 2,
             id = "honorhook:glass:tmm.state", description = "G1 LIQUID 材质位核心（getTransparentModeState 大方法 after 改写 mBlurType 字段 = 0x20000）",
         )
         pending += MountTask(
             kind = MountKind.LIQUID_BOOL, className = TMM_CLASS, methodName = "isLiquidBlurType", paramCount = 0,
-            id = "honorhook:glass:tmm.liquid", description = "G2a 液态判定兜底（isLiquidBlurType after：透明开且原返 false 时强 true）",
+            id = "honorhook:glass:tmm.liquid", description = "G2a 液态判定兜底（isLiquidBlurType after：透明开且原返 false 时强 true）；审计候删：G1/G8a 已覆盖（mBlurType 改写/框架 texture 恒 2），待真机确认冷启动窗口/17.0.0.1 同构后删除（docs 哲学审计 2026-10-09）",
         )
         pending += MountTask(
             kind = MountKind.CONST, className = TMM_CLASS, methodName = "isFrostedBlurType", paramCount = 0,
-            value = false, id = "honorhook:glass:tmm.frosted", description = "G2b 磨砂判定恒 false（isFrostedBlurType returnConstant(false)）",
+            value = false, id = "honorhook:glass:tmm.frosted", description = "G2b 磨砂判定恒 false（isFrostedBlurType returnConstant(false)）；审计候删：G1/G8a 已覆盖（mBlurType 改写/框架 texture 恒 2），待真机确认冷启动窗口/17.0.0.1 同构后删除（docs 哲学审计 2026-10-09）",
         )
         pending += MountTask(
             kind = MountKind.RADIUS_SCALE, className = TMM_CLASS, methodName = "getTransparentBlurRadius", paramCount = 1,
@@ -270,27 +275,20 @@ object GlassRestoreHook : TargetHook {
             kind = MountKind.DEGREE_RAISE, className = UIMODE_FW_CLASS, methodName = "getTransparentDegree", paramCount = 0,
             id = "honorhook:glass:fw.degree", description = "G8b 框架透明度抬升（getTransparentDegree after → 最低 85）",
         )
-        // 组 9：机型强制 HIGH（MachineConfig 字段 + 判定 + 类型）
+        // 组 9：机型强制 HIGH（仅 G9a 字段改写；G9b/G9c/G9d 已审计删除，删除依据见下注释）
         pending += MountTask(
             kind = MountKind.MACHINE_FIELDS, className = MACHINE_CLASS, methodName = "getInstance", paramCount = 1,
             id = "honorhook:glass:machine.instance", description = "G9a 机型字段强制 HIGH（getInstance after：transparencyMaterialLevel=0 / isSupportTransConfig=true / machineType=null 重算）",
         )
-        pending += MountTask(
-            kind = MountKind.CONST, className = MACHINE_CLASS, methodName = "isHighMachine", paramCount = 0,
-            value = true, id = "honorhook:glass:machine.high", description = "G9b 高档机判定恒 true（isHighMachine）",
-        )
-        pending += MountTask(
-            kind = MountKind.CONST, className = MACHINE_CLASS, methodName = "isCompatMachine", paramCount = 0,
-            value = false, id = "honorhook:glass:machine.compat", description = "G9c 兼容机判定恒 false（isCompatMachine）",
-        )
-        pending += MountTask(
-            kind = MountKind.MACHINE_TYPE_HIGH, className = MACHINE_CLASS, methodName = "getMachineType", paramCount = 0,
-            id = "honorhook:glass:machine.type", description = "G9d 机型类型恒 HIGH（getMachineType after → MachineType.HIGH）",
-        )
+        // 删除依据（docs 哲学审计 2026-10-09，jadx 双版本实证——15.0.0.0 systemui-jadx MachineConfig.java L49-64 /
+        // 17.0.0.1 honorui-jadx MachineConfig.java L58-89）：isHighMachine/isCompatMachine/getMachineType 三个 getter
+        // 均为纯字段读，G9a（getInstance after：level=0 / support=true / machineType=null 重算）已令三者**原生**返回
+        // 目标值（true/false/HIGH）；且 getInstance 为懒单例——任何消费方拿到实例前 G9a 必已执行，无冷启动窗口，
+        // 故三点冗余删除（挂载 18→15）；顺带移除 MachineType 枚举 <clinit> 触发面（其懒解析函数随 G9d 一并删除）。
         // 组 10：材质类型改判 + 材质位配置 + 系统配置位
         pending += MountTask(
             kind = MountKind.STYLE_FLIP, className = STYLE_TYPE_CLASS, methodName = "getMaterialType", paramCount = 0,
-            id = "honorhook:glass:style.flip", description = "G10a 材质类型改判（StyleType.getMaterialType after：透明模式下 FROSTED→LIQUID，mode 读取已适配真机 instance 方法）",
+            id = "honorhook:glass:style.flip", description = "G10a 材质类型改判（StyleType.getMaterialType after：透明模式下 FROSTED→LIQUID，mode 读取已适配真机 instance 方法）；审计候删：G1/G8a 已覆盖（mBlurType 改写/框架 texture 恒 2），待真机确认冷启动窗口/17.0.0.1 同构后删除（docs 哲学审计 2026-10-09）",
         )
         pending += MountTask(
             kind = MountKind.CONST, className = CFG_CLASS, methodName = "getConfigTransparentModeMaterial", paramCount = 1,
@@ -309,39 +307,31 @@ object GlassRestoreHook : TargetHook {
     private enum class MountResult { OK, FAILED, NOT_RESOLVED }
 
     /**
-     * 挂载任务类型：
-     * [CONST] 常量短路（恒返 value，不调原方法——isFrostedBlurType/isHighMachine/isCompatMachine/材质特效位）；
-     * [STATE_FIX] getTransparentModeState after：改写 mBlurType 字段（唯一核心机制，改字段不改返回值）；
-     * [LIQUID_BOOL] isLiquidBlurType after：透明开且原返 false 时强 true；
-     * [RADIUS_SCALE] getTransparentBlurRadius after：返回值 x radius 倍率；
-     * [INIT_BLUR] initBulrParams after：批量字段缩放（面板部分，kbshade 锁屏分支二期未含）；
-     * [PANEL_VEIL] setBlurParams before：改参（sat / mask alpha）；
-     * [EDGE_CTOR] EdgeLightParamEx 2 参构造器 before：thickness 6.0 x edge（构造器不内联；防叠乘只缩放 6.0 原值）；
-     * [EDGE_COLOR] setColor before：alpha x rim；
-     * [DEGREE_SCALE] withTransparency after：currentTransparency 重置 + light/darkBlurParam 缩放（ColorHelper 重算）；
-     * [TEXTURE_FIX] 框架 getTransparentTexture after 恒 2；[DEGREE_RAISE] 框架 getTransparentDegree after 抬升；
-     * [MACHINE_FIELDS] getInstance after：3 字段改写；[MACHINE_TYPE_HIGH] getMachineType after 恒 HIGH；
-     * [STYLE_FLIP] getMaterialType after：FROSTED→LIQUID（模式读 uikit wrapper，static/instance 双轨）；
-     * [CONFIG_BIT] ConfigurationEx.getTransparentMode after：FROSTED 位→LIQUID。
+     * 挂载任务类型（改写语义见 [interceptBody]；此处只留代码读不出的设计信息）：
+     * [STATE_FIX] 核心机制：改字段不改返回值（AOT 内联免疫，见类注释）；
+     * [INIT_BLUR] 仅面板部分，kbshade 锁屏分支二期未含；
+     * [EDGE_CTOR] 走构造器（永不内联）；copy 模式防叠乘，只缩放 6.0 原值；
+     * [DEGREE_SCALE] 覆写语义：currentTransparency 重置后经 ColorHelper 重算（防叠乘）；
+     * [STYLE_FLIP] 模式读 uikit wrapper，static/instance 双轨（真机 instance，见类注释 #8）。
      */
     private enum class MountKind {
         CONST, STATE_FIX, LIQUID_BOOL, RADIUS_SCALE, INIT_BLUR, PANEL_VEIL, EDGE_CTOR, EDGE_COLOR,
-        DEGREE_SCALE, TEXTURE_FIX, DEGREE_RAISE, MACHINE_FIELDS, MACHINE_TYPE_HIGH, STYLE_FLIP, CONFIG_BIT,
+        DEGREE_SCALE, TEXTURE_FIX, DEGREE_RAISE, MACHINE_FIELDS, STYLE_FLIP, CONFIG_BIT,
     }
 
-    /** 一次挂载任务的完整描述（类/方法未解析时保留任务本体供懒加载重试；[ctor]=true 时按构造器匹配）。 */
+    /** 挂载任务完整描述（未解析时保留任务本体供懒加载重试）。 */
     private class MountTask(
         val kind: MountKind,
         val className: String,
         val methodName: String,
         val paramCount: Int,
-        val id: String,                 // 幂等 ID（框架用它防重复/日志标识）
+        val id: String,                 // 幂等 ID（框架防重复/日志标识）
         val description: String,
-        val value: Any? = null,         // CONST: 常返值
-        val ctor: Boolean = false,      // true = 构造器挂载（methodName 仅作描述）
+        val value: Any? = null,         // CONST 的常返值
+        val ctor: Boolean = false,      // 构造器挂载（methodName 仅作描述）
     )
 
-    /** 重试轮次（已完成的重试数；第 1 轮 500ms 后、第 2 轮 2s 后；照 HC installCustomTileHooks postDelayed 模式）。 */
+    /** 重试轮次（已完成重试数；照 HC installCustomTileHooks postDelayed 模式）。 */
     private var retryRounds = 0
     private var okCount = 0
     private var totalCount = 0
@@ -351,7 +341,7 @@ object GlassRestoreHook : TargetHook {
     private const val RETRY_DELAY_MS = 500L
     private const val RETRY_FINAL_DELAY_MS = 2000L
 
-    /** 挂载一轮 pending 任务（HC postDelayed 懒加载重试模式，与 HonorInstallerHook.attemptMount 同构）： */
+    /** 挂载一轮 pending 任务（与 HonorInstallerHook.attemptMount 同构，HC postDelayed 懒加载重试模式）。 */
     private fun attemptMount(
         pending: MutableList<MountTask>,
         module: XposedModule,
@@ -378,10 +368,11 @@ object GlassRestoreHook : TargetHook {
         } else {
             retryRounds++
             val delay = if (retryRounds == 1) RETRY_DELAY_MS else RETRY_FINAL_DELAY_MS
-            Handler(Looper.getMainLooper()).postDelayed({
+            // 挂载/重试/DexKit 扫描全部走 MountScheduler 后台线程，不占目标进程主线程（见 MountScheduler）
+            MountScheduler.postDelayed(delay) {
                 runCatching { attemptMount(unresolved, module, loader) }
                     .onFailure { t -> module.log(Log.ERROR, TAG, "懒加载重试挂载异常", t) }
-            }, delay)
+            }
         }
     }
 
@@ -392,7 +383,7 @@ object GlassRestoreHook : TargetHook {
         loader: ClassLoader,
     ): MountResult {
         val executable = if (task.ctor) {
-            // 构造器保持直连 findCtor（resolveCtor 与直连等价，DexKit 兜底收益低——最小改动）
+            // 构造器保持直连 findCtor（resolveCtor 与直连等价，DexKit 兜底收益低）
             findCtor(loader, task.className, task.paramCount)
         } else {
             // 直连失败 → MethodResolver 双轨兜底（第二轨 DexKit 按特征查磁盘 dex，对抗 OTA 混淆漂移；
@@ -432,7 +423,7 @@ object GlassRestoreHook : TargetHook {
         )
     }
 
-    // ---------------- 拦截器实现（每个 intercept 现读开关；各触发日志按源码计数节流） ----------------
+    // ---------------- 拦截器实现（每个 intercept 现读开关） ----------------
 
     private fun interceptBody(
         chain: XposedInterface.Chain,
@@ -440,12 +431,11 @@ object GlassRestoreHook : TargetHook {
         loader: ClassLoader,
         task: MountTask,
     ): Any? {
-        // 每次触发现读远程 prefs（RemotePrefsHolder 进程级缓存，拿到后零开销）——不等 install 期一次性捕获：
-        // 修复「install 期读取失败 → null 被闭包捕获冻结」缺陷（null 时每次触发自动重读自愈，成功一次即缓存）
+        // 每次触发现读 prefs（RemotePrefsHolder 进程级缓存）——防 install 期读取失败冻结（null 时自动重读自愈）
         val prefs = RemotePrefsHolder.obtain(module)
-        if (!featureEnabled(prefs)) return chain.proceed()   // 总开关/F7 关 → 原逻辑放行
+        if (!featureEnabled(prefs)) return chain.proceed()
         return when (task.kind) {
-            // 常量短路：不调原方法，恒返 value（returnConstant 语义；isFrostedBlurType/isHighMachine/isCompatMachine/材质特效位）
+            // CONST：不调原方法恒返 value（returnConstant 语义）
             MountKind.CONST -> task.value
 
             // G1 核心：after 改写字段而非返回值——后续内联读取点全命中（AOT 内联免疫设计）
@@ -459,12 +449,12 @@ object GlassRestoreHook : TargetHook {
                 }
                 r
             }
-            // G2a 液态判定兜底：透明开且原返 false 时强 true（mIsTransparentModeOn 字段现读）
+            // G2a 液态判定兜底
             MountKind.LIQUID_BOOL -> after(chain, module, "liquid") { r ->
                 val on = boolField(chain.thisObject, "mIsTransparentModeOn") ?: false
                 if (on && r != true) true else r
             }
-            // G3 面板模糊半径 x radius 倍率
+            // G3 面板模糊半径倍率
             MountKind.RADIUS_SCALE -> after(chain, module, "radius") { r ->
                 val orig = r as? Float ?: return@after r
                 refreshProps(loader)
@@ -476,7 +466,7 @@ object GlassRestoreHook : TargetHook {
                 }
                 if (scaled != orig) scaled else r
             }
-            // G4 磁贴/通知卡玻璃参数批量缩放（面板部分；mask 优先、nmask 绝对底调、refract/thick/disp、folder 配方、tblur）
+            // G4 磁贴/通知卡玻璃参数批量缩放（面板部分）
             MountKind.INIT_BLUR -> after(chain, module, "initBlur") { r ->
                 refreshProps(loader)
                 val o = chain.thisObject
@@ -505,7 +495,7 @@ object GlassRestoreHook : TargetHook {
                     }.onFailure { t -> module.log(Log.WARN, TAG, "[glass] mask scale failed: $t") }
                 }
                 if (sNtfMask > 0.001f) {
-                    // nmask 绝对底色调色（在通用缩放之后，卡片底调独立于 mask prop）
+                    // nmask 绝对底调（在通用缩放之后，独立于 mask prop）
                     runCatching {
                         val tint = ((sNtfMask * 255.0f + 0.5f).toInt() shl 24) or 0x2E2E2E
                         val overlay = ((sNtfMask * 0.5f * 255.0f + 0.5f).toInt() shl 24) or 0x2E2E2E
@@ -541,7 +531,7 @@ object GlassRestoreHook : TargetHook {
                     }.onFailure { t -> module.log(Log.WARN, TAG, "[glass] folder optics failed: $t") }
                 }
                 if (abs(sTileBlurScale - 1.0f) > 0.001f) {
-                    // 二次模糊：每块磁贴/卡片重糊面板位图（残余磨砂感，独立于背景 radius prop）
+                    // tblur 二次模糊（独立于背景 radius prop 的残余磨砂感）
                     runCatching {
                         val br = floatField(o, "blurRadius") ?: return@runCatching
                         val nbr = max(1.0f, br * sTileBlurScale)
@@ -556,7 +546,7 @@ object GlassRestoreHook : TargetHook {
                 }
                 r
             }
-            // G5 面板遮罩/光泽（最大杠杆）：before 改参（sat 缩放 arg0、mask alpha 缩放 arg1）
+            // G5 面板遮罩/光泽（before 改参：sat / mask alpha）
             MountKind.PANEL_VEIL -> beforeArgs(chain, module, "panel", { args ->
                 val orig = args.getOrNull(1) as? Int ?: return@beforeArgs null
                 refreshProps(loader)
@@ -572,7 +562,7 @@ object GlassRestoreHook : TargetHook {
                 }
                 args.toTypedArray()
             })
-            // G6a 边光宽度：构造器 before 缩放 6.0 原值（构造器不内联；防叠乘只缩放 stock 常量）
+            // G6a 边光宽度（构造器 before；永不内联 + 防叠乘只缩放 stock 常量）
             MountKind.EDGE_CTOR -> beforeArgs(chain, module, "edgeCtor", { args ->
                 val orig = args.getOrNull(1) as? Float ?: return@beforeArgs null
                 refreshProps(loader)
@@ -586,7 +576,7 @@ object GlassRestoreHook : TargetHook {
                 }
                 args.toTypedArray()
             })
-            // G6b 边光亮度：setColor before alpha x rim
+            // G6b 边光亮度（before：alpha x rim）
             MountKind.EDGE_COLOR -> beforeArgs(chain, module, "edgeColor", { args ->
                 val c = args.getOrNull(0) as? Int ?: return@beforeArgs null
                 refreshProps(loader)
@@ -599,7 +589,7 @@ object GlassRestoreHook : TargetHook {
                 args[0] = ((alpha * sRimScale).roundToInt() shl 24) or (c and 0xFFFFFF)
                 args.toTypedArray()
             })
-            // G7 uikit 控件透明参数：after 重置 currentTransparency + 缩放 light/darkBlurParam（ColorHelper 重算防叠乘）
+            // G7 控件透明参数（覆写语义：重置 currentTransparency 后 ColorHelper 重算，防叠乘）
             MountKind.DEGREE_SCALE -> after(chain, module, "uikit") { r ->
                 refreshProps(loader)
                 if (sRadiusScale >= 0.999f && sMaskScale >= 0.999f) return@after r
@@ -630,7 +620,7 @@ object GlassRestoreHook : TargetHook {
                     2
                 } else r
             }
-            // G8b 框架透明度抬升到 minDegree（默认 85）
+            // G8b 框架透明度抬升（minDegree）
             MountKind.DEGREE_RAISE -> after(chain, module, "degree") { r ->
                 val orig = r as? Int ?: return@after r
                 if (orig < sMinDegree) {
@@ -641,7 +631,7 @@ object GlassRestoreHook : TargetHook {
                     sMinDegree
                 } else r
             }
-            // G9a 机型字段强制 HIGH（字段改写；getMachineType 读字段重算 → HIGH）
+            // G9a 机型字段强制 HIGH（字段改写，getMachineType 读字段即重算）
             MountKind.MACHINE_FIELDS -> after(chain, module, "machine") { r ->
                 val inst = r ?: return@after r
                 runCatching {
@@ -651,12 +641,8 @@ object GlassRestoreHook : TargetHook {
                 }.onFailure { t -> module.log(Log.WARN, TAG, "[glass] machine field fix failed: $t") }
                 r
             }
-            // G9d 机型类型恒 HIGH（MachineType.HIGH 枚举常量懒解析缓存）
-            MountKind.MACHINE_TYPE_HIGH -> after(chain, module, "machineType") { r ->
-                val high = machineHigh(loader) ?: return@after r
-                if (r != high) high else r
-            }
-            // G10a 材质类型改判：透明模式下 FROSTED→LIQUID（uikit wrapper 模式读取，static/instance 双轨——真机为 instance，见类注释）
+            // G9d 已删（2026-10-09 哲学审计）：getMachineType 纯字段读，G9a 改写后原生返回 HIGH，懒单例无冷启动窗口（依据见挂载表组 9）
+            // G10a 材质类型改判 FROSTED→LIQUID（模式读 uikit wrapper，static/instance 双轨，见类注释 #8）
             MountKind.STYLE_FLIP -> after(chain, module, "styleFlip") { r ->
                 val liquid = styleLiquid(loader) ?: return@after r
                 val frosted = styleFrosted(loader) ?: return@after r
@@ -670,7 +656,7 @@ object GlassRestoreHook : TargetHook {
                     liquid
                 } else r
             }
-            // G10c 系统配置位改判：BLUR_TYPE_MASK 内 FROSTED 位 → LIQUID
+            // G10c 系统配置位改判（FROSTED 位 → LIQUID）
             MountKind.CONFIG_BIT -> after(chain, module, "configBit") { r ->
                 val orig = r as? Int ?: return@after r
                 if (sConfigDiagCount < 5) {
@@ -689,7 +675,7 @@ object GlassRestoreHook : TargetHook {
         }
     }
 
-    /** after 形态：先 proceed 走原方法，再执行 [transform] 视需要改写结果（异常只记录、返回原结果——失败放行原逻辑纪律）。 */
+    /** after 形态：异常只记录、返回原结果——失败放行原逻辑（boot-loop 纪律）。 */
     private inline fun after(
         chain: XposedInterface.Chain,
         module: XposedModule,
@@ -702,7 +688,7 @@ object GlassRestoreHook : TargetHook {
             .getOrDefault(result)
     }
 
-    /** before 形态：拷贝参数列表，[transform] 返回新参数数组（null = 原样 proceed）；异常回退原调用。 */
+    /** before 形态：[transform] 返回新参数数组（null = 原样 proceed）；异常回退原调用。 */
     private inline fun beforeArgs(
         chain: XposedInterface.Chain,
         module: XposedModule,
@@ -719,7 +705,7 @@ object GlassRestoreHook : TargetHook {
 
     // ---------------- 面板参数缩放辅助（照源码 L440-695 直移） ----------------
 
-    /** G7 用：BlurParam{radius,alphas,RGBs,maskColors} 字段缩放 + ColorHelper.composeColors 重算遮罩色。 */
+    /** G7 用：BlurParam 字段缩放 + ColorHelper.composeColors 重算遮罩色。 */
     private fun scaleBlurParam(loader: ClassLoader, repo: Any, field: String, module: XposedModule) {
         runCatching {
             val p = objField(repo, field) ?: return@runCatching
@@ -766,7 +752,7 @@ object GlassRestoreHook : TargetHook {
         return (na shl 24) or (color and 0x00FFFFFF)
     }
 
-    // ---------------- 反射字段/方法辅助（XposedHelpers 等价物；全部 runCatching 单点容错） ----------------
+    // ---------------- 反射字段/方法辅助（XposedHelpers 等价物；runCatching 单点容错） ----------------
 
     private fun fld(o: Any?, name: String): Field? = runCatching {
         o?.javaClass?.getDeclaredField(name)?.also { it.isAccessible = true }
@@ -806,24 +792,17 @@ object GlassRestoreHook : TargetHook {
         m.invoke(target) as? Int
     }.getOrNull()
 
-    // ---------------- 枚举常量懒解析（mount 期 NOT_RESOLVED 之外的运行期兜底：解析失败 = 该 hook 本次不生效） ----------------
-    // 纪律（boot-loop 事故史）：[loader.loadClass] 不触发类初始化，但 `.enumConstants`/`values()` 会触发目标枚举
-    // 的 <clinit>（静态初始化）——这三个函数**仅允许在 intercept 期调用**：调用点（MACHINE_TYPE_HIGH / STYLE_FLIP
-    // 分支）已处于 featureEnabled 门控之后，且整条链被挂载期 PROTECTIVE 模式 + 运行期 runCatching 双重包裹，
-    // <clinit> 触发即是最坏后果。**禁止从挂载/重试线程（attemptMount/mountOne）调用**——挂载期若走枚举解析
-    // 即把 <clinit> 提前到进程注入阶段，扩大 boot-loop 事故面。首次解析失败（runCatching 兜底）返回 null =
-    // 该 hook 本次不生效（原逻辑放行，下次触发重试）。
+    // ---------------- 枚举常量懒解析（运行期兜底：解析失败 = 该 hook 本次不生效） ----------------
+    // 纪律（boot-loop 事故史）：[loader.loadClass] 不触发类初始化，但 `.enumConstants`/`values()` 会触发枚举
+    // <clinit>——两函数**仅允许在 intercept 期调用**（STYLE_FLIP 分支已过 featureEnabled 门控，且被挂载期
+    // PROTECTIVE + 运行期 runCatching 双重包裹）。**禁止从挂载/重试线程（attemptMount/mountOne）调用**——
+    // 挂载期解析会把 <clinit> 提前到进程注入阶段，扩大 boot-loop 事故面。首次解析失败返回 null =
+    // 本次不生效（原逻辑放行，下次触发重试）。
 
-    private fun machineHigh(loader: ClassLoader): Any? {
-        sMachineHigh?.let { return it }
-        val high = runCatching {
-            loader.loadClass(MACHINE_TYPE_CLASS).enumConstants.firstOrNull { (it as Enum<*>).name == "HIGH" }
-        }.getOrNull()
-        if (high != null) sMachineHigh = high
-        return high
-    }
+    // MachineType 枚举懒解析函数已随 G9d 删除（2026-10-09 哲学审计）：getMachineType 纯字段读，G9a 改写后
+    // 原生返回 HIGH，懒单例无冷启动窗口；顺带移除 MachineType <clinit> 触发面（依据见挂载表组 9）。
 
-    // 同上纪律：enumConstants 触发 StyleType <clinit>，仅允许 intercept 期调用（featureEnabled 门控后、PROTECTIVE + runCatching 包裹），禁挂载/重试线程调用
+    // 纪律同上：enumConstants 触发 <clinit>，仅允许 intercept 期调用
     private fun styleLiquid(loader: ClassLoader): Any? {
         sStyleLiquid?.let { return it }
         val v = runCatching {
@@ -833,7 +812,7 @@ object GlassRestoreHook : TargetHook {
         return v
     }
 
-    // 同上纪律：enumConstants 触发 StyleType <clinit>，仅允许 intercept 期调用（featureEnabled 门控后、PROTECTIVE + runCatching 包裹），禁挂载/重试线程调用
+    // 纪律同上：enumConstants 触发 <clinit>，仅允许 intercept 期调用
     private fun styleFrosted(loader: ClassLoader): Any? {
         sStyleFrosted?.let { return it }
         val v = runCatching {
@@ -843,7 +822,7 @@ object GlassRestoreHook : TargetHook {
         return v
     }
 
-    // ---------------- 属性读取（照源码 L295-320 / L776-802：SystemProperties 反射 + 2s TTL；loadClass 不触发 <clinit>——boot-loop 纪律） ----------------
+    // ---------------- 属性读取（照源码 L295-320 / L776-802：SystemProperties 反射 + 2s TTL） ----------------
 
     private fun refreshProps(loader: ClassLoader) {
         val now = SystemClock.elapsedRealtime()
@@ -860,8 +839,7 @@ object GlassRestoreHook : TargetHook {
         sRimScale = readFloatProp(loader, RIM_PROP, DEFAULT_RIM, 0.15f, 1.0f)
         sFolderMode = readFloatProp(loader, FOLDER_PROP, DEFAULT_FOLDER, 0.0f, 1.0f) > 0.5f
         sTileBlurScale = readFloatProp(loader, TBLUR_PROP, DEFAULT_TBLUR, 0.1f, 2.0f)
-        // degree 与其余 11 属性同走 2s TTL 热刷新（修复「install 期一次性读」后 setprop persist.sys.lgr.degree
-        // 改了不生效——与类注释「2s TTL setprop 通道」矛盾；install 期的首次读取保留作兜底）
+        // degree 同走 2s TTL 热刷新（修复「install 期一次性读」导致 setprop degree 不生效）；install 期首次读取保留兜底
         sMinDegree = readDegreeProp(loader)
     }
 
@@ -879,7 +857,7 @@ object GlassRestoreHook : TargetHook {
         v.coerceIn(60, 100)
     }.getOrDefault(DEFAULT_DEGREE)
 
-    // ---------------- 目标解析（类/方法不存在返回 null → NOT_RESOLVED 懒加载重试；loadClass 不触发初始化——boot-loop 纪律） ----------------
+    // ---------------- 目标解析（类/方法不存在返回 null → NOT_RESOLVED 懒加载重试） ----------------
 
     /** 目标 APK 的 sourceDir（install 期记录，覆盖式更新；null 时 [MethodResolver] 跳过 DexKit 兜底，等价纯直连） */
     private var apkPath: String? = null
@@ -905,10 +883,10 @@ object GlassRestoreHook : TargetHook {
         }
     }.getOrNull()
 
-    /** 总开关现读（每次 intercept 调用）：prefs 获取失败时返回 false = 原逻辑放行（安全默认）。 */
+    /** 总开关现读：prefs 获取失败返回 false = 原逻辑放行（安全默认）。 */
     private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, false) ?: false
 
-    /** F7 功能位开关现读：总开关（上位语义：总关 = 全部放行）&& F7 独立开关（默认 false——boot-loop 事故史，保守默认关）。 */
+    /** F7 功能位开关现读：总开关 && F7 开关（默认 false——boot-loop 事故史，保守）。 */
     private fun featureEnabled(prefs: SharedPreferences?): Boolean =
         hookEnabled(prefs) && (prefs?.getBoolean(KEY_F7_GLASS_ENABLED, false) ?: false)
 
