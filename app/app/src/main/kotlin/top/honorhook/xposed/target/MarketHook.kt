@@ -373,7 +373,7 @@ object MarketHook : TargetHook {
     }
 
     /** 总开关现读（每次 intercept）：prefs 获取失败 false = 原逻辑放行（安全默认）。 */
-    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, false) ?: false
+    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, true) ?: false
 
     /** F5 功能位现读：总开关 && F5 独立开关（默认 false——改动面大）。 */
     private fun featureEnabled(prefs: SharedPreferences?): Boolean =

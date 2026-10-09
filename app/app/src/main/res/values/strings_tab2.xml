@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tab2 模块列表页（照 LSPosed Manager Modules 列表，lsposed-ui-spec.md §3） -->
+    <string name="tab2_modules_title">功能</string>
+    <string name="tab2_modules_subtitle">%1$d 个功能已启用</string>
+    <string name="tab2_target_status_on">已启用</string>
+    <string name="tab2_target_status_off">未启用</string>
+
+    <!-- 4 条目标应用（列表行图标 48dp = 提取的真实 app 图标 honor_ic_theme/installer/systemui/market） -->
+    <string name="tab2_target_theme_name">主题商店</string>
+    <string name="tab2_target_theme_pkg">com.hihonor.android.thememanager</string>
+    <string name="tab2_target_theme_desc">VIP/免费/试用/防回退</string>
+    <string name="tab2_target_installer_name">软件包安装程序</string>
+    <string name="tab2_target_installer_pkg">com.android.packageinstaller</string>
+    <string name="tab2_target_installer_desc">安装器净化</string>
+    <string name="tab2_target_glass_name">系统界面</string>
+    <string name="tab2_target_glass_pkg">com.hihonor.desktop.systemui 等 3 包</string>
+    <string name="tab2_target_glass_desc">液态玻璃恢复</string>
+    <string name="tab2_target_market_name">应用市场</string>
+    <string name="tab2_target_market_pkg">com.hihonor.appmarket</string>
+    <string name="tab2_target_market_desc">市场净化</string>
+
+    <!-- 详情页主开关（照 LSPosed item_master_switch MainSwitchBar，"启用该应用的功能"） -->
+    <string name="tab2_switch_title">启用该应用的功能</string>
+    <string name="tab2_back">返回</string>
+
+    <!-- 功能位条目文案（主题商店 F1-F4；原硬编码于 AppFunctionsScreen AppFn，迁移至此） -->
+    <string name="tab2_fn_f1_name">开启 VIP</string>
+    <string name="tab2_fn_f1_summary">会员状态判定全部改为 VIP（到期/状态判定 → 永久有效）</string>
+    <string name="tab2_fn_f2_name">全部资源免费</string>
+    <string name="tab2_fn_f2_summary">付费判定全部放行、价格归零、购买/VIP 按钮隐藏</string>
+    <string name="tab2_fn_f3_name">试用无倒计时</string>
+    <string name="tab2_fn_f3_summary">试用不因时间/次数到期而中断</string>
+    <string name="tab2_fn_f4_name">永不恢复默认</string>
+    <string name="tab2_fn_f4_summary">授权校验失败/试用结束等一切回退路径全部阻断</string>
+
+    <!-- 功能位条目文案（安装器 F6 / 玻璃 F7 / 市场 F5；同原 AppFn 文案） -->
+    <string name="tab2_fn_f6_name">安装器净化</string>
+    <string name="tab2_fn_f6_summary">跳过联网安全检测与安装前指纹、禁止安装器联网、隐藏安全卡片/广告横幅。安全敏感：默认关闭——跳过检测会削弱系统对恶意应用的拦截，请仅对来源可信的 APK 开启</string>
+    <string name="tab2_fn_f7_name">液态玻璃恢复</string>
+    <string name="tab2_fn_f7_summary">还原控制中心/通知中心液态玻璃渲染（面板遮罩/模糊/边光等，光学参数经 setprop persist.sys.lgr.* 实时可调）。Boot-loop 事故史：默认关闭——开启后请先在 LSPosed 日志过滤 [glass] 确认挂载汇总（installed 18/18），再下拉控制中心观察效果</string>
+    <string name="tab2_fn_f5_name">市场净化</string>
+    <string name="tab2_fn_f5_summary">去开屏广告/运营弹窗/营销推送 · 拦截插电/WiFi/开机自启与外部 content:// 唤醒 · 搜索热词与工具页运营入口屏蔽 · 「我的」/搜索发现页推荐流请求源头拦截（应用更新与搜索应用不受影响）。真机 16.1.9.302 基线 15 点实证。默认关闭——改动面大，开启后请过一遍主要页面确认无广告残留</string>
+</resources>

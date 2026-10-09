@@ -41,31 +41,33 @@ import top.honorhook.data.ThemeModeStore
 import top.honorhook.ui.component.MiuixPageBackground
 import top.honorhook.ui.component.UiTokens
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 主题设置二级页（对齐 Rain p-theme / demo p-theme 结构）：卡 1 = 其他（悬浮底栏 /
- * 跟随系统取色 / 隐藏桌面图标），卡 2 = 外观（暗色三态 + 主题色色板 + 纯黑）。
- * 各开关机制见下方对应行注释。
+ * 设置页（Tab4，照 LSPosed fragment_settings 的 preference 分类列表重排）：
+ * 大标题"设置" + 分组 preference 列表（组标题=小字弱化色+组间距）。
+ * 分组：外观（暗色三态 + 纯黑 + Monet 跟随取色）/ 颜色（12 色板，点开行内网格）/
+ * 界面（悬浮底栏 + 隐藏桌面图标）。关于组版本信息由主页承担，省略。
+ * 功能逻辑与持久化全部照搬原 ThemeSettingsScreen 二级页实现，仅改排布形态。
  */
 @Composable
-fun ThemeSettingsScreen(onBack: () -> Unit) {
+fun ThemeSettingsScreen() {
     val themeMode by ThemeModeStore.mode.collectAsState()
     val wallpaperMonet by ThemeModeStore.wallpaperMonet.collectAsState()
     val pureBlack by ThemeModeStore.pureBlack.collectAsState()
     val keyColorHex by ThemeModeStore.keyColor.collectAsState()
     val service by HookApplication.service.collectAsState()
     val uiToggles by HookSettings.uiToggles.collectAsState()
+
+    // 主题色板行内展开态（点开色板行内网格，规格 §5 颜色组）
+    var keyColorExpanded by remember { mutableStateOf(false) }
 
     // 图标隐藏态以 PackageManager 为准，HookSettings key 仅作持久化记录
     val context = LocalContext.current
@@ -77,13 +79,9 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
         containerColor = MiuixPageBackground(),
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            SmallTopAppBar(
-                title = stringResource(R.string.theme_settings_title),
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(MiuixIcons.ChevronBackward, contentDescription = "返回")
-                    }
-                },
+            TopAppBar(
+                title = stringResource(R.string.settings_title),
+                largeTitle = stringResource(R.string.settings_title),
             )
         },
     ) { padding ->
@@ -95,36 +93,7 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(UiTokens.CardSpacing),
             contentPadding = PaddingValues(bottom = UiTokens.PagePadding),
         ) {
-            item {
-                Group(stringResource(R.string.theme_settings_other_group)) {
-                    SwitchPreference(
-                        title = stringResource(R.string.theme_settings_floating_bar),
-                        summary = stringResource(R.string.theme_settings_floating_bar_summary),
-                        checked = uiToggles[KEY_FLOATING_BOTTOM_BAR_ENABLED] ?: false,
-                        onCheckedChange = { value ->
-                            HookSettings.setUiToggle(KEY_FLOATING_BOTTOM_BAR_ENABLED, value, service)
-                        },
-                        // AppRoot 订阅本 key 即时切换悬浮/贴底双形态（组件照 LSPFRIDA MiuixComponents.kt:105-220）
-                    )
-                    SwitchPreference(
-                        title = stringResource(R.string.theme_settings_wallpaper_monet),
-                        summary = stringResource(R.string.theme_settings_wallpaper_monet_summary),
-                        checked = wallpaperMonet,
-                        onCheckedChange = { ThemeModeStore.setWallpaperMonet(it) },
-                        // 开启后 MainActivity 以壁纸主色为 dynamicColorScheme 种子，优先于手选色板
-                    )
-                    SwitchPreference(
-                        title = stringResource(R.string.theme_settings_hide_icon),
-                        summary = stringResource(R.string.theme_settings_hide_icon_summary),
-                        checked = iconHidden,
-                        onCheckedChange = { value ->
-                            applyIconHidden(packageManager, launcherAlias, value)
-                            HookSettings.setUiToggle(KEY_HIDE_LAUNCHER_ICON_ENABLED, value, service)
-                            iconHidden = value
-                        },
-                    )
-                }
-            }
+            // 外观组：暗色三态 + 纯黑 + Monet 跟随壁纸取色
             item {
                 Group(stringResource(R.string.theme_settings_appearance_group)) {
                     ThemeModeOption(
@@ -142,46 +111,77 @@ fun ThemeSettingsScreen(onBack: () -> Unit) {
                         stringResource(R.string.theme_settings_color_dark_summary),
                         ColorSchemeMode.Dark, themeMode,
                     )
-                    // 色板（照 LSPFRIDA SettingsScreenV093 圆点行）
-                    Text(
-                        stringResource(R.string.theme_settings_key_color),
-                        fontSize = UiTokens.SubtitleSize,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
-                    )
-                    Text(
-                        stringResource(R.string.theme_settings_key_color_summary),
-                        fontSize = UiTokens.CaptionSize,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp),
-                    )
-                    PRESET_KEY_COLORS.chunked(6).forEachIndexed { rowIndex, rowColors ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        ) {
-                            if (rowIndex == 0) {
-                                ThemeColorDot(
-                                    hex = null,
-                                    selected = keyColorHex == null,
-                                    onClick = { ThemeModeStore.setKeyColor(null) },
-                                )
-                            }
-                            rowColors.forEach { (_, hex) ->
-                                ThemeColorDot(
-                                    hex = hex,
-                                    selected = keyColorHex == hex,
-                                    onClick = { ThemeModeStore.setKeyColor(if (keyColorHex == hex) null else hex) },
-                                )
-                            }
-                        }
-                    }
                     SwitchPreference(
                         title = stringResource(R.string.theme_settings_pure_black),
                         summary = stringResource(R.string.theme_settings_pure_black_summary),
                         checked = pureBlack,
                         onCheckedChange = { ThemeModeStore.setPureBlack(it) },
                         // 暗色下生效：MainActivity MiuixTheme 覆盖层黑化背景色槽（见其注释）
+                    )
+                    SwitchPreference(
+                        title = stringResource(R.string.theme_settings_wallpaper_monet),
+                        summary = stringResource(R.string.theme_settings_wallpaper_monet_summary),
+                        checked = wallpaperMonet,
+                        onCheckedChange = { ThemeModeStore.setWallpaperMonet(it) },
+                        // 开启后 MainActivity 以壁纸主色为 dynamicColorScheme 种子，优先于手选色板
+                    )
+                }
+            }
+            // 颜色组：12 色板（点开行内网格）
+            item {
+                Group(stringResource(R.string.set3_group_color)) {
+                    ArrowPreference(
+                        title = stringResource(R.string.theme_settings_key_color),
+                        summary = stringResource(R.string.theme_settings_key_color_summary),
+                        onClick = { keyColorExpanded = !keyColorExpanded },
+                    )
+                    if (keyColorExpanded) {
+                        // 色板（照 LSPFRIDA SettingsScreenV093 圆点行）
+                        PRESET_KEY_COLORS.chunked(6).forEachIndexed { rowIndex, rowColors ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) {
+                                if (rowIndex == 0) {
+                                    ThemeColorDot(
+                                        hex = null,
+                                        selected = keyColorHex == null,
+                                        onClick = { ThemeModeStore.setKeyColor(null) },
+                                    )
+                                }
+                                rowColors.forEach { (_, hex) ->
+                                    ThemeColorDot(
+                                        hex = hex,
+                                        selected = keyColorHex == hex,
+                                        onClick = { ThemeModeStore.setKeyColor(if (keyColorHex == hex) null else hex) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // 界面组：悬浮底栏 + 隐藏桌面图标
+            item {
+                Group(stringResource(R.string.set3_group_ui)) {
+                    SwitchPreference(
+                        title = stringResource(R.string.theme_settings_floating_bar),
+                        summary = stringResource(R.string.theme_settings_floating_bar_summary),
+                        checked = uiToggles[KEY_FLOATING_BOTTOM_BAR_ENABLED] ?: false,
+                        onCheckedChange = { value ->
+                            HookSettings.setUiToggle(KEY_FLOATING_BOTTOM_BAR_ENABLED, value, service)
+                        },
+                        // AppRoot 订阅本 key 即时切换悬浮/贴底双形态（组件照 LSPFRIDA MiuixComponents.kt:105-220）
+                    )
+                    SwitchPreference(
+                        title = stringResource(R.string.theme_settings_hide_icon),
+                        summary = stringResource(R.string.theme_settings_hide_icon_summary),
+                        checked = iconHidden,
+                        onCheckedChange = { value ->
+                            applyIconHidden(packageManager, launcherAlias, value)
+                            HookSettings.setUiToggle(KEY_HIDE_LAUNCHER_ICON_ENABLED, value, service)
+                            iconHidden = value
+                        },
                     )
                 }
             }
@@ -258,7 +258,7 @@ private fun ThemeColorDot(hex: String?, selected: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 设置分组（照 HC MainActivity Group 模式）。 */
+/** 设置分组（照 HC MainActivity Group 模式：小字弱化色组标题 + 卡片）。 */
 @Composable
 private fun Group(
     title: String,

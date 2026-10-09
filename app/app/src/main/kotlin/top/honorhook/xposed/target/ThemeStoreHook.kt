@@ -310,6 +310,23 @@ object ThemeStoreHook : TargetHook {
         // B2 保留：任何 setVipUser(false)（含服务端拉到的过期状态）强制写 true，覆盖登出/特权撤销/网络回写
         addForceArg(pending, CLS_VIP_MANAGER, "setVipUser", 1, "void", true, KEY_F1_VIP_ENABLED,
             "theme:VipManager.setVipUser", "F1 B2 VIP 写点 → 强制置 true")
+        // VipState 散读点恢复（2026-10-09 真机验证回归：漏斗改写依赖"消费方走漏斗"的静态实证，真机上
+        // VIP tab 判定/到期显示未走漏斗——散读方法级直改不依赖任何调用链假设，与漏斗双层并存）：
+        // 到期时间/剩余时长/状态/类型/判定/展示 getter 全部直返会员态（消费方实证见 2e2b0f1^ 版类注释）
+        addConst(pending, CLS_VIP_STATE, "getExpireTimeTimestamp", 0, "long", TS_2088_08_08_MILLIS, KEY_F1_VIP_ENABLED,
+            "theme:VipState.getExpireTimeTimestamp", "F1 B3 到期时间戳 → 2088-08-08")
+        addConst(pending, CLS_VIP_STATE, "getRemainingTime", 0, "java.lang.Long", System.currentTimeMillis() + 1_950_000_000_000L, KEY_F1_VIP_ENABLED,
+            "theme:VipState.getRemainingTime", "F1 剩余时长 → 到 2088 的真实剩余（防消费端 now+X 溢出，A1 审计值语义修正）")
+        addConst(pending, CLS_VIP_STATE, "getVipStatus", 0, "int", 2, KEY_F1_VIP_ENABLED,
+            "theme:VipState.getVipStatus", "F1 T5 VIP 状态 → 2 会员态（1=NOT_VIP '新用户专享'卡根因）")
+        addConst(pending, CLS_VIP_STATE, "getVipType", 0, "java.lang.Integer", 2, KEY_F1_VIP_ENABLED,
+            "theme:VipState.getVipType", "F1 T6 VIP 类型 → 2 连续包月（激活续费入口/账户已开通识别）")
+        addConst(pending, CLS_VIP_STATE, "isVipUser", 0, "boolean", true, KEY_F1_VIP_ENABLED,
+            "theme:VipState.isVipUser", "F1 VipState 实例内判定 → 是 VIP（VipState.java:355 独立字段读路径）")
+        addConst(pending, CLS_VIP_STATE, "getDisplayTimeTimestamp", 0, "long", TS_2088_08_08_MILLIS, KEY_F1_VIP_ENABLED,
+            "theme:VipState.getDisplayTimeTimestamp", "F1 到期日期展示时间戳 → 2088-08-08（UI 展示链 MineVipCardView:430/441、HwThemeManagerActivity:894/901）")
+        addConst(pending, CLS_VIP_STATE, "getDisplayTime", 0, "java.lang.String", TS_2088_08_08_STR, KEY_F1_VIP_ENABLED,
+            "theme:VipState.getDisplayTime", "F1 到期展示字符串 → 2088-08-08")
         // 已删（2026-10-09 审计）：fetchShouldDialogBy* 休眠点——零调用链实证：唯一调用点
         // VipCheckVM.java:164 在 refreshShouldDialog 自环内、全工程无真实调用方（HwThemeManagerActivity.java:2785
         // 仅定义处）；真机弹窗走 overallretentiondialog 链已由展示咽喉拦截（theme-ui-real-chain.md §4.4）
@@ -723,7 +740,7 @@ object ThemeStoreHook : TargetHook {
     // ---------------- 通用挂载工具 ----------------
 
     /** 总开关现读（每次 intercept 调用）：prefs 获取失败返回 false = 原逻辑放行（安全默认）。 */
-    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, false) ?: false
+    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, true) ?: false
 
     /** 功能位开关 = 总开关（上位语义）&& 对应 key（默认 true）；prefs 失败 = false 放行（安全默认）。 */
     private fun featureEnabled(prefs: SharedPreferences?, key: String): Boolean =
@@ -766,9 +783,11 @@ object ThemeStoreHook : TargetHook {
 
     /**
      * 条件路由的 uri 判空：按 [UriOwner] 取 DownloadInfo 实例，反射读 public String uri
-     * （DownloadInfo.java:145 实证）。三分支：① 实例 null → 视为空（H2 场景参数 null 时原入口本就
-     * 提前 return，路由无害）；② 字段值 null/空串 → 空、触发路由（坑史：字段值 null 是「读到了 null」
-     * 非反射异常，原实现误判成异常放行，本轮修复）；③ 反射异常（版本漂移）→ 放行原逻辑（安全默认）。
+     * （DownloadInfo.java:145 实证）。四分支：① 实例 null → 视为空（H2 场景参数 null 时原入口本就
+     * 提前 return，路由无害）；② 字段值 null/空串/"null" 占位串/非 URL 形态（无 "://"）→ 空、
+     * 触发路由（占位串是服务端 JSON 反序列化的常见形态——真机 0% 静默悬停的另一形态；
+     * 真免费资源 fileUrl 是 CDN 直链必含 "://"，不受影响）；③ 反射异常（版本漂移）→ 放行原逻辑
+     * （安全默认）。
      */
     private fun isUriBlank(chain: XposedInterface.Chain, task: MountTask): Boolean {
         val info: Any? = when (task.uriOwner) {
@@ -781,7 +800,8 @@ object ThemeStoreHook : TargetHook {
         val owner = info ?: return true  // ① 实例为 null：视为空（原入口本就提前 return，路由无害）
         val uri = runCatching { owner.javaClass.getField("uri").get(owner) }
             .getOrElse { return false }  // ③ 反射异常（NoSuchField/版本漂移）→ 放行（安全默认）
-        return (uri as? String).isNullOrEmpty()  // ② 字段值 null/空串 → 空（触发路由）
+        val s = uri as? String ?: return false  // 非 String 字段（版本漂移）→ 放行
+        return s.isNullOrEmpty() || s == "null" || !s.contains("://")  // ② 空/占位/非 URL → 触发路由
     }
 
     /** 直连反射解析（双轨第一轨，HookEntry.resolveTargetMethod 同构）；未命中时 mountOne 转第二轨

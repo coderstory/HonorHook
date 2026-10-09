@@ -88,7 +88,7 @@ object HookSettings {
         synchronized(lock) {
             val p = context.applicationContext.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
             local = p
-            _enabled.value = p.getBoolean(KEY_HOOK_ENABLED, false)
+            _enabled.value = p.getBoolean(KEY_HOOK_ENABLED, true)
             // per-key 默认值读（F6 默认 false，不能统一 true 兜底）
             _features.value = FEATURE_DEFAULTS.mapValues { (key, default) -> p.getBoolean(key, default) }
             _uiToggles.value = UI_TOGGLE_DEFAULTS.mapValues { (key, _) -> p.getBoolean(key, false) }
@@ -109,7 +109,7 @@ object HookSettings {
             // 对齐规则（总开关/功能位/UI 侧同）：远程为权威；daemon 缺 key 或 pendingRemote 中 → 保持本地当前值
             val value = when {
                 KEY_HOOK_ENABLED in pendingRemote -> _enabled.value
-                remote.contains(KEY_HOOK_ENABLED) -> remote.getBoolean(KEY_HOOK_ENABLED, false)
+                remote.contains(KEY_HOOK_ENABLED) -> remote.getBoolean(KEY_HOOK_ENABLED, true)
                 else -> _enabled.value
             }
             writeBoth(value, remote)

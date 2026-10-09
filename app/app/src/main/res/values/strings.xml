@@ -7,34 +7,37 @@
     <string name="app_list_title">应用</string>
     <string name="about_title">关于</string>
 
+    <!-- 底部导航 4 tab（lsposed-ui-spec.md §1：模块｜主页｜日志｜设置，主页居中） -->
+    <string name="tab_modules">模块</string>
+    <string name="tab_home">主页</string>
+    <string name="tab_logs">日志</string>
+    <string name="tab_settings">设置</string>
+
     <!-- 应用列表页（Tab2 一级，照 LSPosed Manager Modules 列表模式，demo p-hook 页） -->
     <string name="app_list_target_group">Hook 目标</string>
     <string name="app_list_enabled_format">已启用 %1$d/%2$d</string>
     <!-- 应用功能二级页（demo p-appfn 页） -->
     <string name="appfn_back">返回</string>
 
-    <!-- 首页 Module 页（对齐 Rain 模块状态卡 + 计数卡，docs/rain-ui-layout.md §2） -->
-    <string name="home_status_title_active">模块已激活</string>
+    <!-- 首页（lsposed-ui-spec.md §2：状态卡 + 设备信息卡；统计卡已删除，功能数并入模块 tab 角标） -->
+    <string name="home_status_title_active">已激活</string>
     <string name="home_status_title_inactive">未激活</string>
-    <string name="home_status_summary_active">已通过 libxposed API %1$d 与 LSPosed 框架建立连接</string>
-    <string name="home_status_summary_inactive">未检测到 LSPosed 框架连接——请在 LSPosed Manager 中启用本模块</string>
-    <string name="home_status_action_active">框架已连接</string>
-    <string name="home_status_action_inactive">未检测到框架</string>
-    <string name="home_adapted_count_title">适配目标</string>
-    <string name="home_enabled_count_title">启用功能</string>
-    <string name="home_enabled_count_format">%1$d/%2$d</string>
-    <!-- 首页设备信息详情行（对齐 demo Tab1 detaillist 五行：标题+值上下两行，行间分隔线） -->
+    <string name="home_status_summary_active">%1$s %2$s - API %3$d</string>
+    <string name="home_status_summary_inactive">请先在 LSPosed 中启用本模块</string>
+    <string name="home_menu_about">关于</string>
+    <!-- 首页设备信息详情行（规格 §2：标签/值行组，末行右对齐复制按钮） -->
     <string name="home_detail_system_version">系统版本</string>
     <string name="home_detail_android_version">Android 版本</string>
     <string name="home_detail_lsp_version">LSP 版本</string>
     <string name="home_detail_build_time">构建时间</string>
     <string name="home_detail_device_model">设备型号</string>
+    <string name="home_detail_running_targets">运行中目标数</string>
     <string name="home_detail_unknown">未知</string>
     <string name="home_detail_android_format">Android %1$s（SDK %2$d）</string>
     <string name="home_detail_lsp_format">%1$s %2$s（API %3$d）</string>
-    <!-- 首页运行日志入口卡（状态卡下方，点入运行日志二级页） -->
-    <string name="home_log_entry">运行日志</string>
-    <string name="home_log_entry_summary">Hook 判据日志与活跃目标进程</string>
+    <string name="home_copy_info">复制信息</string>
+    <string name="home_copied">已复制</string>
+    <string name="dialog_ok">确定</string>
 
     <!-- 设置页入口行（对齐 Rain Settings 页，rain-ui-layout.md §4：只放入口，开关全进二级页） -->
     <string name="settings_theme_entry">主题设置</string>

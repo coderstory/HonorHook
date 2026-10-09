@@ -1,8 +1,10 @@
 package top.honorhook.ui.screen
 
+import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
-import android.widget.Toast
+import android.os.ParcelFileDescriptor
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,11 +19,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -31,246 +34,340 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import io.github.libxposed.service.HookedTarget
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import io.github.libxposed.service.XposedService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import top.honorhook.HookApplication
 import top.honorhook.R
-import top.honorhook.data.KEY_LOG_RING
-import top.honorhook.data.REMOTE_PREFERENCE_GROUP
 import top.honorhook.ui.component.MiuixPageBackground
 import top.honorhook.ui.component.UiTokens
-import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
-import top.yukonga.miuix.kmp.icon.extended.ListView
+import top.yukonga.miuix.kmp.icon.extended.Delete
+import top.yukonga.miuix.kmp.icon.extended.ExpandLess
+import top.yukonga.miuix.kmp.icon.extended.ExpandMore
+import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.icon.extended.Share
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+/** 远端日志文件名（hook 侧 LogRing 内存队列 + 后台落盘同一文件；UI 侧只读/删除）。 */
+private const val LOG_FILE_NAME = "honorhook.log"
+
+/** 远端日志刷新轮询间隔（文件无变更推送，照 getRunningTargets 轮询模式）。 */
+private const val POLL_INTERVAL_MS: Long = 5000
+
+/** 滚动阈值语义（规格 §4 SCROLL_THRESHOLD）：距端 >500 行跳转，否则平滑滚动。 */
+private const val SCROLL_THRESHOLD = 500
+
+/** 自动换行开关本地持久化（纯 UI 偏好，不经过 daemon；LSPosed 同款记忆行为）。 */
+private const val PREFS_UI = "honorhook_ui"
+private const val KEY_WORD_WRAP = "log_word_wrap"
+
 /**
- * 运行日志页：读取 hook 侧经 daemon 远程 prefs 双写的 KEY_LOG_RING（getString），
- * 经 [transformLog] 展示层变换后以等宽字体列出；头部为活跃目标状态卡
- * （XposedService.getRunningTargets，注入进程的直接判据）。
+ * 日志页（Tab3，照 LSPosed Logs 页规格 §4 重排）：
+ * 大标题"日志" + 顶栏菜单（保存/分享可见图标 + 溢出菜单：滚顶/滚底/清空/自动换行）。
+ * 读数链路（2026-10-09 修正）：hook 侧经 daemon 落盘远端文件，本页经
+ * XposedService.openRemoteFile("honorhook.log") 读全文——prefs 双写通道废弃
+ * （hook 侧 getRemotePreferences 是只读快照），文件无变更推送，改 5s 轮询。
+ * 行格式不变：`MM-dd HH:mm:ss [tag] msg`，可选 ` ×N` 折叠计数。
  */
 @Composable
-fun LogScreen(onBack: () -> Unit) {
+fun LogScreen() {
     val service by HookApplication.service.collectAsState()
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
 
-    // 远程 prefs 快照（service 断开/re-bind 时随 remember(service) 重建，勿每帧重复 get）
-    val prefs = remember(service) { service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP) }
-
     var lines by remember { mutableStateOf<List<MergedLogLine>>(emptyList()) }
-    var targets by remember { mutableStateOf<List<HookedTarget>>(emptyList()) }
+    var wordWrap by remember { mutableStateOf(loadWordWrap(context)) }
+    var menuExpanded by remember { mutableStateOf(false) }
 
-    // 监听器是 daemon binder 推送（hook 进程写 KEY_LOG_RING 即回调到本进程），
-    // 回调落在 binder 线程，状态更新 post 回主线程；注册/注销随页面进入/退出
-    DisposableEffect(prefs) {
-        if (prefs == null) {
+    val listState = rememberLazyListState()
+
+    // 5s 轮询读取远端日志文件（service 断连/重绑随 remember 重启；offload 到 IO 线程）
+    LaunchedEffect(service) {
+        val s = service
+        if (s == null) {
             lines = emptyList()
-            onDispose {}
-        } else {
-            val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-                if (key == KEY_LOG_RING) {
-                    val newLines = transformLog(prefs.getString(KEY_LOG_RING, "").orEmpty())
-                    scope.launch(Dispatchers.Main) { lines = newLines }
-                }
-            }
-            lines = transformLog(prefs.getString(KEY_LOG_RING, "").orEmpty())
-            prefs.registerOnSharedPreferenceChangeListener(listener)
-            onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            val raw = withContext(Dispatchers.IO) { readRemoteLogFile(s) }
+            val newLines = transformLog(raw)
+            if (newLines != lines) lines = newLines
+            delay(POLL_INTERVAL_MS)
         }
     }
 
-    // 进程启停没有事件推送，只能轻量轮询（5s，页面在组合中才执行）
-    LaunchedEffect(service) {
-        while (isActive) {
-            val s = service
-            targets = if (s == null) {
-                emptyList()
-            } else {
-                runCatching { s.getRunningTargets() }.getOrDefault(emptyList())
-            }
-            delay(5000)
+    // 新行到达：停在末尾（或首帧）时跟随滚到底部，不打断用户上翻
+    LaunchedEffect(lines.size) {
+        if (lines.isEmpty()) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        if (lastVisible == -1 || lastVisible >= lines.lastIndex - 1) {
+            listState.scrollToItem(lines.lastIndex)
         }
     }
 
     val rendered = remember(lines) { renderLines(lines) }
-    val listState = rememberLazyListState()
-    LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) listState.scrollToItem(lines.lastIndex)
-    }
 
     Scaffold(
         containerColor = MiuixPageBackground(),
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            SmallTopAppBar(
-                title = stringResource(R.string.log_title),
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(MiuixIcons.ChevronBackward, contentDescription = stringResource(R.string.appfn_back))
+            TopAppBar(
+                title = stringResource(R.string.log3_title),
+                largeTitle = stringResource(R.string.log3_title),
+                actions = {
+                    // 保存（图标可见）：系统分享文本全部日志（规格 §4 Save 的 HonorHook 映射）
+                    IconButton(onClick = { exportLogs(context, rendered) }) {
+                        Icon(
+                            imageVector = MiuixIcons.Share,
+                            contentDescription = stringResource(R.string.log3_save),
+                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    // 溢出菜单：滚到顶部 / 滚到底部 / 清空日志 / 自动换行
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(
+                                imageVector = MiuixIcons.More,
+                                contentDescription = stringResource(R.string.log3_more),
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                        if (menuExpanded) {
+                            Popup(
+                                alignment = Alignment.TopEnd,
+                                offset = IntOffset(0, with(LocalDensity.current) { 8.dp.roundToPx() }),
+                                onDismissRequest = { menuExpanded = false },
+                                properties = PopupProperties(focusable = true),
+                            ) {
+                                LogOverflowMenu(
+                                    wordWrap = wordWrap,
+                                    onScrollTop = {
+                                        menuExpanded = false
+                                        scope.launch { listState.jumpOrSmoothToTop() }
+                                    },
+                                    onScrollBottom = {
+                                        menuExpanded = false
+                                        scope.launch { listState.jumpOrSmoothToBottom() }
+                                    },
+                                    onClear = {
+                                        menuExpanded = false
+                                        clearRemoteLog(service)
+                                        lines = emptyList()
+                                    },
+                                    onToggleWordWrap = {
+                                        menuExpanded = false
+                                        wordWrap = !wordWrap
+                                        saveWordWrap(context, wordWrap)
+                                    },
+                                )
+                            }
+                        }
                     }
                 },
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = UiTokens.PagePadding),
-        ) {
-            RunningTargetsCard(targets)
-            Spacer(Modifier.height(UiTokens.CardSpacing))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(UiTokens.CardSpacing),
+        if (rendered.isEmpty()) {
+            // 空态（规格 §5 空态 token：居中 + 弱色次色）
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Button(
-                    onClick = {
-                        if (rendered.isEmpty()) return@Button
-                        clipboard.setText(AnnotatedString(rendered.joinToString("\n")))
-                        Toast.makeText(context, context.getString(R.string.log_copied), Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.log_copy), fontSize = UiTokens.SubtitleSize)
-                }
-                Button(
-                    onClick = {
-                        if (rendered.isEmpty()) return@Button
-                        val share = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, rendered.joinToString("\n"))
-                        }
-                        runCatching { context.startActivity(Intent.createChooser(share, null)) }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.log_share), fontSize = UiTokens.SubtitleSize)
-                }
-                Button(
-                    onClick = {
-                        lines = emptyList()
-                        // 远端置空会经 daemon 推给 hook 进程，其环形缓冲同步清
-                        if (prefs != null) {
-                            runCatching { prefs.edit().putString(KEY_LOG_RING, "").apply() }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.log_clear), fontSize = UiTokens.SubtitleSize)
-                }
+                Text(
+                    stringResource(R.string.log3_empty_title),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.log3_empty_hint),
+                    fontSize = UiTokens.CaptionSize,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp),
+                )
             }
-            Spacer(Modifier.height(UiTokens.CardSpacing))
-            if (rendered.isEmpty()) {
-                Box(
+        } else {
+            // 日志列表（规格 §4 item_log_textview 语义：12sp monospace onSurface、水平 16dp、
+            // 无颜色分级；强制 LTR。自动换行开 = 竖排正常 wrap；关 = 行内不换行横向滚动）
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center,
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentPadding = PaddingValues(vertical = 8.dp),
                 ) {
-                    Text(
-                        stringResource(R.string.log_empty),
-                        fontSize = UiTokens.CaptionSize,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-            } else {
-                SelectionContainer(
-                    modifier = Modifier.weight(1f),
-                ) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = UiTokens.PagePadding),
-                    ) {
-                        items(rendered) { line ->
+                items(rendered) { line ->
+                    if (wordWrap) {
+                        Text(
+                            line,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MiuixTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                        )
+                    } else {
+                        Box(Modifier.horizontalScroll(rememberScrollState())) {
                             Text(
                                 line,
-                                fontSize = UiTokens.CaptionSize,
+                                fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.padding(vertical = 2.dp),
+                                color = MiuixTheme.colorScheme.onSurface,
+                                softWrap = false,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
                             )
                         }
                     }
+                }
                 }
             }
         }
     }
 }
 
-/** 活跃目标状态卡：getRunningTargets 返回的注入进程清单（断连/无目标时显示空态）。 */
+/** 保存（分享）：ACTION_SEND 全部日志文本（规格 §4；空列表不弹）。 */private fun exportLogs(context: Context, rendered: List<String>) {
+    if (rendered.isEmpty()) return
+    val share = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, rendered.joinToString("\n"))
+    }
+    runCatching { context.startActivity(Intent.createChooser(share, null)) }
+}
+
+/**
+ * 远端日志读取：openRemoteFile("honorhook.log") → ParcelFileDescriptor → 全文字节流转 String。
+ * 服务未连接/文件不存在/读取失败一律回退空串（配合 transformLog 的空输入短路）。
+ */
+private fun readRemoteLogFile(service: XposedService): String = runCatching {
+    val pfd = service.openRemoteFile(LOG_FILE_NAME)
+    if (pfd == null) "" else ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes().decodeToString() }
+}.getOrDefault("")
+
+/** 清空：删除远端日志文件（hook 侧下次落盘自然重建，参见 hook 侧 LogRing 重写）。 */
+private fun clearRemoteLog(service: XposedService?) {
+    if (service != null) runCatching { service.deleteRemoteFile(LOG_FILE_NAME) }
+}
+
+private fun loadWordWrap(context: Context): Boolean =
+    context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE).getBoolean(KEY_WORD_WRAP, true)
+
+private fun saveWordWrap(context: Context, enabled: Boolean) {
+    context.getSharedPreferences(PREFS_UI, Context.MODE_PRIVATE)
+        .edit().putBoolean(KEY_WORD_WRAP, enabled).apply()
+}
+
+/** 溢出菜单（顶栏 More 弹出的次级动作；自动换行项带对勾指示当前态）。 */
 @Composable
-private fun RunningTargetsCard(targets: List<HookedTarget>) {
-    Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
-        Column(
-            Modifier.padding(
-                horizontal = UiTokens.CardMarginH,
-                vertical = UiTokens.CardMarginV,
-            ),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = MiuixIcons.ListView,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-                Spacer(Modifier.width(UiTokens.CardMarginH))
-                Text(
-                    stringResource(R.string.log_running_targets_title),
-                    fontSize = UiTokens.SubtitleSize,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            if (targets.isEmpty()) {
-                Text(
-                    stringResource(R.string.log_running_targets_empty),
-                    fontSize = UiTokens.CaptionSize,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            } else {
-                targets.forEach { target ->
-                    Text(
-                        target.processName,
-                        fontSize = UiTokens.SubtitleSize,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        stringResource(R.string.log_target_state_format, target.pid, target.state),
-                        fontSize = UiTokens.CaptionSize,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                }
-            }
+private fun LogOverflowMenu(
+    wordWrap: Boolean,
+    onScrollTop: () -> Unit,
+    onScrollBottom: () -> Unit,
+    onClear: () -> Unit,
+    onToggleWordWrap: () -> Unit,
+) {
+    Card(modifier = Modifier.width(180.dp), cornerRadius = UiTokens.CardRadius) {
+        Column {
+            OverflowItem(MiuixIcons.ExpandLess, stringResource(R.string.log3_scroll_top), onScrollTop)
+            HorizontalDivider(Modifier.padding(horizontal = 12.dp))
+            OverflowItem(MiuixIcons.ExpandMore, stringResource(R.string.log3_scroll_bottom), onScrollBottom)
+            HorizontalDivider(Modifier.padding(horizontal = 12.dp))
+            OverflowItem(MiuixIcons.Delete, stringResource(R.string.log3_clear), onClear)
+            HorizontalDivider(Modifier.padding(horizontal = 12.dp))
+            OverflowItem(
+                MiuixIcons.Ok,
+                stringResource(R.string.log3_word_wrap),
+                onToggleWordWrap,
+                isChecked = wordWrap,
+            )
         }
     }
+}
+
+/** 溢出菜单单行（图标 + 文本；isChecked 非空时为可勾选项，开启态右端显示对勾）。 */
+@Composable
+private fun OverflowItem(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit,
+    isChecked: Boolean? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            title,
+            fontSize = 14.sp,
+            color = MiuixTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (isChecked == true) {
+            Icon(
+                imageVector = MiuixIcons.Ok,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MiuixTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+/** 滚到顶部：距顶 >500 行跳转，否则平滑滚动（规格 §4 SCROLL_THRESHOLD）。 */
+private suspend fun LazyListState.jumpOrSmoothToTop() {
+    if (firstVisibleItemIndex > SCROLL_THRESHOLD) scrollToItem(0) else animateScrollToItem(0)
+}
+
+/** 滚到底部：距底 >500 行跳转，否则平滑滚动。 */
+private suspend fun LazyListState.jumpOrSmoothToBottom() {
+    val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisibleItemIndex
+    val last = layoutInfo.totalItemsCount - 1
+    if (last - lastVisible > SCROLL_THRESHOLD) scrollToItem(last) else animateScrollToItem(last)
 }
 
 /** KEY_LOG_RING 行：`MM-dd HH:mm:ss [tag] msg`，可选 ` ×N` 折叠计数后缀（hook 侧写入格式）。 */

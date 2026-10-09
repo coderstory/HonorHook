@@ -1,31 +1,41 @@
 package top.honorhook.xposed
 
+import android.os.ParcelFileDescriptor
 import io.github.libxposed.api.XposedModule
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import top.honorhook.data.KEY_LOG_RING
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * 运行日志环形缓冲：hook 侧判据级日志双写通道——同一行信息既走 module.log（LSPosed 日志），
- * 也经 [RemotePrefsHolder] 既有链路写进远程配置通道 [KEY_LOG_RING]（LSPosed daemon 落库 +
- * binder 推送），UI 日志页读同一 key 实时展示/一键复制，零新基建。
- * 窗口裁剪：按行首时间戳丢弃超 [WINDOW_MS]（30 分钟）的旧行（时间戳按当前年填充解析，
- * 跨年边界近似处理）；[CAP_LINES] 200 行为第二道 cap（超限丢最旧，环形语义）。
- * 重复去重：与已有行 "[tag] msg"（时间戳与 ×N 计数后缀外）相同则不追加新行，改写为
- * `时间戳 [tag] msg ×N`（计数递增、时间戳刷新为最新出现时间）——同一拦截点多次触发、
- * 同 hook 多进程重复汇总一眼可见频次。
- * prefs 获取失败静默返回、下次触发自愈——此处不记日志，否则失败与触发源互相递归刷屏。
- * @Synchronized 串行化同进程多 hook 线程竞争；跨进程各写一份后最后一写胜出
- * （LSPosedRemotePreferences 快照型覆盖写）——判据日志低频，可接受。
+ * 运行日志环形缓冲：判据级日志通道，UI 日志页经模块 app 侧同名 API 读同一文件展示。
+ * 通道选型（真机实证）：prefs 通道废弃——hook 侧 [RemotePrefsHolder] 的 getRemotePreferences 返回
+ * 只读快照，edit() 抛 UnsupportedOperationException（LSPosed verbose 日志堆栈实证），KEY_LOG_RING
+ * 从未写成功（app 日志页空白根因）；且该异常曾把 install() 收尾带崩（push 抛出 → markInstalled
+ * 未执行，LSPosed 报 "target install failed"）。改用 module.openRemoteFile —— XposedModule 公开
+ * 方法（javap 实证），daemon 以 MODE_CREATE | MODE_READ_WRITE 打开模块专属沙箱文件
+ * （LSPModuleService.openRemoteFile 实证），hook 进程与模块 app 打开的是同一个文件。
+ * 文件名约定 "honorhook.log"（[FILE_NAME]）——UI 侧按此名读取，改动必须两侧同步。
+ * 热路径零 IO：push 只做内存 append + 500ms 去抖 post 一次落盘；flush 全程 runCatching 吞异常，
+ * 任何失败静默 return（下次 push 重试）——install 收尾等关键路径绝不再被日志带崩（真机事故教训）。
+ * 窗口裁剪（30 分钟）/×N 去重/cap 200 行语义同前，UI 侧解析依赖（行格式 `MM-dd HH:mm:ss [tag] msg`）。
+ * 跨进程（各被 hook 进程一份队列）无锁协议，最后一写胜出——判据日志低频，可接受。
  */
 object LogRing {
 
     /** 窗口裁切：行年龄超此毫秒数（30 分钟）即丢弃。 */
     private const val WINDOW_MS = 30 * 60 * 1000L
 
-    /** 缓冲容量（行数）：窗口裁切后的第二道 cap。 */
+    /** 缓冲容量（行数）：窗口裁切后的第二道 cap（内存队列与文件内容同 cap）。 */
     private const val CAP_LINES = 200
+
+    /** 远程文件通道文件名——UI 侧读取同名文件，严格一致。 */
+    private const val FILE_NAME = "honorhook.log"
+
+    /** 去抖窗口：窗口内多次 push 合并为一次落盘写。 */
+    private const val FLUSH_DEBOUNCE_MS = 500L
 
     /** 行内时间戳格式（14 字符定长，位于行首）。 */
     private val timeFmt = SimpleDateFormat("MM-dd HH:mm:ss", Locale.US)
@@ -36,32 +46,84 @@ object LogRing {
     /** 行尾重复计数后缀（" ×N"）。 */
     private val countSuffix = Regex("\\s×\\d+$")
 
+    /** 内存队列（cap [CAP_LINES]）：落盘失败不清空，下次 flush 重试。 */
+    private val queue = mutableListOf<String>()
+
+    /** 去抖标志：已有待执行 flush 时为 true，防窗口内重复 post。 */
+    private val pendingFlush = AtomicBoolean(false)
+
     /**
-     * 追加一行判据日志（与 module.log 同文双写，非替换）。
+     * 追加一行判据日志（仅内存操作，零文件 IO——intercept 热路径）。
      *
      * @param tag 行内短标识（"theme"/"glass"/"market"/"installer"，UI 日志页归类用）
      * @param msg 判据行内容（时间、tag、×N 计数由本方法统一拼，调用方不重复拼）
      */
     @Synchronized
     fun push(module: XposedModule, tag: String, msg: String) {
-        val prefs = RemotePrefsHolder.obtain(module) ?: return
-        val now = System.currentTimeMillis()
-        val newLine = "${timeFmt.format(Date(now))} [$tag] $msg"
-        val newKey = " [$tag] $msg"
+        queue += "${timeFmt.format(Date(System.currentTimeMillis()))} [$tag] $msg"
+        if (queue.size > CAP_LINES) queue.subList(0, queue.size - CAP_LINES).clear()
+        if (pendingFlush.compareAndSet(false, true)) {
+            MountScheduler.postDelayed(FLUSH_DEBOUNCE_MS) { flush(module) }
+        }
+    }
 
+    /**
+     * 去抖落盘（MountScheduler 后台线程串行执行，不占用 hook 线程）。
+     * 全程 runCatching 吞异常：读合并写任一步失败静默 return，队列保留待下次 push 重试。
+     */
+    private fun flush(module: XposedModule) {
+        // 先复位标志：flush 期间新 push 可再次触发 post，尾部行不会滞留到进程退出
+        pendingFlush.set(false)
+        val queued: List<String>
+        synchronized(this) { queued = queue.toList() }
+        if (queued.isEmpty()) return
+        runCatching {
+            val now = System.currentTimeMillis()
+            val pfd = module.openRemoteFile(FILE_NAME)
+            try {
+                val merged = merge(readAll(pfd), queued, now)
+                writeAll(pfd, merged)
+                // 只清已落盘快照段；flush 期间新 append 的尾部行保留待下次落盘
+                synchronized(this) { queue.subList(0, queued.size).clear() }
+            } finally {
+                pfd.close()
+            }
+        }
+    }
+
+    /** 现有文件行 + 新队列行合并：窗口裁剪 → 同键合并计数 → cap 200。 */
+    private fun merge(existingText: String, queued: List<String>, now: Long): String {
         val kept = mutableListOf<String>()
-        var merged = false
-        for (l in prefs.getString(KEY_LOG_RING, null).orEmpty().lines().filter { it.isNotBlank() }) {
+        val idxByKey = HashMap<String, Int>()
+        for (l in existingText.lines().filter { it.isNotBlank() } + queued) {
             if (isExpired(l, now)) continue
-            if (!merged && keyOf(l) == newKey) {
-                kept += recount(l, now)
-                merged = true
+            val k = keyOf(l)
+            val idx = idxByKey[k]
+            if (idx != null) {
+                kept[idx] = recount(kept[idx], now)
             } else {
+                idxByKey[k] = kept.size
                 kept += l
             }
         }
-        if (!merged) kept += newLine
-        prefs.edit().putString(KEY_LOG_RING, kept.takeLast(CAP_LINES).joinToString("\n")).apply()
+        return kept.takeLast(CAP_LINES).joinToString("\n")
+    }
+
+    /** 读文件全文（MODE_CREATE 已保证文件存在；空文件返回空串）。 */
+    private fun readAll(pfd: ParcelFileDescriptor): String =
+        FileInputStream(pfd.fileDescriptor).readBytes().toString(Charsets.UTF_8)
+
+    /**
+     * 截断重写全文件。读写共用同一个 fd：读后位置在 EOF，写前必须截断 + 归位到 0，
+     * 否则文件头残留旧字节 / 写进空洞。包装流不显式 close——关流会连带关掉共享 fd，
+     * 唯一收尾是调用方 pfd.close()。
+     */
+    private fun writeAll(pfd: ParcelFileDescriptor, content: String) {
+        val out = FileOutputStream(pfd.fileDescriptor)
+        out.channel.truncate(0)
+        out.channel.position(0)
+        out.write(content.toByteArray(Charsets.UTF_8))
+        out.flush()
     }
 
     /** 行年龄 = now − 行首时间戳（年按当前年填充）；解析失败视为保留（防误删异常行）。 */

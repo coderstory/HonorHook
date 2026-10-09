@@ -888,7 +888,7 @@ object GlassRestoreHook : TargetHook {
     }.getOrNull()
 
     /** 总开关现读：prefs 获取失败返回 false = 原逻辑放行（安全默认）。 */
-    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, false) ?: false
+    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, true) ?: false
 
     /** F7 功能位开关现读：总开关 && F7 开关（默认 false——boot-loop 事故史，保守）。 */
     private fun featureEnabled(prefs: SharedPreferences?): Boolean =

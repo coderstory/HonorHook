@@ -23,7 +23,7 @@ class HookEntry : XposedModule() {
         runCatching {
             // 照 HC HyperSystemUiModule L663：每次回调现读远程 prefs（hook 侧只读实现）
             val prefs = getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-            val enabled = prefs.getBoolean(KEY_HOOK_ENABLED, false)
+            val enabled = prefs.getBoolean(KEY_HOOK_ENABLED, true)
             log(Log.INFO, TAG, "hook_enabled = $enabled (${param.packageName})")
             registerHookEnabledListener(prefs)
             installDemoHook(param.defaultClassLoader, prefs)
@@ -59,7 +59,7 @@ class HookEntry : XposedModule() {
         if (hookEnabledListenerInstalled) return
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == KEY_HOOK_ENABLED) {
-                log(Log.INFO, TAG, "hook_enabled changed to ${prefs.getBoolean(KEY_HOOK_ENABLED, false)}")
+                log(Log.INFO, TAG, "hook_enabled changed to ${prefs.getBoolean(KEY_HOOK_ENABLED, true)}")
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -82,7 +82,7 @@ class HookEntry : XposedModule() {
             .setId("honorhook:demo-switch-link") // 幂等 ID（框架用它防重复/日志标识）
             .intercept { chain ->
                 val result = chain.proceed()
-                if (prefs.getBoolean(KEY_HOOK_ENABLED, false)) {
+                if (prefs.getBoolean(KEY_HOOK_ENABLED, true)) {
                     log(Log.INFO, TAG, "[demo] hook_enabled=true: 演示负载执行（仅日志，无副作用）")
                 }
                 result

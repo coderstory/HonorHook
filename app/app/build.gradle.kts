@@ -5,11 +5,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// java.time 显式 import：KTS 脚本编译环境不解析裸 java.* 全限定引用（Unresolved reference 'time'）
+// java.time 显式 import：KTS 脚本不解析裸 java.* 引用（Unresolved reference 'time'）
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-// 构建时刻（首页“构建时间”详情行；每次构建重新注入，格式 yyyy-MM-dd HH:mm 对齐 demo）
+// 构建时刻（首页“构建时间”详情行数据源；格式对齐 demo）
 val buildTime = LocalDateTime.now()
     .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
 
@@ -24,15 +24,15 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // 构建时间（首页详情行数据源；构建配置开启见下方 buildFeatures）
+        // buildConfigField 向 Home"/关于"页暴露构建时刻（buildConfig 开启见下方 buildFeatures）
         buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
     }
 
     buildTypes {
         release {
-            // 混淆 + 资源收缩 + debug 签名直出（照 AI-lsposed-temlate release 范本）：
-            // 本机无正式 keystore，debug 签名包可安装覆盖升级；proguard-rules.pro 已备
-            // java_init.list 改写（-adaptresourcefilecontents）+ XposedModule 入口 keep 规则。
+            // 混淆 + 资源收缩 + debug 签名直出（照 AI-lsposed-temlate 范本：本机无正式 keystore，
+            // debug 签名包可安装覆盖升级）；proguard-rules.pro 已备 java_init.list 改写
+            // （-adaptresourcefilecontents）+ XposedModule 入口 keep 规则。
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -45,7 +45,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // AGP 9 内置 Kotlin：android.kotlin DSL 设置 JVM target（照 LSPFRIDA 写法）
+    // JVM target 17（android.kotlin DSL；照 LSPFRIDA 写法）
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17"))
@@ -54,13 +54,13 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true // 关于页显示 VERSION_NAME
+        buildConfig = true // 关于页 VERSION_NAME 与 BUILD_TIME 注入前提
     }
 
     packaging {
         resources {
-            // AI-temlate 硬手法：显式合并 xposed 元数据 + 排除其余全部非代码资源，
-            // 保证混淆后 java_init.list 存活（比 proguard keep 更硬，书写顺序照 HC）
+            // AI-temlate 硬手法：显式合并 xposed 元数据 + 排除其余非代码资源——
+            // 混淆后 java_init.list 存活的硬保证（比 proguard keep 更硬，书写顺序照 HC）
             merges += "META-INF/xposed/*"
             excludes += "**"
         }
@@ -81,14 +81,14 @@ dependencies {
     implementation(libs.miuix.ui)
     implementation(libs.miuix.preference)
     implementation(libs.miuix.icons)
-    // miuix-blur（玻璃拟态悬浮底栏）：AAR minSdk33 官方 <uses-sdk tools:overrideLibrary> 放行；
-    // 运行时 isRuntimeShaderSupported gate 保证 API<33 自动降级纯色（照 LSPFRIDA build.gradle.kts:122-124）
+    // miuix-blur（玻璃拟态悬浮底栏）：AAR minSdk33 由官方 tools:overrideLibrary 放行；
+    // API<33 运行时自动降级纯色（照 LSPFRIDA build.gradle.kts:122-124）
     implementation(libs.miuix.blur)
 
     // libxposed：api 仅编译期（运行时由 LSPosed 框架提供）；service 为宿主 App 与框架通信
     compileOnly(libs.libxposed.api)
     implementation(libs.libxposed.service)
 
-    // DexKit：按特征查找被混淆的目标方法（双轨解析的兜底线，版本照 HC org.luckypray:dexkit:2.2.0）
+    // DexKit：混淆目标方法特征查找（双轨解析的兜底线；版本照 HC dexkit:2.2.0）
     implementation(libs.dexkit)
 }
