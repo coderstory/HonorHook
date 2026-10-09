@@ -5,6 +5,14 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// java.time 显式 import：KTS 脚本编译环境不解析裸 java.* 全限定引用（Unresolved reference 'time'）
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+// 构建时刻（首页“构建时间”详情行；每次构建重新注入，格式 yyyy-MM-dd HH:mm 对齐 demo）
+val buildTime = LocalDateTime.now()
+    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+
 android {
     namespace = "top.honorhook"
     compileSdk = 37
@@ -15,6 +23,9 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
+
+        // 构建时间（首页详情行数据源；构建配置开启见下方 buildFeatures）
+        buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
     }
 
     buildTypes {
@@ -59,6 +70,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
+    implementation(libs.androidx.compose.material3) // M3 dynamicLightColorScheme（Monet 取色）
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.android)
