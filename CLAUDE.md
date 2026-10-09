@@ -113,15 +113,15 @@ miuix 常用组件：`Scaffold` / `SmallTopAppBar` / `Card` / `Button` / `Naviga
 - [ ] 玻璃悬浮底栏（LSPFRIDA FloatingMiuixNavigationBar 抄改 + 悬浮/贴底双形态开关真实生效）
 
 ### 任务队列（依赖排序，按计划自主执行，不等催）
-1. **git 仓库初始化 + 首次分层 commit**（立即并行——当前零版本控制是最大工程风险）
-2. **Tab2 重构**：一级 app 列表 → 二级该 app 功能开关（照 manager 模式，demo 已定稿）← 等第二批完成（HookSettingsScreen 冲突）
-3. **主题系统完整版**：ThemeModeStore 抄 LSPFRIDA 完整版（Monet 九风格/19 色主题色/暗色三态/纯黑）+ Tab1 详情真实数据（系统/Android/LSP 版本、构建时间、设备型号）+ miuix Toast ← 等底栏玻璃完成（ThemeSettingsScreen 冲突）
-4. **第三批 MarketTamer 整合**（F5，拆两小批：市场去广告弹窗 + SystemUI 指震部分；market-jadx/honorui-jadx 基线已就绪）
-5. 版本适配脚本（fanqie adapt_new_version 四步法移植）
-6. release 签名配置
-7. **真机验证闭环**（用户装包 → LSPosed 日志三类判据：`installed N/M` / `theme-download-chain 路由触发` / `挽留弹窗已拦截` → 迭代修复）
-8. 第四个插件整合（HonorLsposedFix？待用户确认）
-9. skill 沉淀更新（真机基线验证方法论 / 观测日志闭环 / "静态点≠运行时关键点"教训）
+1. [x] **git 仓库初始化 + 分层 commit** ✅（19 commit：基线 3 + submodule 11 + 功能 5；10 参考项目 submodule 化）
+2. [x] **Tab2 重构** ✅（commit 22871db：AppListScreen 一级 + AppFunctionsScreen 二级，manager 模式）
+3. [x] **主题系统完整版** ✅（commit 561f2fb：Monet 构建链 + 12 色板 + 暗色三态 + 纯黑 + 跟随取色，抄 LSPFRIDA）
+4. [x] **第三批 MarketTamer 整合** ✅（commit 362ffe2：MarketHook 464 行 15 点真机基线 15/15 命中，F5）
+5. [x] 版本适配脚本 ✅（tools/adapt_new_version.py，基线 56/56 全存活留档）
+6. [x] release 签名配置 ✅（commit 62666ec：混淆+收缩，**release 2.8MB**（-82%），混淆正确性验证全 PASS——java_init.list 改写对齐、注册链 keep、字符串常量完好）
+7. [ ] **真机验证闭环（T1 门禁 / T10 全量验收）**——用户装桌面包（debug 或 release）→ LSPosed 日志五判据：`installed N/M`（主题 46/46、安装器 10/10、玻璃 18/18、市场 15/15）/ `theme-download-chain 路由触发` / `挽留弹窗已拦截` / 重启不回退 / F5-F7 行为 → 反馈现象逐点迭代
+8. [ ] 第四个插件整合（HonorLsposedFix？待用户确认）
+9. [ ] skill 沉淀更新（观测验证铁律/门类放行/真机基线校验/版本错位排查——✅ 已完成；二期候选锁屏玻璃 600 行、MarketTamer 细分开关、Monet 九风格）
 
 ### 阻塞 / 等待用户
 - 真机验证（设备连接 + 装最新桌面包操作一轮）——判据日志回来逐点核对
