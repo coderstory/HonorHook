@@ -10,3 +10,6 @@
 [submodule "reference/AI-lsposed-temlate"]
 	path = reference/AI-lsposed-temlate
 	url = https://github.com/bujianxingyun/AI-lsposed-temlate
+[submodule "reference/skills"]
+	path = reference/skills
+	url = https://github.com/android/skills
