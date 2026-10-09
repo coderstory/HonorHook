@@ -12,6 +12,7 @@ import top.honorhook.data.KEY_F2_FREE_ENABLED
 import top.honorhook.data.KEY_F3_TRIAL_ENABLED
 import top.honorhook.data.KEY_F4_NO_RESET_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
+import top.honorhook.xposed.LogRing
 import top.honorhook.xposed.MethodResolver
 import top.honorhook.xposed.MountScheduler
 import top.honorhook.xposed.RemotePrefsHolder
@@ -585,6 +586,7 @@ object ThemeStoreHook : TargetHook {
                     val prefs = RemotePrefsHolder.obtain(module)
                     if (routeActive(chain, prefs, module, task)) {
                         module.log(Log.INFO, TAG, "挽留弹窗已拦截: ${task.methodName}")
+                        LogRing.push(module, RING_TAG, "挽留弹窗已拦截: ${task.methodName}")
                         null
                     } else {
                         chain.proceed()
@@ -599,6 +601,7 @@ object ThemeStoreHook : TargetHook {
                         val result = chain.proceed()
                         (chain.thisObject as? Activity)?.finish()
                         module.log(Log.INFO, TAG, "挽留弹窗已拦截: ${task.methodName}")
+                        LogRing.push(module, RING_TAG, "挽留弹窗已拦截: ${task.methodName}")
                         result
                     } else {
                         chain.proceed()
@@ -678,11 +681,15 @@ object ThemeStoreHook : TargetHook {
         }
         if (vipFixLogCount < 3) {
             vipFixLogCount++
+            val msg =
+                "vip-state 漏斗改写: ${task.methodName} setter=${filled}/6 vipUser=true vipStatus=2 " +
+                    "vipType=2 expireTimeTimestamp=$TS_2088_08_08_MILLIS displayTime=$TS_2088_08_08_STR remainingTime=now+1.95e12"
             module.log(
                 Log.INFO, TAG,
-                "vip-state 漏斗改写: ${task.methodName} setter=${filled}/6 vipUser=true vipStatus=2 " +
-                    "vipType=2 expireTimeTimestamp=$TS_2088_08_08_MILLIS displayTime=$TS_2088_08_08_STR remainingTime=now+1.95e12",
+                msg,
             )
+            // vip-state 改写生效判据，双写进环形缓冲（随节流同步，只进前 3 次）
+            LogRing.push(module, RING_TAG, msg)
         }
         return state
     }
@@ -703,11 +710,14 @@ object ThemeStoreHook : TargetHook {
     /** 挂载汇总始终输出，不受 [DEBUG_LOGGING] 门控（Rain "installed N/M" + fanqie 汇总行模式）。 */
     private fun logSummary(module: XposedModule) {
         val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
+        val msg = "ThemeStoreHook: installed $okCount/$totalCount$failurePart"
         module.log(
             if (failedIds.isEmpty()) Log.INFO else Log.WARN,
             TAG,
-            "ThemeStoreHook: installed $okCount/$totalCount$failurePart",
+            msg,
         )
+        // 汇总级双写进环形缓冲（含失败清单；单点"挂载失败"高频 WARN 不进，只进汇总级）
+        LogRing.push(module, RING_TAG, msg)
     }
 
     // ---------------- 通用挂载工具 ----------------
@@ -735,10 +745,13 @@ object ThemeStoreHook : TargetHook {
         if (!task.uriEmptyRoute) return true
         val blank = isUriBlank(chain, task)
         if (blank) {
+            val msg = "theme-download-chain 路由触发: ${task.id}（DownloadInfo.uri 为空 → ${actionDesc(task)}）"
             module.log(
                 Log.INFO, TAG,
-                "theme-download-chain 路由触发: ${task.id}（DownloadInfo.uri 为空 → ${actionDesc(task)}）",
+                msg,
             )
+            // 路由触发 = 下载修复链路生效的判据，双写进环形缓冲供 UI 日志页核对
+            LogRing.push(module, RING_TAG, msg)
         }
         return blank
     }
@@ -784,6 +797,9 @@ object ThemeStoreHook : TargetHook {
             m.name == methodName && m.parameterCount == paramCount && m.returnType.name == returnType
         }
     }.getOrNull()
+
+    /** LogRing 环形缓冲行内短标识（UI 日志页按 tag 归类展示）。 */
+    private const val RING_TAG = "theme"
 
     private const val TAG = "HonorHook"
 }

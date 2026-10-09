@@ -15,6 +15,7 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import top.honorhook.data.KEY_F7_GLASS_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
+import top.honorhook.xposed.LogRing
 import top.honorhook.xposed.MethodResolver
 import top.honorhook.xposed.MountScheduler
 import top.honorhook.xposed.RemotePrefsHolder
@@ -416,11 +417,14 @@ object GlassRestoreHook : TargetHook {
     /** 挂载汇总（始终输出；对应插件 "installed N/M resolved hook(s)" 行）。 */
     private fun logSummary(module: XposedModule) {
         val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
+        val msg = "GlassRestoreHook: installed $okCount/$totalCount$failurePart"
         module.log(
             if (failedIds.isEmpty()) Log.INFO else Log.WARN,
             TAG,
-            "GlassRestoreHook: installed $okCount/$totalCount$failurePart",
+            msg,
         )
+        // 汇总级双写进环形缓冲（失败清单 failedIds 为排查关键；单点"挂载失败"高频 WARN 不进，只进汇总级）
+        LogRing.push(module, RING_TAG, msg)
     }
 
     // ---------------- 拦截器实现（每个 intercept 现读开关） ----------------
@@ -889,6 +893,9 @@ object GlassRestoreHook : TargetHook {
     /** F7 功能位开关现读：总开关 && F7 开关（默认 false——boot-loop 事故史，保守）。 */
     private fun featureEnabled(prefs: SharedPreferences?): Boolean =
         hookEnabled(prefs) && (prefs?.getBoolean(KEY_F7_GLASS_ENABLED, false) ?: false)
+
+    /** LogRing 环形缓冲行内短标识（UI 日志页按 tag 归类展示）。 */
+    private const val RING_TAG = "glass"
 
     private const val TAG = "HonorHook"
 }

@@ -34,6 +34,7 @@ import top.honorhook.ui.screen.AboutScreen
 import top.honorhook.ui.screen.AppFunctionsScreen
 import top.honorhook.ui.screen.AppListScreen
 import top.honorhook.ui.screen.HomeScreen
+import top.honorhook.ui.screen.LogScreen
 import top.honorhook.ui.screen.SettingsScreen
 import top.honorhook.ui.screen.ThemeSettingsScreen
 import top.yukonga.miuix.kmp.blur.layerBackdrop
@@ -43,7 +44,7 @@ import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.basic.Scaffold
 
-/** 根组件：NavHost（底部三页主界面 + appfn/theme_settings/about 二级页，路由结构照 LSPFRIDA
+/** 根组件：NavHost（底部三页主界面 + appfn/theme_settings/about/logs 二级页，路由结构照 LSPFRIDA
  * MainActivity AppRoot，二级页返回 = popBackStack）。 */
 @Composable
 fun AppRoot() {
@@ -54,7 +55,12 @@ fun AppRoot() {
                 onNavigateToAppFn = { id -> navController.navigate("appfn/$id") },
                 onNavigateToThemeSettings = { navController.navigate("theme_settings") },
                 onNavigateToAbout = { navController.navigate("about") },
+                onNavigateToLogs = { navController.navigate("logs") },
             )
+        }
+        // 运行日志二级页（首页入口卡进入；读取 hook 侧 KEY_LOG_RING，返回 = popBackStack）
+        composable("logs") {
+            LogScreen(onBack = { navController.popBackStack() })
         }
         // 应用功能二级页（targetId = AppTargets.id，Tab2 一级列表点击进入）
         composable("appfn/{targetId}") { backStackEntry ->
@@ -82,6 +88,7 @@ private fun MainScaffold(
     onNavigateToAppFn: (String) -> Unit,
     onNavigateToThemeSettings: () -> Unit,
     onNavigateToAbout: () -> Unit,
+    onNavigateToLogs: () -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val pagerState = rememberPagerState(pageCount = { 3 })
@@ -107,7 +114,7 @@ private fun MainScaffold(
 
     val pagerContent: @Composable (Int) -> Unit = { page ->
         when (page) {
-            0 -> HomeScreen()
+            0 -> HomeScreen(onNavigateToLogs = onNavigateToLogs)
             1 -> AppListScreen(onTargetClick = onNavigateToAppFn)
             else -> SettingsScreen(
                 onNavigateToThemeSettings = onNavigateToThemeSettings,

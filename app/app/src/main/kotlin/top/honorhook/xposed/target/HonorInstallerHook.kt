@@ -11,6 +11,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Proxy
 import top.honorhook.data.KEY_F6_INSTALLER_PURIFY_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
+import top.honorhook.xposed.LogRing
 import top.honorhook.xposed.MethodResolver
 import top.honorhook.xposed.MountScheduler
 import top.honorhook.xposed.RemotePrefsHolder
@@ -218,11 +219,14 @@ object HonorInstallerHook : TargetHook {
     /** 挂载汇总（始终输出；照 Rain "installed N/M" + ThemeStoreHook 模式）。 */
     private fun logSummary(module: XposedModule) {
         val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
+        val msg = "HonorInstallerHook: installed $okCount/$totalCount$failurePart"
         module.log(
             if (failedIds.isEmpty()) Log.INFO else Log.WARN,
             TAG,
-            "HonorInstallerHook: installed $okCount/$totalCount$failurePart",
+            msg,
         )
+        // 汇总级双写进环形缓冲（含失败清单；单点"挂载失败"高频 WARN 不进，只进汇总级）
+        LogRing.push(module, RING_TAG, msg)
     }
 
     // ---------------- 拦截器实现（每个 intercept 现读开关；触发日志始终输出） ----------------
@@ -239,10 +243,13 @@ object HonorInstallerHook : TargetHook {
         return when (task.kind) {
             MountKind.CONST -> {
                 module.log(Log.INFO, TAG, "[installer] 拦截触发: ${task.id} → 常返 ${task.value}")
+                LogRing.push(module, RING_TAG, "[installer] 拦截触发: ${task.id} → 常返 ${task.value}")
                 task.value
             }
             MountKind.BLOCK -> {
-                module.log(Log.INFO, TAG, "[installer] 拦截触发: ${task.id} → ${if (task.className == "java.net.Socket") "联网已禁止" else "空实现阻断"}")
+                val msg = "[installer] 拦截触发: ${task.id} → ${if (task.className == "java.net.Socket") "联网已禁止" else "空实现阻断"}"
+                module.log(Log.INFO, TAG, msg)
+                LogRing.push(module, RING_TAG, msg)
                 null
             }
             MountKind.HIDE_FIELD_AFTER -> {
@@ -258,6 +265,7 @@ object HonorInstallerHook : TargetHook {
                     if (view != null) {
                         view.visibility = View.GONE
                         module.log(Log.INFO, TAG, "[installer] 拦截触发: ${task.id} → 横幅字段 $fieldName 已置 GONE")
+                        LogRing.push(module, RING_TAG, "[installer] 拦截触发: ${task.id} → 横幅字段 $fieldName 已置 GONE")
                     } else {
                         module.log(Log.WARN, TAG, "[installer] ${task.id} 横幅字段 $fieldName 非 View 或读取失败（本次未隐藏）")
                     }
@@ -291,6 +299,7 @@ object HonorInstallerHook : TargetHook {
                         .onFailure { t -> module.log(Log.WARN, TAG, "[installer] 检测结果投递失败", t) }
                 }
                 module.log(Log.INFO, TAG, "[installer] 拦截触发: ${task.id} → 免检测结果已投递（isHn=$isHn）")
+                LogRing.push(module, RING_TAG, "[installer] 拦截触发: ${task.id} → 免检测结果已投递（isHn=$isHn）")
                 null
             } catch (t: Throwable) {
                 module.log(Log.WARN, TAG, "[installer] ${task.id} 跳过逻辑异常，回退原检测流程", t)
@@ -303,6 +312,7 @@ object HonorInstallerHook : TargetHook {
                     cb.javaClass.getMethod("c").invoke(cb)
                     cb.javaClass.getMethod("a", Boolean::class.javaPrimitiveType).invoke(cb, true)
                     module.log(Log.INFO, TAG, "[installer] 拦截触发: ${task.id} → 指纹验证已直接回调成功")
+                    LogRing.push(module, RING_TAG, "[installer] 拦截触发: ${task.id} → 指纹验证已直接回调成功")
                 }
                 null
             } catch (t: Throwable) {
@@ -318,6 +328,7 @@ object HonorInstallerHook : TargetHook {
                     m.isAccessible = true
                     m.invoke(dVar, *arrayOfNulls<Any?>(1))
                     module.log(Log.INFO, TAG, "[installer] 拦截触发: ${task.id} → 分流已走失败分支（断网免死等 2s）")
+                    LogRing.push(module, RING_TAG, "[installer] 拦截触发: ${task.id} → 分流已走失败分支（断网免死等 2s）")
                 }
                 null
             } catch (t: Throwable) {
@@ -348,6 +359,9 @@ object HonorInstallerHook : TargetHook {
             m.name == methodName && m.parameterCount == paramCount
         }
     }.getOrNull()
+
+    /** LogRing 环形缓冲行内短标识（UI 日志页按 tag 归类展示）。 */
+    private const val RING_TAG = "installer"
 
     private const val TAG = "HonorHook"
 }

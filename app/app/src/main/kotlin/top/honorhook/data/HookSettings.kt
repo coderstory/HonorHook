@@ -13,6 +13,9 @@ const val REMOTE_PREFERENCE_GROUP = "honorhook"
 /** Hook 总开关 key。 */
 const val KEY_HOOK_ENABLED = "hook_enabled"
 
+/** 运行日志环形缓冲 key（hook 侧判据日志经 daemon 双写，UI 日志页读取/复制/清空；cap 200 行）。 */
+const val KEY_LOG_RING = "log_ring"
+
 /** F1-F4 功能位独立开关 key（默认 true；总开关为上位语义：总关 = 全部放行）。 */
 const val KEY_F1_VIP_ENABLED = "f1_vip_enabled"
 const val KEY_F2_FREE_ENABLED = "f2_free_enabled"

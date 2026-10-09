@@ -9,6 +9,7 @@ import java.lang.reflect.Method
 import java.util.ArrayList
 import top.honorhook.data.KEY_F5_MARKET_ENABLED
 import top.honorhook.data.KEY_HOOK_ENABLED
+import top.honorhook.xposed.LogRing
 import top.honorhook.xposed.MethodResolver
 import top.honorhook.xposed.MountScheduler
 import top.honorhook.xposed.RemotePrefsHolder
@@ -261,11 +262,14 @@ object MarketHook : TargetHook {
     /** 挂载汇总（始终输出；照 Rain "installed N/M" + ThemeStoreHook 模式）。 */
     private fun logSummary(module: XposedModule) {
         val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
+        val msg = "MarketHook: installed $okCount/$totalCount$failurePart"
         module.log(
             if (failedIds.isEmpty()) Log.INFO else Log.WARN,
             TAG,
-            "MarketHook: installed $okCount/$totalCount$failurePart",
+            msg,
         )
+        // 汇总级双写进环形缓冲（含失败清单；单点"挂载失败"高频 WARN 不进，只进汇总级）
+        LogRing.push(module, RING_TAG, msg)
     }
 
     // ---------------- 拦截器实现（每个 intercept 现读开关；触发日志始终输出） ----------------
@@ -283,12 +287,14 @@ object MarketHook : TargetHook {
             // 置 null 不调原方法（对应插件 before setResult(null)）
             MountKind.NULL -> {
                 module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 置 null")
+                LogRing.push(module, RING_TAG, "[market] 拦截触发: ${task.id} → 置 null")
                 null
             }
             MountKind.NULL_IF_ARG_SUFFIX -> {
                 val arg = chain.args?.getOrNull(task.argIndex)
                 if (arg != null && arg.javaClass.name.endsWith(task.suffix ?: "")) {
                     module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 置 null（arg=${arg.javaClass.name}）")
+                    LogRing.push(module, RING_TAG, "[market] 拦截触发: ${task.id} → 置 null（arg=${arg.javaClass.name}）")
                     null
                 } else {
                     chain.proceed()
@@ -301,6 +307,7 @@ object MarketHook : TargetHook {
                 val newArgs = args.toTypedArray()
                 newArgs[task.argIndex] = ArrayList<Any>()
                 module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 热词列表换空")
+                LogRing.push(module, RING_TAG, "[market] 拦截触发: ${task.id} → 热词列表换空")
                 chain.proceedWith(chain.thisObject, newArgs)
             }
             // 响应汇聚点：替换成功空响应 → 原生空数据分支，不落 error 分支（避免「加载失败，点击重试」占位）
@@ -310,13 +317,17 @@ object MarketHook : TargetHook {
                 val empty = buildEmptySuccessResp(loader)
                 val newArgs = args.toTypedArray()
                 newArgs[task.argIndex] = empty
-                module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 响应替换为成功空响应${if (empty == null) "（构造失败，置 null 兜底）" else ""}")
+                val msg = "[market] 拦截触发: ${task.id} → 响应替换为成功空响应${if (empty == null) "（构造失败，置 null 兜底）" else ""}"
+                module.log(Log.INFO, TAG, msg)
+                LogRing.push(module, RING_TAG, msg)
                 chain.proceedWith(chain.thisObject, newArgs)
             }
             // 请求源头短路：返回 errorCode=-1 空 BaseResp，与 App execute 失败分支同形态，下游判空安全
             MountKind.RESULT_ERROR_RESP -> {
                 val resp = buildErrorResp(loader)
-                module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 请求源头短路（BaseResp errorCode=-1${if (resp == null) "，构造失败返回 null" else ""}）")
+                val msg = "[market] 拦截触发: ${task.id} → 请求源头短路（BaseResp errorCode=-1${if (resp == null) "，构造失败返回 null" else ""}）"
+                module.log(Log.INFO, TAG, msg)
+                LogRing.push(module, RING_TAG, msg)
                 resp
             }
             // 推送到达入口：更新族（pushNotifyType 以 "1" 开头）放行；探测失败亦放行（fail-open，宁放过不误杀更新通知）
@@ -324,12 +335,16 @@ object MarketHook : TargetHook {
                 val (type, action) = probePushType(chain.args?.getOrNull(0))
                 if (type == null) {
                     module.log(Log.WARN, TAG, "[market] ${task.id} 类型不可读，放行（fail-open：宁可放过不可误杀更新通知）")
+                    // 放行类判据也双写：区分"功能未开"（无日志）与"探测失败放行"（有日志）
+                    LogRing.push(module, RING_TAG, "[market] ${task.id} 类型不可读，放行（fail-open：宁可放过不可误杀更新通知）")
                     chain.proceed()
                 } else if (type.startsWith("1")) {
                     module.log(Log.INFO, TAG, "[market] ${task.id} 放行（更新族）type=$type action=$action")
+                    LogRing.push(module, RING_TAG, "[market] ${task.id} 放行（更新族）type=$type action=$action")
                     chain.proceed()
                 } else {
                     module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 推送已抑制 type=$type action=$action")
+                    LogRing.push(module, RING_TAG, "[market] 拦截触发: ${task.id} → 推送已抑制 type=$type action=$action")
                     null
                 }
             }
@@ -342,12 +357,15 @@ object MarketHook : TargetHook {
                 val type = runCatching { p1.javaClass.getMethod("D").invoke(p1)?.toString() }.getOrNull()
                 if (type == null) {
                     module.log(Log.WARN, TAG, "[market] ${task.id} 服务类型不可读，放行（fail-open：宁可放过不可误杀更新通知）")
+                    LogRing.push(module, RING_TAG, "[market] ${task.id} 服务类型不可读，放行（fail-open：宁可放过不可误杀更新通知）")
                     chain.proceed()
                 } else if (type.startsWith("1")) {
                     module.log(Log.INFO, TAG, "[market] ${task.id} 放行（更新族）type=$type")
+                    LogRing.push(module, RING_TAG, "[market] ${task.id} 放行（更新族）type=$type")
                     chain.proceed()
                 } else {
                     module.log(Log.INFO, TAG, "[market] 拦截触发: ${task.id} → 通知展示已阻断 type=$type")
+                    LogRing.push(module, RING_TAG, "[market] 拦截触发: ${task.id} → 通知展示已阻断 type=$type")
                     null
                 }
             }
@@ -433,6 +451,9 @@ object MarketHook : TargetHook {
             m.name == methodName && m.parameterCount == paramCount
         }
     }.getOrNull()
+
+    /** LogRing 环形缓冲行内短标识（UI 日志页按 tag 归类展示）。 */
+    private const val RING_TAG = "market"
 
     private const val TAG = "HonorHook"
 }

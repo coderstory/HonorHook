@@ -47,17 +47,18 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Layers
 import top.yukonga.miuix.kmp.icon.extended.SelectAll
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 首页 Module 页（对齐 Rain Module 页，docs/rain-ui-layout.md §2）：
- * 模块状态卡 + 适配目标计数卡 + 启用功能计数卡 + 设备信息详情卡。
+ * 模块状态卡 + 运行日志入口卡 + 适配目标计数卡 + 启用功能计数卡 + 设备信息详情卡。
  * 状态卡只做激活/未激活两态（"Read failed" 态需读框架信息，本项目无该路径）；
  * 适配计数 = TargetRegistry 公开 API，4 组与应用 tab 4 行口径一致（不依赖反射，混淆安全）；
  * 详情卡五行对齐 demo Tab1 detaillist（LSP 版本未绑定时显示"未知"）。
  */
 @Composable
-fun HomeScreen() {
+fun HomeScreen(onNavigateToLogs: () -> Unit) {
     val active by FrameworkState.active.collectAsState()
     val apiVersion by FrameworkState.apiVersion.collectAsState()
     val frameworkName by FrameworkState.frameworkName.collectAsState()
@@ -96,6 +97,16 @@ fun HomeScreen() {
             item {
                 Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
                     StatusCard(active, apiVersion)
+                }
+            }
+            // 运行日志入口卡（状态卡下方；点入日志二级页，见 AppRoot "logs" route）
+            item {
+                Card(modifier = Modifier.fillMaxWidth(), cornerRadius = UiTokens.CardRadius) {
+                    ArrowPreference(
+                        title = stringResource(R.string.home_log_entry),
+                        summary = stringResource(R.string.home_log_entry_summary),
+                        onClick = onNavigateToLogs,
+                    )
                 }
             }
             item {
