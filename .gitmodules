@@ -4,3 +4,6 @@
 [submodule "reference/HonorInstallerPurify"]
 	path = reference/HonorInstallerPurify
 	url = https://github.com/VoreulCH/HonorInstallerPurify.git
+[submodule "reference/HonorLiquidGlassRestore"]
+	path = reference/HonorLiquidGlassRestore
+	url = https://github.com/VoreulCH/HonorLiquidGlassRestore.git
