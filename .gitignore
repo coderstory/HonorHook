@@ -1,6 +1,13 @@
 # 本地资产：大体积 / 可再生 / 可重新获取，不进版本库
 system-files/
-reference/
+
+# reference/ 下手动放置的外部项目（待拿到原 URL 后转为 submodule 引入）
+reference/LSPFRIDA（同类插件）/
+reference/HyperChanger（同类插件）/
+reference/notification-guard（同类插件）/
+reference/LSPosed（框架源码）/
+reference/fanqie-purify（AI开发插件实践）/
+reference/Rain_1.1.5.apk
 
 # tools/ 下二进制目录与 jar（可重新下载/生成）
 tools/platform-tools/
