@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -53,13 +54,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
             // Monet 跟随系统取色（用户明确引入 M3 的目的）：M3 dynamicColorScheme 读取系统壁纸
-            // 动态色的主色作为种子；开启时优先于手选色板。⚠ dynamicLightColorScheme 是
+            // 动态色的主色作为种子；开启时优先于手选色板。⚠ dynamicColorScheme 系列是
             // @Composable——不能在 runCatching/remember 等普通 lambda 中调用（LSPFRIDA 已踩）；
             // API<31 无动态壁纸色→null。
+            // 当前明暗模式单一来源：纯黑判定与下方 Monet 种子取色共用（不重复定义，避免两处漂移）
+            val isDark = when (mode) {
+                ColorSchemeMode.Dark -> true
+                ColorSchemeMode.Light -> false
+                else -> isSystemInDarkTheme()
+            }
             val context = LocalContext.current
             val dynamicSeed: androidx.compose.ui.graphics.Color? =
                 if (wallpaperMonet && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    dynamicLightColorScheme(context).primary
+                    // 暗色种子取自暗色动态调色板（dynamicDarkColorScheme），避免暗色强调色派生自
+                    // 浅色壁纸色系；二者是 @Composable 不能进 remember，保持 composition 内直接
+                    // 调用，切明暗时的一次性重组开销为已知取舍
+                    if (isDark) {
+                        dynamicDarkColorScheme(context).primary
+                    } else {
+                        dynamicLightColorScheme(context).primary
+                    }
                 } else null
             val effectiveSeed = dynamicSeed ?: keyColor
             // Miuix ThemeController 源码实读（LSPFRIDA R2a 注释）：lightColors/darkColors 只在
@@ -89,11 +103,6 @@ class MainActivity : ComponentActivity() {
             // （background/surface/surfaceContainer*/surfaceVariant，对齐 demo --bg:#000/
             // --card:#0C0C0E），onSurface 等文本槽位走 Miuix 暗色默认，黑底上依旧可读；
             // 已知取舍：主色/强调色回退 Miuix 内置暗色默认（不复用 keyColor/Monet 种子色）。
-            val isDark = when (mode) {
-                ColorSchemeMode.Dark -> true
-                ColorSchemeMode.Light -> false
-                else -> isSystemInDarkTheme()
-            }
             MiuixTheme(controller = controller) {
                 if (pureBlack && isDark) {
                     val black = darkColorScheme(

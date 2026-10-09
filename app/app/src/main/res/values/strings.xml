@@ -22,7 +22,7 @@
     <string name="home_status_action_inactive">未检测到框架</string>
     <string name="home_adapted_count_title">适配目标</string>
     <string name="home_enabled_count_title">启用功能</string>
-    <string name="home_enabled_count_format">%1$d/4</string>
+    <string name="home_enabled_count_format">%1$d/%2$d</string>
     <!-- 首页设备信息详情行（对齐 demo Tab1 detaillist 五行：标题+值上下两行，行间分隔线） -->
     <string name="home_detail_system_version">系统版本</string>
     <string name="home_detail_android_version">Android 版本</string>

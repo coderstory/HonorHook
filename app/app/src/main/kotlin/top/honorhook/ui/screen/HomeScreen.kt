@@ -54,8 +54,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 模块状态卡 + 适配目标计数卡 + 启用功能计数卡 + 设备信息详情卡（五行真实数据）。
  * - 状态卡两态（Rain 三态中的 "Not connected / Working"；"Read failed" 态需读取框架信息，
  *   本项目无该读取路径，不做）；
- * - 适配卡数值 = TargetRegistry 静态注册目标数；
- * - 启用卡数值 = HookSettings F1-F4 开启数（n/4，照 FrameworkState 的 StateFlow + collectAsState 模式）；
+ * - 适配卡数值 = TargetRegistry 公开 API 目标组数（按对象去重，4 组与应用 tab 4 行口径一致；不依赖反射，release 混淆安全）；
+ * - 启用卡数值 = HookSettings 功能位开启数与总数（n/N，照 FrameworkState 的 StateFlow + collectAsState 模式）；
  * - 详情卡五行 = 系统版本 / Android 版本 / LSP 版本 / 构建时间 / 设备型号（对齐 demo Tab1 detaillist，
  *   上下两行结构；LSP 版本来自 FrameworkState 框架信息，未绑定显示"未知"）。
  */
@@ -66,7 +66,7 @@ fun HomeScreen() {
     val frameworkName by FrameworkState.frameworkName.collectAsState()
     val frameworkVersion by FrameworkState.frameworkVersion.collectAsState()
     val features by HookSettings.features.collectAsState()
-    val adaptedCount = remember { registeredTargetCount() }
+    val adaptedCount = remember { TargetRegistry.groupedTargetCount() }
     val enabledFeatureCount = features.count { it.value }
 
     // 详情行数据（设备/系统信息静态取一次；LSP 版本随框架绑定状态实时变化）
@@ -115,7 +115,7 @@ fun HomeScreen() {
                     CountCard(
                         icon = MiuixIcons.SelectAll,
                         title = stringResource(R.string.home_enabled_count_title),
-                        count = stringResource(R.string.home_enabled_count_format, enabledFeatureCount),
+                        count = stringResource(R.string.home_enabled_count_format, enabledFeatureCount, features.size),
                     )
                 }
             }
@@ -243,21 +243,6 @@ private fun CountCard(icon: ImageVector, title: String, count: String) {
         )
     }
 }
-
-/**
- * 已注册 hook 目标数（适配目标计数卡数值）。
- * 数值来自 [TargetRegistry]（静态注册表：init 内 register(ThemeStoreHook) 等目标）。
- * 本次重构红线禁止改动 xposed/，且 TargetRegistry 无公开 size API，
- * 故对照其 private targets 反射读取（本工程 minify 关闭、字段名稳定；加载安全：
- * TargetRegistry/<init> 只含字符串与空集合初始化，libxposed API 类在 install() 内才引用）。
- * 日后 xposed 侧若提供公开访问器，此处可换直读。
- */
-private fun registeredTargetCount(): Int = runCatching {
-    val clazz = TargetRegistry::class.java
-    val instance = clazz.getDeclaredField("INSTANCE").apply { isAccessible = true }[null]
-    val targets = clazz.getDeclaredField("targets").apply { isAccessible = true }[instance] as Map<*, *>
-    targets.size
-}.getOrDefault(0)
 
 /**
  * 设备信息详情卡（对齐 demo Tab1 detaillist：五行"上下两行结构"，行间 1dp 分隔线）。

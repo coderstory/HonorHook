@@ -58,11 +58,22 @@ private val UI_TOGGLE_DEFAULTS = mapOf(
  * LSPosed daemon SQLite 落库 → binder 推送到所有 hook 进程）；
  * XposedService 不可用 → 仅写本地 SP（UI 照常可切，只是暂不推送）。
  * hook 侧（xposed 进程）：只读远程 prefs + registerOnSharedPreferenceChangeListener 热监听（LSPosedRemotePreferences）。
+ *
+ * 线程安全：主线程 UI 写（[setEnabled]/[setFeatureEnabled]/[setUiToggle]）与 Binder 回调线程
+ * [syncRemote] 经 [lock] 互斥——StateFlow 读改写原子，不互相覆盖丢写。
+ * 脏键（[pendingRemote]）：service==null 窗口期或远程推送失败的本地编辑以本地为权威，
+ * bind 后 [syncRemote] 补推而非被 daemon 旧值覆盖（防开关回弹、编辑不丢）。
  */
 object HookSettings {
 
     @Volatile
     private var local: SharedPreferences? = null
+
+    /** 互斥锁：保护 [pendingRemote] 与 StateFlow 读改写，UI 写线程与 syncRemote（bind 回调线程）串行化。 */
+    private val lock = Any()
+
+    /** 脏键集合（[lock] 保护）：本地已写、远程未同步成功的 key；syncRemote 时本地为权威补推。 */
+    private val pendingRemote = mutableSetOf<String>()
 
     private val _enabled = MutableStateFlow(false)
     /** 总开关当前值（只读 StateFlow；修改只有 [setEnabled]，与 [syncRemote] 同步覆盖）。 */
@@ -78,54 +89,65 @@ object HookSettings {
 
     /** 必须在首次访问 [enabled]/[features]/[uiToggles]/[setEnabled]/[setFeatureEnabled]/[setUiToggle] 前调用（HookApplication.onCreate）。 */
     fun init(context: Context) {
-        val p = context.applicationContext.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
-        local = p
-        _enabled.value = p.getBoolean(KEY_HOOK_ENABLED, false)
-        // 各功能位按 FEATURE_DEFAULTS 的 per-key 默认值读（F6 默认 false，不能统一用 true 兜底）
-        _features.value = FEATURE_DEFAULTS.mapValues { (key, default) -> p.getBoolean(key, default) }
-        _uiToggles.value = UI_TOGGLE_DEFAULTS.mapValues { (key, _) -> p.getBoolean(key, false) }
+        synchronized(lock) {
+            val p = context.applicationContext.getSharedPreferences(REMOTE_PREFERENCE_GROUP, Context.MODE_PRIVATE)
+            local = p
+            _enabled.value = p.getBoolean(KEY_HOOK_ENABLED, false)
+            // 各功能位按 FEATURE_DEFAULTS 的 per-key 默认值读（F6 默认 false，不能统一用 true 兜底）
+            _features.value = FEATURE_DEFAULTS.mapValues { (key, default) -> p.getBoolean(key, default) }
+            _uiToggles.value = UI_TOGGLE_DEFAULTS.mapValues { (key, _) -> p.getBoolean(key, false) }
+        }
     }
 
     /**
      * 服务绑定后对齐一次：远程为权威（daemon 数据存在则采用），回写本地 + 远程（照 HC DockSettingsStore.syncRemote）。
      * 使 UI 显示与 daemon 持久化数据一致（可能已被其他进程/历史状态写入）。F1-F4 功能位同规则对齐。
+     * 脏键（[pendingRemote]）例外：本地未同步编辑（service==null 窗口期/推送失败）以本地为权威，
+     * 先把本地当前值补推到远程再走对齐——UI 不回弹、编辑不丢。
      */
     fun syncRemote(service: XposedService) {
-        val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
-        val value = if (remote.contains(KEY_HOOK_ENABLED)) {
-            remote.getBoolean(KEY_HOOK_ENABLED, false)
-        } else {
-            _enabled.value
-        }
-        writeBoth(value, remote)
-        // 功能位：远程为权威；daemon 缺失的 key 补写本地当前值（与总开关 writeBoth 语义一致）；
-        // 读远程用 per-key 默认值（F6 默认 false 不能统一用 true 兜底）
-        _features.value = _features.value.mapValues { (key, current) ->
-            if (remote.contains(key)) remote.getBoolean(key, FEATURE_DEFAULTS[key] ?: true) else current
-        }
-        _features.value.forEach { (key, v) ->
-            local?.edit()?.putBoolean(key, v)?.apply()
-            if (!remote.contains(key)) remote.edit().putBoolean(key, v).apply()
-        }
-        // UI 侧开关同规则对齐（远程为权威；daemon 缺失的 key 补写本地当前值）
-        _uiToggles.value = _uiToggles.value.mapValues { (key, current) ->
-            if (remote.contains(key)) remote.getBoolean(key, false) else current
-        }
-        _uiToggles.value.forEach { (key, v) ->
-            local?.edit()?.putBoolean(key, v)?.apply()
-            if (!remote.contains(key)) remote.edit().putBoolean(key, v).apply()
+        synchronized(lock) {
+            val remote = service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+            // 脏键优先补推：本地为权威（用户最新编辑），覆盖 daemon 旧值；补推成功才移除，
+            // 失败的留待下次 bind 再试（远程仍以本地为准，不回弹）
+            pendingRemote.removeAll { key ->
+                runCatching { remote.edit().putBoolean(key, localValueOf(key)).apply() }.isSuccess
+            }
+            val value = if (remote.contains(KEY_HOOK_ENABLED)) {
+                remote.getBoolean(KEY_HOOK_ENABLED, false)
+            } else {
+                _enabled.value
+            }
+            writeBoth(value, remote)
+            // 功能位：远程为权威；daemon 缺失的 key 补写本地当前值（与总开关 writeBoth 语义一致）；
+            // 读远程用 per-key 默认值（F6 默认 false 不能统一用 true 兜底）
+            _features.value = _features.value.mapValues { (key, current) ->
+                if (remote.contains(key)) remote.getBoolean(key, FEATURE_DEFAULTS[key] ?: true) else current
+            }
+            _features.value.forEach { (key, v) ->
+                local?.edit()?.putBoolean(key, v)?.apply()
+                if (!remote.contains(key)) remote.edit().putBoolean(key, v).apply()
+            }
+            // UI 侧开关同规则对齐（远程为权威；daemon 缺失的 key 补写本地当前值）
+            _uiToggles.value = _uiToggles.value.mapValues { (key, current) ->
+                if (remote.contains(key)) remote.getBoolean(key, false) else current
+            }
+            _uiToggles.value.forEach { (key, v) ->
+                local?.edit()?.putBoolean(key, v)?.apply()
+                if (!remote.contains(key)) remote.edit().putBoolean(key, v).apply()
+            }
         }
     }
 
     /**
      * 更新总开关：先写本地（无 service 也能存，UI 自洽），再推远程（照 HC DockSettingsStore.update 双写）。
-     * service 为 null 时降级为纯本地（UI 仍可切，框架恢复后下一次 [syncRemote] 对齐）。
+     * service 为 null 时降级为纯本地（UI 仍可切），记脏键——框架恢复后 [syncRemote] 以本地为权威补推，
+     * 不会被 daemon 旧值覆盖回弹。
      */
     fun setEnabled(enabled: Boolean, service: XposedService?) {
-        _enabled.value = enabled
-        local?.edit()?.putBoolean(KEY_HOOK_ENABLED, enabled)?.apply()
-        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { remote ->
-            remote.edit().putBoolean(KEY_HOOK_ENABLED, enabled).apply()
+        synchronized(lock) {
+            _enabled.value = enabled
+            writeLocalAndRemote(KEY_HOOK_ENABLED, enabled, service)
         }
     }
 
@@ -134,10 +156,9 @@ object HookSettings {
      * hook 侧 intercept 每次现读各自 feature key（总开关仍是上位语义：总关 = 全部放行）。
      */
     fun setFeatureEnabled(key: String, enabled: Boolean, service: XposedService?) {
-        _features.value = _features.value + (key to enabled)
-        local?.edit()?.putBoolean(key, enabled)?.apply()
-        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { remote ->
-            remote.edit().putBoolean(key, enabled).apply()
+        synchronized(lock) {
+            _features.value = _features.value + (key to enabled)
+            writeLocalAndRemote(key, enabled, service)
         }
     }
 
@@ -147,11 +168,34 @@ object HookSettings {
      * 见 ThemeSettingsScreen.applyIconHidden）。
      */
     fun setUiToggle(key: String, enabled: Boolean, service: XposedService?) {
-        _uiToggles.value = _uiToggles.value + (key to enabled)
-        local?.edit()?.putBoolean(key, enabled)?.apply()
-        service?.getRemotePreferences(REMOTE_PREFERENCE_GROUP)?.let { remote ->
-            remote.edit().putBoolean(key, enabled).apply()
+        synchronized(lock) {
+            _uiToggles.value = _uiToggles.value + (key to enabled)
+            writeLocalAndRemote(key, enabled, service)
         }
+    }
+
+    /**
+     * 本地先写 + 远程推送（service != null 时）：
+     * service == null（绑定前/框架进程死亡窗口期）或远程推送抛异常 → 记脏键 [pendingRemote]，
+     * 下次 [syncRemote] 以本地当前值为权威补推（防开关被 daemon 旧值回弹、编辑丢失）。
+     */
+    private fun writeLocalAndRemote(key: String, enabled: Boolean, service: XposedService?) {
+        local?.edit()?.putBoolean(key, enabled)?.apply()
+        if (service == null) {
+            pendingRemote += key
+            return
+        }
+        val pushed = runCatching {
+            service.getRemotePreferences(REMOTE_PREFERENCE_GROUP)
+                .edit().putBoolean(key, enabled).apply()
+        }
+        if (pushed.isFailure) pendingRemote += key
+    }
+
+    /** 脏键的本地当前值（本地为权威；仅在 [lock] 内调用，读改写一致）。 */
+    private fun localValueOf(key: String): Boolean = when (key) {
+        KEY_HOOK_ENABLED -> _enabled.value
+        else -> _features.value[key] ?: _uiToggles.value[key] ?: false
     }
 
     private fun writeBoth(value: Boolean, remote: SharedPreferences) {
