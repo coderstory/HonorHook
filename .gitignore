@@ -1,0 +1,17 @@
+# 本地资产：大体积 / 可再生 / 可重新获取，不进版本库
+system-files/
+reference/
+
+# tools/ 下二进制目录与 jar（可重新下载/生成）
+tools/platform-tools/
+tools/jadx/
+tools/jadx.zip
+tools/apktool.jar
+tools/__pycache__/
+
+# Gradle 构建产物与本地配置
+app/.gradle/
+app/app/build/
+app/build/
+.kotlin/
+local.properties
