@@ -88,7 +88,11 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         loader: ClassLoader,
         mountOne: (T) -> Result,
     ) {
-        checkHostVersionOnce(module)
+        // 自检延后到后台线程：PackageLoadedParam 时机 Application 尚未创建，直查必拿 null；
+        // 挂载首轮全成功时无重试轮，故不能依赖重试驱动（hostVersionChecked 未置位但也没有下一轮）。
+        MountScheduler.postDelayed(1000) {
+            runCatching { checkHostVersionOnce(module) }
+        }
         totalCount = pending.size
         val unresolved = mutableListOf<T>()
         for (task in pending) {
@@ -157,13 +161,14 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
      */
     private fun checkHostVersionOnce(module: XposedModule) {
         if (hostVersionChecked || expectedHostVersion == null) return
-        hostVersionChecked = true
         runCatching {
+            // PackageLoadedParam 时机 Application 往往尚未创建：拿不到就不置位，随下一轮重试再查
             val app = Class.forName("android.app.ActivityThread")
                 .getMethod("currentApplication").invoke(null) as? android.content.Context
-            val actual = app?.packageManager?.getPackageInfo(hostPackage, 0)?.versionName
+                ?: return
+            val actual = app.packageManager.getPackageInfo(hostPackage, 0)?.versionName ?: return
+            hostVersionChecked = true
             when {
-                actual == null -> return
                 actual == expectedHostVersion ->
                     module.log(Log.INFO, TAG, "$hookName 宿主版本与 hook 基线一致: $actual")
                 else -> module.log(
