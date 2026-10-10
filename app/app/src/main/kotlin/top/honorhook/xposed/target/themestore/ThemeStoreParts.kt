@@ -137,9 +137,13 @@ internal fun addForceArg(
 
 // ---------------- 跨文件运行时工具（路由判定 / 反射缓存 / 判据日志） ----------------
 
+/** 下载链路由命中日志节流计数（task.id → 已打印次数）。下载是用户动作、可重复触发，不节流会刷屏。 */
+private val routeLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
 /**
  * 路由激活判定：uriEmptyRoute=false 时恒激活；=true 时额外要求 DownloadInfo.uri 为空才激活
- * （非空放行；uri 读取失败按版本漂移放行，安全默认）。触发时输出 INFO 判据日志（不受 DEBUG_LOGGING 门控）。
+ * （非空放行；uri 读取失败按版本漂移放行，安全默认）。触发时输出 INFO 判据日志
+ * （每 task 前 2 次，不受 DEBUG_LOGGING 门控 —— 与其余判据日志同一节流口径）。
  */
 internal fun routeActive(
     chain: XposedInterface.Chain,
@@ -149,13 +153,18 @@ internal fun routeActive(
     if (!task.uriEmptyRoute) return true
     val blank = isUriBlank(chain, task)
     if (blank) {
-        module.log(
-            Log.INFO, MountEngine.TAG,
-            "theme-download-chain 路由触发: ${task.id}（DownloadInfo.uri 为空 → ${actionDesc(task)}）",
-        )
+        val n = routeLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
+        if (n <= ROUTE_LOG_PER_TASK) {
+            module.log(
+                Log.INFO, MountEngine.TAG,
+                "theme-download-chain 路由触发: ${task.id}（DownloadInfo.uri 为空 → ${actionDesc(task)}）",
+            )
+        }
     }
     return blank
 }
+
+private const val ROUTE_LOG_PER_TASK = 2
 
 /**
  * 条件路由的 uri 判空：按 [UriOwner] 取 DownloadInfo 实例，反射读 public String uri。四分支：

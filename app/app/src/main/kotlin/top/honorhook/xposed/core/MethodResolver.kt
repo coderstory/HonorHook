@@ -1,7 +1,6 @@
 package top.honorhook.xposed.core
 
 import android.util.Log
-import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
@@ -10,11 +9,25 @@ object MethodResolver {
 
     private const val TAG = "HonorHook"
 
-    /** DexKit 兜底命中缓存（key = "$className#$methodName#${paramCount}_${returnType}"）。 */
-    private val dexkitHits = ConcurrentHashMap<String, Method>()
+    /**
+     * DexKit 兜底命中缓存：**按 ClassLoader 分桶**（弱键，不阻止 loader 被回收）。
+     *
+     * 分桶的理由：同一次特征查询在不同 ClassLoader 下可能命中不同类，混在一个平表里会串味；
+     * 弱键的理由：缓存持有 Method ⇒ Class ⇒ ClassLoader 强引用链，进程内 loader 若被回收会泄漏。
+     */
+    private val hitBuckets = java.util.WeakHashMap<ClassLoader, ConcurrentHashMap<String, Method>>()
 
     /** DexKit 兜底未命中 key 集合（null 结果也缓存；ConcurrentHashMap 禁 null value，未命中单记）——命中直返 null，免重复磁盘扫描。 */
-    private val dexkitMisses = ConcurrentHashMap.newKeySet<String>()
+    private val missBuckets = java.util.WeakHashMap<ClassLoader, MutableSet<String>>()
+
+    private fun hitBucket(loader: ClassLoader): ConcurrentHashMap<String, Method> =
+        synchronized(hitBuckets) { hitBuckets.getOrPut(loader) { ConcurrentHashMap() } }
+
+    private fun missBucket(loader: ClassLoader): MutableSet<String> = synchronized(missBuckets) {
+        missBuckets.getOrPut(loader) {
+            java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+        }
+    }
 
     /**
      * 解析目标方法（双轨；缓存语义见类注释）。
@@ -39,10 +52,27 @@ object MethodResolver {
     ): Method? {
         // 第一轨：直连反射（照 Rain ck0.S 语义：loadClass + 按名匹配，异常/查不到只记日志转兜底；不缓存——重试靠它赌类稍后可加载）
         val direct = runCatching {
-            loader.loadClass(className).declaredMethods.firstOrNull { m ->
+            val byName = loader.loadClass(className).declaredMethods.filter { m ->
                 m.name == methodName &&
-                    (paramCount == null || m.parameterCount == paramCount) &&
+                    matchesParameters(m, paramCount, paramTypes) &&
                     (returnType == null || m.returnType.name == returnType)
+            }
+            // 桥接/合成方法与真实方法同签名，会把"唯一命中"判定搅成歧义 ⇒ 优先只看真实方法；
+            // 仅当没有任何真实方法时才回退到合成方法（如协变返回值的桥接实现）。
+            val candidates = byName.filter { !it.isSynthetic && !it.isBridge }.ifEmpty { byName }
+            when (candidates.size) {
+                0 -> null
+                1 -> candidates[0]
+                else -> {
+                    // 同参数量、同返回值的重载且无 paramTypes 锚点：保留 firstOrNull 的既有权衡
+                    // （不改变已可用目标的行为），但不再静默 —— 挂错方法是最难查的一类失效。
+                    Log.w(
+                        TAG,
+                        "直连反射命中 ${candidates.size} 个同名同参数量方法（$className#$methodName），" +
+                            "paramTypes 锚点不足，取第一个: ${DexKitHelper.signatureOf(candidates[0])}",
+                    )
+                    candidates[0]
+                }
             }
         }.onFailure { t ->
             Log.w(TAG, "直连反射未命中 $className#$methodName（${t::class.java.simpleName}），转 DexKit 兜底", t)
@@ -75,8 +105,10 @@ object MethodResolver {
             append("|cs=").append(declaredClassStrings?.joinToString(","))
             append("|cf=").append(declaredClassFieldTypes?.joinToString(","))
         }
-        if (dexkitMisses.contains(cacheKey)) return null
-        dexkitHits[cacheKey]?.let { return it }
+        val missSet = missBucket(loader)
+        if (missSet.contains(cacheKey)) return null
+        val hitMap = hitBucket(loader)
+        hitMap[cacheKey]?.let { return it }
         val hit = DexKitHelper.withBridge(apk) { bridge ->
             DexKitHelper.findMethodByFeatures(
                 bridge = bridge,
@@ -91,15 +123,39 @@ object MethodResolver {
                 declaredClassFieldTypes = declaredClassFieldTypes,
             ).firstOrNull() // 兜底语义：类名可能已被混淆重映射，按方法特征命中即采纳
         }
-        if (hit != null) dexkitHits[cacheKey] = hit else dexkitMisses += cacheKey
+        if (hit != null) hitMap[cacheKey] = hit else missSet += cacheKey
         return hit
     }
 
     /**
-     * 解析目标构造器（仅直连；构造器场景 DexKit 收益低未提供——玻璃 ctor 任务直连已命中基线）。
-     * declareConstructors 解析不触发类初始化（与 loadClass 同纪律）。
+     * 参数匹配：[paramTypes] 非空时按**参数类型名序列**精确匹配（可消解同 arity 的重载，
+     * 如 `SystemUiHook` 的 `updateSubs(List)` / `updateSubs(MobileCallBack)`），
+     * 为空时退化为按 [paramCount] 匹配。
+     *
+     * 类型名比较前先按 [PRIMITIVE_ALIASES] 归一：DexHint 里写 `int` 而实际声明是 `java.lang.Integer`
+     * （或反之）时不该判为不匹配 —— 否则该挂载点会从"直连命中"退化成"未解析"，
+     * 白吃一轮重试再交给 DexKit（而 DexKit 用的是同一份特征，同样是空转）。
      */
-    fun resolveCtor(loader: ClassLoader, className: String, paramCount: Int): Constructor<*>? = runCatching {
-        loader.loadClass(className).declaredConstructors.firstOrNull { it.parameterCount == paramCount }
-    }.getOrNull()
+    private fun matchesParameters(m: Method, paramCount: Int?, paramTypes: List<String>?): Boolean {
+        if (!paramTypes.isNullOrEmpty()) {
+            val actual = m.parameterTypes
+            return actual.size == paramTypes.size &&
+                actual.indices.all { canonicalTypeName(actual[it].name) == canonicalTypeName(paramTypes[it]) }
+        }
+        return paramCount == null || m.parameterCount == paramCount
+    }
+
+    /** 基本类型与其包装类型的等价归一（`int` / `java.lang.Integer` 视为同一类型）。 */
+    private fun canonicalTypeName(name: String): String = PRIMITIVE_ALIASES[name] ?: name
+
+    private val PRIMITIVE_ALIASES = mapOf(
+        "java.lang.Integer" to "int",
+        "java.lang.Long" to "long",
+        "java.lang.Boolean" to "boolean",
+        "java.lang.Double" to "double",
+        "java.lang.Float" to "float",
+        "java.lang.Short" to "short",
+        "java.lang.Byte" to "byte",
+        "java.lang.Character" to "char",
+    )
 }

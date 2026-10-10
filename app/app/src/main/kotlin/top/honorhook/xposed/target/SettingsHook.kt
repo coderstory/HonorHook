@@ -2,7 +2,6 @@ package top.honorhook.xposed.target
 
 import android.util.Log
 import android.view.View
-import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
@@ -66,16 +65,12 @@ object SettingsHook : TargetHook {
         override val dex: DexHint? = null,
     ) : MountEngine.Task
 
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
-        val method = engine.resolveTask(task, module, loader) ?: return MountEngine.Result.NOT_RESOLVED
-        return runCatching {
-            val builder = module.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .setId(task.id)
+    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
             when (task.kind) {
                 // after 语义：原 Q3 跑完（全部业务门控保留副作用）后，强制启用停用按钮并补挂点击监听
                 //（原逻辑仅在最终 enabled 时挂监听）。按钮视图按 id 名运行时查找。
-                MountKind.ENABLE_DISABLE_BUTTON -> builder.intercept { chain ->
+                MountKind.ENABLE_DISABLE_BUTTON -> {
                     chain.proceed()
                     runCatching {
                         val self = chain.thisObject
@@ -91,19 +86,15 @@ object SettingsHook : TargetHook {
                         btn.isEnabled = true
                         val listener = self as? android.view.View.OnClickListener
                         if (listener != null) btn.setOnClickListener(listener)
-                        module.log(Log.INFO, MountEngine.TAG, "settings-hook 生效: ${task.id} — ${task.description}")
+                        engine.judge(module, task, JUDGE_PREFIX)
                     }.onFailure { t ->
                         module.log(Log.WARN, MountEngine.TAG, "停用按钮启用失败（放行原状态）: ${t.message}")
                     }
                     null
                 }
             }
-        }.fold(
-            onSuccess = { MountEngine.Result.OK },
-            onFailure = { t ->
-                module.log(Log.WARN, MountEngine.TAG, "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t)
-                MountEngine.Result.FAILED
-            },
-        )
-    }
+        }
+
+    /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
+    private const val JUDGE_PREFIX = "settings-hook"
 }

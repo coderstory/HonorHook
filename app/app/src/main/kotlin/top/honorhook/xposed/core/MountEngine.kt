@@ -11,7 +11,7 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     /** 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。 */
     enum class Result { OK, FAILED, NOT_RESOLVED }
 
-/** DexKit 兜底特征声明 —— 用于**混淆名目标**（类名/方法名随时可能被 R8 重映射）。 */
+    /** DexKit 兜底特征声明 —— 用于**混淆名目标**（类名/方法名随时可能被 R8 重映射）。 */
     class DexHint(
         val strings: List<String>? = null,
         val paramTypes: List<String>? = null,
@@ -39,6 +39,8 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     private var okCount = 0
     private var totalCount = 0
     private val failedIds = mutableListOf<String>()
+    /** 判据日志节流计数（task.id → 已打印次数）。 */
+    private val judgeCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     /** 目标 APK 磁盘路径（[begin] 期写入，[MethodResolver] 第二轨 DexKit 兜底用；null 时跳过）。 */
     private var apkPath: String? = null
     /** hook 编写时的宿主版本基线（[begin] 期写入；非空则首轮挂载前做一次版本自检）。 */
@@ -135,6 +137,46 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     }
 
     /**
+     * 单任务挂载统一模板：解析（[resolveTask]）→ 挂 [PROTECTIVE] → 结果分级。
+     *
+     * 各目标只需提供 [intercept]（kind 分派逻辑），解析、异常兜底与分级由本模板统一负责：
+     * 挂载异常记 WARN 并返回 [Result.FAILED]（重试无意义），不阻断同批其他任务。
+     */
+    fun mount(
+        task: Task,
+        module: XposedModule,
+        loader: ClassLoader,
+        intercept: XposedInterface.Hooker,
+    ): Result {
+        val method = resolveTask(task, module, loader) ?: return Result.NOT_RESOLVED
+        return runCatching {
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId(task.id)
+                .intercept(intercept)
+        }.fold(
+            onSuccess = { Result.OK },
+            onFailure = { t ->
+                module.log(Log.WARN, TAG, "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t)
+                Result.FAILED
+            },
+        )
+    }
+
+    /**
+     * 判据日志（每任务前 [JUDGE_LOG_PER_TASK] 次；真机核对"功能已生效"用，不受 [DEBUG_LOGGING] 门控）。
+     * @param prefix 目标侧日志前缀（如 `installer-hook`），沿用各历史口径便于按前缀过滤。
+     * @param detail 目标侧补充数据（如"剔除副卡后 1/2 卡"），非空时附在行尾。
+     */
+    fun judge(module: XposedModule, task: Task, prefix: String, detail: String? = null) {
+        val n = judgeCount.merge(task.id, 1) { a, b -> a + b } ?: 1
+        if (n <= JUDGE_LOG_PER_TASK) {
+            val suffix = if (detail.isNullOrEmpty()) "" else "（$detail）"
+            module.log(Log.INFO, TAG, "$prefix 生效: ${task.id} — ${task.description}$suffix")
+        }
+    }
+
+    /**
      * 宿主版本自检（每进程一次）：hook 挂载点以特定宿主版本反编译实证，宿主 OTA 后混淆名/签名可能漂移——
      * 版本不一致时打 WARN 提醒"判据以 installed N/M 为准"。拿不到 Context（宿主 Application 未起）则跳过。
      */
@@ -164,6 +206,9 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         const val MAX_RETRY_ROUNDS = 2
         const val RETRY_DELAY_MS = 500L
         const val RETRY_FINAL_DELAY_MS = 2000L
+
+        /** 判据日志每任务打印上限（超出的命中不再打，防高频读点刷屏）。 */
+        const val JUDGE_LOG_PER_TASK = 2
 
         /** 挂载细节日志门控（默认关；汇总与判据日志不受门控）。 */
         const val DEBUG_LOGGING = false

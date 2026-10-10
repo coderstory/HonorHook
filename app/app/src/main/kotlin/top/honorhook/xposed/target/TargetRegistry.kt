@@ -4,7 +4,7 @@ import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 
 /**
- * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；docs/rain-hook-architecture.md §1.2）。
+ * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；`.claude/skills/lsposed-hook-expert/references/rain-dexkit-and-mount-patterns.md`）。
  * [find] 按包名查表；[installed] 是完成首次 install 的**目标对象**集合——对象级判定：
  * 同一对象注册多个包名键时共享安装状态，防别名包共享进程双装。
  */
@@ -24,8 +24,8 @@ object TargetRegistry {
         register(SystemUiHook)
     }
 
-    /** 注册目标（同包重复注册以最后一次为准）。 */
-    fun register(target: TargetHook) {
+    /** 注册目标（同包重复注册以最后一次为准；仅 [init] 期静态注册使用）。 */
+    private fun register(target: TargetHook) {
         targets[target.packageName] = target
     }
 
@@ -40,9 +40,4 @@ object TargetRegistry {
     fun markInstalled(target: TargetHook) {
         installed += target
     }
-
-    /**
-     * 按对象去重的目标组数（= 应用 tab 行数口径；多键目标同 delegate 稳定归 1 组，与装载顺序无关）。
-     */
-    fun groupedTargetCount(): Int = targets.values.toSet().size
 }

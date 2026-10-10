@@ -1,13 +1,13 @@
 package top.honorhook.xposed.target
 
 import android.util.Log
-import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.data.RemoteConfig
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 荣耀 SystemUI `com.android.systemui`（基线 17.0.0.1）：隐藏副卡（SIM2 卡槽）状态栏信号图标。
@@ -60,6 +60,8 @@ object SystemUiHook : TargetHook {
                 returnType = "void",
                 id = "systemui:mobileDataController.updateSubs",
                 description = "U1 副卡(SIM2)状态栏信号图标隐藏（updateSubs 入参剔除 slotId==1，≥2 卡才剔；状态栏/通知头/锁屏 cluster 同源生效）",
+                // 参数类型锚点：交给共享 MethodResolver 做重载消歧（此前本目标手写解析绕开了 DexKit 兜底与失败分级）
+                dex = DexHint(paramTypes = listOf("java.util.List")),
             ),
         )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
@@ -72,51 +74,48 @@ object SystemUiHook : TargetHook {
         override val returnType: String,
         override val id: String,
         override val description: String,
+        override val dex: DexHint? = null,
     ) : MountEngine.Task
 
-    /** 判据日志节流（前 2 次）。 */
-    private val judgeCount = AtomicInteger(0)
+    /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
+    private const val JUDGE_PREFIX = "systemui-hook"
 
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
-        // 按参数类型消歧（见类注释重载说明）；未命中走 NOT_RESOLVED 重试，与 engine.resolveTask 同语义
-        val method = runCatching {
-            loader.loadClass(task.className).declaredMethods.firstOrNull {
-                it.name == task.methodName &&
-                    it.parameterCount == 1 &&
-                    it.parameterTypes[0] == java.util.List::class.java
-            }
-        }.getOrNull() ?: run {
-            module.log(Log.WARN, MountEngine.TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
-            return MountEngine.Result.NOT_RESOLVED
-        }
-        return runCatching {
-            module.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .setId(task.id)
-                .intercept { chain ->
-                    val orig = runCatching { chain.getArg(0) as? List<*> }.getOrNull()
-                        ?: return@intercept chain.proceed()
-                    if (orig.size < 2) return@intercept chain.proceed()
-                    val kept = orig.filter { sub ->
-                        val slot = sub?.let { runCatching { it.javaClass.getField("slotId").getInt(it) }.getOrNull() }
-                        slot != HIDDEN_SLOT_ID
+    /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
+    private val unreadableWarned = AtomicBoolean(false)
+
+    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
+            val orig = runCatching { chain.getArg(0) as? List<*> }.getOrNull()
+            if (orig == null || orig.size < 2) {
+                chain.proceed()
+            } else {
+                var unreadable = 0
+                val kept = orig.filter { sub ->
+                    val slot = sub?.let {
+                        runCatching { it.javaClass.getField("slotId").getInt(it) }.getOrNull()
                     }
-                    if (kept.size == orig.size) return@intercept chain.proceed()
-                    if (judgeCount.incrementAndGet() <= 2) {
-                        module.log(Log.INFO, MountEngine.TAG, "systemui-hook 生效: ${task.id}（剔除副卡后 ${kept.size}/${orig.size} 卡）")
-                    }
+                    if (slot == null) unreadable++
+                    slot != HIDDEN_SLOT_ID
+                }
+                if (kept.size == orig.size) {
+                    // 一个都没剔掉：要么本来只有主卡（正常），要么 slotId 取不到（字段非 public / 版本漂移）。
+                    // 后者是静默 no-op —— 判据行照打 installed 1/1 却毫无效果，必须留痕才排得动。
+                    if (unreadable > 0) warnUnreadableOnce(module)
+                    chain.proceed()
+                } else {
+                    engine.judge(module, task, JUDGE_PREFIX, "剔除副卡后 ${kept.size}/${orig.size} 卡")
                     // 传过滤副本：宿主内部只逐元素拷贝进 mSubscriptionInfoList，不持有入参引用，副本安全
                     chain.proceedWith(chain.thisObject, arrayOf(kept))
                 }
-        }.fold(
-            onSuccess = { MountEngine.Result.OK },
-            onFailure = { t ->
-                module.log(
-                    Log.WARN, MountEngine.TAG,
-                    "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t,
-                )
-                MountEngine.Result.FAILED
-            },
-        )
+            }
+        }
+
+    private fun warnUnreadableOnce(module: XposedModule) {
+        if (unreadableWarned.compareAndSet(false, true)) {
+            module.log(
+                Log.WARN, MountEngine.TAG,
+                "systemui-hook 未生效：SubscriptionModel.slotId 字段不可读（非 public 或版本漂移），副卡图标未剔除",
+            )
+        }
     }
 }

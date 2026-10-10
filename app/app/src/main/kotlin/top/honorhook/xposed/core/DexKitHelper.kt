@@ -75,8 +75,12 @@ object DexKitHelper {
                 Log.e(TAG, "DexKitBridge.create 失败: $apkPath", t)
                 return null
             }
+            // 旧桥的 native 句柄不随 GC 立即释放：apkPath 变化时显式关掉。
+            // （进程内目标 APK 恒定，正常路径几乎不会走到这里。）
+            val previous = cachedBridge
             cachedBridge = bridge
             cachedBridgeApkPath = apkPath
+            if (previous != null) runCatching { previous.close() }
             return bridge
         }
     }

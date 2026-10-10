@@ -1,7 +1,5 @@
 package top.honorhook.xposed.target
 
-import android.util.Log
-import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
@@ -74,37 +72,14 @@ object LauncherCardTitleHook : TargetHook {
         override val description: String,
     ) : MountEngine.Task
 
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
-        val method = engine.resolveTask(task, module, loader) ?: return MountEngine.Result.NOT_RESOLVED
-        return runCatching {
-            module.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .setId(task.id)
-                .intercept { _ ->
-                    logJudge(module, task)
-                    // 不 proceed、不改 SP：直接对 ITheme 出口返回 true（决定卡片标题空态）。
-                    // 图标名走 HiddenTitleManager 另一条读链，不受此处影响。
-                    true
-                }
-        }.fold(
-            onSuccess = { MountEngine.Result.OK },
-            onFailure = { t ->
-                module.log(
-                    Log.WARN, MountEngine.TAG,
-                    "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t,
-                )
-                MountEngine.Result.FAILED
-            },
-        )
-    }
-
-    private val judgeLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
-
-    /** 判据日志节流（每 task 前 2 次；真机核对「卡片标题已隐藏」用）。 */
-    private fun logJudge(module: XposedModule, task: MountTask) {
-        val n = judgeLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
-        if (n <= 2) {
-            module.log(Log.INFO, MountEngine.TAG, "launcher-hook 生效: ${task.id} — ${task.description}")
+    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { _ ->
+            engine.judge(module, task, JUDGE_PREFIX)
+            // 不 proceed、不改 SP：直接对 ITheme 出口返回 true（决定卡片标题空态）。
+            // 图标名走 HiddenTitleManager 另一条读链，不受此处影响。
+            true
         }
-    }
+
+    /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
+    private const val JUDGE_PREFIX = "launcher-hook"
 }

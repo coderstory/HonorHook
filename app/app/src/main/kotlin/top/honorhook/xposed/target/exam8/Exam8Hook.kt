@@ -187,47 +187,33 @@ object Exam8Hook : TargetHook {
         pending += MountTask(MountKind.CONDITIONAL, className, methodName, paramCount, returnType, value, matchArg, id, description)
     }
 
-    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数构造 CONST / CONDITIONAL 的 intercept）。 */
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
-        val method = engine.resolveTask(task, module, loader) ?: return MountEngine.Result.NOT_RESOLVED
-        return runCatching {
-            module.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .setId(task.id)
-                .intercept { chain ->
-                    // CONDITIONAL：参数未命中则放行原方法（只短路目标特权位，不误伤其他判定）
-                    if (task.kind == MountKind.CONDITIONAL) {
-                        val arg0 = chain.args.firstOrNull() as? Int
-                        if (arg0 != task.matchArg) return@intercept chain.proceed()
-                    }
-                    logJudge(module, task)
-                    if (DEBUG) {
-                        // 诊断原值：仅每个 task 首次命中时取一次（节流，避免列表滚动刷屏）
-                        logOrigOnce(module, task, chain)
-                    }
-                    task.value
+    /**
+     * 单个挂载任务执行：CONST / CONDITIONAL 的 intercept 逻辑交给共享 [MountEngine.mount]
+     * （解析 / 异常兜底 / 结果分级都在那边）。
+     */
+    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
+            // CONDITIONAL：参数未命中则放行原方法（只短路目标特权位，不误伤其他判定）
+            val missed = task.kind == MountKind.CONDITIONAL &&
+                (chain.args.firstOrNull() as? Int) != task.matchArg
+            if (missed) {
+                chain.proceed()
+            } else {
+                engine.judge(module, task, JUDGE_PREFIX)
+                if (DEBUG) {
+                    // 诊断原值：仅每个 task 首次命中时取一次（节流，避免列表滚动刷屏）
+                    logOrigOnce(module, task, chain)
                 }
-        }.fold(
-            onSuccess = { MountEngine.Result.OK },
-            onFailure = { t ->
-                module.log(Log.WARN, MountEngine.TAG, "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t)
-                MountEngine.Result.FAILED
-            },
-        )
-    }
-
-    /** 诊断日志开关（默认开：仅每 task 首次命中打原值，收静音后仍可核对真实档位编码）。 */
-    private const val DEBUG = true
-    private val judgeLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
-    private val origLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
-
-    /** 判据日志节流（每 task 前 2 次；真机核对「超级会员已解锁」用，不受 DEBUG 门控）。 */
-    private fun logJudge(module: XposedModule, task: MountTask) {
-        val n = judgeLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
-        if (n <= 2) {
-            module.log(Log.INFO, MountEngine.TAG, "exam8-hook 生效: ${task.id} — ${task.description}")
+                task.value
+            }
         }
-    }
+
+    /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
+    private const val JUDGE_PREFIX = "exam8-hook"
+
+    /** 原值诊断开关（默认关；置 true 时每 task 首次命中多付一次 proceed 打原值，核对档位编码用）。 */
+    private const val DEBUG = false
+    private val origLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** 原值诊断节流（每 task 仅首次命中取一次原值；后续命中直接放行不取原值，省日志与 proceed 开销）。 */
     private fun logOrigOnce(module: XposedModule, task: MountTask, chain: XposedInterface.Chain) {

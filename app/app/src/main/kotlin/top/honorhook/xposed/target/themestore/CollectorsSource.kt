@@ -10,7 +10,7 @@ import top.honorhook.xposed.data.CloudSwitchTable
 
 /** F2 下载链（H1/H2b/W1）+ 云控统一读点 + 服务端数据源头裁剪（S1 槽位 / S2 底部 tab）及其运行时实现。 */
 
-/** H1/H2b：空 URL 付费项 → **VIP 下载通道**（修"下载永远 0%"）。依据见 design.md §三 H1/H2b + §十。 */
+/** H1/H2b：空 URL 付费项 → **VIP 下载通道**（修"下载永远 0%"）。依据见 docs/theme-store.md §三 H1/H2b + §十。 */
 internal fun collectDownloadChainHooks(pending: MutableList<MountTask>) {
     pending += MountTask(
         kind = MountKind.CONST,
@@ -191,11 +191,28 @@ internal fun pruneSlotPayload(orig: Any?, module: XposedModule): List<*>? {
 
 // ---------------- S2 运行时实现：BottomTabConfigs 出口裁剪 ----------------
 
+/**
+ * 底部 tab 取值失败（字段可见性 / 版本漂移）的一次性留痕标志。
+ *
+ * 没有这行的话，"installed N/M 全绿"与"tab 没裁掉"会同时成立，排查时无从下手。
+ */
+private val unreadableTabIdWarned = java.util.concurrent.atomic.AtomicBoolean(false)
+
+private fun warnUnreadableTabIdOnce(module: XposedModule, where: String) {
+    if (unreadableTabIdWarned.compareAndSet(false, true)) {
+        module.log(
+            Log.WARN, TAG,
+            "底部 tab 裁剪未生效（$where）：BottomTabConfigs.getBottomTabId() 取值失败（非 public 或版本漂移），放行原配置",
+        )
+    }
+}
+
 /** 出口裁剪：按 `BottomTabFilter` 表剔掉 VIP / 福利 tab。 */
 internal fun pruneBottomTabPayload(orig: Any?, module: XposedModule): List<*>? {
     val list = orig as? List<*> ?: return null
     if (list.isEmpty()) return null
     var changed = false
+    var unreadable = 0
     val out = ArrayList<Any>(list.size)
     val pruned = ArrayList<BottomTabFilter.Rule>()
     for (item in list) {
@@ -210,9 +227,13 @@ internal fun pruneBottomTabPayload(orig: Any?, module: XposedModule): List<*>? {
             pruned += rule
             continue
         }
+        if (id == null) unreadable++
         out.add(item)
     }
-    if (!changed) return null
+    if (!changed) {
+        if (unreadable > 0) warnUnreadableTabIdOnce(module, "S2 服务端配置出口")
+        return null
+    }
     if (out.size < BottomTabFilter.MIN_LIST_SIZE) {
         module.log(
             Log.WARN, TAG,
@@ -282,16 +303,21 @@ internal fun pruneTabStateFlowBeforeCreateTabs(chain: XposedInterface.Chain, mod
         val cur = flow.javaClass.getMethod("getValue").invoke(flow) as? List<*> ?: return
         val out = ArrayList<Any>(cur.size)
         var changed = false
+        var unreadable = 0
         for (item in cur) {
             if (item == null) continue
             val id = (reflectGet(item, "getBottomTabId") as? Number)?.toInt()
             if (id != null && BottomTabFilter.ruleFor(id) != null) {
                 changed = true
             } else {
+                if (id == null) unreadable++
                 out.add(item)
             }
         }
-        if (!changed) return
+        if (!changed) {
+            if (unreadable > 0) warnUnreadableTabIdOnce(module, "S2b createTabs 前置")
+            return
+        }
         if (out.size < BottomTabFilter.MIN_LIST_SIZE) {
             module.log(Log.WARN, TAG, "底部 tab 前置裁剪放弃：裁后仅 ${out.size} 项，放行原配置")
             return

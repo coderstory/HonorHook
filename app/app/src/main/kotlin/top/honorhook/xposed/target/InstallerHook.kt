@@ -1,7 +1,6 @@
 package top.honorhook.xposed.target
 
 import android.util.Log
-import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
@@ -271,7 +270,7 @@ object InstallerHook : TargetHook {
 
     /**
      * 挂载任务类型：[CONST] 常量短路（命中即返回强制值，不调原方法）；
-     * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，AI-lsposed-temlate SKILL.md:102 实证）；
+     * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，`.cursor/skills/libxposed-api/SKILL.md` 实证）；
      * [CHECK_BYPASS] 安全检测分发器短路（自构造"通过"结果回调宿主，失败放行原方法）；
      * [FINGERPRINT_BYPASS] 指纹校验直接通过（回调 c()+a(true)，失败放行原方法）。
      */
@@ -321,18 +320,13 @@ object InstallerHook : TargetHook {
         )
     }
 
-    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 kind 分派的 intercept 构造）。 */
+    /** 单个挂载任务执行：本函数只产出 kind 分派的 intercept 逻辑，解析/异常/分级交给共享 [MountEngine.mount]。 */
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
-        val method = engine.resolveTask(task, module, loader)
-            ?: return MountEngine.Result.NOT_RESOLVED
-        return runCatching {
-            val builder = module.hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .setId(task.id)
+        val result = engine.mount(task, module, loader) { chain ->
             when (task.kind) {
                 // 常量短路：命中即返回强制值（List 类值每次新建实例，避免共享可变集合被调用方改写）
-                MountKind.CONST -> builder.intercept { chain ->
-                    logJudge(module, task)
+                MountKind.CONST -> {
+                    engine.judge(module, task, JUDGE_PREFIX)
                     val v = task.value
                     if (v is Collection<*>) {
                         // 集合类强制值每次新建实例（避免共享可变集合被调用方改写）
@@ -342,12 +336,12 @@ object InstallerHook : TargetHook {
                     }
                 }
                 // void 空实现阻断（不调原方法）
-                MountKind.BLOCK -> builder.intercept { chain ->
-                    logJudge(module, task)
+                MountKind.BLOCK -> {
+                    engine.judge(module, task, JUDGE_PREFIX)
                     null
                 }
                 // 安全检测分发器短路：不调原方法，主线程回吐"通过"结果；准备失败放行原方法（不死锁）
-                MountKind.CHECK_BYPASS -> builder.intercept { chain ->
+                MountKind.CHECK_BYPASS -> {
                     val delivered = runCatching {
                         val callback = chain.args?.getOrNull(1) ?: return@runCatching false
                         val self = chain.thisObject
@@ -368,14 +362,14 @@ object InstallerHook : TargetHook {
                         true
                     }.getOrDefault(false)
                     if (delivered) {
-                        logJudge(module, task)
+                        engine.judge(module, task, JUDGE_PREFIX)
                         null
                     } else {
                         chain.proceed()
                     }
                 }
                 // 指纹校验直接通过：回调 c()（清待决弹窗）+ a(true)（判定通过），不调原方法；失败放行
-                MountKind.FINGERPRINT_BYPASS -> builder.intercept { chain ->
+                MountKind.FINGERPRINT_BYPASS -> {
                     val ok = runCatching {
                         val cb = chain.args?.getOrNull(1) ?: return@runCatching false
                         val cMethod = cb.javaClass.methods.firstOrNull { it.name == "c" && it.parameterTypes.isEmpty() }
@@ -389,40 +383,26 @@ object InstallerHook : TargetHook {
                         true
                     }.getOrDefault(false)
                     if (ok) {
-                        logJudge(module, task)
+                        engine.judge(module, task, JUDGE_PREFIX)
                         null
                     } else {
                         chain.proceed()
                     }
                 }
             }
-        }.fold(
-            onSuccess = {
-                if (MountEngine.DEBUG_LOGGING) {
-                    val verb = when (task.kind) {
-                        MountKind.CONST -> "常返"
-                        MountKind.BLOCK -> "空实现阻断"
-                        MountKind.CHECK_BYPASS -> "检测短路直通"
-                        MountKind.FINGERPRINT_BYPASS -> "指纹直通"
-                    }
-                    module.log(Log.INFO, MountEngine.TAG, "hook 已挂载: ${task.description} → $verb ${task.value ?: "null"}")
-                }
-                MountEngine.Result.OK
-            },
-            onFailure = { t ->
-                module.log(Log.WARN, MountEngine.TAG, "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t)
-                MountEngine.Result.FAILED
-            },
-        )
-    }
-
-    /** 判据日志节流（每 task 前 2 次；真机核对"清净化已生效"用，不受 DEBUG_LOGGING 门控）。 */
-    private val judgeLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
-
-    private fun logJudge(module: XposedModule, task: MountTask) {
-        val n = judgeLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
-        if (n <= 2) {
-            module.log(Log.INFO, MountEngine.TAG, "installer-hook 生效: ${task.id} — ${task.description}")
         }
+        if (result == MountEngine.Result.OK && MountEngine.DEBUG_LOGGING) {
+            val verb = when (task.kind) {
+                MountKind.CONST -> "常返"
+                MountKind.BLOCK -> "空实现阻断"
+                MountKind.CHECK_BYPASS -> "检测短路直通"
+                MountKind.FINGERPRINT_BYPASS -> "指纹直通"
+            }
+            module.log(Log.INFO, MountEngine.TAG, "hook 已挂载: ${task.description} → $verb ${task.value ?: "null"}")
+        }
+        return result
     }
+
+    /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
+    private const val JUDGE_PREFIX = "installer-hook"
 }
