@@ -89,6 +89,13 @@ miuix 常用组件：`Scaffold` / `SmallTopAppBar` / `Card` / `Button` / `Naviga
 
 ## 六、adb 与设备操作
 
+- **🚫 绝对禁止重启手机（`adb reboot` / `reboot` 任何形态）。** 2026-10-10 用户明令：重启必须由用户自己执行并事先知晓；
+  AI 违反一次（未确认直接 reboot 验证 system hook）。需要重启才能生效的验证（如 system_server hook）一律**停下来告知用户**，等用户自己重启并说"重启完了"再继续。
+- 同理禁止：恢复出厂、`pm uninstall` 系统应用、擦除数据等破坏性/难回退的设备操作——一律先征求确认。
+- **🚫 禁止在用户手机上直接"实测"未验证 hook 的破坏性效果**（如实际停用/卸载管控应用、验证强停是否生效）。
+  2026-10-10 用户明令：真机是用户的日常主力机，一旦搞坏无法开机/无法使用，损失不可承受。
+  AI 的职责边界 = 写代码 + 构建通过 + 给出**用户自行执行**的验证命令清单与预期结果；执行与否、何时执行由用户决定。
+
 - adb 路径：`tools/platform-tools/adb.exe`（v37.0.1，用户级，无需管理员）
 - Android SDK 已就位：`tools\android-sdk\`（项目内便携安装，**新增工具链一律装进 `tools/` 下，不装到 `D:\software\` 等盘级目录**；含 `platforms;android-37.0` + `build-tools;36.1.0` + `platform-tools`，由 `cmdline-tools` 经代理安装）。**AGP 编译必须平台 SDK**；`local.properties` 写 `sdk.dir=D:/project/lsposed-plugin/tools/android-sdk`（**必须正斜杠**——Java Properties 把反斜杠当转义吃掉导致路径非法）
 - **必须用 `tools/jdk-21` 跑 Gradle**（Adoptium Temurin 21.0.12.1，2026-10-09 便携安装）：`JAVA_HOME="D:/project/lsposed-plugin/tools/jdk-21" ./gradlew ...`

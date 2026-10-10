@@ -1,6 +1,6 @@
 # 全量 hook 清单与冗余审计（2026-10-10）
 
-> 目的：两个目标（主题商店 + 包管理器）共 **54 个挂载点**（43 + 11）的全量台账 + 冗余/废弃/重复审计。
+> 目的：四个目标（主题商店 + 包管理器 + 设置 + system_server）共 **56 个挂载点**（43 + 11 + 1 + 1）的全量台账 + 冗余/废弃/重复审计。
 > 长期维护基线：**改 hook 前先看本表**；`多余/废弃` 项附 jadx `file:line` 实证，不靠印象。
 > 相关：`docs/theme-store-hook-design.md`（主题商店设计）、`docs/installer-cloud-config.md §六`（包管理器落地）。
 
@@ -22,7 +22,7 @@
 > 删除 `SlotProbe.kt`/`VipDebugProbe.kt` 及调用行、`KEY_HOOK_ENABLED`、私有 `findMethod`（mountOne 直接走
 > `MethodResolver.resolveMethod`）；`UriOwner` 枚举随之收敛为 `THIS`/`GET_DOWNLOAD_INFO` 两值。
 > **P3 未执行**（抽公共基类 / 历史注释归档 / featureKey 管道处理——含回归风险，待单独一轮 + 真机验证）。
-> 当前真机验证判据：`installed 43/43`（主题商店，39 基线 + VIP 漏斗 2 + getSecondTitle 1 + createTabs 前置 1，见 §六）+ `installed 11/11`（包管理器，7 基线 + 安全卡 2 + 检测短路 1 + 指纹直通 1）。
+> 当前真机验证判据：`installed 43/43`（主题商店，39 基线 + VIP 漏斗 2 + getSecondTitle 1 + createTabs 前置 1，见 §六）+ `installed 11/11`（包管理器，7 基线 + 安全卡 2 + 检测短路 1 + 指纹直通 1）+ `installed 1/1`（设置 SettingsHook S1 停用按钮）+ `installed 1/1`（system_server SystemHook S1 停用守卫，需重启生效）。
 
 ---
 
