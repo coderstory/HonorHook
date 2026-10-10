@@ -3,7 +3,7 @@ name: static-analysis
 description: 安卓静态代码分析——阅读 smali 与 jadx 伪代码，定位 LSPosed hook 目标点。当需要从反编译产物中找 hook 点、理解目标 app 行为、按字符串/资源 id/调用关系定位混淆类与方法时使用。涵盖 smali 语法、jadx 伪代码阅读、自研 dex 分析脚本方法、真机取证补充。
 metadata:
   author: 项目沉淀
-  last-updated: '2026-10-09'
+  last-updated: '2026-10-10'
   keywords:
   - 静态分析
   - smali
@@ -13,6 +13,8 @@ metadata:
   - dex
   - uiautomator
 ---
+
+> 项目级实战判据（选点 / 死点 / 验证铁律）：[`docs/reverse-craft.md`](../../../docs/reverse-craft.md)。
 
 ## 适用场景
 
@@ -91,7 +93,7 @@ fanqie-purify `adscan.py` 思路：按关键词（广告/弹窗/会员/hybrid br
 - `adb shell uiautomator dump` → View 树 XML（看 content-desc/text/类名）
 - `adb shell dumpsys window` → 窗口层级（看浮动窗口 type/gravity/surfaceInsets）
 - LSPosed 日志 → hook 挂载/拦截确认
-- fanqie-purify `adapt_new_version.sh --arm-dump` → 手机端 View 树转储，`--pull-tree` 拉到 artifacts/
+- 本项目 `tools/dev.sh ui` → uiautomator dump 落 `.buildtmp/ui_*.xml` 并打印文本/描述节点（已封装，优先用它）
 
 ## 工具
 
@@ -106,7 +108,7 @@ fanqie-purify `adscan.py` 思路：按关键词（广告/弹窗/会员/hybrid br
 
 ## 实践案例
 
-### Rain HookEntry（`system-files/rain-apktool/smali/love/nairain/hook/xposed/HookEntry.smali`）
+### Rain HookEntry（原 `system-files/rain-apktool/smali/...`，产物已清理；需对 `reference/Rain_1.1.5.apk` 重跑 apktool）
 26KB 入口 smali，用 libxposed API 102 + DexKit。读 smali 看 hook 挂载逻辑（`onPackageLoaded` 回调里对 scope 内 app 调 DexKit 查找 + hook）。jadx 因 libxposed 类型缺失产出不理想，以 smali 为准。
 
 ### fanqie-purify 定位 Polaris 语音子系统
@@ -125,13 +127,17 @@ fanqie-purify `adscan.py` 思路：按关键词（广告/弹窗/会员/hybrid br
 
 ## 静态点 ≠ 运行时关键点（观测验证铁律）
 
-jadx/smali 静态分析找出的"疑似 hook 点"只是候选，**必须经过运行时调用观测验证才算数**——静态存在 ≠ 运行时被调用 ≠ 决定最终表现。主题商店真机轮（2026-10-09，见 `docs/theme-ui-real-chain.md`）三个实证案例：
+jadx/smali 静态分析找出的"疑似 hook 点"只是候选，**必须经过运行时调用观测验证才算数**——静态存在 ≠ 运行时被调用 ≠ 决定最终表现。主题商店真机轮（2026-10-09，见 `docs/reverse/theme-store.md`）三个实证案例：
 
 ### 实证案例
 
 1. **`isBuyBtnShow` 是"门"非"开关"**：它是详情页按钮区的入口门，不是按钮展示的仲裁者。hook 它常返 false 会跳过后续 `updateButtons`/`hideLayout` 更新逻辑，按钮停在 XML 初始 visible 态——看起来"没变"，实为"更新逻辑没跑到"。
 2. **`getExpireTimeTimestamp` 全库仅 1 个消费方**：表面上它直接决定会员过期时间，但真正消费链走的是 `getDisplayTime`/`getDisplayTimeTimestamp`——静态看着最"像"的 hook 点未必是生效路径，hook 前先数清楚消费方。
 3. **`fetchShouldDialogByDefault`/`fetchShouldDialogByCloud` 在目标版本全工程零调用**：消费链（`VipCheckRepo.getShouldDialog` → `VipCheckVM.refreshShouldDialog` → `HwThemeManagerActivity.showVipCheckDialog`）除定义外零调用方 = **休眠代码**，hook 拦的是一个根本不触发的弹窗，挂载成功也无效。
+
+### 版本错位 / 判据类排查
+
+不在本 skill 展开（改 hook 后为什么没生效的排查顺序：先对宿主版本 → 再看 `installed N/M` 命中率 → 最后才动实现），见 `honorhook-dev` skill 与 `docs/hook-craft.md` §验证铁律。
 
 ### 修正法
 

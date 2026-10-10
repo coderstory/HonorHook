@@ -3,7 +3,7 @@ name: build-lsposed-module
 description: 从零构建 LSPosed 插件源码工程的方法论——Android Gradle 工程脚手架、libxposed API 依赖、XposedModule 入口与注册、miuix UI 脚手架（拼装 HC hook 入口 + LSPFRIDA UI 体系 + Rain UI 结构）、构建 APK。当需要新建 LSPosed/Xposed 模块工程、搭建项目脚手架时使用。
 metadata:
   author: 项目沉淀
-  last-updated: '2026-10-09'
+  last-updated: '2026-10-10'
   keywords:
   - 构建
   - 脚手架
@@ -13,6 +13,8 @@ metadata:
   - 工程
   - APK
 ---
+
+> 项目级实战判据（选点 / 死点 / 验证铁律）：[`docs/hook-craft.md`](../../../docs/hook-craft.md)。
 
 ## 适用场景
 
@@ -146,4 +148,9 @@ UI 写法详见 `reference/LSPFRIDA（同类插件）`、`reference/HyperChanger
 - `reference/LSPFRIDA（同类插件）`、`reference/HyperChanger（同类插件）`、`reference/notification-guard（同类插件）`：新版 API + miuix 实战
 - `reference/Rain_1.1.5.apk`：UI 结构参考（About + Adapted apps + 设置 + 悬浮底栏，作者夜雨|Nairain）
 - `reference/fanqie-purify（AI开发插件实践）/module/`：旧版 API module 结构（`build.sh` / `AndroidManifest` / `xposed_init`）
-- 环境约束：无 Win 管理员（工具用户级）、仅真机直连无模拟器
+- 环境约束：macOS 本机（JDK 21 / SDK 在 `tools/android-sdk/`，`tools/dev.sh` 顶部已固化解析）、仅真机直连无模拟器
+- 构建入口：**走 `tools/dev.sh build`**，不在会话里手拼 gradle 命令
+
+## references/
+
+- [`references/hc-remote-prefs-channel.md`](references/hc-remote-prefs-channel.md) — HyperChanger UI↔hook 远程 prefs 双通道全链路实证（LSPosed 源码 API 102 链路 / 现读 + 变化监听两机制 / 二进制资产通道 / 反向 RPC），搭通信层时必读

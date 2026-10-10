@@ -3,7 +3,7 @@ name: lsposed-hook-expert
 description: LSPosed/Xposed 模块开发专家——hook 策略、API 使用与方法论。当需要开发 LSPosed 插件、编写 hook 代码、选择 hook 点与策略、使用 libxposed API 或旧版 Xposed API、适配混淆目标 app 时使用。沉淀自 reference 三插件（新版 API）+ fanqie-purify MainHook（旧版 API + 方法论）+ Rain（DexKit）实践。
 metadata:
   author: 项目沉淀
-  last-updated: '2026-10-09'
+  last-updated: '2026-10-10'
   keywords:
   - LSPosed
   - Xposed
@@ -12,6 +12,8 @@ metadata:
   - DexKit
   - 模块开发
 ---
+
+> 项目级实战判据（选点 / 死点 / 验证铁律）：[`docs/hook-craft.md`](../../../docs/hook-craft.md)。
 
 ## 适用场景
 
@@ -65,7 +67,7 @@ import de.robv.android.xposed.XposedHelpers;
 ### 1. 版本无关实现 > 硬编码混淆类名/资源 id
 - 混淆类名/资源 id 逐版变（fanqie 实测 `f22.q`→`f32.q`、`a13.d0`→`i23.d0`），硬编码每版都要改。
 - **文案 + 结构定位**：拿住稳定特征（"个人主页"爬到头像行→取父容器→收掉非头像子块）；文案判定（"我的资产"）；`getIdentifier(name, type, pkg)` 按名查 id（不硬编码数值）。
-- 仍需每版复核的：`PRE_HIDE_RES_IDS`（只省一帧闪现）、阅读页广告行工厂类名、VIP 促销弹层类名——用 `adapt_new_version.sh` 自动比对提醒。
+- 仍需每版复核的：`PRE_HIDE_RES_IDS`（只省一帧闪现）、阅读页广告行工厂类名、VIP 促销弹层类名——用 `python3 tools/adapt_new_version.py` 自动比对提醒。
 
 ### 2. 广告位总闸 > 逐个 View GONE
 - 在广告**请求/渲染之前**拦截：`AdConfigManager.checkAdAvailable(广告位, *)` 返回 false，一次 hook 覆盖全部被动广告位，无"渲染一帧才隐藏"的闪烁。
@@ -103,6 +105,8 @@ Rain 用 DexKit（`libdexkit.so`）查找 hook 点。DexKit 按 dex 特征匹配
 
 适用：目标 app 高混淆，类名不可读，但知道方法特征。DexKit 在运行时（hook 进程内）分析目标 dex，返回匹配的方法。详见 Rain 入口 `love.nairain.hook.xposed.HookEntry`。
 
+完整用法（Bridge 两种创建方式 / 查询构造→结果→过滤流程 / 双轨策略 / Rain 的挂载助手 ck0·qa·sa 与 `XposedHelpers` 替代品 i92）见 [`references/rain-dexkit-and-mount-patterns.md`](references/rain-dexkit-and-mount-patterns.md)。**DexKit 的定位手段（何时该用特征查找）见 `static-analysis` skill。**
+
 依赖坐标：`implementation("org.luckypray:dexkit:2.2.0")`（HyperChanger build.gradle.kts:84）；Rain 通过 DexKitBridge 使用（apk 内 libdexkit.so 四架构）。注意：HookEntry 构造器里的 dexkit 包引用实为混淆器塞进的字符串解密 helper，真正的 DexKit 查找调用在分发类里。
 
 ## 开发流程
@@ -124,6 +128,14 @@ Rain 用 DexKit（`libdexkit.so`）查找 hook 点。DexKit 按 dex 特征匹配
 | Rain（reference/Rain_1.1.5.apk） | libxposed 102 + DexKit | 混淆 app 的 DexKit hook 点查找 |
 | fanqie-purify（reference） | 旧版 de.robv + 自研 dex 工具 | hook 方法论精华（版本无关/总闸/收口点/弯路） |
 
+## references/
+
+| 文件 | 内容 | 何时读 |
+|------|------|--------|
+| [`rain-dexkit-and-mount-patterns.md`](references/rain-dexkit-and-mount-patterns.md) | Rain（高混淆样本）入口分发链路 / 按包名注册表与适配器接口 / DexKit 查询全流程与双轨策略 / libxposed 挂载助手（ck0·qa·sa·i92）/ 字符串解密体系 | 写 DexKit 兜底、或"按特征找被混淆的方法"时 |
+| [`rain-module-sample-analysis.md`](references/rain-module-sample-analysis.md) | Rain 基本信息 / META-INF 三配置（java_init.list + module.prop + scope.list）/ 混淆与防护特征 / UI 结构 | 要 libxposed 102 标准模块样张与配置写法时 |
+| [`ai-lsposed-template-rules.md`](references/ai-lsposed-template-rules.md) | AI-lsposed-temlate 工程结构与两份 `.cursor` AI 规则（API 速查 + Classic API 禁用对照表） | 防 AI 生成代码混用新旧两代 API 时 |
+
 ## 限制
 
 - **服务端校验绕不过**：VIP 权益等服务端校验，hook 只能改本地状态（isVip=true），实际权益由服务端决定（fanqie-purify 免登录说明）。
@@ -135,7 +147,7 @@ Rain 用 DexKit（`libdexkit.so`）查找 hook 点。DexKit 按 dex 特征匹配
 按钮显隐类"门"方法（`isXxxShow`/`needShowXxx`）只是**入口判断**，不是最终仲裁者——门通过后还有真正的仲裁链决定显示什么。hook 门本身（尤其拦死返 false）会连后续更新逻辑一起掐掉，UI 停在初始态"看似没变"，且易误伤其他路径。
 
 - 正确姿势：门方法放行，干预真正的仲裁者——服务端下发的按钮类型（`buttonType`/`getXxxType`）。
-- 实证（主题商店 20.1.63.305，`docs/theme-ui-real-chain.md`）：`OnlinePreviewBaseActivity` 门通过后，`updateButtons` 按 `IncentiveData.getThemeDetailButtonType()` switch 决定显示哪组按钮；hook 门返 false 跳过 updateButtons，按钮停在 XML 初始 visible 态。
+- 实证（主题商店 20.1.63.305，`docs/reverse/theme-store.md`）：`OnlinePreviewBaseActivity` 门通过后，`updateButtons` 按 `IncentiveData.getThemeDetailButtonType()` switch 决定显示哪组按钮；hook 门返 false 跳过 updateButtons，按钮停在 XML 初始 visible 态。
 - 门后可能有**平行判定副本**：`ToolBarGroupLayout.needShowBuyButton()`、`WallpaperDetailView.needShowBuyButton()` 与 `isBuyBtnShow` 逻辑几乎逐行相同但是独立方法，需逐个覆盖才算完整。
 
 ## 移植前真机基线校验
