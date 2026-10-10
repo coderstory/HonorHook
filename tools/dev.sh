@@ -7,11 +7,39 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ---- 便携工具链（全部项目内，不依赖系统 PATH/管理员权限）----
-export JAVA_HOME="$ROOT/tools/jdk-21"          # 完整 JDK；JBR 缺 jlink 无法打包
+# ---- 工具链：项目内便携版优先，否则本机安装兜底（macOS 迁移后，原 Windows 硬编码路径已不适用）----
+# JDK 必须带 jlink（打包 release 需要）；brew 的 openjdk@21 经 libexec 下的 Home 才有 bin/jlink
+if [ -x "$ROOT/tools/jdk-21/bin/jlink" ]; then
+  export JAVA_HOME="$ROOT/tools/jdk-21"
+elif [ -x /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/jlink ]; then
+  export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+elif [ -x /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/jlink ]; then
+  export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+else
+  export JAVA_HOME="$ROOT/tools/jdk-21"   # 均缺失：保留原路径，由 require 报出明确错误
+fi
 export ANDROID_HOME="$ROOT/tools/android-sdk"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-ADB="$ROOT/tools/platform-tools/adb.exe"
+if [ -x "$ROOT/tools/platform-tools/adb" ]; then
+  ADB="$ROOT/tools/platform-tools/adb"
+elif [ -x "$ROOT/tools/platform-tools/adb.exe" ]; then
+  ADB="$ROOT/tools/platform-tools/adb.exe"
+else
+  ADB="$(command -v adb || echo adb)"     # brew android-platform-tools
+fi
+# 逆向工具链（decompile/jadx/aapt2 子命令用；找不到不报错，用时才 require）
+APKTOOL="$ROOT/tools/apktool.jar"
+JADX=""
+if [ -x "$ROOT/tools/jadx/bin/jadx" ]; then
+  JADX="$ROOT/tools/jadx/bin/jadx"                 # macOS/Linux bundle
+elif [ -f "$ROOT/tools/jadx/bin/jadx.bat" ]; then
+  JADX="$ROOT/tools/jadx/bin/jadx.bat"             # Windows bundle
+fi
+# build-tools 里取版本最高的一份（36.0.0 < 36.1.0 < 37.0.0 字典序即版本序）
+AAPT2=""
+for c in "$ANDROID_HOME"/build-tools/*/aapt2 "$ANDROID_HOME"/build-tools/*/aapt2.exe; do
+  if [ -x "$c" ]; then AAPT2="$c"; fi
+done
 GRADLEW="$ROOT/app/gradlew"
 APK_DEBUG="$ROOT/app/app/build/outputs/apk/debug/app-debug.apk"
 APK_RELEASE="$ROOT/app/app/build/outputs/apk/release/app-release.apk"
@@ -31,7 +59,7 @@ case "${1:-help}" in
     cat <<'EOF'
 HonorHook 开发工具
 
-环境要求：Git Bash；工具链在 tools/ 下（jdk-21 / android-sdk / platform-tools）
+环境要求：macOS（JDK 21 / adb / python3-Pillow 由 tools/ 或本机安装提供，缺失时脚本自行兜底）
 
 子命令：
   build            编译 debug APK
@@ -59,12 +87,17 @@ HonorHook 开发工具
   key <keycode>    发送按键（4=返回 3=Home）
   verify           一键：编译 → 安装 → 启动 → 抓判据日志
   clean            清理 Gradle 构建产物
+  env              打印工具链解析结果（java/adb/apktool/jadx/aapt2/python 都在哪，先跑这个）
+  decompile <apk> [名称]   apktool 反编译 → system-files/<名称>-apktool（smali + 明文 manifest + res）
+  jadx <apk> [名称]        jadx 反编译（--show-bad-code）→ system-files/<名称>-jadx
+  aapt2 <参数...>          aapt2 透传（自动选 build-tools 里最高版本）
+  apkinfo <apk>            aapt2 dump badging 摘要（包名/版本/权限）
 EOF
     ;;
 
   build)
     require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
-    info "编译 debug APK（JAVA_HOME=$JAVA_HOME）"
+    info "编译 debug APK（JAVA_HOME=${JAVA_HOME}）"
     (cd "$ROOT/app" && "$GRADLEW" :app:assembleDebug --console=plain)
     ls -lh "$APK_DEBUG"
     ;;
@@ -200,8 +233,16 @@ EOF
     #   开关状态 = 模块页固定位置取色（ON=蓝 74,128,247 / OFF=白底+灰边 230）。
     # 注意：先跑 install-release（触发通知）再跑本命令；deploy-release 已串好。
     require "$ADB"
-    PYVENV="C:/Users/coderstory/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
-    [ -x "$PYVENV" ] || die "缺少 venv python（含 Pillow）：$PYVENV"
+    # 像素分析用解释器：HONORHOOK_PYTHON 覆盖 > 工程内 venv > PATH（Windows Git Bash 常见 python 而非 python3）
+    PYVENV="${HONORHOOK_PYTHON:-}"
+    if [ -z "$PYVENV" ]; then
+      for c in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" \
+               "$(command -v python3 || true)" "$(command -v python || true)"; do
+        if [ -n "$c" ] && [ -x "$c" ]; then PYVENV="$c"; break; fi
+      done
+    fi
+    [ -n "$PYVENV" ] && [ -x "$PYVENV" ] || die "缺少 python3（enable-module 需 Pillow 做截屏取色）"
+    "$PYVENV" -c 'import PIL' 2>/dev/null || die "python3 缺少 Pillow：${PYVENV}（pip3 install pillow）"
     LSP_FOCUS="com.android.shell/org.lsposed.manager"
 
     SZ=$("$ADB" shell wm size | tr -d '\r' | grep -oE '[0-9]+x[0-9]+')
@@ -391,7 +432,9 @@ PYEOF
     # MSYS_NO_PATHCONV：Git Bash 会把 /sdcard/... 误转为 Windows 路径
     MSYS_NO_PATHCONV=1 "$ADB" shell rm -f /sdcard/ui_dump.xml >/dev/null 2>&1 || true
     MSYS_NO_PATHCONV=1 "$ADB" shell uiautomator dump /sdcard/ui_dump.xml 2>&1 | tr -d '\r' || true
-    MSYS_NO_PATHCONV=1 "$ADB" pull /sdcard/ui_dump.xml "$(cygpath -w "$out")" 2>&1 | tr -d '\r' | tail -1 || true
+    pull_dst="$out"   # Git Bash 需转 Windows 路径；macOS 直接用原路径
+    if command -v cygpath >/dev/null 2>&1; then pull_dst="$(cygpath -w "$out")"; fi
+    MSYS_NO_PATHCONV=1 "$ADB" pull /sdcard/ui_dump.xml "$pull_dst" 2>&1 | tr -d '\r' | tail -1 || true
     if [ ! -s "$out" ]; then
       info "UI dump 失败（文件为空）——检查屏幕是否亮屏/解锁"
       exit 1
@@ -499,6 +542,51 @@ PYEOF
 
   clean)
     (cd "$ROOT/app" && "$GRADLEW" :app:clean --console=plain)
+    ;;
+
+  env)
+    info "工具链解析结果（别在会话里问路径，跑这个）"
+    printf '  %-12s %s\n' JAVA_HOME "$JAVA_HOME"
+    printf '  %-12s %s\n' java "$JAVA_HOME/bin/java"
+    printf '  %-12s %s\n' ADB "$ADB"
+    printf '  %-12s %s\n' ANDROID_HOME "$ANDROID_HOME"
+    printf '  %-12s %s\n' aapt2 "${AAPT2:-MISSING}"
+    printf '  %-12s %s\n' apktool "$APKTOOL"
+    printf '  %-12s %s\n' jadx "${JADX:-MISSING}"
+    printf '  %-12s %s\n' python3 "$(command -v python3 || echo MISSING)"
+    printf '  %-12s %s\n' gradlew "$GRADLEW"
+    ;;
+
+  decompile)
+    # 反编译产物落 system-files/<名称>-apktool（smali + 明文 AndroidManifest + res）
+    require "$APKTOOL"; require "$JAVA_HOME/bin/java"
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh decompile <apk> [名称]（默认取 apk 文件名）"
+    apk="$2"; name="${3:-$(basename "$apk" .apk)}"
+    out="$ROOT/system-files/$name-apktool"
+    info "apktool 反编译 → $out"
+    "$JAVA_HOME/bin/java" -jar "$APKTOOL" d -f "$apk" -o "$out"
+    info "完成（smali/ 在 $out/smali，META-INF 在 $out/unknown/META-INF）"
+    ;;
+
+  jadx)
+    [ -n "$JADX" ] || die "未找到 jadx（tools/jadx/bin/jadx）"
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh jadx <apk> [名称]"
+    apk="$2"; name="${3:-$(basename "$apk" .apk)}"
+    out="$ROOT/system-files/$name-jadx"
+    info "jadx（--show-bad-code）→ $out"
+    JAVA_OPTS="${JAVA_OPTS:-}" "$JADX" --show-bad-code -d "$out" "$apk"
+    ;;
+
+  aapt2)
+    [ -n "$AAPT2" ] || die "未找到 aapt2（tools/android-sdk/build-tools/*/aapt2）"
+    if [ $# -gt 1 ]; then shift; fi
+    "$AAPT2" "$@"
+    ;;
+
+  apkinfo)
+    [ -n "$AAPT2" ] || die "未找到 aapt2（tools/android-sdk/build-tools/*/aapt2）"
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh apkinfo <apk>"
+    "$AAPT2" dump badging "$2" | head -14
     ;;
 
   *)
