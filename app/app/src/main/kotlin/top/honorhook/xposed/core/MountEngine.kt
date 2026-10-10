@@ -1,4 +1,4 @@
-package top.honorhook.xposed
+package top.honorhook.xposed.core
 
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
@@ -16,7 +16,7 @@ import java.lang.reflect.Method
  * 状态语义：模块 dex 被注入到**每个目标进程**独立加载，两目标永不同进程 ⇒ 每目标各持一个
  * [MountEngine] 实例（object 字段）即天然隔离；[begin] 在 install() 时重置计数。
  */
-class MountEngine(private val hookName: String) {
+class MountEngine(private val hookName: String, private val hostPackage: String) {
 
     /** 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。 */
     enum class Result { OK, FAILED, NOT_RESOLVED }
@@ -64,10 +64,14 @@ class MountEngine(private val hookName: String) {
     private val failedIds = mutableListOf<String>()
     /** 目标 APK 磁盘路径（[begin] 期写入，[MethodResolver] 第二轨 DexKit 兜底用；null 时跳过）。 */
     private var apkPath: String? = null
+    /** hook 编写时的宿主版本基线（[begin] 期写入；非空则首轮挂载前做一次版本自检）。 */
+    private var expectedHostVersion: String? = null
+    private var hostVersionChecked = false
 
-    /** install() 时调用：写入 APK 路径并重置计数（防同进程重复 install 计数累积）。 */
-    fun begin(apkPath: String?) {
+    /** install() 时调用：写入 APK 路径与版本基线并重置计数（防同进程重复 install 计数累积）。 */
+    fun begin(apkPath: String?, expectedHostVersion: String? = null) {
         this.apkPath = apkPath
+        this.expectedHostVersion = expectedHostVersion
         retryRounds = 0
         okCount = 0
         failedIds.clear()
@@ -84,6 +88,7 @@ class MountEngine(private val hookName: String) {
         loader: ClassLoader,
         mountOne: (T) -> Result,
     ) {
+        checkHostVersionOnce(module)
         totalCount = pending.size
         val unresolved = mutableListOf<T>()
         for (task in pending) {
@@ -144,6 +149,30 @@ class MountEngine(private val hookName: String) {
             TAG,
             "$hookName: installed $okCount/$totalCount$failurePart",
         )
+    }
+
+    /**
+     * 宿主版本自检（每进程一次）：hook 挂载点以特定宿主版本反编译实证，宿主 OTA 后混淆名/签名可能漂移——
+     * 版本不一致时打 WARN 提醒"判据以 installed N/M 为准"。拿不到 Context（宿主 Application 未起）则跳过。
+     */
+    private fun checkHostVersionOnce(module: XposedModule) {
+        if (hostVersionChecked || expectedHostVersion == null) return
+        hostVersionChecked = true
+        runCatching {
+            val app = Class.forName("android.app.ActivityThread")
+                .getMethod("currentApplication").invoke(null) as? android.content.Context
+            val actual = app?.packageManager?.getPackageInfo(hostPackage, 0)?.versionName
+            when {
+                actual == null -> return
+                actual == expectedHostVersion ->
+                    module.log(Log.INFO, TAG, "$hookName 宿主版本与 hook 基线一致: $actual")
+                else -> module.log(
+                    Log.WARN, TAG,
+                    "$hookName 宿主版本 $actual 与 hook 基线 $expectedHostVersion 不一致——挂载点可能漂移，" +
+                        "判据以 installed N/M 与失败清单为准",
+                )
+            }
+        }
     }
 
     companion object {

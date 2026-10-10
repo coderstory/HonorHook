@@ -1,5 +1,7 @@
 package top.honorhook.xposed.target
 
+import top.honorhook.xposed.target.themestore.ThemeStoreHook
+
 /**
  * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；docs/rain-hook-architecture.md §1.2）。
  * [find] 按包名查表；[installed] 是完成首次 install 的**目标对象**集合——对象级判定：

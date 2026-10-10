@@ -1,4 +1,4 @@
-package top.honorhook.xposed
+package top.honorhook.xposed.data
 
 /**
  * 底部导航 tab 的「服务端配置」源头裁剪表 —— 数据与 hook 逻辑分离的唯一改动点。

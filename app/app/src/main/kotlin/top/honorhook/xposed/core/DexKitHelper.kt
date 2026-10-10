@@ -1,4 +1,4 @@
-package top.honorhook.xposed
+package top.honorhook.xposed.core
 
 import android.util.Log
 import org.luckypray.dexkit.DexKitBridge

@@ -1,4 +1,4 @@
-package top.honorhook.xposed
+package top.honorhook.xposed.data
 
 /**
  * 主题商店云控布尔开关「强制表」—— key 与 hook 逻辑分离的唯一数据源。

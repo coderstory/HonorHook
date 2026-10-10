@@ -4,9 +4,9 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
-import top.honorhook.xposed.InstallerConfigTable
-import top.honorhook.xposed.MountEngine
-import top.honorhook.xposed.MountEngine.DexHint
+import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.data.InstallerConfigTable
 
 /**
  * 包管理器（软件包安装程序 `com.android.packageinstaller`，荣耀定制 14.0.37.301）目标 —— 五项「清净化」能力：
@@ -41,7 +41,7 @@ object InstallerHook : TargetHook {
     override val packageName = "com.android.packageinstaller"
 
     /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("InstallerHook")
+    private val engine = MountEngine("InstallerHook", packageName)
 
     private const val PKG_HN = "com.hihonor.packageinstaller"
 
@@ -62,7 +62,7 @@ object InstallerHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底需要 APK 磁盘路径（MethodResolver）
-        engine.begin(param.applicationInfo?.sourceDir)
+        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 挂载表 7 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗 1）；**以真机 `installed N/M` 的 M 为准。**
         val pending = mutableListOf<MountTask>()
@@ -73,6 +73,9 @@ object InstallerHook : TargetHook {
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
+
+    /** hook 编写时的宿主版本基线（aapt2 实证）；OTA 超出此版本时 MountEngine 首轮挂载打 WARN。 */
+    private const val HOST_VERSION_BASELINE = "14.0.37.301"
 
     // ---------------- R4 不请求广告 + R1 不展示安装页广告 ----------------
 

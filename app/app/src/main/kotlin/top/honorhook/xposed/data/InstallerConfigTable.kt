@@ -1,4 +1,4 @@
-package top.honorhook.xposed
+package top.honorhook.xposed.data
 
 /**
  * 包管理器（软件包安装程序 `com.android.packageinstaller`）云控强制表 —— key 与 hook 逻辑分离的唯一数据源。

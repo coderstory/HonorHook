@@ -1,4 +1,4 @@
-package top.honorhook.xposed
+package top.honorhook.xposed.data
 
 /**
  * 美豆（金币/福利/「耀宝」营销）**服务端槽位**的源头过滤表 —— 数据与 hook 逻辑分离的唯一改动点。
