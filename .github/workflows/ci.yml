@@ -16,11 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # JDK 21：与 tools/README.md 声明的工具链要求一致（release 打包需要含 jlink 的完整 JDK）
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       # GitHub 托管镜像已预装 Android SDK（/usr/local/lib/android/sdk，许可证已预授权），
       # 缺失的 platform/build-tools 由 AGP 在构建时自动补齐，无需 setup-android action。
@@ -32,12 +33,13 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "versionName=$VERSION"
 
-      # dev 分支：编译 debug + 单测（编译测试门禁）
+      # dev 分支：编译 debug + 单测
       - name: Build debug (dev)
         if: github.ref_name == 'dev'
         run: |
           ./app/gradlew -p app assembleDebug --no-daemon --stacktrace
-          ./app/gradlew -p app test --no-daemon --continue || true
+          # 真门禁（不加 `|| true`）：跑 :app:testDebugUnitTest，覆盖表驱动决策的回归。
+          ./app/gradlew -p app test --no-daemon
 
       - name: Upload debug APK (dev)
         if: github.ref_name == 'dev'
@@ -61,7 +63,10 @@ jobs:
             自动构建（run #${{ github.run_number }}，commit ${{ github.sha }}）
 
             - 模块版本：${{ steps.ver.outputs.version }}
-            - 宿主基线：主题商店 20.1.63.305 / 包管理器 14.0.37.301
-            - 安装：LSPosed 管理器导入 APK，启用模块后勾选两个作用域
+            - 宿主基线：主题商店 20.1.63.305 / 包管理器 14.0.37.301 / 系统桌面 18.0.0.234 /
+              成人高考题库 5.9.0.0-release
+            - 安装：LSPosed 管理器导入 APK，启用模块后勾选全部 6 个作用域
+              （主题商店 / 包管理器 / 设置 / SystemUI / 系统桌面 / 成人高考题库）
+            - 判据：LSPosed 框架日志 `/data/adb/lspd/log/modules_*.log` 里的 `installed N/M`
           files: app/app/build/outputs/apk/release/app-release.apk
           make_latest: true

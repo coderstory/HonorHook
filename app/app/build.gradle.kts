@@ -95,4 +95,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
+
+    // JVM 单元测试（表驱动决策的回归；这些对象无 Android 依赖，不需要 Robolectric）
+    testImplementation(libs.junit)
 }

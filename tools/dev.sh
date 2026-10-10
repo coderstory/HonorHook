@@ -83,7 +83,19 @@ HonorHook 开发工具
   launch           冷启动模块 App（主 Activity）
   log              实时日志：宿主阻断 + HonorHook tag
   log-hook         实时日志：仅 HonorHook tag（hook 侧 installed N/M 判据）
+  log-tag          一次性 dump：TAG=HonorHook 的全部缓冲
+  log-grep         全量缓冲按内容匹配 HonorHook / lspd / LSPosed（无视 tag）
+  grep-log <正则>   按正则过滤当前 logcat 缓冲
+  grep-logd <正则>  按正则过滤全 buffer（-b all）
+  modlog [tag] [行数]   LSPosed 框架日志中匹配 tag 的最后 N 行（默认 HonorHook / 60）
+  lspd-log         LSPosed 框架日志目录与最近内容（模块未被加载时先看这里）
   crash            抓取崩溃堆栈（一次性 dump，不阻塞）
+  logcrash         读崩溃缓冲区（-b crash）头部
+  diag-start       清 logcat 后启动目标并抓首轮诊断
+  diag-module      模块自检三步：包安装 / 宿主进程存活 / LSPosed 模块记录
+  diag-capture     收集 [diag] 取证日志并按 tag 分组
+  wait-hook        清空日志后轮询等待 installed 判据（最长 3 分钟）
+  hook-test        清日志 → 强停并拉起主题商店 → 抓挂载判据
   logcat           原始全量 logcat dump（最近缓冲）
   clear-log        清空设备 logcat 缓冲
   log-file         拉取 hook 侧判据日志文件 honorhook.log
@@ -96,6 +108,11 @@ HonorHook 开发工具
   swipe <x1> <y1> <x2> <y2> [ms]   滑动
   text <文本>      输入文本
   key <keycode>    发送按键（4=返回 3=Home）
+  launch-theme     冷启动主题商店（宿主，触发 hook）并 dump 栈顶
+  top              当前前台/栈顶 Activity + 本模块包存活状态
+  size             debug/release APK 体积与最大成分
+  dexstat          release classes.dex 按顶层包统计类数
+  test             运行 JVM 单元测试（表驱动决策回归）
   verify           一键：编译 → 安装 → 启动 → 抓判据日志
   clean            清理 Gradle 构建产物
   env              打印工具链解析结果（java/adb/apktool/jadx/aapt2/python 都在哪，先跑这个）
@@ -108,7 +125,8 @@ EOF
     ;;
 
   build)
-    require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
+    # 不 require jlink：debug 编译不需要，缺 jlink 的 JDK 也应能编 debug（release 才要）
+    require "$GRADLEW"
     info "编译 debug APK（JAVA_HOME=${JAVA_HOME}）"
     (cd "$ROOT/app" && "$GRADLEW" :app:assembleDebug --console=plain)
     ls -lh "$APK_DEBUG"
@@ -217,16 +235,22 @@ EOF
     ;;
 
   build-release)
-    require "$GRADLEW"
+    require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
     (cd "$ROOT/app" && "$GRADLEW" :app:assembleRelease --console=plain)
     ls -lh "$APK_RELEASE"
+    ;;
+
+  test)
+    require "$GRADLEW"
+    info "运行 JVM 单元测试（:app:testDebugUnitTest）"
+    (cd "$ROOT/app" && "$GRADLEW" :app:testDebugUnitTest --console=plain)
     ;;
 
   install)
     require "$ADB"; require "$APK_DEBUG"
     info "先卸载旧包（用户约定：每次安装前必须卸载，避免覆盖安装残留）"
     "$ADB" uninstall top.honorhook 2>&1 | tr -d '\r' || true
-    "$ADB" install -r "$APK_DEBUG" | tr -d '\r'
+    "$ADB" install "$APK_DEBUG" | tr -d '\r'
     info "校验已安装包版本："
     "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
     ;;
@@ -235,7 +259,7 @@ EOF
     require "$ADB"; require "$APK_RELEASE"
     info "先卸载旧包（用户约定：每次安装前必须卸载）"
     "$ADB" uninstall top.honorhook 2>&1 | tr -d '\r' || true
-    "$ADB" install -r "$APK_RELEASE" | tr -d '\r'
+    "$ADB" install "$APK_RELEASE" | tr -d '\r'
     ;;
 
   enable-module)
@@ -338,11 +362,14 @@ PYEOF
     done
     [ "$done_flag" = 1 ] || die "未能进入模块页完成启用（通知可能失效，重跑 install-release 再试）"
     "$ADB" shell "cmd statusbar collapse" >/dev/null 2>&1
-    # 作用域进程全部强停（hook 必须强停重启才生效），下次拉起即带 hook
-    for pkg in com.hihonor.android.thememanager com.android.packageinstaller com.android.settings com.android.systemui; do
+    # 作用域进程**全部**强停（hook 必须强停重启才生效），下次拉起即带 hook。
+    # 必须与 META-INF/xposed/scope.list 的 6 个包一一对应，漏一个就会出现
+    # "部署报成功但该目标 hook 没生效"的假成功。
+    for pkg in com.hihonor.android.thememanager com.android.packageinstaller com.android.settings \
+               com.android.systemui com.hihonor.android.launcher com.exam8.chengrenGK; do
       "$ADB" shell "am force-stop $pkg" >/dev/null 2>&1
     done
-    info "作用域进程已强停（thememanager/packageinstaller/settings）"
+    info "作用域进程已强停（scope.list 全部 6 个包）"
     ;;
 
   deploy-release)
@@ -527,7 +554,7 @@ PYEOF
     require "$ADB"
     mkdir -p "$LOG_OUT"
     out="$LOG_OUT/honorhook_$(stamp).log"
-    "$ADB" shell cat /data/user/0/top.honorhook/files/honorhook.log 2>/dev/null | tr -d '\r' > "$out" || true
+    "$ADB" shell su -c "cat /data/user/0/top.honorhook/files/honorhook.log" 2>/dev/null | tr -d '\r' > "$out" || true
     if [ -s "$out" ]; then info "已落盘: $out"; cat "$out"; else
       info "未在应用私有目录取到（日志文件由 XposedService.openRemoteFile 提供，走 App 内日志页查看）"
     fi

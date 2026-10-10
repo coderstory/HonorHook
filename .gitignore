@@ -39,3 +39,7 @@ skills-lock.json
 
 # native hook 路线遗留（当前无 cpp 代码；Dobby 为中途放弃的 s20cxq 实验素材）
 app/app/src/main/cpp/
+
+# Python 字节码缓存（skill 脚本本地运行产物）
+__pycache__/
+*.pyc

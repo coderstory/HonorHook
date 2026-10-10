@@ -15,6 +15,8 @@ coreKtx = "1.17.0"
 miuix = "0.9.4"
 # MaterialKolor：由种子色生成 M3 色板（KernelSU 主题页的关键色/配色风格/色规范）
 materialKolor = "5.0.1"
+# JVM 单元测试（表驱动决策的回归；跑在 :app:testDebugUnitTest）
+junit = "4.13.2"
 
 [libraries]
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
@@ -49,6 +51,8 @@ backdrop = { group = "io.github.kyant0", name = "backdrop", version = "2.0.0" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
