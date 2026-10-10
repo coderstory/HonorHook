@@ -1,0 +1,67 @@
+name: build
+
+on:
+  push:
+    branches: [dev, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract version
+        id: ver
+        run: |
+          VERSION=$(grep -oE 'versionName = "[^"]+"' app/app/build.gradle.kts | cut -d'"' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "versionName=$VERSION"
+
+      # dev 分支：编译 debug + 单测（编译测试门禁）
+      - name: Build debug (dev)
+        if: github.ref_name == 'dev'
+        run: |
+          ./app/gradlew -p app assembleDebug --no-daemon --stacktrace
+          ./app/gradlew -p app test --no-daemon --continue || true
+
+      - name: Upload debug APK (dev)
+        if: github.ref_name == 'dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-${{ github.run_number }}
+          path: app/app/build/outputs/apk/debug/app-debug.apk
+
+      # master 分支：编译 release 并发 GitHub Release
+      - name: Build release (master)
+        if: github.ref_name == 'master'
+        run: ./app/gradlew -p app assembleRelease --no-daemon --stacktrace
+
+      - name: Publish release (master)
+        if: github.ref_name == 'master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
+          name: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
+          body: |
+            自动构建（run #${{ github.run_number }}，commit ${{ github.sha }}）
+
+            - 模块版本：${{ steps.ver.outputs.version }}
+            - 宿主基线：主题商店 20.1.63.305 / 包管理器 14.0.37.301
+            - 安装：LSPosed 管理器导入 APK，启用模块后勾选两个作用域
+          files: app/app/build/outputs/apk/release/app-release.apk
+          make_latest: true
