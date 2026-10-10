@@ -1,8 +1,8 @@
 # docs 文档索引
 
-> 更新：2026-10-10 · 共 14 份（不含本索引）。模块已收敛为**纯 hook 模块（无 UI）**，保留
-> **两个目标**的文档：主题商店（`com.hihonor.android.thememanager`）+ 包管理器（`com.android.packageinstaller`）；
-> UI 规格、已删目标（市场/玻璃）的整合与预研文档已清理。
+> 更新：2026-10-10 · 活跃文档 8 份（不含本索引与 archive/）。模块已收敛为**纯 hook 模块（无 UI）**，
+> 仅保留**两个目标**：主题商店（`com.hihonor.android.thememanager`）+ 包管理器（`com.android.packageinstaller`）。
+> 早期参考项目分析（Rain / HyperChanger / 模板审计 / gap 分析）已移入 `archive/`，需要借模式时再翻。
 
 ## 实现设计（1）
 
