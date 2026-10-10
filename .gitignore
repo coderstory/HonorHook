@@ -6,6 +6,8 @@ reference/Rain_1.1.5.apk
 
 # tools/ 下二进制目录与 jar（可重新下载/生成）
 tools/platform-tools/
+tools/android-sdk/
+tools/jdk-21/
 tools/jadx/
 tools/jadx.zip
 tools/apktool.jar

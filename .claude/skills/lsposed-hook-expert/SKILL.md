@@ -143,5 +143,5 @@ Rain 用 DexKit（`libdexkit.so`）查找 hook 点。DexKit 按 dex 特征匹配
 迁移任何参考 hook 代码（同类插件/旧项目）前，先拿**真机实际安装的 apk** 反编译出基线，逐点验证类/方法存在性，再决定迁移哪些点：
 
 - 无效点/历史兼容分支不迁移；README 宣传 ≠ 代码事实，以基线 apk 实际代码为准。
-- 案例（荣耀三插件整合，`docs/honor-plugins-integration.md`）：`HonorInstallerPurify` 8 组 hook 真机基线**全命中**可整体移植；其 README 声称的"降级安装"hook 在 v4.0 全文件不存在（残留宣传），不迁移。
+- 案例（荣耀三插件整合，归档文档已随模块收敛删除）：`HonorInstallerPurify` 8 组 hook 真机基线**全命中**可整体移植；其 README 声称的"降级安装"hook 在 v4.0 全文件不存在（残留宣传），不迁移。
 - 版本先对齐：不同 MagicOS 版本类名混淆完全不同（MagicOS 10 v3.2 vs MagicOS 11 v4.0），装错版本不崩但静默失效——迁移前先 `adb dumpsys package` 对版本。
