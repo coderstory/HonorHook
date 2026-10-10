@@ -22,3 +22,4 @@ local.properties
 # 适配脚本反编译缓存 / Kotlin 编译缓存
 .buildtmp/
 app/.kotlin/
+.workbuddy/
