@@ -19,12 +19,13 @@ object ThemeStoreHook : TargetHook {
     private val engine = MountEngine("ThemeStoreHook", packageName)
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
-        // libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（HookEntry 同款写法）
         val loader = param.defaultClassLoader
-        // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir（HC ScreenRecorderModule.kt:85 实证）
+        // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
-        // 挂载表 39 项（38 清理基线 + W1 动态壁纸应用路径撕裂修正）；**以真机 M 为准。**
+        // 挂载表 43 项（F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 3
+        // + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2）；
+        // 逐点清点口径与 README/台账一致，**仍以真机 `installed N/M` 的 M 为准。**
         val pending = mutableListOf<MountTask>()
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_VIP)) {
             collectVipHooks(pending)             // F1 B1/B2 + VipState getter 短路

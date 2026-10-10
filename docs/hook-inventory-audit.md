@@ -3,12 +3,14 @@
 > **本文件只记代码里读不到的**：口径、已决的删除决策与理由、**勿删观察项**、真机回归教训。
 > **逐点清单不在这里** —— 权威来源 = 各 `*Hook.kt` / `themestore/Collectors*.kt` 内的挂载表（代码），
 > 逐点逆向依据 = [`reverse/`](reverse/) 下对应 app 的记录，设计理由 = [`theme-store.md`](theme-store.md)。
-> 复核点数：`grep -rhoE '"(theme|installer|settings|exam8|launcher|systemui):[^"]+"' app/app/src/main/kotlin/top/honorhook/xposed/target/ | sort -u | wc -l`
+> 复核点数（**全命名空间**，勿再漏 `cloud:` / `adsource:` / `btn-hide:` / `ad-request:` / `ad-source:` / `ab-request:`）：
+> `grep -rhoE '"[a-zA-Z0-9-]+:[A-Za-z0-9_.$]+"' app/app/src/main/kotlin/top/honorhook/xposed/target/ | sort -u | wc -l`
+> 当前结果：合计 **67**（theme 43 / installer 11 / exam8 10 / settings 1 / systemui 1 / launcher 1）。
 
 ## 一、口径与当前基线
 
-- **唯一权威 = 真机 `installed N/M` 的 M**（落 LSPosed 框架日志）。文档写死的点数会漂移：现存文档口径 40/43/39 与代码 id 去重计数（theme 37 / installer 8）不一致，**待下次装机对账后统一**。
-- 2026-10-10 晚真机基线：主题商店 `installed 43/43`（39 基础 + VIP 漏斗 2 + `getSecondTitle` 1 + `createTabs` 前置 1）、包管理器 `11/11`、设置 `1/1`。SystemUI / 桌面 / exam8 各 1 / 1 / 10。
+- **唯一权威 = 真机 `installed N/M` 的 M**（落 LSPosed 框架日志）。**口径已于 2026-10-11 对齐**：此前记录的"文档 40/43/39 与代码 37 不一致"是**复核命令写错**造成的假漂移——旧命令的正则只含 6 个命名空间，漏了 `cloud:` / `adsource:` / `btn-hide:` 等，报出的 theme 37 / installer 8 并非真实点数。用上方的全命名空间命令复查，代码计数与 README 完全一致（theme 43 / installer 11）。
+- 2026-10-10 晚真机基线：主题商店 `installed 43/43`、包管理器 `11/11`、设置 `1/1`。SystemUI / 桌面 / exam8 各 1 / 1 / 10。
 - **system_server 守卫 hook = 放弃决策（2026-10-10）**：该 fork 只回调 `onSystemServerLoaded`，libxposed api 102 无此回调类型，合成 stub 成本 > 收益。**勿重新评估**。
 
 ## 二、已决清理（2026-10-10，含理由 —— 复删/复挂前先读）

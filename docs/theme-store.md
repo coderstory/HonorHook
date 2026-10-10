@@ -52,7 +52,7 @@
 Hook 点清单依据：`docs/reverse/theme-store.md` §6（目标类名在 keep 名单内可读、不混淆漂移），
 已逐一对照 `system-files/theme-store-jadx/sources` 复核全部目标类/方法签名（行号与报告一致）。
 
-真机基线：主题商店 `20.1.63.305`（= hook 基线）。当前挂载表 **40 项**（2026-10-10：新增 `S1` 槽位裁剪、`S2` 底部 tab 裁剪，并删除 2 个冗余的 `VipModel` 漏斗点，详见 §八·2；**40/40 待真机验证**，此前实测 `installed 41/41`；更早口径见各节历史记录——**一律以真机 `installed N/M` 的 M 为准**）。
+真机基线：主题商店 `20.1.63.305`（= hook 基线）。当前挂载表 **43 项**（代码逐点清点：F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 3 + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2；2026-10-10 真机实测 `installed 43/43`。更早口径见各节历史记录——**一律以真机 `installed N/M` 的 M 为准**）。
 
 ## 二、功能位归组
 
@@ -144,7 +144,7 @@ hook 侧 `module.log()` 落 **LSPosed 框架日志** `/data/adb/lspd/log/modules
 `ClassMatcher.create()/usingStrings(vararg)/addFieldForType(String)`、`FindMethod.create()/searchPackages(vararg)`。
 
 > **待真机验证**：锚点只在"直连失败"时才被用到，正常版本**不会**触发第二轨；
-> 判据 = `installed 40/40` 不变 + 日志中不出现"DexKit 兜底跳过（默认包类且无内容锚点）"。
+> 判据 = `installed 43/43` 不变 + 日志中不出现"DexKit 兜底跳过（默认包类且无内容锚点）"。
 
 ## 九、美豆 / 福利中心（广告变现链路）拦截
 

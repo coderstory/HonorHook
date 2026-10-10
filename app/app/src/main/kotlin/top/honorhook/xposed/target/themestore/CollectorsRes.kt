@@ -40,7 +40,7 @@ internal fun collectBeanSourceZeroHooks(pending: MutableList<MountTask>) {
 }
 
 // A6-A10（5 个 is*BtnShow 门）与按钮显隐汇总点均已**删除**：不再逐按钮硬掰门/藏按钮，
-// 按钮显隐交由"用户 VIP + 资源免费"的数据态驱动（ToolBarGroupLayout 原生 switch）。依据见 design.md §十。
+// 按钮显隐交由"用户 VIP + 资源免费"的数据态驱动（ToolBarGroupLayout 原生 switch）。依据见 docs/theme-store.md §十。
 
 /** T1：详情页按钮组类型 → **-1（无激励）**。 */
 internal fun collectRealChainHooks(pending: MutableList<MountTask>) {
@@ -106,10 +106,10 @@ internal fun collectVipHooks(pending: MutableList<MountTask>) {
         id = "theme:VipManager.getVipState",
         description = "F1 漏斗2 会员中心直读点改写（VipManager.java:88；VipMemberCenterActivity:345/VipCenterModel:1131/ArrivedPushManager:3228 实证；null 时自建实例）",
     )
-    // **F1 现状：VipManager 2 点 + VipState 7 getter + 漏斗 2 点，共 11 点。**
+    // **F1 现状：VipManager 2 点 + VipState 8 getter（含 getSecondTitle）+ 漏斗 2 点，共 12 点。**
 }
 
-/** F1/F2 双保险拦截 VIP 挽留弹窗（展示咽喉 showDialog + ARouter 直启兜底）。依据见 design.md §三 F1 挽留弹窗。 */
+/** F1/F2 双保险拦截 VIP 挽留弹窗（展示咽喉 showDialog + ARouter 直启兜底）。依据见 docs/theme-store.md §三 F1 挽留弹窗。 */
 internal fun collectRetentionDialogHooks(pending: MutableList<MountTask>) {
     pending += MountTask(
         kind = MountKind.BLOCK,

@@ -1,5 +1,5 @@
 # HonorHook ProGuard/R8 规则
-# 启用混淆时（release isMinifyEnabled=true）必需——初版 release 未开混淆，以下规则备好待用。
+# release 已启用混淆 + 资源收缩（见 app/build.gradle.kts 的 release 块），下列规则为存活保证。
 # 照 HyperChanger proguard-rules.pro 前三条。
 
 # libxposed 注解只存在于 compileOnly 的 api jar，运行期无类，忽略告警

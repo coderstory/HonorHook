@@ -103,7 +103,7 @@
 代码：`app/.../xposed/target/InstallerHook.kt` + 数据表 `app/.../xposed/InstallerConfigTable.kt`；
 注册：`TargetRegistry.register(InstallerHook)`；作用域：`scope.list` 增 `com.android.packageinstaller`。
 
-五项需求 → **7 个挂载点**（全部"源头优先"，无视图隐藏）：
+六项需求 → **11 个挂载点**（全部"源头优先"，无视图隐藏）：
 
 | 需求 | 挂载点 | 类型 | 落地 |
 |---|---|---|---|
@@ -113,6 +113,10 @@
 | R2 三方安装异常跳转不拦截 | `CommonConfigManager#j(String)` | CONST false | `isNewTaskStartInstallBySourcePkg` 恒不在拦截名单（含 `"ALL"` 通配） |
 | R3 安全模式默认不开启 | `CommonConfigManager#g()` + `#h(CommonConfigResponse)` | CONST JSON | 恒返 `{"easyModeDefaultOpen":0,"superProtectModeDefaultOpen":0}`；`g()` 页面懒加载点 / `h()` 网络响应点（→ 写 Settings `uz1.d/e`） |
 | R5 不提示开启安全模式 | `n12#f(int, SafeModeRise, RbiTempBean, boolean)` | CONST false | `isShowGuideOpenSafeModeDialog` 唯一展示门；`InstallSuccess` 两处调用（立即弹 `if(f(1,..)) r1()` → 落 `else finish()`；延后弹 `k0=f(2,..)` → `l0()` 不再弹） |
+| R5 安装页安全模式提示卡 | `r12#j(CardTipsRecord, String, boolean, String)` | CONST false | `isSupportSafeModeCardShow` 恒 false ⇒ 提示卡整卡隐藏 |
+| R5 安装页底部推广卡 | `r12#s(PackageInstallerActivity, RbiTempBean)` | **BLOCK** | `setSafeModeBottomSheetShow` 空实现阻断 ⇒ 底部推广 sheet 不展示 |
+| R6 跳过联网安全检测 | `ly1#h(boolean, sy1)` | **CHECK_BYPASS** | 联网安全检测**唯一入口**（全工程唯一调用点 `PackageInstallerActivity:1847`）；构造器按 `isHn` 选 `py1`（荣耀云）/`qy1`（通用）两条管线，**在分发器层短路即两条一起跳过**：不调原方法（不发检测请求 ⇒ 无"当前网络不佳"横幅），复用宿主静态工厂 `ly1.a(isHn)` 造"通过"结果，主线程经 `sy1.b` 回吐 ⇒ 无风险判定 ⇒ 风险拦截页/「已了解」勾选框/指纹校验整条下游链不出现。准备失败**放行原方法**（降级为有检测，不死锁） |
+| R6 安装指纹校验直通 | `qf2#g(Context, qf2$a)` | **FINGERPRINT_BYPASS** | 安装前指纹/密码校验唯一入口。回调 `c()`（清待决弹窗）+ `a(true)`（判定通过），不调原方法 ⇒ 校验弹窗不出现；检测短路后该链通常已不触发，此点为双保险 |
 
 **为什么"不请求广告"选 `lt1.b` 而不是直接阻断 `zv1.m`/`mt1.m`**：`zt1.m` 是 `void` 且靠回调回传结果；
 直接阻断会让 presenter 的 `vt1` 回调永不触发（可能挂起等待）。`lt1.b` 是宿主自己的"是否支持请求"判定，
@@ -132,9 +136,18 @@
 | `CommonConfigManager#j` | 类名可读、方法名混淆 | `strings=["isNewTaskStartInstallBySourcePkg"]` |
 | `CommonConfigManager#g` | 同上（方法体无字符串） | `classStrings=["CommonConfigManager"]` |
 | `CommonConfigManager#h` | 同上 | `strings=["initGetSafeModeConfig"]` + `paramTypes=[CommonConfigResponse]` |
+| `r12#j` | 默认包 + 单字母方法 | `strings=["isSupportSafeModeCardShow() pageIndex="]` + `paramTypes=[CardTipsRecord, String, boolean, String]` |
+| `r12#s` | 默认包 + 单字母方法 | `strings=["setSafeModeBottomSheetShow() first return"]` + `paramTypes=[PackageInstallerActivity, RbiTempBean]` |
+| `qf2#g` | 默认包 + 单字母方法 | `classStrings=["PwdControlUtil"]` + `paramTypes=[android.content.Context, qf2$a]` |
+| `ly1#h` | 默认包 + 单字母方法 | **类内零字符串常量**，仅 `paramTypes=[boolean, sy1]` 弱锚点 —— OTA 重混淆时诚实 `NOT_RESOLVED`，由汇总行暴露 |
 | `AdRespV4#getAdAppList` | 类名可读、方法名可读 | 无（直连轨足够） |
 
-**真机判据（待验证——改动完成时设备已断开）**：
-`InstallerHook: installed 7/7`（无失败清单）＋ 首 2 次命中各打一行
+**真机判据（R1–R5 已实测 `installed 11/11`；R6 两项待验证——加入时设备已断开）**：
+`InstallerHook: installed 11/11`（无失败清单）＋ 首 2 次命中各打一行
 `installer-hook 生效: <id> — <desc>`；UI 复核：安装确认页/安装中页/安装完成页 无广告卡片、
-不弹"开启安全模式"引导弹窗、安装成功页「完成」正常关闭。
+不弹"开启安全模式"引导弹窗、无"当前网络不佳"横幅、无风险拦截页、无「已了解」勾选框、无指纹弹窗，
+安装成功页「完成」正常关闭。
+
+**R6 的残余风险（未实测，如实记录）**：`CHECK_BYPASS` 是否走短路是**同步**判定的，而真正回吐"通过"结果的
+`Handler.post` 是异步的 —— 若那段回调抛异常，宿主会等不到检测结果。代码里只打 WARN，可能出现"安装流卡住"
+的表现。真机验证时若遇到安装无响应，优先查这条（日志特征：`安全检测通过结果回调异常`）。

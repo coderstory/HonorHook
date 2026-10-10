@@ -49,4 +49,5 @@
 ## 未解决
 
 - 主题商店搜索页「免费领」是本地硬编码 tab，云控与槽位裁剪都管不到 → `docs/theme-store.md` §七·2
-- 挂载点口径漂移（文档 40/43/39 与代码 id 计数 37 不一致）→ 装机时用真机 `installed N/M` 对账统一
+- ~~挂载点口径漂移~~ **已排查为假问题（2026-10-11）**：`docs/hook-inventory-audit.md` 的复核 grep 正则漏了 6 个命名空间，
+  误报 theme 37 / installer 8；用全命名空间命令复查后代码计数（theme 43 / installer 11）与 README 一致。
