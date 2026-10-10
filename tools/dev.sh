@@ -40,6 +40,17 @@ AAPT2=""
 for c in "$ANDROID_HOME"/build-tools/*/aapt2 "$ANDROID_HOME"/build-tools/*/aapt2.exe; do
   if [ -x "$c" ]; then AAPT2="$c"; fi
 done
+# ---- PATH 暴露（让按 PATH 探测的工具/脚本认得出本项目的工具链）----
+# 顺序：项目垫片 > jadx bundle > SDK build-tools（取最高版本，aapt2/apksigner/zipalign/dexdump）> JDK > platform-tools
+PATH="$ROOT/tools/bin:$PATH"
+[ -x "$ROOT/tools/jadx/bin/jadx" ] && PATH="$ROOT/tools/jadx/bin:$PATH"
+BT=""
+for d in "$ANDROID_HOME"/build-tools/*/; do [ -d "$d" ] && BT="${d%/}"; done
+[ -n "$BT" ] && PATH="$BT:$PATH"
+[ -x "$JAVA_HOME/bin/java" ] && PATH="$JAVA_HOME/bin:$PATH"
+[ -d "$ROOT/tools/platform-tools" ] && PATH="$ROOT/tools/platform-tools:$PATH"
+export PATH
+
 GRADLEW="$ROOT/app/gradlew"
 APK_DEBUG="$ROOT/app/app/build/outputs/apk/debug/app-debug.apk"
 APK_RELEASE="$ROOT/app/app/build/outputs/apk/release/app-release.apk"
@@ -92,6 +103,7 @@ HonorHook 开发工具
   jadx <apk> [名称]        jadx 反编译（--show-bad-code）→ system-files/<名称>-jadx
   aapt2 <参数...>          aapt2 透传（自动选 build-tools 里最高版本）
   apkinfo <apk>            aapt2 dump badging 摘要（包名/版本/权限）
+  exec <命令...>           带本项目工具链环境（PATH/JAVA_HOME/ANDROID_HOME）执行任意命令
 EOF
     ;;
 
@@ -555,6 +567,10 @@ PYEOF
     printf '  %-12s %s\n' jadx "${JADX:-MISSING}"
     printf '  %-12s %s\n' python3 "$(command -v python3 || echo MISSING)"
     printf '  %-12s %s\n' gradlew "$GRADLEW"
+    info "按 PATH 解析到的（本项目垫片 + SDK build-tools 已注入）"
+    for t in apktool jadx aapt2 apksigner zipalign dexdump java adb; do
+      printf '  %-12s %s\n' "$t" "$(command -v "$t" 2>/dev/null || echo MISSING)"
+    done
     ;;
 
   decompile)
@@ -581,6 +597,13 @@ PYEOF
     [ -n "$AAPT2" ] || die "未找到 aapt2（tools/android-sdk/build-tools/*/aapt2）"
     if [ $# -gt 1 ]; then shift; fi
     "$AAPT2" "$@"
+    ;;
+
+  exec)
+    # 带本项目工具链环境执行任意命令（PATH/JAVA_HOME/ANDROID_HOME 已注入）
+    if [ $# -gt 1 ]; then shift; fi
+    [ $# -gt 0 ] || die "用法: tools/dev.sh exec <命令...>（例如 exec python3 <脚本> --json）"
+    exec "$@"
     ;;
 
   apkinfo)

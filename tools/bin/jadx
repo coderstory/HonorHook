@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# dev.sh/doctor.py 用的 jadx 垫片（真实实现 = tools/jadx/bin/jadx，跨平台 bundle）
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+exec "$ROOT/tools/jadx/bin/jadx" "$@"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# dev.sh/doctor.py 用的 apktool 垫片：把它变成 PATH 上的可执行名（真实实现 = tools/apktool.jar）
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/java" ]; then
+  for c in "$ROOT/tools/jdk-21" /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home; do
+    if [ -x "$c/bin/java" ]; then JAVA_HOME="$c"; break; fi
+  done
+fi
+exec "${JAVA_HOME:?JDK 21 not found}/bin/java" -jar "$ROOT/tools/apktool.jar" "$@"
