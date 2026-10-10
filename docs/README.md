@@ -1,6 +1,6 @@
 # docs 文档索引
 
-> 更新：2026-10-10 · 活跃文档 8 份（不含本索引与 archive/）。模块已收敛为**纯 hook 模块（无 UI）**，
+> 更新：2026-10-10 · 活跃文档 9 份（不含本索引与 archive/）。模块已收敛为**纯 hook 模块（无 UI）**，
 > 仅保留**两个目标**：主题商店（`com.hihonor.android.thememanager`）+ 包管理器（`com.android.packageinstaller`）。
 > 早期参考项目分析（Rain / HyperChanger / 模板审计 / gap 分析）已移入 `archive/`，需要借模式时再翻。
 
@@ -19,6 +19,7 @@
 | `honor-theme-payment-analysis.md` | 荣耀主题付费机制逆向（引擎+商店两 apk 的 hook 点清单） | 主题模块相关 hook 开发前必读 | 5 组 30 个 hook 点全部 file:line 实证（含 B3 过期时间链），是主题模块 v1 的实现依据 |
 | `theme-download-chain.md` | 付费主题下载卡 0% 的下载链路反查与卡点定位 | 主题下载/免费化相关 hook 开发时 | 卡点 = 下载 URL 获取：付费主题服务端不在详情 JSON 下发可用直链，真实 URL 只在 sendProduct 授权接口返回 |
 | `theme-ui-real-chain.md` | 主题商店 UI 真实渲染链反查（详情页按钮/VIP tab/新用户专享） | hook 详情页按钮真机无效时必读 | isBuyBtnShow 是"门"非"开关"，真实链 = 门 + `IncentiveData.getThemeDetailButtonType()` → updateButtons switch；fetchShouldDialogBy* 消费链是休眠代码 |
+| `launcher-card-title-hide.md` | **系统桌面卡片标题（YOYO建议）隐藏分析**（节点定位 / 渲染链 / 总闸 `z.d()` / 官方「隐藏应用名称」开关 / 4 条 hook 路线 + 插件独立 ClassLoader 约束） | 要做桌面定制、或想隐掉卡片/图标文字时 | 那行文本 = `card_indicator_title`（`HnIndicator2X4StackView`，在 `YOYOCardStackPlugin.apk` 独立 CL）；总闸 = `ThemeUtilImpl.isHiddenTitle()` ← SP `launcher_icon_title_hidden`；推荐 hook 点 `ThemeUtilImpl.isHiddenTitle()`（类名不混淆、只被卡片消费） |
 | `rain-analysis.md` | Rain_1.1.5.apk 逆向留档（基本信息/META-INF 三配置/strings 核对） | 需要 libxposed 102 参考基线与配置写法时 | Rain 是单入口 + java_init.list/module.prop/scope.list 三配置文件的标准 libxposed 102 模块样张 |
 | `rain-hook-architecture.md` | Rain hook 架构分析（入口分发/DexKit 双轨/字符串解密） | 写 hook 分发或借鉴 DexKit 双轨解析时 | 单入口 HookEntry + 接口化 per-app 适配器 + 静态注册表 + 直连反射优先/DexKit 兜底双轨解析 |
 

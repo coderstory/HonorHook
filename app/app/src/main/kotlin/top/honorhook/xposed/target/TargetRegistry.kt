@@ -20,6 +20,7 @@ object TargetRegistry {
         register(InstallerHook)
         register(SettingsHook)
         register(Exam8Hook)
+        register(LauncherCardTitleHook)
     }
 
     /** 注册目标（同包重复注册以最后一次为准）。 */
