@@ -25,3 +25,11 @@
     public void onPackageLoaded(io.github.libxposed.api.XposedModuleInterface$PackageLoadedParam);
     public void onPackageReady(io.github.libxposed.api.XposedModuleInterface$PackageReadyParam);
 }
+
+# ---- UI 宿主入口（Application/Activity 已由 manifest android:name 引用自动 keep，此处冗余防御）----
+-keep public class top.honorhook.ui.HonorHookApp { public <init>(); }
+-keep public class top.honorhook.ui.MainActivity { public <init>(); }
+
+# 功能目录 / 配置存储为跨进程共用（宿主写、hook 侧读远端 key 字面量一致），防 R8 重命名其成员/常量
+-keep class top.honorhook.FeatureCatalog { *; }
+-keep class top.honorhook.xposed.data.RemoteConfig { *; }

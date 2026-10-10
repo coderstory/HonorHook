@@ -5,8 +5,10 @@ import android.view.View
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.data.RemoteConfig
 
 /** 系统设置（14.0.0.210）：应用详情页「停用」按钮恒可点。 */
 object SettingsHook : TargetHook {
@@ -21,6 +23,7 @@ object SettingsHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SETTINGS_DISABLE_BTN)) return
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 挂载表 1 项；**以真机 `installed N/M` 的 M 为准。**

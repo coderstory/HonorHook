@@ -4,7 +4,9 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.data.RemoteConfig
 
 /**
  * 荣耀桌面 `com.hihonor.android.launcher`：隐藏卡片堆栈标题（如「YOYO 建议 · 明日天气预报」）。
@@ -43,6 +45,7 @@ object LauncherCardTitleHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_LAUNCHER_HIDE_TITLE)) return
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 挂载表 1 项；**以真机 `installed N/M` 的 M 为准。**

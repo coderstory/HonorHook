@@ -5,7 +5,9 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 
 /** 荣耀主题商店目标（F1–F4）：F1 开 VIP / F2 全免费（含下载链修复）/ F3 试用无倒计时 / F4 不恢复默认。 */
@@ -24,18 +26,26 @@ object ThemeStoreHook : TargetHook {
 
         // 挂载表 39 项（38 清理基线 + W1 动态壁纸应用路径撕裂修正）；**以真机 M 为准。**
         val pending = mutableListOf<MountTask>()
-        collectFreeJudgmentHooks(pending)   // F2 A1-A4 + A11 + T1 + btn-hide:buy
-        collectPriceZeroHooks(pending)      // F2 A5
-        collectBeanSourceZeroHooks(pending) // F2 A11
-        collectRealChainHooks(pending)      // F2 T1（按钮组类型兜底）
-        collectDownloadChainHooks(pending)  // F2 H1/H2b + W1
-        collectCloudSwitchHooks(pending)    // 云控统一读点（表驱动：CloudSwitchTable）
-        collectAdSlotPruneHooks(pending)    // 美豆服务端槽位源头裁剪（表驱动：AdSlotFilter）
-        collectBottomTabPruneHooks(pending) // 底部 tab 源头裁剪（表驱动：BottomTabFilter）
-        collectVipHooks(pending)            // F1 B1/B2 + VipState getter 短路
-        collectRetentionDialogHooks(pending) // F1 挽留弹窗双保险
-        collectTrialHooks(pending)          // F3 C1/C5/C6 + F4 C4 + 保守归 F2 C2
-        collectApplyStateHooks(pending)     // F4 C7 + F3 C9
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_VIP)) {
+            collectVipHooks(pending)             // F1 B1/B2 + VipState getter 短路
+            collectRetentionDialogHooks(pending) // F1 挽留弹窗双保险
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_FREE)) {
+            collectFreeJudgmentHooks(pending)   // F2 A1-A4 + A11 + T1 + btn-hide:buy
+            collectPriceZeroHooks(pending)      // F2 A5
+            collectBeanSourceZeroHooks(pending) // F2 A11
+            collectRealChainHooks(pending)      // F2 T1（按钮组类型兜底）
+            collectDownloadChainHooks(pending)  // F2 H1/H2b + W1
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_TRIAL)) {
+            collectTrialHooks(pending)          // F3 C1/C5/C6 + F4 C4 + 保守归 F2 C2
+            collectApplyStateHooks(pending)     // F4 C7 + F3 C9
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_AD_OFF)) {
+            collectCloudSwitchHooks(pending)    // 云控统一读点（表驱动：CloudSwitchTable）
+            collectAdSlotPruneHooks(pending)    // 美豆服务端槽位源头裁剪（表驱动：AdSlotFilter）
+            collectBottomTabPruneHooks(pending) // 底部 tab 源头裁剪（表驱动：BottomTabFilter）
+        }
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }

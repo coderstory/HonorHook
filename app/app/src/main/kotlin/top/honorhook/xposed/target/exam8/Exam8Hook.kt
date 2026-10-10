@@ -4,7 +4,9 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 
 /**
@@ -52,9 +54,13 @@ object Exam8Hook : TargetHook {
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         val pending = mutableListOf<MountTask>()
-        collectVipUserStatusHooks(pending)   // F1 中央会员态
-        collectVipPrivilegeHooks(pending)    // F1 特权资源
-        collectBurnAfterReadingHooks(pending) // F2 阅后即焚特权门
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_EXAM8_SUPER_VIP)) {
+            collectVipUserStatusHooks(pending)   // F1 中央会员态
+            collectVipPrivilegeHooks(pending)    // F1 特权资源
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_EXAM8_BURN)) {
+            collectBurnAfterReadingHooks(pending) // F2 阅后即焚特权门
+        }
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }

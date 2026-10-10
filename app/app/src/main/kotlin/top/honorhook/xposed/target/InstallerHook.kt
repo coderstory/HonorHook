@@ -4,9 +4,11 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.data.InstallerConfigTable
+import top.honorhook.xposed.data.RemoteConfig
 
 /** 包管理器目标（14.0.37.301）：五项「清净化」。 */
 object InstallerHook : TargetHook {
@@ -45,13 +47,21 @@ object InstallerHook : TargetHook {
 
         // 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。**
         val pending = mutableListOf<MountTask>()
-        collectAdRequestHooks(pending)      // R4 不请求广告 + R1 不展示安装页广告
-        collectAbRequestHooks(pending)      // R4 不请求 AB
-        collectCommonConfigHooks(pending)   // R2 三方跳转不拦截 + R3 安全模式默认不开启
-        collectSafeModeDialogHooks(pending) // R5 不提示开启安全模式
-        collectSafeModeCardHooks(pending)   // R5 安装页安全模式提示卡/底部推广卡
-        collectSecurityCheckHooks(pending)  // R6 跳过联网安全检测（分发器层，双管线一并短路）
-        collectFingerprintBypassHooks(pending) // R6 安装指纹校验直接通过（风险链兜底）
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_INSTALLER_AD)) {
+            collectAdRequestHooks(pending)      // R4 不请求广告 + R1 不展示安装页广告
+            collectAbRequestHooks(pending)      // R4 不请求 AB
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_INSTALLER_NO_INTERCEPT)) {
+            collectCommonConfigHooks(pending)   // R2 三方跳转不拦截 + R3 安全模式默认不开启
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_INSTALLER_NO_SAFE_PROMPT)) {
+            collectSafeModeDialogHooks(pending) // R5 不提示开启安全模式
+            collectSafeModeCardHooks(pending)   // R5 安装页安全模式提示卡/底部推广卡
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_INSTALLER_SKIP_CHECK)) {
+            collectSecurityCheckHooks(pending)  // R6 跳过联网安全检测（分发器层，双管线一并短路）
+            collectFingerprintBypassHooks(pending) // R6 安装指纹校验直接通过（风险链兜底）
+        }
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
