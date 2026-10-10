@@ -23,6 +23,9 @@ import top.honorhook.xposed.target.TargetHook
  *
  * 注意：这是**客户端**解锁——把本地会员态伪造为超级会员，翻转 UI 与客户端功能门。
  * 服务端强校验的能力（如真实付费音视频流、云端题库下发）仍由服务端把关，本 hook 不触及网络协议。
+ *
+ * F2「阅后即焚」（YHJF=14）见 [collectBurnAfterReadingHooks]：短路 `VipUtils.hasPrivilege(14)` 过 UI/功能门。
+ * 该功能另有**单次付费**路径 `orderState == 1`（服务端订单态），本 hook 不涉及其校验。
  */
 object Exam8Hook : TargetHook {
 
@@ -37,6 +40,13 @@ object Exam8Hook : TargetHook {
     private const val CLS_VIP_USER_STATUS = "com.exam8.newer.tiku.bean.VipUserStatus"
     private const val CLS_VIP_PRIVILEGE = "com.exam8.newer.tiku.bean.VipPrivilegeRes"
 
+    /** F2 阅后即焚：特权位 [VipUtils.YHJF]，见 `com.exam8.tiku.util.VipUtils.hasPrivilege(int)`。 */
+    private const val CLS_VIP_UTILS = "com.exam8.tiku.util.VipUtils"
+    private const val PRIVILEGE_BURN_AFTER_READING = 14
+
+    /** 剩余天数拉满值（覆盖 F2 `hasPrivilege` 的 `RemainDays >= 0` 与展示）。 */
+    private const val FAR_FUTURE_DAYS = 3650
+
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
@@ -44,6 +54,7 @@ object Exam8Hook : TargetHook {
         val pending = mutableListOf<MountTask>()
         collectVipUserStatusHooks(pending)   // F1 中央会员态
         collectVipPrivilegeHooks(pending)    // F1 特权资源
+        collectBurnAfterReadingHooks(pending) // F2 阅后即焚特权门
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
@@ -89,9 +100,45 @@ object Exam8Hook : TargetHook {
         )
     }
 
-    // ---------------- 挂载执行：CONST 常量短路（解析/重试/汇总在共享 [engine]） ----------------
+    // ---------------- F2 阅后即焚（YHJF=14）：特权门 + 剩余天数 ----------------
 
-    private enum class MountKind { CONST }
+    /**
+     * F2「阅后即焚」解锁。
+     *
+     * 逆向定位（jadx 实证，APK 5.9.0.0-release）：页面 `com.exam8.newer.tiku.test_activity.ExamSprintFragment`
+     * 内所有「是否已解锁」判定都是 `VipUtils.hasPrivilege(14) || orderState == 1`——
+     * 前者是**会员特权覆盖**（本次目标），后者是**单次付费订单**（`立即抢购` 买的就是它，服务端按 UserId 查订单表）。
+     *
+     * `hasPrivilege(int)` 原始实现：
+     * `HasSubjectConfig() && getVipLevelByPrivilege(i) > 0 && VipPrivilege.getUserVipLevel() >= 该等级 && getRemainDays() >= 0`
+     * 其中 `getVipLevelByPrivilege` 依赖**服务端下发**的 `VipSubjectConfig`（非会员时可能不含 14），
+     * 故本组直接短路 hasPrivilege，并补 `RemainDays`/`HasSubjectConfig` 兜底。
+     *
+     * 边界（未实测，不打包票）：`orderState` 由 `http://api.wantiku.com/api/Sprint/Papers?UserId=&SubjectId=`
+     * 下发，属服务端订单态。若服务端在 hasPrivilege 为真时仍按订单卡内容下放，则本组只能过 UI 门、拿不到题目正文。
+     * 真机判据：进「阅后即焚」点试卷，看题目/答案是否完整（UI 门过但正文空 = 服务端锁死）。
+     */
+    private fun collectBurnAfterReadingHooks(pending: MutableList<MountTask>) {
+        // 主门：仅对特权位 14（阅后即焚）短路 true；其他特权位放行原逻辑，避免误伤无关功能判定
+        addConditional(
+            pending, CLS_VIP_UTILS, "hasPrivilege", 1, "boolean", true, PRIVILEGE_BURN_AFTER_READING,
+            "exam8:vipUtils.hasPrivilege", "F2 阅后即焚特权门(14)=true",
+        )
+        // 兜底：剩余天数（hasPrivilege 第四个条件 & 「VIP 有效期」展示）
+        addConst(
+            pending, CLS_VIP_PRIVILEGE, "getRemainDays", 0, "int", FAR_FUTURE_DAYS,
+            "exam8:vipPrivilege.getRemainDays", "F2 剩余天数拉满($FAR_FUTURE_DAYS)",
+        )
+        // 兜底：学科配置开关（hasPrivilege 第一条件）
+        addConst(
+            pending, CLS_VIP_PRIVILEGE, "getHasSubjectConfig", 0, "boolean", true,
+            "exam8:vipPrivilege.getHasSubjectConfig", "F2 学科配置开关=true",
+        )
+    }
+
+    // ---------------- 挂载执行：CONST 常量短路 / CONDITIONAL 按参短路（解析/重试/汇总在共享 [engine]） ----------------
+
+    private enum class MountKind { CONST, CONDITIONAL }
 
     private class MountTask(
         val kind: MountKind,
@@ -100,6 +147,8 @@ object Exam8Hook : TargetHook {
         override val paramCount: Int,
         override val returnType: String,
         val value: Any?,
+        /** CONDITIONAL 专用：仅当第 0 参等于此值才短路，否则放行原方法。 */
+        val matchArg: Int?,
         override val id: String,
         override val description: String,
     ) : MountEngine.Task
@@ -114,10 +163,25 @@ object Exam8Hook : TargetHook {
         id: String,
         description: String,
     ) {
-        pending += MountTask(MountKind.CONST, className, methodName, paramCount, returnType, value, id, description)
+        pending += MountTask(MountKind.CONST, className, methodName, paramCount, returnType, value, null, id, description)
     }
 
-    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 CONST 的 intercept 构造）。 */
+    /** 带参短路：仅第 0 参 == [matchArg] 时返回 [value]，其余走原逻辑。 */
+    private fun addConditional(
+        pending: MutableList<MountTask>,
+        className: String,
+        methodName: String,
+        paramCount: Int,
+        returnType: String,
+        value: Any?,
+        matchArg: Int,
+        id: String,
+        description: String,
+    ) {
+        pending += MountTask(MountKind.CONDITIONAL, className, methodName, paramCount, returnType, value, matchArg, id, description)
+    }
+
+    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数构造 CONST / CONDITIONAL 的 intercept）。 */
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
         val method = engine.resolveTask(task, module, loader) ?: return MountEngine.Result.NOT_RESOLVED
         return runCatching {
@@ -125,12 +189,15 @@ object Exam8Hook : TargetHook {
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .setId(task.id)
                 .intercept { chain ->
+                    // CONDITIONAL：参数未命中则放行原方法（只短路目标特权位，不误伤其他判定）
+                    if (task.kind == MountKind.CONDITIONAL) {
+                        val arg0 = chain.args.firstOrNull() as? Int
+                        if (arg0 != task.matchArg) return@intercept chain.proceed()
+                    }
                     logJudge(module, task)
                     if (DEBUG) {
-                        // 诊断：取一次原值观测（确认 hook 命中且看真实档位编码；非会员原值多为 0）
-                        runCatching { chain.proceed() }.onSuccess { orig ->
-                            module.log(Log.DEBUG, MountEngine.TAG, "exam8 原值 ${task.id} = $orig → 强制 ${task.value}")
-                        }
+                        // 诊断原值：仅每个 task 首次命中时取一次（节流，避免列表滚动刷屏）
+                        logOrigOnce(module, task, chain)
                     }
                     task.value
                 }
@@ -143,15 +210,25 @@ object Exam8Hook : TargetHook {
         )
     }
 
-    /** 诊断日志开关（默认开；确认档位编码后改 false 收静音）。 */
+    /** 诊断日志开关（默认开：仅每 task 首次命中打原值，收静音后仍可核对真实档位编码）。 */
     private const val DEBUG = true
     private val judgeLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val origLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** 判据日志节流（每 task 前 2 次；真机核对「超级会员已解锁」用，不受 DEBUG 门控）。 */
     private fun logJudge(module: XposedModule, task: MountTask) {
         val n = judgeLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
         if (n <= 2) {
             module.log(Log.INFO, MountEngine.TAG, "exam8-hook 生效: ${task.id} — ${task.description}")
+        }
+    }
+
+    /** 原值诊断节流（每 task 仅首次命中取一次原值；后续命中直接放行不取原值，省日志与 proceed 开销）。 */
+    private fun logOrigOnce(module: XposedModule, task: MountTask, chain: XposedInterface.Chain) {
+        val n = origLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
+        if (n > 1) return
+        runCatching { chain.proceed() }.onSuccess { orig ->
+            module.log(Log.DEBUG, MountEngine.TAG, "exam8 原值 ${task.id} = $orig → 强制 ${task.value}")
         }
     }
 }
