@@ -311,7 +311,7 @@ PYEOF
     info "冷启动 top.honorhook（明确 LAUNCHER intent，不用 monkey 避免干扰）"
     "$ADB" shell am force-stop top.honorhook 2>/dev/null || true
     "$ADB" shell am start -a android.intent.action.MAIN \
-      -c android.intent.category.LAUNCHER -n top.honorhook/.LauncherActivity 2>&1 | tr -d '\r'
+      -c android.intent.category.LAUNCHER -n top.honorhook/.ui.MainActivity 2>&1 | tr -d '\r'
     sleep 3
     "$0" top
     ;;
@@ -350,7 +350,7 @@ PYEOF
     info "② 冷启动 top.honorhook"
     "$ADB" shell am force-stop top.honorhook 2>/dev/null || true
     "$ADB" shell monkey -p top.honorhook -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || \
-      "$ADB" shell am start -n top.honorhook/.LauncherActivity >/dev/null 2>&1 || true
+      "$ADB" shell am start -n top.honorhook/.ui.MainActivity >/dev/null 2>&1 || true
     sleep 5
     info "③ 进程存活检查"
     pid="$("$ADB" shell pidof top.honorhook 2>/dev/null | tr -d '\r' || true)"
