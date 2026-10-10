@@ -68,6 +68,8 @@ internal const val CLS_SLOT_DATA_MATE = "$PKG.hitop.mate.SlotData"
 
 // 底部导航 tab —— AMS systemParam 在线配置 JSON；唯一域模型出口 = getBottomTabConfigs()。
 internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
+// 主页 Activity（未混淆 keep 名单）——createTabs 的宿主，S2b 前置裁剪挂载点。
+internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 
 /**
  * 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制；
@@ -78,7 +80,7 @@ internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
  * [FINISH_ACTIVITY] 先 proceed 再 finish（不 proceed 生命周期会在未初始化状态走完，可能 NPE）；
  * [PRE_PROCESS] proceed 前修正 this 数据（W1 壁纸路径），再原样放行。
  */
-internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS }
+internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX }
 
 /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
 internal enum class UriOwner { THIS, GET_DOWNLOAD_INFO }
@@ -191,6 +193,7 @@ internal fun actionDesc(task: MountTask): String = when (task.kind) {
     MountKind.BLOCK -> "空实现阻断（不调原方法）"
     MountKind.FINISH_ACTIVITY -> "放行原方法后 finish Activity"
     MountKind.PRE_PROCESS -> "前置修正 this 数据后放行原方法"
+    MountKind.VIP_STATE_FIX -> "VipState 实例字段改写（after，null 自建）"
 }
 
 /** 反射方法缓存（`类名#方法名` → Method），避免在 getList 这类的取数路径上反复查找。 */

@@ -21,11 +21,11 @@
 > 删除 `SlotProbe.kt`/`VipDebugProbe.kt` 及调用行、`KEY_HOOK_ENABLED`、私有 `findMethod`（mountOne 直接走
 > `MethodResolver.resolveMethod`）；`UriOwner` 枚举随之收敛为 `THIS`/`GET_DOWNLOAD_INFO` 两值。
 > **P3 未执行**（抽公共基类 / 历史注释归档 / featureKey 管道处理——含回归风险，待单独一轮 + 真机验证）。
-> 当前真机验证判据：`installed 39/39`（主题商店，38 清理基线 + W1 动态壁纸应用路径修复）+ `installed 7/7`（包管理器）。
+> 当前真机验证判据：`installed 43/43`（主题商店，39 基线 + VIP 漏斗 2 + getSecondTitle 1 + createTabs 前置 1，见 §六）+ `installed 7/7`（包管理器）。
 
 ---
 
-## 一、主题商店 `ThemeStoreHook`（39 点 · W1 修复后基线）
+## 一、主题商店 `ThemeStoreHook`（43 点 · 2026-10-10 回归修复后基线，构成见 §6.5）
 
 真机基线 20.1.63.305；全部签名已逐一对 `system-files/theme-store-jadx/sources` 复核。
 
@@ -222,3 +222,52 @@ public int getVipOnly() { return this.vipOnly; }                // ← 纯 gette
 - 详情页付费主题仍走 VIP 通道下载（`theme-download-chain 路由触发` H1/H2b 两条，不再有 H2）
 - 列表/浏览页无 VIP 专属角标（覆盖 `getVipOnly` 直连消费点后）
 - 无 `failed` 清单
+
+---
+
+## 六、2026-10-10 真机回归复盘（审计删除的教训）
+
+> 背景：当日 P0–P3 审计删除了若干"静态推断冗余"的挂载点，真机复测发现两处 UI 回归。
+> **教训：审计删除必须真机 A/B 验证，静态推理不足以作为删除依据。**
+
+### 6.1 "VIP 已过期"横幅回归（→ 漏斗恢复 + getSecondTitle 置空）
+
+- 当日审计以"`VipState` 字段全 private ⇒ 类外只走 getter ⇒ getter 已短路 ⇒ 漏斗冗余"为由删除
+  `VipManager.getLocalVipState/getVipState` 双漏斗。真机复测横幅复活，证明推理有两处漏洞：
+  1. `getVipState()` 可返回 **null**（首查未落缓存）——UI 拿到 null 直接走已过期/未登录分支，
+     getter 短路对 null 实例无意义；漏斗在 null 时自建实例填会员值；
+  2. `VipState` 的 `equals/copy/writeToParcel/toString` 等**类内方法直读字段**，不经任何 getter。
+- 且横幅文案真正的来源是 **服务端下发字段 `secondTitle`**（服务端按真实购买记录生成
+  "VIP 已过期，立即行动"文案；`MineVipCardView:1789-1792` 判 `secondTitle`+`linkUrl` 均非空才渲染），
+  客户端伪造任何本地 getter 都改不了它 ⇒ 需要单独挂 `getSecondTitle → ""` 判空隐藏。
+- 处置：漏斗两点恢复（`MountKind.VIP_STATE_FIX`，after 改写实例字段）；`getSecondTitle` 置空串。
+
+### 6.2 VIP tab 删不掉（→ S2b createTabs 前置裁剪）
+
+- S2（`BottomTabConfigs.getBottomTabConfigs` 出口裁剪）只覆盖 **AMS 在线配置刷新链**；
+  真机实证存在第二条路径：`refreshBottomTabCacheConfigTask` 读 **MMKV 缓存**
+  （`decodeString(bottom_tab_config)` → `GsonUtils.toList` 直解 `List<BottomTabItem>`），
+  完全绕过 `BottomTabConfigs`；冷启动用脏缓存建 tab，刷新后 StateFlow 更新 UI 不重建。
+- 陷阱：`createTabs` 的 fallback 分支（列表 null / size∉[3,5]）会**本地硬编码建 VIP tab**
+  （`if (isSupportVip) createActionTab("VIP")`）——单纯清空缓存反而让 VIP tab 必然复活。
+- 处置：新增 S2b `createTabs` 前置裁剪（PRE_PROCESS）：proceed 前把 StateFlow 列表就地裁剪，
+  缓存脏不脏无所谓，且列表合法时走宿主正常分支不踩 fallback。
+
+### 6.3 环境陷阱：jadx 反编译包 ≠ 设备运行包
+
+- 曾据 jadx 产物给 `VipState.getIsVipUser` 加挂载点，真机挂载失败（39/1）；
+  拉设备实机 APK 用 dex 字符串检索证实：设备包**只有** `isVipUser()`，没有 `getIsVipUser()`。
+- **规矩：hook 目标方法存在性必须以设备实机 APK 的 dex 为准验证**（`adb shell pm path` 拉包 →
+  zip 解析 dex 查方法名字符串），jadx 产物仅作阅读参考。
+
+### 6.4 环境陷阱：模块重装后被 LSPosed 停用
+
+- `adb install -r` 覆盖安装后，LSPosed 会停用模块 ⇒ 之后拉起的目标进程全部无注入
+  （表现为：进程活着、模块日志一条没有）。**必须手动到 LSPosed 管理器重新启用**。
+- 排查口诀：目标进程无任何模块日志 ≠ hook 没挂上，先查进程启动时间 vs 模块启用时间，
+  再查 LSPosed 是否停用；安装器等按需拉起的进程还要 force-stop 一次才会以新身份注入。
+
+### 6.5 当前基线（2026-10-10 晚）
+
+- `ThemeStoreHook: installed 43/43`（39 基础 + 漏斗 2 + secondTitle 1 + createTabs 前置 1）
+- `InstallerHook: installed 7/7`

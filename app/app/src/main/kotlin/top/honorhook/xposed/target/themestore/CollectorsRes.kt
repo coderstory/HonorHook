@@ -98,9 +98,41 @@ internal fun collectVipHooks(pending: MutableList<MountTask>) {
         "theme:VipState.getDisplayTimeTimestamp", "F1 到期日期展示时间戳 → 2088-08-08（UI 展示链 MineVipCardView:430/441、HwThemeManagerActivity:894/901）")
     addConst(pending, CLS_VIP_STATE, "getDisplayTime", 0, "java.lang.String", TS_2088_08_08_STR,
         "theme:VipState.getDisplayTime", "F1 到期展示字符串 → 2088-08-08")
-    // 已删的历史挂载点（fetchShouldDialogBy* 休眠链 / T8 getVipCardType / VipManager 读点漏斗 /
-    // VipModel 双漏斗）依据全部归档于 docs/hook-inventory-audit.md §五。
-    // **F1 现状：VipManager 2 点 + VipState 7 个 getter，共 9 点。**
+    // getSecondTitle：**服务端下发**的二级标题文案（ MineVipCardView.java:1789-1792 ——
+    // secondTitle 与 linkUrl 均非空才渲染 ll_secondary_container 横幅行；服务端按真实购买记录
+    // 下发"VIP 已过期，立即行动"文案，客户端 getter 伪造不影响它）→ 置空串 ⇒ 判空整行隐藏。
+    addConst(pending, CLS_VIP_STATE, "getSecondTitle", 0, "java.lang.String", "",
+        "theme:VipState.getSecondTitle", "F1 二级标题横幅（服务端下发'VIP 已过期'文案）→ 空串隐藏（MineVipCardView:1789 判空）")
+    // 已删的历史挂载点（fetchShouldDialogBy* 休眠链 / T8 getVipCardType）依据全部归档于
+    // docs/hook-inventory-audit.md §五。
+    // **漏斗恢复（2026-10-10 真机回归实证）**：当日审计曾以"VipState 字段全 private ⇒ 类外只走 getter ⇒
+    // 漏斗冗余"为由删除 `VipManager.getLocalVipState/getVipState` 两漏斗点——**该推理有漏**：
+    // ① `getVipState()` 可返回 null（首查未落缓存），漏斗 null 时自建实例填会员值；getter 短路救不了
+    //    "UI 拿到 null → 直接走未登录/已过期分支"的路径（"VIP 已过期"横幅回归的真机根因）；
+    // ② VipState 的 `equals/copy/writeToParcel` 等类内方法直读字段，不经过任何 getter。
+    // 漏斗（after 改写实例字段）与 getter 短路双层并存，覆盖互补。昨晚（2e2b0f1）真机验证的良好形态
+    // 即"双层并存"，今日删层即回归——教训：**审计删除必须真机 A/B，不许只凭静态推理**。
+    pending += MountTask(
+        kind = MountKind.VIP_STATE_FIX,
+        className = CLS_VIP_MANAGER,
+        methodName = "getLocalVipState",
+        paramCount = 0,
+        returnType = CLS_VIP_STATE,
+        value = null,
+        id = "theme:VipManager.getLocalVipState",
+        description = "F1 漏斗1 页面级 VIP 状态汇聚点改写（VipManager.java:55；DetailSource:219/ApplySource:1149/WidgetUtil:131/AdsRequestSource:285/ApplyResourceServer:357 实证）",
+    )
+    pending += MountTask(
+        kind = MountKind.VIP_STATE_FIX,
+        className = CLS_VIP_MANAGER,
+        methodName = "getVipState",
+        paramCount = 0,
+        returnType = CLS_VIP_STATE,
+        value = null,
+        id = "theme:VipManager.getVipState",
+        description = "F1 漏斗2 会员中心直读点改写（VipManager.java:88；VipMemberCenterActivity:345/VipCenterModel:1131/ArrivedPushManager:3228 实证；null 时自建实例）",
+    )
+    // **F1 现状：VipManager 2 点 + VipState 7 getter + 漏斗 2 点，共 11 点。**
 }
 
 /** F1/F2 双保险拦截 VIP 挽留弹窗（展示咽喉 showDialog + ARouter 直启兜底）。依据见 design.md §三 F1 挽留弹窗。 */

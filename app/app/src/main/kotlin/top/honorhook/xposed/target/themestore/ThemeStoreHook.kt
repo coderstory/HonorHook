@@ -127,12 +127,21 @@ object ThemeStoreHook : TargetHook {
                         chain.proceed()
                     }
                 }
-                // 前置数据修正：proceed 前修正 this 对象的字段（壁纸 packagePath 路径撕裂修复 W1），再原样放行
+                // 前置数据修正（proceed 前修 this/共享数据，再原样放行）：按任务分流
                 MountKind.PRE_PROCESS -> builder.intercept { chain ->
                     if (routeActive(chain, module, task)) {
-                        fixWallpaperPackagePath(chain, module)
+                        if (task.id == "theme:WallpaperPreview.fixPackagePath") {
+                            fixWallpaperPackagePath(chain, module)  // W1：壁纸 packagePath 路径撕裂修复
+                        } else {
+                            pruneTabStateFlowBeforeCreateTabs(chain, module)  // S2b：tab 缓存路径兜底
+                        }
                     }
                     chain.proceed()
+                }
+                // VIP 状态漏斗改写（after 语义）：proceed 拿 VipState 实例逐 setter 填会员值；null 自建。
+                // 2026-10-10 真机回归后恢复——getter 短路覆盖不了 null 实例与类内字段直读（见 collectVipHooks 注释）
+                MountKind.VIP_STATE_FIX -> builder.intercept { chain ->
+                    fixVipState(chain, module, task)
                 }
             }
         }.fold(

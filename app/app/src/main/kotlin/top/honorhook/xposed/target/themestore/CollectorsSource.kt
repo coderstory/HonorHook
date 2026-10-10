@@ -158,6 +158,23 @@ internal fun collectBottomTabPruneHooks(pending: MutableList<MountTask>) {
         description = "底部 tab 源头裁剪（BottomTabConfigs.getBottomTabConfigs 出口按 BottomTabFilter 表剔除 " +
             BottomTabFilter.PRUNED_TABS.joinToString("/") { "${it.name}(${it.id})" } + "）",
     )
+    // S2b 消费口兜底（2026-10-10 真机实证的第二条 tab 数据路径）：tab 清单除了 AMS 刷新链（S2 已裁）
+    // 还有一条 **MMKV 缓存直读**路径 —— refreshBottomTabCacheConfigTask 读 `decodeString(bottom_tab_config)`
+    // → GsonUtils.toList 直解 List<BottomTabItem> → StateFlow，完全绕过 BottomTabConfigs ⇒ S2 裁不到；
+    // 冷启动 createTabs 用脏缓存建 tab，刷新后 StateFlow 更新 UI 也不重建 ⇒ VIP tab 常驻。
+    // 钩 createTabs 入口（PRE_PROCESS）：proceed 前把 StateFlow 列表就地裁剪——缓存脏不脏都无所谓，
+    // 且列表合法（size∈[3,5]）时走宿主正常分支，不会踩 fallback 本地硬编码建 VIP tab 的分支。
+    pending += MountTask(
+        kind = MountKind.PRE_PROCESS,
+        className = CLS_MAIN_ACTIVITY,
+        methodName = "createTabs",
+        paramCount = 1,
+        returnType = "void",
+        value = null,
+        id = "adsource:CreateTabs.pruneStateFlow",
+        description = "底部 tab S2b createTabs 前置裁剪 StateFlow（堵 MMKV 缓存直读路径，" +
+            BottomTabFilter.PRUNED_TABS.joinToString("/") { "${it.name}(${it.id})" } + "）",
+    )
 }
 
 // ---------------- S1 运行时实现：SlotData.getList() 出口裁剪 ----------------
@@ -293,3 +310,114 @@ internal fun fixWallpaperPackagePath(chain: XposedInterface.Chain, module: Xpose
         module.log(Log.WARN, TAG, "壁纸 packagePath 修正失败（放行原逻辑）: ${t.message}")
     }
 }
+
+/**
+ * **S2b createTabs 前置裁剪**：proceed 前把 `HwThemeManagerModel.getBottomTabConfig()`（StateFlow）
+ * 里的 tab 列表按 [BottomTabFilter] 表就地裁剪——堵 MMKV 缓存直读路径（见 collectBottomTabPruneHooks S2b 注释）。
+ * 幂等：列表无目标 tab 时零操作；裁后 < [BottomTabFilter.MIN_LIST_SIZE] 放弃（宁可不裁也不踩 fallback）。
+ * StateFlow 公开类型是只读 StateFlow，实际对象实现 MutableStateFlow ⇒ 反射 setValue 可写。
+ */
+internal fun pruneTabStateFlowBeforeCreateTabs(chain: XposedInterface.Chain, module: XposedModule) {
+    runCatching {
+        val activity = chain.thisObject ?: return
+        // getModel() 可能在父类或非 public（Kotlin private 委托属性不生成公开 getter）：
+        // 先沿继承链找方法，找不到再走 `model$delegate` Lazy 字段
+        val model: Any = run {
+            var cls: Class<*>? = activity.javaClass
+            var found: Any? = null
+            while (cls != null && found == null) {
+                val m = cls.declaredMethods.firstOrNull { it.name == "getModel" && it.parameterCount == 0 }
+                if (m != null) {
+                    m.isAccessible = true
+                    found = m.invoke(activity)
+                }
+                cls = cls.superclass
+            }
+            found ?: run {
+                val f = generateSequence(activity.javaClass) { it.superclass }
+                    .mapNotNull { c -> c.declaredFields.firstOrNull { it.name == "model\$delegate" } }
+                    .firstOrNull() ?: return
+                f.isAccessible = true
+                val lazy = f.get(activity) as? Lazy<*> ?: return
+                lazy.value ?: return
+            }
+        }
+        val flow = model.javaClass.getMethod("getBottomTabConfig").invoke(model) ?: return
+        val cur = flow.javaClass.getMethod("getValue").invoke(flow) as? List<*> ?: return
+        val out = ArrayList<Any>(cur.size)
+        var changed = false
+        for (item in cur) {
+            if (item == null) continue
+            val id = (reflectGet(item, "getBottomTabId") as? Number)?.toInt()
+            if (id != null && BottomTabFilter.ruleFor(id) != null) {
+                changed = true
+            } else {
+                out.add(item)
+            }
+        }
+        if (!changed) return
+        if (out.size < BottomTabFilter.MIN_LIST_SIZE) {
+            module.log(Log.WARN, TAG, "底部 tab 前置裁剪放弃：裁后仅 ${out.size} 项，放行原配置")
+            return
+        }
+        flow.javaClass.getMethod("setValue", Any::class.java).invoke(flow, out as Any)
+        module.log(Log.INFO, TAG, "底部 tab 缓存路径已裁剪（createTabs 前置）: ${cur.size} → ${out.size} 项")
+    }.onFailure { t ->
+        module.log(Log.WARN, TAG, "createTabs 前置裁剪失败（放行原逻辑）: ${t.message}")
+    }
+}
+
+// ---------------- F1 运行时实现：VipManager 漏斗改写（VIP_STATE_FIX，2026-10-10 真机回归后恢复） ----------------
+
+/** vip-state 漏斗日志节流 ≤3 次（getLocalVipState/getVipState 是高频 LiveData 汇聚点，防刷屏）。 */
+private var vipFixLogCount = 0
+
+/**
+ * VIP_STATE_FIX 改写（after 语义）：先 proceed 拿 VipState 实例 → 逐 setter 填永久 VIP 值；
+ * 实例 null（getVipState 首查未落缓存）→ 无参构造自建后返回——**这条 null 路径是 getter 短路
+ * 覆盖不了的核心场景**（UI 拿到 null 直接走已过期/未登录分支，"VIP 已过期"横幅回归的真机根因）。
+ * setter 签名按 jadx VipState.java 实证；逐个独立 runCatching，缺失的（版本漂移）跳过；
+ * 整体失败放行原逻辑（PROTECTIVE 纪律）。判据日志：`vip-state 漏斗改写: <method> setter=N/6`。
+ */
+internal fun fixVipState(chain: XposedInterface.Chain, module: XposedModule, task: MountTask): Any? {
+    val orig = runCatching { chain.proceed() }.getOrNull()
+    val state = orig ?: runCatching {
+        // null 实例（getVipState 首查）：按宿主 classLoader 构造空 VipState 再填会员值
+        val loader = chain.thisObject?.javaClass?.classLoader
+        Class.forName(CLS_VIP_STATE, true, loader).getDeclaredConstructor().newInstance()
+    }.getOrNull()
+    if (state == null) {
+        module.log(Log.WARN, TAG, "vip-state 漏斗改写失败（实例不可得），放行原逻辑: ${task.methodName}")
+        return orig
+    }
+    // 剩余时长 = now + 1.95e12（到 2088 的真实剩余；防消费端 now+X 溢出，2026-10-09 语义修正）
+    val filled = listOf(
+        Triple("setVipUser", java.lang.Boolean.TYPE, true as Any),
+        Triple("setVipStatus", java.lang.Integer.TYPE, 2 as Any),
+        Triple("setVipType", java.lang.Integer::class.java, 2 as Any),
+        Triple("setExpireTimeTimestamp", java.lang.Long.TYPE, TS_2088_08_08_MILLIS as Any),
+        Triple("setDisplayTime", String::class.java, TS_2088_08_08_STR as Any),
+        Triple("setRemainingTime", java.lang.Long::class.java, System.currentTimeMillis() + 1_950_000_000_000L),
+    ).count { (name, paramType, value) -> invokeVipSetter(state, name, paramType, value, module) }
+    if (filled == 0) {
+        module.log(Log.WARN, TAG, "vip-state 漏斗改写失败（全部 setter 缺失/异常），放行原逻辑: ${task.methodName}")
+        return orig
+    }
+    if (vipFixLogCount < 3) {
+        vipFixLogCount++
+        module.log(
+            Log.INFO, TAG,
+            "vip-state 漏斗改写: ${task.methodName} setter=$filled/6 vipUser=true vipStatus=2 vipType=2 " +
+                "expireTimeTimestamp=$TS_2088_08_08_MILLIS displayTime=$TS_2088_08_08_STR remainingTime=now+1.95e12",
+        )
+    }
+    return state
+}
+
+/** 单个 VipState setter 反射调用（实证签名精确匹配；失败跳过 = 版本漂移容错，不阻断）。 */
+private fun invokeVipSetter(state: Any, name: String, paramType: Class<*>, value: Any, module: XposedModule): Boolean =
+    runCatching {
+        state.javaClass.getMethod(name, paramType).invoke(state, value)
+    }.onFailure { t ->
+        module.log(Log.WARN, TAG, "vip-state setter 缺失/失败（跳过）: $name — ${t.message}")
+    }.isSuccess
