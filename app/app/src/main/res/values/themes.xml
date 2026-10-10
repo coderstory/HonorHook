@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 宿主 UI 主题：仅需 NoActionBar（界面全部由 Miuix Compose 绘制），windowBackground 兜底启动闪白/闪黑 -->
+    <style name="Theme.HonorHook" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Re:荣耀 模块自绘图标（替换此前从 Rain LSPosed 复制来的雨滴位图）。
+
+  做法说明：R 用**描边路径**（strokeWidth + round cap/join）而不是多段填充路径拼合。
+  填充路径手拼字母时，圆弧连接处的半径/方向很难配平，容易出现缺口和错位（上一版就是这个毛病）；
+  描边是单条连续路径 + 圆头端点，字形几何上必然干净。
+
+  画布 108x108，自适应图标安全区约 18~90，字形落在 34~72 区间。
+-->
+<vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 圆角方形底板：MagicOS 青紫渐变 -->
+    <path android:pathData="M20,4 L88,4 A16,16 0 0 1 104,20 L104,88 A16,16 0 0 1 88,104 L20,104 A16,16 0 0 1 4,88 L4,20 A16,16 0 0 1 20,4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="4"
+                android:startY="4"
+                android:endX="104"
+                android:endY="104"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00D2C7" />
+                <item android:offset="0.5" android:color="#FF2F7BFF" />
+                <item android:offset="1.0" android:color="#FF7B4DFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 玻璃高光斜带 -->
+    <path
+        android:pathData="M4,58 L104,20 L104,31 L4,69 Z"
+        android:fillColor="#26FFFFFF" />
+
+    <!--
+      R 字标：单条连续描边路径 = 竖笔 + 上半圆角环 + 斜腿。
+      竖笔 x=37（y: 72→38）；圆环从竖笔顶部向右画半圆再回竖笔中部（顶 y=38，底 y=53，半径 7.5）；
+      斜腿从 (46,53) 拉到 (62,72)。strokeWidth=8，round cap 让端点自然。
+    -->
+    <path
+        android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M46,53 L62,72"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- 冒号：两个等大圆点 -->
+    <path
+        android:pathData="M74,45 A4.5,4.5 0 1 1 65,45 A4.5,4.5 0 1 1 74,45 Z"
+        android:fillColor="#FFFFFFFF" />
+    <path
+        android:pathData="M74,66 A4.5,4.5 0 1 1 65,66 A4.5,4.5 0 1 1 74,66 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

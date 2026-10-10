@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- miuix-blur 声明 minSdk 33（RuntimeShader 折射高光），但项目需覆盖到 API 26。
+         该库只在 `Build.VERSION.SDK_INT >= 33` 时被调用（见 MainActivity/FloatingBottomBar 的
+         `enableBlurSdk` 守卫），低版本走实色底栏，故可安全 override，不会有 NoSuchMethodError。 -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+
+    <!-- Android 11(API 30) 包可见性：模块需要读取 6 个宿主应用的 label/icon 才能渲染功能列表。
+         系统应用（settings / systemui / launcher / thememanager / packageinstaller）默认可见，
+         但**用户安装的应用**（如 com.exam8.chengrenGK）在未声明时 getApplicationInfo() 直接返回 null，
+         图标会退化成首字母色块。QUERY_ALL_PACKAGES 是 LSPosed 类模块读取宿主应用的标准做法。 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。
@@ -12,9 +24,13 @@
          注意 `android:description` 属性格式是 reference（只接受 @string 引用，字面量会被 aapt2 拒绝），
          故简介落在 res/values/strings.xml 的 `module_description`。label 可直接字面量。 -->
     <application
+        android:name=".ui.HonorHookApp"
         android:allowBackup="false"
         android:description="@string/module_description"
-        android:label="耀子专逛窑子">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="Re:荣耀"
+        android:theme="@style/Theme.HonorHook">
 
         <!-- Xposed 基础标识（兼容旧框架探测；现代 LSPosed 走 META-INF/xposed/*） -->
         <meta-data
@@ -22,10 +38,22 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="专噶耀子的腰子。" />
+            android:value="重新编译你的荣耀体验——系统深处，由你执笔。" />
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
+
+        <!-- 宿主设置界面：三 Tab（首页/功能/设置），Miuix Compose 实现 -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="Re:荣耀"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
     </application>
 

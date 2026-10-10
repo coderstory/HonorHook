@@ -1,0 +1,579 @@
+package top.honorhook.ui.screen
+
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.graphics.drawable.Drawable
+import android.view.View
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import top.honorhook.FeatureCatalog
+import top.honorhook.ui.FeatureStore
+import top.honorhook.ui.component.isInDarkTheme
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.ChevronForward
+import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+
+/**
+ * 第二个 Tab —— **照抄 KernelSU `SuperUserMiuix.kt` 的视觉结构**：
+ *
+ * 一级（`GroupItem`）：`Card` + 48dp 应用图标 + 主标题 + 副标题（包名/功能数）+
+ * 右侧状态标签列 + 右箭头。状态标签沿用 `StatusTagMiuix`（6dp 圆角 + 9sp/750 字重）。
+ *
+ * 二级（`SimpleAppItem`）：左侧 6dp 强调色条 + `Card { BasicComponent(标题, 说明, startAction=图标) }`，
+ * 按用户要求**每个选项都带功能说明**（即 `BasicComponent` 的 `summary`，取 `Feature.description`）。
+ */
+@Composable
+fun FeaturesScreen(bottomInnerPadding: Dp = 0.dp) {
+    var selectedTarget by remember { mutableStateOf<FeatureCatalog.Target?>(null) }
+    val target = selectedTarget
+    BackHandler(enabled = target != null) { selectedTarget = null }
+    if (target == null) {
+        TargetListScreen(bottomInnerPadding) { selectedTarget = it }
+    } else {
+        // 二级页占满整个内容区，同样要避开悬浮底栏
+        FeatureListScreen(
+            target = target,
+            onBack = { selectedTarget = null },
+            bottomInnerPadding = bottomInnerPadding,
+        )
+    }
+}
+
+/** 一级列表 —— 照抄 KernelSU `SuperUserMiuix` 的 `GroupItem` 卡。 */
+@Composable
+private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatalog.Target) -> Unit) {
+    val scrollBehavior = MiuixScrollBehavior()
+    val context = LocalContext.current
+
+    // 只展示**本机确实装了**的目标应用：没装的功能列出来也没意义（点了必然无效果）。
+    // getApplicationInfo 依赖 QUERY_ALL_PACKAGES（已在 manifest 声明）。
+    val installedTargets = remember {
+        FeatureCatalog.targets.filter { target ->
+            runCatching {
+                context.packageManager.getApplicationInfo(target.packageName, 0)
+            }.isSuccess
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = "功能",
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        popupHost = { },
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxHeight()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding() + 6.dp,
+                bottom = bottomInnerPadding +
+                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp,
+            ),
+            overscrollEffect = null,
+        ) {
+            items(count = installedTargets.size) { index ->
+                val target = installedTargets[index]
+                TargetGroupCard(
+                    target = target,
+                    onClick = { onOpenTarget(target) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 目标真实应用图标。
+ *
+ * 图标源走 `getApplicationInfo(GET_META_DATA).loadIcon(pm)`：直接 `getApplicationIcon()`
+ * 对荣耀/华为这类分体（split APK）系统应用会抛异常或退回系统默认灰块。
+ *
+ * 两个关键坑：
+ * 1. **不能转 Bitmap**。`Drawable.toBitmap()` 对 `LayerDrawable` / `AnimatedVectorDrawable`
+ *    会返回 null 或抛异常（成考题库 `com.exam8.chengrenGK` 就是这种），导致图标整块消失。
+ * 2. **Drawable 必须先 `ConstantState.newDrawable(res, theme)` 重建并 measure**。
+ *    跨进程/跨用户拿到的 Drawable 常带 `intrinsicWidth = -1` 且未 measure，
+ *    直接 draw 是空白。
+ */
+@Composable
+private fun rememberAppIcon(packageName: String): Painter? {
+    val context = LocalContext.current
+    return remember(packageName) {
+        val pm = context.packageManager
+        val appInfo = runCatching {
+            pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+        }.getOrNull() ?: return@remember null
+
+        val raw = runCatching { appInfo.loadIcon(pm) }
+            .recoverCatching { pm.getApplicationIcon(packageName) }
+            .getOrNull() ?: return@remember null
+
+        // 重建 + 固定尺寸 measure，抹掉 intrinsicWidth=-1 与未 measure 的状态
+        val drawable = runCatching {
+            (raw.constantState?.newDrawable(context.resources, context.theme) ?: raw)
+                .mutate()
+        }.getOrDefault(raw)
+
+        DrawablePainter(drawable)
+    }
+}
+
+/**
+ * 极简 Drawable → Painter 适配器。
+ *
+ * 不依赖 `androidx.compose.ui.res.rememberDrawablePainter`（该 API 在本项目的
+ * Compose Multiplatform 依赖组合下不可解析），也不走 `Drawable.toBitmap()`
+ * （对 `LayerDrawable`/`AnimatedVectorDrawable` 会失败导致图标整块消失）。
+ */
+private class DrawablePainter(private val drawable: Drawable) : Painter() {
+
+    override val intrinsicSize: Size = Size(
+        width = drawable.intrinsicWidth.takeIf { it > 0 }?.toFloat() ?: 144f,
+        height = drawable.intrinsicHeight.takeIf { it > 0 }?.toFloat() ?: 144f,
+    )
+
+    override fun DrawScope.onDraw() {
+        drawIntoCanvas { canvas ->
+            val w = size.width.toInt().coerceAtLeast(1)
+            val h = size.height.toInt().coerceAtLeast(1)
+            drawable.setBounds(0, 0, w, h)
+            drawable.draw(canvas.nativeCanvas)
+        }
+    }
+}
+
+/** 图标槽位：有图标画图标，无图标画首字母色块（不留空白）。 */
+@Composable
+private fun AppIconSlot(
+    packageName: String,
+    fallbackText: String,
+    modifier: Modifier = Modifier,
+) {
+    val icon = rememberAppIcon(packageName)
+    if (icon != null) {
+        Image(painter = icon, contentDescription = null, modifier = modifier)
+    } else {
+        // 兜底：Miuix 次强调色圆角块 + 首字母，避免"图标空白"看起来像 bug
+        Box(
+            modifier = modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = fallbackText.take(1).uppercase(),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+/** 目标分组卡 —— 照抄 KernelSU `GroupItem`。 */
+@Composable
+private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) {
+    val isInDark = isInDarkTheme()
+
+    // 状态标签配色沿用 GroupItem 的语义分层
+    val customBg = colorScheme.secondaryContainer.copy(alpha = 0.8f)
+    val customFg = colorScheme.onSecondaryContainer
+    val activeBg = colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+    val activeFg = colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+    val countBg = if (isInDark) Color.White.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.3f)
+    val countFg = if (isInDark) Color.Black.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.8f)
+
+    val enabledCount = target.features.count { FeatureStore.isEnabled(it.key) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 12.dp),
+        onClick = onClick,
+        showIndication = true,
+        insideMargin = PaddingValues(start = 10.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AppIconSlot(
+                packageName = target.packageName,
+                fallbackText = target.name,
+                modifier = Modifier
+                    .padding(end = 10.dp)
+                    .size(48.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = target.name,
+                    modifier = Modifier.basicMarquee(),
+                    fontWeight = FontWeight(550),
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                Text(
+                    text = "${target.packageName} · ${target.features.size} 项",
+                    modifier = Modifier.basicMarquee(),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight(550),
+                    color = colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            Column(
+                modifier = Modifier.padding(start = 16.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                StatusTag(
+                    label = "$enabledCount/${target.features.size}",
+                    backgroundColor = if (enabledCount > 0) activeBg else countBg,
+                    contentColor = if (enabledCount > 0) activeFg else countFg,
+                )
+                if (enabledCount > 0) {
+                    StatusTag(label = "已启用", backgroundColor = customBg, contentColor = customFg)
+                }
+            }
+            ArrowRightIcon()
+        }
+    }
+}
+
+/**
+ * 顶部应用信息卡 —— 照抄 KernelSU 超级用户/模块详情页的头部：
+ * 64dp 应用图标 + 应用名 + 包名 + 版本/UID + 右侧启用状态标签。
+ */
+@Composable
+private fun AppHeaderCard(
+    target: FeatureCatalog.Target,
+    versionText: String?,
+    uid: Int?,
+    enabledCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    val isInDark = isInDarkTheme()
+    val activeBg = colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+    val activeFg = colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+    val idleBg = if (isInDark) Color.White.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.3f)
+    val idleFg = if (isInDark) Color.Black.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.8f)
+
+    Card(modifier = modifier) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppIconSlot(
+                packageName = target.packageName,
+                fallbackText = target.name,
+                modifier = Modifier.size(44.dp),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 10.dp, end = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    text = target.name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // 包名 / 版本 / UID 各占一行，字号统一 11sp 压紧
+                val meta = listOfNotNull(
+                    target.packageName,
+                    versionText?.let { "版本 $it" },
+                    uid?.let { "UID $it" },
+                )
+                meta.forEach { line ->
+                    Text(
+                        text = line,
+                        fontSize = 11.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = "已启用 $enabledCount/${target.features.size} 项功能",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (enabledCount > 0) activeFg else colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            StatusTag(
+                label = if (enabledCount > 0) "运行中" else "待启用",
+                backgroundColor = if (enabledCount > 0) activeBg else idleBg,
+                contentColor = if (enabledCount > 0) activeFg else idleFg,
+                // 头部卡空间有限，用 11sp（原 13sp 偏大）；一级列表仍用 9sp
+                fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+/** 二级列表 —— 照抄 KernelSU 超级用户详情页：顶部应用信息卡 + 左侧色条的功能开关列表。 */
+@Composable
+private fun FeatureListScreen(
+    target: FeatureCatalog.Target,
+    onBack: () -> Unit,
+    bottomInnerPadding: Dp = 0.dp,
+) {
+    val scrollBehavior = MiuixScrollBehavior()
+    val context = LocalContext.current
+
+    // 应用信息（版本名 / UID），拿不到就留 null 不显示该行。
+    // 注意：`ApplicationInfo.versionName/versionCode` 是 @hide 字段，SDK 里访问不到，
+    // 必须走 `PackageInfo`。
+    val pkgInfo: PackageInfo? = remember(target.packageName) {
+        runCatching {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(target.packageName, 0)
+        }.getOrNull()
+    }
+    val versionText: String? = remember(pkgInfo) {
+        pkgInfo?.let { info -> "${info.versionName} (${info.longVersionCode})" }
+    }
+    val uid: Int? = remember(pkgInfo) {
+        runCatching {
+            context.packageManager.getApplicationInfo(target.packageName, 0).uid
+        }.getOrNull()
+    }
+    val enabledCount = target.features.count { FeatureStore.isEnabled(it.key) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = target.name,
+                navigationIcon = { MiuixBackButton(onBack) },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        popupHost = { },
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxHeight()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding() + 6.dp,
+                bottom = bottomInnerPadding +
+                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp,
+            ),
+            overscrollEffect = null,
+        ) {
+            // ---- 顶部应用信息卡（KernelSU 详情页同款：图标 + 名称 + 包名/版本 + 状态标签）----
+            item {
+                AppHeaderCard(
+                    target = target,
+                    versionText = versionText,
+                    uid = uid,
+                    enabledCount = enabledCount,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                )
+            }
+
+            items(count = target.features.size) { index ->
+                val feature = target.features[index]
+                var enabled by remember(feature.key) {
+                    mutableStateOf(FeatureStore.isEnabled(feature.key))
+                }
+                // 整个 Row 统一带上/下边距，保证左侧色条与卡片同步留白
+                Row(
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 左侧 6dp 彩色条：色相由 feature.key 哈希决定，稳定不跳变。
+                    // 开启时满色 + 100% 不透明；关闭时淡化到 45% + 半透明，
+                    // 避免用「变灰」表达关闭（灰色在深色模式下几乎看不见）。
+                    val accent = rememberAccentColor(feature.key)
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .width(6.dp)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (enabled) accent else accent.copy(alpha = 0.45f)
+                            )
+                    )
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 6.dp, end = 12.dp),
+                    ) {
+                        // 不加图标：每个开关都重复同一个目标应用图标反而是噪声，
+                        // 左侧色条（开=primary / 关=primaryContainer）已经能表达状态。
+                        SwitchPreference(
+                            title = feature.title,
+                            // 用户要求：二级菜单每个选项都带功能说明
+                            summary = feature.description,
+                            checked = enabled,
+                            onCheckedChange = {
+                                FeatureStore.setEnabled(feature.key, it)
+                                enabled = it
+                            },
+                            // 卡片内边距：原来只设了 horizontal，内容贴着上下边缘很挤
+                            insideMargin = PaddingValues(
+                                start = 9.dp,
+                                end = 9.dp,
+                                top = 14.dp,
+                                bottom = 14.dp,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 按 feature key 稳定取一个彩色强调色（左侧色条用）。
+ *
+ * 用 `key.hashCode()` 索引固定调色板，而不是每次重组 `Random.nextInt()`：
+ * 后者会在重组时变色，滚动列表会「闪成彩虹」，很廉价。
+ * key → index 的映射是确定性的，同一个功能在任何时候都是同一个颜色。
+ *
+ * 色板取饱和度/亮度一致的一组，颜色之间跳变明显且在浅色/深色背景下都能看清。
+ */
+private val accentPalette = listOf(
+    Color(0xFFEF5350), // 红
+    Color(0xFFEC407A), // 粉
+    Color(0xFFAB47BC), // 紫
+    Color(0xFF7E57C2), // 深紫
+    Color(0xFF5C6BC0), // 靛蓝
+    Color(0xFF42A5F5), // 天蓝
+    Color(0xFF26C6DA), // 青
+    Color(0xFF26A69A), // 蓝绿
+    Color(0xFF66BB6A), // 绿
+    Color(0xFF9CCC65), // 黄绿
+    Color(0xFFFFCA28), // 琥珀
+    Color(0xFFFF7043), // 橙
+    Color(0xFF8D6E63), // 棕
+    Color(0xFF78909C), // 蓝灰
+)
+
+@Composable
+private fun rememberAccentColor(key: String): Color = remember(key) {
+    accentPalette[Math.floorMod(key.hashCode(), accentPalette.size)]
+}
+@Composable
+internal fun StatusTag(
+    label: String,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color,
+    contentColor: Color,
+    fontSize: androidx.compose.ui.unit.TextUnit = 9.sp,
+) {
+    Box(modifier = modifier.background(color = backgroundColor, shape = RoundedCornerShape(6.dp))) {
+        Text(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            text = label,
+            color = contentColor,
+            fontSize = fontSize,
+            fontWeight = FontWeight(750),
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/** 右箭头（照抄 GroupItem 末尾的箭头，RTL 时翻转）。 */
+@Composable
+private fun ArrowRightIcon() {
+    val layoutDirection = LocalLayoutDirection.current
+    Image(
+        modifier = Modifier
+            .graphicsLayer { if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f }
+            .padding(start = 8.dp)
+            .size(width = 10.dp, height = 16.dp),
+        imageVector = MiuixIcons.ChevronForward,
+        contentDescription = null,
+        colorFilter = ColorFilter.tint(colorScheme.onSurfaceVariantActions),
+    )
+}

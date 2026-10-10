@@ -5,5 +5,5 @@
   故必须落一个字符串资源。这是本模块唯一的 res 资源，与应用 UI 无关（无 Activity/图标/布局）。
 -->
 <resources>
-    <string name="module_description">专噶耀子的腰子。</string>
+    <string name="module_description">重新编译你的荣耀体验——系统深处，由你执笔。</string>
 </resources>

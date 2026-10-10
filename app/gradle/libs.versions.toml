@@ -1,13 +1,55 @@
-# HonorHook 版本目录 —— 纯 hook 模块：仅 libxposed api（编译期）+ DexKit
+# HonorHook 版本目录 —— hook 模块 + 原生 Compose(Material3) UI
 [versions]
 agp = "9.2.1"
 kotlin = "2.3.21"
 libxposed = "102.0.0"
 dexkit = "2.2.0"
+# 工具链对齐 HyperChanger（AGP 9.2.1 + Kotlin 2.3.21 + Compose 1.11.0）
+compose = "1.11.0"
+# JetBrains 的 material3 只发alpha 线（Central 无1.11.0 稳定版），取同代最新 alpha
+composeMaterial3 = "1.11.0-alpha07"
+activityCompose = "1.12.3"
+lifecycle = "2.10.0"
+coreKtx = "1.17.0"
+# Miuix（KernelSU Manager UI 同源；0.9.4 = Maven Central 最新 release）
+miuix = "0.9.4"
+# MaterialKolor：由种子色生成 M3 色板（KernelSU 主题页的关键色/配色风格/色规范）
+materialKolor = "5.0.1"
 
 [libraries]
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
+# 模块宿主 App 经该服务与 LSPosed 通信：远程 prefs 下发 + 真实激活状态（照 LSPFRIDA/HyperChanger）
+libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed" }
 dexkit = { group = "org.luckypray", name = "dexkit", version.ref = "dexkit" }
+
+# Compose Multiplatform（JetBrains 产物，1.11.0）
+compose-ui = { group = "org.jetbrains.compose.ui", name = "ui", version.ref = "compose" }
+compose-foundation = { group = "org.jetbrains.compose.foundation", name = "foundation", version.ref = "compose" }
+compose-animation = { group = "org.jetbrains.compose.animation", name = "animation", version.ref = "compose" }
+# 原生 Material3（首页/功能页顶栏与状态卡用）
+compose-material3 = { group = "org.jetbrains.compose.material3", name = "material3", version.ref = "composeMaterial3" }
+# Material 图标（MiuixIcons 的原生替代）
+compose-material-icons-core = { group = "org.jetbrains.compose.material", name = "material-icons-core", version = "1.7.3" }
+# Extended 图标（KernelSU 首页用的 Tag/Security/Smartphone/Fingerprint/DeveloperBoard/Block 等都在这）
+compose-material-icons-extended = { group = "org.jetbrains.compose.material", name = "material-icons-extended", version = "1.7.3" }
+
+# Miuix：KernelSU Manager UI 的真正来源（miuix-ui 基本组件 / preference 设置项 / blur 液态玻璃 lens 折射）
+miuix-core = { group = "top.yukonga.miuix.kmp", name = "miuix-core", version.ref = "miuix" }
+miuix-ui = { group = "top.yukonga.miuix.kmp", name = "miuix-ui", version.ref = "miuix" }
+miuix-preference = { group = "top.yukonga.miuix.kmp", name = "miuix-preference", version.ref = "miuix" }
+miuix-icons-android = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-android", version.ref = "miuix" }
+# miuix-blur：Backdrop/LayerBackdrop/blur/lens/vibrancy，FloatingBottomBar 的折射高光靠它
+miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur", version.ref = "miuix" }
+# MaterialKolor：种子色 → M3 色板（主题页的动态取色）
+material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
+
+# 液态玻璃真·背景模糊（Kyant0 AndroidLiquidGlass，对齐 HyperChanger 2.0.0）
+backdrop = { group = "io.github.kyant0", name = "backdrop", version = "2.0.0" }
+
+activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

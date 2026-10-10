@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  monochrome 层（Android 13+ 主题图标单色层）：只保留 "Re:" 字标，
+  颜色由系统按主题着色。与 foreground 层用同一套描边路径，保证字形一致。
+-->
+<vector android:height="108.0dp" android:width="108.0dp" android:viewportWidth="108.0" android:viewportHeight="108.0"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- R：竖笔 + 上半圆角环 + 斜腿 -->
+    <path
+        android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53"
+        android:strokeColor="#ffffff"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M46,53 L62,72"
+        android:strokeColor="#ffffff"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <!-- 冒号 -->
+    <path android:fillColor="#ffffff"
+        android:pathData="M74,45 A4.5,4.5 0 1 1 65,45 A4.5,4.5 0 1 1 74,45 Z" />
+    <path android:fillColor="#ffffff"
+        android:pathData="M74,66 A4.5,4.5 0 1 1 65,66 A4.5,4.5 0 1 1 74,66 Z" />
+</vector>

@@ -17,6 +17,9 @@ dependencyResolutionManagement {
         maven { url = uri("https://maven.aliyun.com/repository/google") }
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
+        // JetBrains Compose Multiplatform 的 material3/material-icons 只在 Maven Central 有
+        // （阿里云镜像未同步），必须保留直连；国内网络不通时靠前面的阿里云仓兜底。
+        maven { url = uri("https://repo1.maven.org/maven2") }
         // libxposed 离线兜底：限定 group 的 mavenLocal，本地 ~/.m2 有货时优先命中
         mavenLocal {
             content {
