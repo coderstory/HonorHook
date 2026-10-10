@@ -25,6 +25,12 @@ object InstallerHook : TargetHook {
     private const val CLS_AB_EXP_UTILS = "sx1"
     /** 安全模式引导弹窗「是否展示」门助手（默认包混淆名；类内日志 TAG `InstalledGuideDialogHelper`）。 */
     private const val CLS_SAFE_MODE_DIALOG_HELPER = "n12"
+    /** 联网安全检测分发器（默认包混淆名；构造器按 isHn 选 py1/qy1 两条管线，h() 是唯一入口）。 */
+    private const val CLS_SECURITY_CHECK = "ly1"
+    /** 安装指纹校验助手（默认包混淆名；类内日志 TAG `PwdControlUtil`，`qf2$a` 回调接口）。 */
+    private const val CLS_FINGERPRINT_AUTH = "qf2"
+    /** 安装页提示卡助手（默认包混淆名；方法体内有 isSupportSafeModeCardShow 等独有日志串）。 */
+    private const val CLS_SAFE_MODE_CARD = "r12"
 
     // ---- 类名可读、方法名为单字母混淆（仅方法名会漂移）----
     /** 云控配置管理器（`configVO` key→JSON；方法 b..j 为单字母混淆）。 */
@@ -37,12 +43,15 @@ object InstallerHook : TargetHook {
         // DexKit 第二轨兜底需要 APK 磁盘路径（MethodResolver）
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
-        // 挂载表 7 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗 1）；**以真机 `installed N/M` 的 M 为准。**
+        // 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。**
         val pending = mutableListOf<MountTask>()
         collectAdRequestHooks(pending)      // R4 不请求广告 + R1 不展示安装页广告
         collectAbRequestHooks(pending)      // R4 不请求 AB
         collectCommonConfigHooks(pending)   // R2 三方跳转不拦截 + R3 安全模式默认不开启
         collectSafeModeDialogHooks(pending) // R5 不提示开启安全模式
+        collectSafeModeCardHooks(pending)   // R5 安装页安全模式提示卡/底部推广卡
+        collectSecurityCheckHooks(pending)  // R6 跳过联网安全检测（分发器层，双管线一并短路）
+        collectFingerprintBypassHooks(pending) // R6 安装指纹校验直接通过（风险链兜底）
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
@@ -160,13 +169,103 @@ object InstallerHook : TargetHook {
         )
     }
 
+    // ---------------- R5 补充：安装页安全模式提示卡 / 底部推广卡 ----------------
+
+    /**
+     * `r12.j(CardTipsRecord, String, boolean, String)` = `isSupportSafeModeCardShow()` 恒 false（提示卡整卡隐藏）；
+     * `r12.s(PackageInstallerActivity, RbiTempBean)` = `setSafeModeBottomSheetShow` 空实现（底部推广卡不展示）。
+     */
+    private fun collectSafeModeCardHooks(pending: MutableList<MountTask>) {
+        addConst(
+            pending, CLS_SAFE_MODE_CARD, "j", 4, "boolean",
+            InstallerConfigTable.SAFE_MODE_CARD_NOT_SHOWN,
+            "installer:SafeModeCard.isSupportSafeModeCardShow",
+            "R5 安装页安全模式提示卡不展示（r12.j → false，整卡隐藏）",
+            // 锚点：方法体独有日志串 + 参数类型序列（CardTipsRecord 可读类名，强锚点）
+            dex = DexHint(
+                strings = listOf("isSupportSafeModeCardShow() pageIndex="),
+                paramTypes = listOf(
+                    "$PKG_HN.utils.CardTipsRecord",
+                    "java.lang.String",
+                    "boolean",
+                    "java.lang.String",
+                ),
+            ),
+        )
+        addBlock(
+            pending, CLS_SAFE_MODE_CARD, "s", 2, "void",
+            "installer:SafeModeCard.setSafeModeBottomSheetShow",
+            "R5 安全模式底部推广卡不展示（r12.s 空实现阻断）",
+            // 锚点：方法体独有日志串 + 参数类型序列（两个可读类名，强锚点）
+            dex = DexHint(
+                strings = listOf("setSafeModeBottomSheetShow() first return"),
+                paramTypes = listOf(
+                    "com.android.packageinstaller.PackageInstallerActivity",
+                    "$PKG_HN.rbi.RbiTempBean",
+                ),
+            ),
+        )
+    }
+
+    // ---------------- R6 跳过联网安全检测（分发器层，双管线一并短路） ----------------
+
+    /**
+     * `ly1.h(boolean, sy1)` = 联网安全检测**唯一入口**（全工程唯一调用点 PackageInstallerActivity:1847）。
+     * 构造器内按 isHn 选 py1（荣耀云检测）/ qy1（通用）两条管线 —— **在分发器层短路，两条管线一并跳过**：
+     * 不调原方法（不发检测请求 ⇒ 无"当前网络不佳"横幅），直接复用宿主静态工厂 `ly1.a(isHn)` 构造"通过"结果，
+     * 经 `sy1.b(oy1, jz1)` 在主线程回吐（模拟宿主异步回调语义）⇒ 无风险判定 ⇒
+     * 风险拦截页 / "已了解"勾选框 / 指纹校验整条下游链不出现。
+     * jz1 用空实现动态代理（宿主回调体内会调 `jz1.a(Drawable)`，null 安全）。
+     * 短路准备失败时**放行原方法**（降级为有检测，安装流程不死锁）。
+     */
+    private fun collectSecurityCheckHooks(pending: MutableList<MountTask>) {
+        pending += MountTask(
+            kind = MountKind.CHECK_BYPASS,
+            className = CLS_SECURITY_CHECK,
+            methodName = "h",
+            paramCount = 2,
+            returnType = "void",
+            value = null,
+            id = "installer:SecurityCheck.bypass",
+            description = "R6 联网安全检测分发器短路（ly1.h → 直接回传通过；检测请求/网络不佳横幅/风险页/勾选框一并消除）",
+            // ly1 类内零字符串常量 ⇒ 仅参数类型序列弱锚点（OTA 重混淆时诚实 NOT_RESOLVED，由汇总行暴露）
+            dex = DexHint(paramTypes = listOf("boolean", "sy1")),
+        )
+    }
+
+    // ---------------- R6 安装指纹校验直接通过（风险链兜底） ----------------
+
+    /**
+     * `qf2.g(Context, qf2$a)` = 安装前指纹/密码校验唯一入口。回调 `c()`（清除待决弹窗）+ `a(true)`（判定通过），
+     * 不调原方法（校验弹窗不出现）。检测分发器短路后该链通常已不触发，此点为双保险。
+     */
+    private fun collectFingerprintBypassHooks(pending: MutableList<MountTask>) {
+        pending += MountTask(
+            kind = MountKind.FINGERPRINT_BYPASS,
+            className = CLS_FINGERPRINT_AUTH,
+            methodName = "g",
+            paramCount = 2,
+            returnType = "void",
+            value = null,
+            id = "installer:FingerprintAuth.bypass",
+            description = "R6 安装指纹校验直接通过（qf2.g → 回调 c()+a(true)，不弹校验）",
+            // 锚点：类级日志 TAG（PwdControlUtil）+ 参数类型序列（Context 可读）
+            dex = DexHint(
+                classStrings = listOf("PwdControlUtil"),
+                paramTypes = listOf("android.content.Context", "qf2\$a"),
+            ),
+        )
+    }
+
     // ---------------- 挂载执行：本目标私有任务定义（重试/汇总/解析在共享 [MountEngine]） ----------------
 
     /**
      * 挂载任务类型：[CONST] 常量短路（命中即返回强制值，不调原方法）；
-     * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，AI-lsposed-temlate SKILL.md:102 实证）。
+     * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，AI-lsposed-temlate SKILL.md:102 实证）；
+     * [CHECK_BYPASS] 安全检测分发器短路（自构造"通过"结果回调宿主，失败放行原方法）；
+     * [FINGERPRINT_BYPASS] 指纹校验直接通过（回调 c()+a(true)，失败放行原方法）。
      */
-    private enum class MountKind { CONST, BLOCK }
+    private enum class MountKind { CONST, BLOCK, CHECK_BYPASS, FINGERPRINT_BYPASS }
 
     private class MountTask(
         val kind: MountKind,
@@ -237,6 +336,55 @@ object InstallerHook : TargetHook {
                     logJudge(module, task)
                     null
                 }
+                // 安全检测分发器短路：不调原方法，主线程回吐"通过"结果；准备失败放行原方法（不死锁）
+                MountKind.CHECK_BYPASS -> builder.intercept { chain ->
+                    val delivered = runCatching {
+                        val callback = chain.args?.getOrNull(1) ?: return@runCatching false
+                        val self = chain.thisObject
+                        val isHn = self.javaClass.getMethod("d").invoke(self) as Boolean
+                        // 通过结果复用宿主静态工厂 ly1.a(boolean)（与原管线自产 pass 同构）
+                        val pass = self.javaClass.getDeclaredMethod("a", Boolean::class.javaPrimitiveType)
+                            .apply { isAccessible = true }.invoke(null, isHn)
+                        // jz1 回调参数用空实现动态代理（宿主回调体内调 jz1.a(Drawable)，null 安全）
+                        val jz1 = loader.loadClass("jz1")
+                        val noop = java.lang.reflect.Proxy.newProxyInstance(loader, arrayOf(jz1)) { _, _, _ -> null }
+                        val deliver = callback.javaClass.methods.first { it.name == "b" && it.parameterTypes.size == 2 }
+                        // 模拟宿主异步回调语义（原管线自工作线程回吐结果）
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            runCatching { deliver.invoke(callback, pass, noop) }.onFailure { t ->
+                                module.log(Log.WARN, MountEngine.TAG, "安全检测通过结果回调异常: ${t.message}")
+                            }
+                        }
+                        true
+                    }.getOrDefault(false)
+                    if (delivered) {
+                        logJudge(module, task)
+                        null
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                // 指纹校验直接通过：回调 c()（清待决弹窗）+ a(true)（判定通过），不调原方法；失败放行
+                MountKind.FINGERPRINT_BYPASS -> builder.intercept { chain ->
+                    val ok = runCatching {
+                        val cb = chain.args?.getOrNull(1) ?: return@runCatching false
+                        val cMethod = cb.javaClass.methods.firstOrNull { it.name == "c" && it.parameterTypes.isEmpty() }
+                        val aMethod = cb.javaClass.methods.firstOrNull {
+                            it.name == "a" && it.parameterTypes.size == 1 &&
+                                it.parameterTypes[0] == Boolean::class.javaPrimitiveType
+                        }
+                        if (cMethod == null || aMethod == null) return@runCatching false
+                        cMethod.invoke(cb)
+                        aMethod.invoke(cb, true)
+                        true
+                    }.getOrDefault(false)
+                    if (ok) {
+                        logJudge(module, task)
+                        null
+                    } else {
+                        chain.proceed()
+                    }
+                }
             }
         }.fold(
             onSuccess = {
@@ -244,6 +392,8 @@ object InstallerHook : TargetHook {
                     val verb = when (task.kind) {
                         MountKind.CONST -> "常返"
                         MountKind.BLOCK -> "空实现阻断"
+                        MountKind.CHECK_BYPASS -> "检测短路直通"
+                        MountKind.FINGERPRINT_BYPASS -> "指纹直通"
                     }
                     module.log(Log.INFO, MountEngine.TAG, "hook 已挂载: ${task.description} → $verb ${task.value ?: "null"}")
                 }

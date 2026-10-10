@@ -1,6 +1,6 @@
 # 全量 hook 清单与冗余审计（2026-10-10）
 
-> 目的：两个目标（主题商店 + 包管理器）共 **47 个挂载点**的全量台账 + 冗余/废弃/重复审计。
+> 目的：两个目标（主题商店 + 包管理器）共 **54 个挂载点**（43 + 11）的全量台账 + 冗余/废弃/重复审计。
 > 长期维护基线：**改 hook 前先看本表**；`多余/废弃` 项附 jadx `file:line` 实证，不靠印象。
 > 相关：`docs/theme-store-hook-design.md`（主题商店设计）、`docs/installer-cloud-config.md §六`（包管理器落地）。
 
@@ -15,13 +15,14 @@
 | **P4 观察项**（保留） | 4 | 见 §四 |
 
 清理后：ThemeStoreHook **40 → 38**（−1 死挂 −1 重复），InstallerHook **7 → 7**；挂载基建去重（P3-1）另计。
+2026-10-10 晚：InstallerHook **7 → 11**（+安全模式提示卡/推广卡 2 + 安全检测分发器短路 1 + 指纹直通 1，见 §二表 #8-11）。
 
 > **执行状态（2026-10-10 更新）**：**P0 + P1 + P2 已全部执行完毕**（debug/release 均 BUILD SUCCESSFUL）——
 > 删除 `TryOut.isSupportTrial`、`o52.addDownloadItem`(H2)；`isVipResouce` 改挂 `getVipOnly`（下表 #4 已更新）；
 > 删除 `SlotProbe.kt`/`VipDebugProbe.kt` 及调用行、`KEY_HOOK_ENABLED`、私有 `findMethod`（mountOne 直接走
 > `MethodResolver.resolveMethod`）；`UriOwner` 枚举随之收敛为 `THIS`/`GET_DOWNLOAD_INFO` 两值。
 > **P3 未执行**（抽公共基类 / 历史注释归档 / featureKey 管道处理——含回归风险，待单独一轮 + 真机验证）。
-> 当前真机验证判据：`installed 43/43`（主题商店，39 基线 + VIP 漏斗 2 + getSecondTitle 1 + createTabs 前置 1，见 §六）+ `installed 7/7`（包管理器）。
+> 当前真机验证判据：`installed 43/43`（主题商店，39 基线 + VIP 漏斗 2 + getSecondTitle 1 + createTabs 前置 1，见 §六）+ `installed 11/11`（包管理器，7 基线 + 安全卡 2 + 检测短路 1 + 指纹直通 1）。
 
 ---
 
@@ -113,7 +114,7 @@
 
 ---
 
-## 二、包管理器 `InstallerHook`（7 点）
+## 二、包管理器 `InstallerHook`（11 点）
 
 | # | id | 目标 | 值/类型 | 判定 |
 |---|---|---|---|---|
@@ -124,6 +125,17 @@
 | 5 | `installer:CommonConfig.getSafeModeConfigJson` | `CommonConfigManager.g()` | 全关 JSON | 保留（页面懒加载读点） |
 | 6 | `installer:CommonConfig.getSafeModeConfigJsonFromRsp` | `CommonConfigManager.h(...)` | 全关 JSON | 保留（网络响应点；`g()` 内部调 `h(null)`，二者都挂防 R8 内联） |
 | 7 | `installer:SafeModeDialogGate.isShowGuideOpenSafeModeDialog` | `n12.f(...)` | false | 保留（弹窗唯一展示门） |
+| 8 | `installer:SafeModeCard.isSupportSafeModeCardShow` | `r12.j(CardTipsRecord,String,boolean,String)` | false | 保留（安装页安全模式提示卡整卡隐藏；真机遗留症状修复 2026-10-10） |
+| 9 | `installer:SafeModeCard.setSafeModeBottomSheetShow` | `r12.s(PackageInstallerActivity,RbiTempBean)` | BLOCK | 保留（底部推广卡不展示） |
+| 10 | `installer:SecurityCheck.bypass` | `ly1.h(boolean,sy1)` | CHECK_BYPASS | 保留（**联网安全检测唯一入口/分发器**：构造器按 isHn 选 py1/qy1 双管线，分发器层短路一并跳过；直接回传"通过"⇒ 网络不佳横幅/风险拦截页/已了解勾选框整条下游链消失；短路失败放行原方法防死锁） |
+| 11 | `installer:FingerprintAuth.bypass` | `qf2.g(Context,qf2$a)` | FINGERPRINT_BYPASS | 保留（指纹/密码校验唯一入口，回调 `c()`+`a(true)` 直通；检测短路后通常不触发，双保险） |
+
+> #8–11 为 2026-10-10 真机回归后新增（用户症状：安全模式提示卡残留、"当前网络不佳"横幅、风险拦截页
+> 强制勾选"已了解"、安装前指纹验证）。#10 参考了 VoreulCH/HonorAdvancedSettings 的 InstallerHook
+> （同名混淆类 ly1/qf2/r12 与本机 14.0.37.301 dump 逐一核对一致），但按本项目纪律改造：
+> **不抄** `Socket.connect` 全断（保留精确断点）、**不抄** UI 层 after 隐藏（e2/k2 + W0/Y0，治标）；
+> 全部混淆名目标补 DexKit 内容锚点（r12/qf2 有日志串强锚点；ly1 零字符串仅 paramTypes 弱锚点，
+> OTA 漂移时诚实 NOT_RESOLVED 由汇总行暴露）。
 
 ---
 
@@ -218,7 +230,7 @@ public int getVipOnly() { return this.vipOnly; }                // ← 纯 gette
 ## 五、改后应验判据（真机）
 
 - `ThemeStoreHook: installed 38/38`（清理 P0+P1 后）
-- `InstallerHook: installed 7/7`
+- `InstallerHook: installed 11/11`
 - 详情页付费主题仍走 VIP 通道下载（`theme-download-chain 路由触发` H1/H2b 两条，不再有 H2）
 - 列表/浏览页无 VIP 专属角标（覆盖 `getVipOnly` 直连消费点后）
 - 无 `failed` 清单
@@ -270,4 +282,4 @@ public int getVipOnly() { return this.vipOnly; }                // ← 纯 gette
 ### 6.5 当前基线（2026-10-10 晚）
 
 - `ThemeStoreHook: installed 43/43`（39 基础 + 漏斗 2 + secondTitle 1 + createTabs 前置 1）
-- `InstallerHook: installed 7/7`
+- `InstallerHook: installed 11/11`

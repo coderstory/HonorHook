@@ -19,6 +19,9 @@ object InstallerConfigTable {
      */
     const val THIRD_PARTY_JUMP_NOT_INTERCEPTED = false
 
+    /** 安装页安全模式提示卡不展示 —— `r12.j(...)`（`isSupportSafeModeCardShow`）恒 false。 */
+    const val SAFE_MODE_CARD_NOT_SHOWN = false
+
     /**
      * 广告请求条件不成立 —— `lt1.b(String)`（`checkIsSupportAdRequest`）恒 false。
      * 该实现是 `wt1` 接口的**唯一**实现，`zv1.m`（V4 广告）与 `mt1.m`（V3 广告）都先问它；
