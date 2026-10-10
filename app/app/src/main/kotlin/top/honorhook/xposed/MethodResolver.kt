@@ -8,7 +8,9 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * 双轨目标解析共享入口（从 HookEntry.resolveTargetMethod 提取为公开基建，供各 TargetHook 接线）。
  * 第一轨直连反射（最快、零 so 依赖）；未命中且提供 [apkPath] 时第二轨 DexKit 按特征兜底
- * （磁盘 dex 扫描 + 包名白名单等过滤），对抗 OTA 混淆漂移（单字母类名被重映射后直连失效）。
+ * （磁盘 dex 扫描 + 包名白名单 + 方法体字符串特征），对抗 OTA 混淆漂移（单字母类名被重映射后直连失效）。
+ * **第二轨的范围纪律（2026-10-10 审计）**：包名可作白名单时按包名限定；**默认包类**（无包名，如 `u15`/`o52`）
+ * 无法限定范围，**必须由调用方提供 `usingStrings` 字符串特征**才允许兜底，否则跳过（避免全 APK 同名方法误命中）。
  * 两轨失败返回 null，调用方归入 NOT_RESOLVED 懒加载重试，只记日志不炸宿主。
  *
  * 纪律：类解析只走 loadClass、不触发 <clinit>——boot-loop 纪律（v2.3 事故模式）；
@@ -31,6 +33,10 @@ object MethodResolver {
      * 解析目标方法（双轨；缓存语义见类注释）。
      * @param className 直连失败时其包名自动作为 DexKit 包名白名单
      * @param apkPath   目标 APK 的 sourceDir（`param.applicationInfo?.sourceDir`）；null 时跳过 DexKit 兜底
+     * @param usingStrings 方法体内**引用的字符串常量**（混淆不改字符串，是最稳的特征；可选）
+     * @param paramTypes   **参数类型序列**（按声明顺序；可含未被混淆的可读类名，比 paramCount 强得多；可选）
+     * @param declaredClassStrings **所在类**引用的字符串常量（类名+方法名都被混淆时的兜底锚点；可选）
+     * @param declaredClassFieldTypes **所在类的字段类型集合**（字段类型含可读类名，如 `common.DownloadInfo`；可选）
      */
     fun resolveMethod(
         loader: ClassLoader,
@@ -39,6 +45,10 @@ object MethodResolver {
         paramCount: Int? = null,
         returnType: String? = null,
         apkPath: String? = null,
+        usingStrings: List<String>? = null,
+        paramTypes: List<String>? = null,
+        declaredClassStrings: List<String>? = null,
+        declaredClassFieldTypes: List<String>? = null,
     ): Method? {
         // 第一轨：直连反射（照 Rain ck0.S 语义：loadClass + 按名匹配，异常/查不到只记日志转兜底；不缓存——重试靠它赌类稍后可加载）
         val direct = runCatching {
@@ -57,18 +67,44 @@ object MethodResolver {
             Log.w(TAG, "直连反射未命中且未提供 apkPath，跳过 DexKit 兜底: $className#$methodName")
             return null
         }
+        // ★ 2026-10-10 审计修正：**默认包类**（className 不含 "."，如混淆名 `u15` / `o52`）无法用包名限定搜索范围，
+        // 原实现把 packages 传成 null ⇒ DexKit 退化为"全 APK 按同名+同签名找第一个" ⇒ 极易命中无关类的方法，
+        // 属于"看起来有兜底、实际有害"的假兜底。现改为：**必须提供"内容性锚点"才允许兜底**——即至少有一项
+        // 混淆不改的约束（方法体字符串 / 参数类型序列 / 所在类字符串）；否则诚实跳过（仍可依赖直连轨 + 懒加载重试）。
+        val pkg = className.substringBeforeLast('.', "").takeIf { it.isNotBlank() }
+        val hasAnchor = !usingStrings.isNullOrEmpty() ||
+            !paramTypes.isNullOrEmpty() ||
+            !declaredClassStrings.isNullOrEmpty() ||
+            !declaredClassFieldTypes.isNullOrEmpty()
+        if (pkg == null && !hasAnchor) {
+            Log.w(
+                TAG,
+                "DexKit 兜底跳过（默认包类且无内容锚点，避免全 APK 误命中）: $className#$methodName",
+            )
+            return null
+        }
         // 兜底缓存（仅第二轨；null 也缓存——防版本漂移场景每轮重试对同 key 重复做秒级磁盘扫描）
-        val cacheKey = "$className#$methodName#${paramCount}_${returnType}"
+        val cacheKey = buildString {
+            append(className).append('#').append(methodName).append('#').append(paramCount).append('_').append(returnType)
+            append("|p=").append(paramTypes?.joinToString(","))
+            append("|s=").append(usingStrings?.joinToString(","))
+            append("|cs=").append(declaredClassStrings?.joinToString(","))
+            append("|cf=").append(declaredClassFieldTypes?.joinToString(","))
+        }
         if (dexkitMisses.contains(cacheKey)) return null
         dexkitHits[cacheKey]?.let { return it }
         val hit = DexKitHelper.withBridge(apk) { bridge ->
             DexKitHelper.findMethodByFeatures(
                 bridge = bridge,
                 loader = loader,
-                packages = className.substringBeforeLast('.', "").takeIf { it.isNotBlank() }?.let { listOf(it) },
+                packages = pkg?.let { listOf(it) },
                 methodName = methodName,
                 returnType = returnType,
                 paramCount = paramCount,
+                paramTypes = paramTypes,
+                usingStrings = usingStrings,
+                declaredClassStrings = declaredClassStrings,
+                declaredClassFieldTypes = declaredClassFieldTypes,
             ).firstOrNull() // 兜底语义：类名可能已被混淆重映射，按方法特征命中即采纳
         }
         if (hit != null) dexkitHits[cacheKey] = hit else dexkitMisses += cacheKey

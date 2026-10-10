@@ -1,107 +1,50 @@
 package top.honorhook.xposed.target
 
 import android.app.Activity
-import android.content.SharedPreferences
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.reflect.Method
-import top.honorhook.data.KEY_F1_VIP_ENABLED
-import top.honorhook.data.KEY_F2_FREE_ENABLED
-import top.honorhook.data.KEY_F3_TRIAL_ENABLED
-import top.honorhook.data.KEY_F4_NO_RESET_ENABLED
-import top.honorhook.data.KEY_HOOK_ENABLED
-import top.honorhook.xposed.LogRing
-import top.honorhook.xposed.MethodResolver
-import top.honorhook.xposed.MountScheduler
-import top.honorhook.xposed.RemotePrefsHolder
+import top.honorhook.xposed.AdSlotFilter
+import top.honorhook.xposed.BottomTabFilter
+import top.honorhook.xposed.CloudSwitchTable
+import top.honorhook.xposed.MountEngine
+import top.honorhook.xposed.MountEngine.DexHint
 
 /**
- * 荣耀主题商店目标（F1-F4）——docs/honorhook-theme-requirements.md 落地；实现依据
- * docs/honor-theme-payment-analysis.md §6 Hook 点清单（目标类名在 keep 名单内可读、不混淆漂移），
- * 已逐一对照 theme-store-jadx/sources 复核全部目标类/方法签名（行号与报告一致）。
+ * 荣耀主题商店目标（F1–F4）：F1 开 VIP / F2 全免费（含下载链修复）/ F3 试用无倒计时 / F4 不恢复默认。
  *
- * 按钮矩阵方向修正（docs/theme-ui-real-chain.md 唯一依据，2026-10）：门类要放行——原 isBuyBtnShow 等
- * 门返 false 会让 updateButtons 整段不执行、按钮停留 XML 初始态（真机"没变"的机制根因）；按钮组最终
- * 显隐由 T1 getThemeDetailButtonType→0 → updateButtons switch 主控（服务端激励失败强制置 -1 会
- * hideLayout 全隐藏，勿返 -1）；T2/T3 壁纸/挂件平行购买门关；T5/T6 VipState 状态→2（原 1=NOT_VIP
- * 是"新用户专享"卡根因）。实证：IncentiveData.java:142、ToolBarGroupLayout.java:489/924、
- * WallpaperDetailView.java:405/722、MineVipCardView.java:1880-1904、VipState.java:314/319/355、
- * OnlinePreviewBaseActivity.java:3097/4161/5686/2920-2924。
+ * **设计依据、挂载点理由与真机判据全部归档在 `docs/theme-store-hook-design.md`**，本文件只保留代码。
+ * 目标类名在 keep 名单内可读（不混淆漂移）；全部签名已逐一对 `system-files/theme-store-jadx/sources`
+ * 复核。真机基线主题商店 20.1.63.305（挂载数随挂载表变化，**以真机 `installed N/M` 的 M 为准**）。
  *
- * 下载 0% 修复（docs/theme-download-chain.md §4 唯一依据，H1/H2 必须成对）：付费主题被 F2 免费化后
- * 详情页"下载"永远 0%——F2 把付费项推入免费分支（o52.java:604）直接用 item JSON 的 fileUrl 下载，
- * 而付费资源服务端不下发可用直链（真实 URL 只在 sendProduct 授权接口返回）→ uri 空 → DownloadHandler
- * 静默短路 → UI 定格 0%。H1 DownloadInfo.isPayedItem（:939，uri 字段 L145）uri 空 → true（导入授权
- * 下载分支）；H2 o52.addDownloadItem 4 参版（:882，dex 实证 `Lo52;` 默认包类，非 ads_mobile_sdk/yads
- * 同名类）uri 空 → 第 3 参 downloadType 2（TRIAL，分派 :617 → e71 试用策略 → sendProduct(trialFlag=1)
- * 签发试用 URL+密钥）；H2b common.a.getDownloadType（a.java:78）兜底详情页直调 builder 版链
- * （common/d.java:233 不经 4 参版），同条件返 2、双点不冲突。uri 非空（真免费 fileUrl/已购
- * download.do?k= 直链）一律放行不误伤；只做 H1 不做 H2 → 落 c71 普通购买分支弹 IAP 支付页。
- *
- * 挽留弹窗拦截（docs/theme-ui-real-chain.md §现象四 4.5，F1/F2 双保险，归组 F1）：showDialog 空实现
- * （void 拦截器返 null = 不调原方法）单点覆盖全部 6 型（含真机 MEMBER_EXPIRE=4）；onCreate proceed
- * 后 finish 兜 ARouter 直启（照 fanqie MainHook.java:689 先例；HC 的 finish+不 proceed 模式不采用）；
- * F3/F5 源头不挂：getData 拦截连带试用资源回收副作用（doResRecycle）、handleArrivedPushMsg 影响推送
- * 入库面大。
- *
- * F2 A 组 11 点全上（报告"建议全上"）：A1-A4 ItemInfo 判定短路（列表/详情全局生效——所有页面按钮
- * 逻辑都走它）；A5 price/actualPrice 是 double 字段、libxposed 102 不能 hook 字段 → getter 归零 +
- * setter 首参强 0 组合；A11 服务端 bean 源头归零（列表接口直接用）。F1 B 组：VipManager.isVipUser→
- * true（报告首选读点）+ setVipUser 首参强 true（网络/本地任何"过期"回写都失效）；VipState 到期/状态
- * getter → 2088-08-08 永久有效；另补 VipState.isVipUser→true（自带独立字段读路径，VipState.java:355）。
- * 真机补充：到期日期展示走 getDisplayTimeTimestamp（MineVipCardView.java:430/441、
- * HwThemeManagerActivity.java:894/901）而非 expireTimeTimestamp。B5 checkVipStateOnline 不挂
- * （报告标"非必须，B1 已够"，网络回写点不如读点稳）。F3 C 组 9 点：离线 8 分钟窗
- * （tryout.a.isValidTheme→true/isWareOutDated→false）、在线任务授权窗（duringIncentive→true/
- * getIncentiveExpireTime→Long.MAX）、isSupportTrial/checkCurrentTheme→true、云控
- * AgreeRepo.isTrialSupportOnline→true。F4：回退路径判定点全放行（tryout 有效态防 ThemeTimeFenceManager
- * 到期回收发"试用已结束" + ThemeResManager.getThemeApplyState→PERMANENT/isTrialTheme→false
- * + 永久 VIP 会员到期入口不触发）。
- *
- * 2026-10-09 哲学审计（12 点 → 4 点）：7 个 VipState 散读 getter（B3/B4/T5/T6/displayTime 等）
- * + T8 getVipCardType（T5→2 已覆盖其 switch，深签名冗余）+ 2 个 fetchShouldDialogBy* 休眠点（零调用
- * 链：.getShouldDialog( 唯一调用点 VipCheckVM.java:164 在 refreshShouldDialog 自环内、全工程无真实
- * 调用方；真机弹窗走 overallretentiondialog 链已由展示咽喉拦截，§4.4 实证）删除，并入 VipManager
- * 双漏斗 VIP_STATE_FIX（合并依据与调用方清单见 collectVipHooks KDoc）。
- *
- * 功能位归组（同一方法只属一个功能位；归组不确定保守归 F2；总开关为上位语义）：F2=KEY_F2_FREE_ENABLED
- * （A1-A11 + T1-T3 + H1/H2/H2b + C1/C2）；F1=KEY_F1_VIP_ENABLED（B1/B2 + 双漏斗 + 挽留弹窗）；
- * F3=KEY_F3_TRIAL_ENABLED（C3/C5/C6/C8/C9）；F4=KEY_F4_NO_RESET_ENABLED（C4/C7）。
- *
- * 开关语义（照 HC 模式，与 HookEntry 演示 hook 同构）：挂载无条件，每个 intercept 内现读远程 prefs
- * （总开关 × 功能位 key）决定本次是否生效——切开关下一次调用即生效，无需重启进程。
- * 挂载健壮性（docs/gap-analysis.md G1/G2）：未解析项 postDelayed 约 500ms 重试一轮、再失败约 2s
- * 最后一轮（HC installCustomTileHooks L408-416 同款），仍失败 WARN 放弃；汇总
- * `ThemeStoreHook: installed N/M` 始终输出（真机判据），细节日志由 DEBUG_LOGGING 门控（默认关）。
- *
- * 不挂的点（如实标注）：D 组购买/已购流程（F2 全免费后无购买场景，且 D4/D5 属服务端单/签名与 IAP SDK
- * 支付页，本地 hook 无效，§6 D 组注）；B5（见上）；T10 updateButtons 直改（theme-ui-real-chain.md
- * §五 标可选：全读点都走 T1，L3099/1733/2676/2714/3782 实证，T1 已覆盖 switch 输入，真机不足再上）；
- * F3/F5 挽留弹窗源头拦截（doResRecycle 副作用 + 推送入库面大，见上）。
+ * 新增/调整挂载点前：先更新 design.md 的理由，再改此处代码（最少 hook 点 / 根源原则，CLAUDE.md §九）。
  */
 object ThemeStoreHook : TargetHook {
 
     override val packageName = "com.hihonor.android.thememanager"
+
+    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+    private val engine = MountEngine("ThemeStoreHook")
 
     private const val PKG = "com.hihonor.android.thememanager"
 
     // 目标类（报告 §6；jadx 已复核签名）
     private const val CLS_ITEM_INFO = "$PKG.common.ItemInfo"
     private const val CLS_ITEM_BEAN = "$PKG.hitop.entity.res.BaseResItemBean"
-    private const val CLS_PREVIEW = "$PKG.OnlinePreviewBaseActivity"
     private const val CLS_VIP_MANAGER = "$PKG.vip.manager.VipManager"
     private const val CLS_VIP_STATE = "$PKG.vip.data.VipState"
-    // 已删（2026-10-09 哲学审计）：CLS_VIP_DEFAULT_CONFIG / CLS_VIP_CLOUD_CONFIG
-    // ——fetchShouldDialogByDefault/fetchShouldDialogByCloud 零调用休眠链，见 collectVipHooks 内删除注释
+    // VipModel（服务端响应 → VipState 唯一转换器）曾挂 2 个 VIP_STATE_FIX 漏斗点 + 挽留弹窗休眠链等，
+    // 已于 2026-10-09/10 三轮审计删除——历史依据归档见 docs/hook-inventory-audit.md §五。
 
-    // 2026-10 反查新增（docs/theme-ui-real-chain.md §五 T1/T2/T3，jadx 实证）
+    // 2026-10 反查新增（docs/theme-ui-real-chain.md §五 T1，jadx 实证）
     private const val CLS_INCENTIVE_DATA = "$PKG.incentive.IncentiveData"
-    private const val CLS_TOOLBAR_GROUP_LAYOUT = "$PKG.entity.ToolBarGroupLayout"
-    private const val CLS_WALLPAPER_DETAIL_VIEW = "$PKG.detail.WallpaperDetailView"
-    // 已删（2026-10-09 哲学审计）：CLS_MINE_VIP_CARD / CLS_VIP_CARD_TYPE
-    // ——T8 getVipCardType 深签名冗余点（T5 已覆盖其 switch 分支），见 collectVipHooks 内删除注释
+    // 详情页 Activity：仅用于「购买」按钮隐藏（changeVipBtnsVisibility 第 1 参 buy，:2837 定义 / :2920 设 mBuyBtn）。
+    // 已删的按钮策略类目标（needShowBuyButton 门 / MineVipCardView T8）历史见 docs/hook-inventory-audit.md §五。
+    private const val CLS_PREVIEW = "$PKG.OnlinePreviewBaseActivity"
+    // 在线壁纸预览页（类名未混淆）；W1 挂 applyLiveWallpaperPrepare 用，见 collectDownloadChainHooks。
+    private const val CLS_WALLPAPER_PREVIEW_LOW = "$PKG.wallpaper.OnlineWallpaperPreviewLowActivity"
 
     // 2026-10 挽留弹窗拦截（docs/theme-ui-real-chain.md §现象四 4.5，jadx 实证）：
     // Manager 是 Activity 的 Kotlin object 嵌套静态类（Activity.java:150-163；showDialog L158-161
@@ -113,9 +56,12 @@ object ThemeStoreHook : TargetHook {
     private const val TS_2088_08_08_MILLIS = 3_742_732_800_000L
     /** 2088-08-08 展示字符串（与服端 displayTime 同格式 "yyyy-MM-dd HH:mm:ss"，即 fn5 默认解析格式）。 */
     private const val TS_2088_08_08_STR = "2088-08-08 00:00:00"
+    // CLS_TRYOUT / CLS_DOWNLOADER_MGR / CLS_DOWNLOAD_MODEL / CLS_SHAREPREF_UTILS 这 4 个是**混淆名**
+    // （类名或方法名会被 R8 重映射）。每个挂载点都配了 DexKit 内容锚点（字符串常量 / 参数类型 / 类字段类型），
+    // 直连反射失败时按特征兜底；锚点与依据写在各自 collect* 函数的 DexHint 处。
     private const val CLS_TRYOUT = "$PKG.tryout.a"
     private const val CLS_INCENTIVE_INFO = "$PKG.incentive.entity.TimeLimitIncentiveInfo"
-    private const val CLS_AGREE_REPO = "$PKG.ams.mgr.AgreeRepo"
+    // 云控开关：不再逐个挂 AgreeRepo 方法，统一走 CLS_SHAREPREF_UTILS 读点 + CloudSwitchTable 表
     private const val CLS_THEME_RES_MANAGER = "$PKG.theme.apply.ThemeResManager"
     private const val CLS_THEME_APPLY_STATE = "$PKG.theme.apply.ThemeApplyState"
 
@@ -124,127 +70,121 @@ object ThemeStoreHook : TargetHook {
     // 非 ads_mobile_sdk/yads 同名类）；common.a builder 产品类（a.java:78）——详情页主链路
     // common/d.java:233 直调 builder 版（L563）不经 4 参版
     private const val CLS_DOWNLOAD_INFO = "$PKG.common.DownloadInfo"
-    private const val CLS_DOWNLOADER_MGR = "o52"
+    // 已删 H2（`o52.addDownloadItem`，被 H2b 完全覆盖）历史依据见 docs/hook-inventory-audit.md §三.2。
+    // DownloadModel builder 产物（package 内混淆名）；DexKit 锚点 = 类字段类型 WeakReference + common.DownloadInfo。
     private const val CLS_DOWNLOAD_MODEL = "$PKG.common.a"
+
+    // 云控统一读点：SharepreferenceUtils（混淆名 u15，默认包）——全部云控布尔开关的唯一出口。
+    // 强制项数据在 CloudSwitchTable（key 与逻辑分离），此处只挂读点、查表短路。
+    // DexKit 锚点：方法体内的 SP 文件名常量 "themename" + 参数类型序列（见 collectCloudSwitchHooks）。
+    private const val CLS_SHAREPREF_UTILS = "u15"
+
+    // 美豆（bonus/金币/福利）入口——服务端下发的**槽位**，无云控布尔开关、无请求参数可关，
+    // 只能在「服务端载荷 → 域模型」的出口按内容裁剪：唯一收口即 SlotData.getList()（详见 AdSlotFilter 的载荷实证）。
+    // 旧口径（collect 层拦截）已废弃改源头，历史见 docs/theme-store-hook-design.md §九。
+    private const val CLS_SLOT_DATA_MATE = "$PKG.hitop.mate.SlotData"
+
+    // 底部导航 tab —— 同样是**服务端下发**的配置（AMS systemParam 的在线配置 JSON），
+    // 唯一域模型出口 = BottomTabConfigs.getBottomTabConfigs()（详见 BottomTabFilter 类注释）。
+    private const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         // libxposed 102 的 PackageLoadedParam 只有 defaultClassLoader（HookEntry 同款写法）
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir（HC ScreenRecorderModule.kt:85 实证）
-        apkPath = param.applicationInfo?.sourceDir
-        // 预热远程 prefs（进程级缓存、失败自动重读——修复「install 期一次性读取失败后 null 冻结」坑）
-        RemotePrefsHolder.obtain(module)
+        engine.begin(param.applicationInfo?.sourceDir)
 
-        retryRounds = 0
-        okCount = 0
-        failedIds.clear()
-
-        // 挂载表 38 项（46 − 2026-10-09 审计删 10 点 + 新增漏斗 2）；"同一方法只属一个功能位"
+        // 挂载表 39 项（38 + W1 动态壁纸应用路径撕裂修正）；**以真机 M 为准。**
         val pending = mutableListOf<MountTask>()
         collectFreeJudgmentHooks(pending)   // F2 A1-A4
         collectPriceZeroHooks(pending)      // F2 A5
         collectBeanSourceZeroHooks(pending) // F2 A11
-        collectButtonMatrixHooks(pending)   // F2 A6-A10
-        collectRealChainHooks(pending)      // F2 T1-T3
+        collectRealChainHooks(pending)      // F2 T1（按钮组类型兜底）
         collectDownloadChainHooks(pending)  // F2 H1/H2/H2b
-        collectVipHooks(pending)            // F1 B1/B2 + 双漏斗
+        collectCloudSwitchHooks(pending)    // 云控统一读点（表驱动：CloudSwitchTable）
+        collectAdSlotPruneHooks(pending)     // 美豆服务端槽位源头裁剪（表驱动：AdSlotFilter）
+        collectBottomTabPruneHooks(pending)  // 底部 tab 源头裁剪（表驱动：BottomTabFilter）
+        collectVipHooks(pending)            // F1 B1/B2 + 统一漏斗（VipModel.changeToVipState）
         collectRetentionDialogHooks(pending) // F1 挽留弹窗双保险
-        collectTrialHooks(pending)          // F3 C3/C5/C6/C8 + F4 C4 + 保守归 F2 C1/C2
+        collectTrialHooks(pending)          // F3 C3/C5/C6 + F4 C4 + 保守归 F2 C1/C2
         collectApplyStateHooks(pending)     // F4 C7 + F3 C9
-        totalCount = pending.size
 
-        attemptMount(pending, module, loader)
+        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    // ---------------- F2：全部资源免费（功能位 key = KEY_F2_FREE_ENABLED） ----------------
+    // ---------------- F2：全部资源免费（归组 F2） ----------------
 
     /** A1-A4：ItemInfo 付费/已购判定全短路为免费态（列表/详情全局生效——所有页面按钮逻辑都走它）。 */
     private fun collectFreeJudgmentHooks(pending: MutableList<MountTask>) {
-        addConst(pending, CLS_ITEM_INFO, "isNeedPayItem", 0, "boolean", false, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_INFO, "isNeedPayItem", 0, "boolean", false,
             "theme:ItemInfo.isNeedPayItem", "F2 A1 需付费判定 → 免费")
-        addConst(pending, CLS_ITEM_INFO, "isNeedOrder", 0, "boolean", false, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_INFO, "isNeedOrder", 0, "boolean", false,
             "theme:ItemInfo.isNeedOrder", "F2 A2 需下单判定 → 不弹下单")
-        addConst(pending, CLS_ITEM_INFO, "getPayed", 0, "boolean", true, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_INFO, "getPayed", 0, "boolean", true,
             "theme:ItemInfo.getPayed", "F2 A3 已购读点1 → 已购")
-        addConst(pending, CLS_ITEM_INFO, "isPayed", 0, "boolean", true, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_INFO, "isPayed", 0, "boolean", true,
             "theme:ItemInfo.isPayed", "F2 A3 已购读点2 → 已购")
-        addConst(pending, CLS_ITEM_INFO, "isVipResouce", 0, "boolean", false, KEY_F2_FREE_ENABLED,
-            "theme:ItemInfo.isVipResouce", "F2 A4 VIP 专属标记 → 移除以当普通资源")
+        // A4 VIP 专属标记：挂 **getVipOnly()** 而不是 `isVipResouce()`（2026-10-10 审计修正）——
+        // ① `isVipResouce()` 实现就是 `getVipOnly() == 1`（ItemInfo.java:781）⇒ 改挂后它自然为 false，覆盖不缩水；
+        // ② `getVipOnly()` 另有**直连消费点**（BrowseDataHelper:60/98/129/229/266 遍历
+        //    ThemeInfo/WallPaperInfo/FontInfo/MagicBabyInfo，四者均 extends ItemInfo 且未覆盖该方法）
+        //    ⇒ 只挂 isVipResouce 会漏掉这条链。详见 docs/hook-inventory-audit.md §三.3。
+        addConst(pending, CLS_ITEM_INFO, "getVipOnly", 0, "int", 0,
+            "theme:ItemInfo.getVipOnly", "F2 A4 VIP 专属标记源头 → 0（同时覆盖 isVipResouce() 与直连 getVipOnly() 消费点）")
     }
 
     /** A5：price/actualPrice（double 字段）libxposed 102 无法 hook 字段，读点（getter 归零）+ 写点（setter 写 0）组合覆盖。 */
     private fun collectPriceZeroHooks(pending: MutableList<MountTask>) {
-        addConst(pending, CLS_ITEM_INFO, "getPrice", 0, "double", 0.0, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_INFO, "getPrice", 0, "double", 0.0,
             "theme:ItemInfo.getPrice", "F2 A5 价格读点（展示）→ 0 元")
-        addConst(pending, CLS_ITEM_INFO, "getActualPrice", 0, "double", 0.0, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_INFO, "getActualPrice", 0, "double", 0.0,
             "theme:ItemInfo.getActualPrice", "F2 A5 现价读点（展示）→ 0 元")
-        addForceArg(pending, CLS_ITEM_INFO, "setPrice", 1, "void", 0.0, KEY_F2_FREE_ENABLED,
+        addForceArg(pending, CLS_ITEM_INFO, "setPrice", 1, "void", 0.0,
             "theme:ItemInfo.setPrice", "F2 A5 价格写点 → 强制写 0")
-        addForceArg(pending, CLS_ITEM_INFO, "setActualPrice", 1, "void", 0.0, KEY_F2_FREE_ENABLED,
+        addForceArg(pending, CLS_ITEM_INFO, "setActualPrice", 1, "void", 0.0,
             "theme:ItemInfo.setActualPrice", "F2 A5 现价写点 → 强制写 0")
     }
 
     /** A11：列表接口直接用服务端 bean 源头（String 价格 + vipOnly）。 */
     private fun collectBeanSourceZeroHooks(pending: MutableList<MountTask>) {
-        addConst(pending, CLS_ITEM_BEAN, "getPrice", 0, "java.lang.String", "0", KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_BEAN, "getPrice", 0, "java.lang.String", "0",
             "theme:ItemBean.getPrice", "F2 A11 服务端 bean 价格源头 → \"0\"")
-        addConst(pending, CLS_ITEM_BEAN, "getActualPrice", 0, "java.lang.String", "0", KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_BEAN, "getActualPrice", 0, "java.lang.String", "0",
             "theme:ItemBean.getActualPrice", "F2 A11 服务端 bean 现价源头 → \"0\"")
-        addConst(pending, CLS_ITEM_BEAN, "getVipOnly", 0, "int", 0, KEY_F2_FREE_ENABLED,
+        addConst(pending, CLS_ITEM_BEAN, "getVipOnly", 0, "int", 0,
             "theme:ItemBean.getVipOnly", "F2 A11 服务端 bean VIP 专属标记 → 0")
     }
 
-    /**
-     * A6-A10：按钮矩阵门类统一放行（docs/theme-ui-real-chain.md §0.1/§四 反查修正，2026-10）。
-     * [半效/DEAD 标注：这些方法不是渲染开关而是入口门；布尔参数仅喂 changeVipBtnsVisibility
-     * （L4161/2920-3028 实证）、非最终仲裁——本轮保守保留，真机日志观察后按需清理]
-     * 机制：门返 false 会让 L3097 updateButtons 整段不执行、按钮停留 XML 初始态（真机"没变"根因）；
-     * 最终显隐由 T1 → updateButtons switch（L5686）主控；mBuyBtn 另受 u02.isSupportPayed()
-     * （u02.java:459）与 isShowIconCustom/isAudit（L2920-2924）约束。
-     */
-    private fun collectButtonMatrixHooks(pending: MutableList<MountTask>) {
-        // 门要放行（原 false 方向反了，门开 L3097 updateButtons 才执行）；购买按钮显隐由
-        // u02.isSupportPayed() 能力判定兜底，不另挂【购买】隐藏
-        addConst(pending, CLS_PREVIEW, "isBuyBtnShow", 1, "boolean", true, KEY_F2_FREE_ENABLED,
-            "theme:Preview.isBuyBtnShow", "F2 A6 购买门放行（原 false 跳过 updateButtons 停留初始态）→ true")
-        // 门类统一放行（对照表：布尔参数非最终仲裁，T1 主控）
-        addConst(pending, CLS_PREVIEW, "isDownloadBtnShow", 1, "boolean", true, KEY_F2_FREE_ENABLED,
-            "theme:Preview.isDownloadBtnShow", "F2 A7 '下载'按钮常显（门类放行）")
-        addConst(pending, CLS_PREVIEW, "isFreeAccessBtnShow", 1, "boolean", true, KEY_F2_FREE_ENABLED,
-            "theme:Preview.isFreeAccessBtnShow", "F2 A8 '免费获取'门放行（非最终仲裁）")
-        addConst(pending, CLS_PREVIEW, "isTrialBtnShow", 1, "boolean", true, KEY_F2_FREE_ENABLED,
-            "theme:Preview.isTrialBtnShow", "F2 A10 '试用'门放行（非最终仲裁）")
-        addConst(pending, CLS_PREVIEW, "isVipBtnShow", 1, "boolean", true, KEY_F2_FREE_ENABLED,
-            "theme:Preview.isVipBtnShow", "F2 A9 VIP 门放行（原 false 属门类误关）→ true")
-    }
+    /** A6-A10（5 个 is*BtnShow 门）与按钮显隐汇总点均已**删除**：不再逐按钮硬掰门/藏按钮，
+     *  按钮显隐交由"用户 VIP + 资源免费"的数据态驱动（ToolBarGroupLayout 原生 switch）。依据见 design.md §十。 */
+
 
     /**
-     * T1-T3（docs/theme-ui-real-chain.md §五）：按钮组最终显隐 = 门过后读服务端按钮类型
-     * getThemeDetailButtonType → updateButtons switch（OnlinePreviewBaseActivity.java:3097-3102、
-     * ToolBarGroupLayout.java:924-932、WallpaperDetailView.java:722-730 实证；全读点同一 getter，
-     * 钩一处全覆盖）。T1→0 免费领小按钮组（IncentiveCommonManager.java:636 激励失败强制置 -1 →
-     * hideLayout 全隐藏，绝不返 -1）；T2/T3→false 壁纸/挂件平行购买门（与 isBuyBtnShow 同构的
-     * 独立副本，旧 hook 未覆盖）。
+     * T1：详情页按钮组类型 → **-1（无激励）**。
+     *
+     * 2026-10-09 真机回归修正（原取值 0 是错的）：`OnlinePreviewBaseActivity.updateButtons` 的 switch 实证——
+     * `case 0` 显示 `freeReceiveSmallView`、`case 1` 显示 `freeReceiveBigView`（二者即「免费领」= 美豆入口）；
+     * 而 **`case 2/3/4/5` 在 `VipManager.isVipUser()==true` 时同样落到 `freeReceiveSmallView.setVisibility(0)`**
+     * ——把用户强制成 VIP 后，普通中段值也全都会显示免费领。
+     *
+     * `case -1` → `hideLayout()`，而 `hideLayout` 只隐藏激励类视图（freeReceiveSmall/BigView、freeReceiveBtn、
+     * vipReceiveSmall/BigView、timeLimitDownloadBtn，OnlinePreviewBaseActivity:1751 实证），
+     * **不碰 mDownloadBtn/mApplyBtn/mBuyBtn** → 免费领（美豆）消失、下载/应用照常。
+     * （旧注释"−1 会把按钮全隐藏"系误读，已更正；-1 另有 `getIncentiveData()!=null` 守卫，无数据时本就保持隐藏态。）
+     *
+     * 依据见 design.md §三 T1。
      */
     private fun collectRealChainHooks(pending: MutableList<MountTask>) {
-        addConst(pending, CLS_INCENTIVE_DATA, "getThemeDetailButtonType", 0, "int", 0, KEY_F2_FREE_ENABLED,
-            "theme:IncentiveData.getThemeDetailButtonType", "F2 T1 服务端按钮类型 → 0（免费领小按钮组；勿返 -1 全隐藏）")
-        addConst(pending, CLS_TOOLBAR_GROUP_LAYOUT, "needShowBuyButton", 1, "boolean", false, KEY_F2_FREE_ENABLED,
-            "theme:ToolBar.needShowBuyButton", "F2 T2 壁纸/挂件购买门（ToolBarGroupLayout:489，旧未覆盖）→ 关，走免费分支")
-        addConst(pending, CLS_WALLPAPER_DETAIL_VIEW, "needShowBuyButton", 1, "boolean", false, KEY_F2_FREE_ENABLED,
-            "theme:WallpaperDetail.needShowBuyButton", "F2 T3 壁纸详情弹窗购买门（WallpaperDetailView:405，T2 同构副本）→ 关")
+        addConst(pending, CLS_INCENTIVE_DATA, "getThemeDetailButtonType", 0, "int", -1,
+            "theme:IncentiveData.getThemeDetailButtonType", "F2 T1 服务端按钮类型 → -1（无激励：hideLayout 只关「免费领/美豆」激励视图，保留下载/应用）")
+        // 用户明确要求：详情页不显示「购买」按钮。changeVipBtnsVisibility 第 1 参即 buy
+        // （OnlinePreviewBaseActivity.java:2837 定义，:2920 用它设 mBuyBtn 可见性；:3834 亦为 mBuyBtn 显隐点）
+        addForceArg(pending, CLS_PREVIEW, "changeVipBtnsVisibility", 10, "void", false,
+            "btn-hide:buy", "F2 详情页「购买」按钮隐藏（changeVipBtnsVisibility buy 参数强制 false）",
+            forceArgIndex = 0)
     }
 
-    /**
-     * H1/H2/H2b（docs/theme-download-chain.md §4，2026-10）：空 URL 付费项 → 试用授权下载通道
-     * （e71 = sendProduct trialFlag=1，服务端签发真实 URL + 内容密钥）。
-     * 机制：F2 A5 价格归零 → isPayedItem 恒 false → o52 免费分支（L604）用 fileUrl 下载，
-     * 付费资源 fileUrl 非直链 → uri 空 → DownloadHandler 静默短路 → 0% 定格。
-     * H1 uri 空 → 常返 true（进授权分支）；H2 4 参版 uri 空 → downloadType 2（TRIAL，避开 c71
-     * 普通购买弹 IAP）；H2b builder 版分派读出兜详情页主链路（common/d.java:233 直调 1 参版 L563
-     * 不经 4 参版）。三挂载点共用条件：**uri 为空（null/空串）**；非空放行原逻辑（不误伤）。
-     * 挂载点分工路由见 MountTask.uriEmptyRoute/uriOwner 注释。
-     */
+    /** H1/H2b：空 URL 付费项 → **VIP 下载通道**（修"下载永远 0%"）。依据见 design.md §三 H1/H2b + §十。 */
     private fun collectDownloadChainHooks(pending: MutableList<MountTask>) {
         pending += MountTask(
             kind = MountKind.CONST,
@@ -253,25 +193,9 @@ object ThemeStoreHook : TargetHook {
             paramCount = 0,
             returnType = "boolean",
             value = true,
-            featureKey = KEY_F2_FREE_ENABLED,
             id = "theme:DownloadInfo.isPayedItem",
-            description = "F2 H1 空 URL 付费项判定 → 付费（导入授权下载分支；uri 字段 DownloadInfo.java:145 实证）",
+            description = "F2 H1 空 URL 付费项判定 → 付费（进付费策略分派分支，再由 H2b 路由到 VIP 通道；uri 字段 DownloadInfo.java:145 实证）",
             uriEmptyRoute = true,
-        )
-        pending += MountTask(
-            kind = MountKind.FORCE_ARG,
-            className = CLS_DOWNLOADER_MGR,
-            methodName = "addDownloadItem",
-            paramCount = 4,
-            returnType = "boolean",
-            value = 2,
-            featureKey = KEY_F2_FREE_ENABLED,
-            id = "theme:o52.addDownloadItem",
-            description = "F2 H2 空 URL 项 downloadType → 2（TRIAL；o52.java:882/617 e71 试用策略）",
-            uriEmptyRoute = true,
-            uriOwner = UriOwner.ARG,
-            uriArgIndex = 1,
-            forceArgIndex = 2,
         )
         pending += MountTask(
             kind = MountKind.CONST,
@@ -279,97 +203,182 @@ object ThemeStoreHook : TargetHook {
             methodName = "getDownloadType",
             paramCount = 0,
             returnType = "int",
-            value = 2,
-            featureKey = KEY_F2_FREE_ENABLED,
+            value = 3,
             id = "theme:DownloadModel.getDownloadType",
-            description = "F2 H2b 空 URL 项 downloadType 分派读出 → 2（TRIAL；o52.java:616 分派点，兜底详情页 builder 版链路）",
+            description = "F2 H2b 空 URL 项 downloadType 分派读出 → 3（VIP 通道；o52.java:616 分派点，兜底详情页 builder 版链路）",
             uriEmptyRoute = true,
             uriOwner = UriOwner.GET_DOWNLOAD_INFO,
+            // 混淆名兜底：`common.a`（DownloadModel）类内**无字符串**、方法**无参数**，
+            // 唯一稳定锚点是**类字段类型** —— 它同时持有 `WeakReference`（context）与 `common.DownloadInfo`
+            // 两种字段（common/a.java:11-12 实证），而字段类型引用的是类名（DownloadInfo 未被混淆）。
+            dex = DexHint(
+                classFieldTypes = listOf(
+                    "java.lang.ref.WeakReference",
+                    "$PKG.common.DownloadInfo",
+                ),
+            ),
+        )
+        pending += MountTask(
+            kind = MountKind.PRE_PROCESS,
+            className = CLS_WALLPAPER_PREVIEW_LOW,
+            methodName = "applyLiveWallpaperPrepare",
+            paramCount = 0,
+            returnType = "void",
+            value = null,
+            id = "theme:WallpaperPreview.fixPackagePath",
+            description = "F2 W1 动态壁纸应用前修正 packagePath（付费撕裂：A1 把 isNeedPayItem 强制 false → updateStatus():2660 重算路径漏掉 PAYED_HWTHEMES 子目录 → isFileExists(false) 静默 return）",
+            // 类未混淆（keep 名单），方法名 jadx 可读；仍配方法体独有日志串锚点抗未来混淆
+            dex = DexHint(strings = listOf("applyLiveWallpaper start")),
         )
     }
 
-    // ---------------- F1：开启 VIP（功能位 key = KEY_F1_VIP_ENABLED） ----------------
+    // ---------------- 云控开关：统一读点 + 表驱动强制（数据见 CloudSwitchTable） ----------------
 
     /**
-     * F1 VIP 组（2026-10-09 哲学审计后结构，12 点 → 4 点）。
-     * - 删除 10 点：7 个 VipState 散读 getter（B3a/B3b/T5/T6/VipState.isVipUser/getDisplayTimeTimestamp/
-     *   getDisplayTime）+ T8 MineVipCardView.getVipCardType（深签名冗余，T5 已覆盖其 switch）
-     *   + 2 个 fetchShouldDialogBy* 休眠点（零调用链，删因见函数内注释）；
-     * - 保留 2 点：B1 VipManager.isVipUser 读点（VipManager.java:111 页面级直接判定，非实例散读）、
-     *   B2 setVipUser 写点（覆盖登出/特权撤销/网络回写路径，setVipUser(false) 强制 true）；
-     * - 新增 2 漏斗：getLocalVipState（VipManager.java:55，页面级 LiveData 汇聚点：DetailSource:219/
-     *   ApplySource:1149/WidgetUtil:131/AdsRequestSource:285/ApplyResourceServer:357 实证）与
-     *   getVipState（VipManager.java:88 @Nullable，VipCenter 中心直读：VipMemberCenterActivity:345/
-     *   VipCenterModel:1131/ArrivedPushManager:3228 实证），intercept 拿 VipState 实例逐 setter 改写——
-     *   散读 getter 读的是同一实例，一处改写全链路生效（依赖权重：汇聚点 2 钩 > 散读点 7 钩）。
+     * 云控布尔开关统一拦截：只挂**读点**，具体强制哪些 key 全部由 [CloudSwitchTable] 声明。
+     *
+     * 为什么能统一：主题商店全部云控布尔开关都由 `SharepreferenceUtils`（混淆名 `u15`）从 SP
+     * `themename` 读出——`ams/mgr/AgreeRepo` 约 30 个 `is*()` 开关方法、`ads/AdStrategy` 的广告总闸
+     * 等 83 处读点全走它。故在此挂一次，即等价于逐个方法级 hook，且**新版本新增读点自动覆盖**。
+     *
+     * 两个重载都要挂：`getBoolean(String, boolean)` 覆盖绝大多数（含带默认值的 AgreeRepo 全量）；
+     * `getBoolean(String)` 覆盖固定默认 false 的读点（如 `local_has_signed`，AgreeRepo:243）。
+     *
+     * 机制：命中表内 key → 直接短路返回强制值（不调原方法）；未命中 → 放行原逻辑（零影响）。
+     */
+    private fun collectCloudSwitchHooks(pending: MutableList<MountTask>) {
+        pending += MountTask(
+            kind = MountKind.KEY_OVERRIDE,
+            className = CLS_SHAREPREF_UTILS,
+            methodName = "getBoolean",
+            paramCount = 2,
+            returnType = "boolean",
+            value = null,
+            id = "cloud:ShareprefUtils.getBoolean2",
+            description = "云控统一读点 getBoolean(String key, boolean def) — 表驱动强制（CloudSwitchTable ${CloudSwitchTable.ENTRIES.size} 项）",
+            // 混淆名兜底：SP 文件名 "themename" 是方法体内的字符串常量（混淆不改）+ 参数类型序列
+            dex = DexHint(
+                strings = listOf("themename"),
+                paramTypes = listOf("java.lang.String", "boolean"),
+            ),
+        )
+        pending += MountTask(
+            kind = MountKind.KEY_OVERRIDE,
+            className = CLS_SHAREPREF_UTILS,
+            methodName = "getBoolean",
+            paramCount = 1,
+            returnType = "boolean",
+            value = null,
+            id = "cloud:ShareprefUtils.getBoolean1",
+            description = "云控统一读点 getBoolean(String key) — 表驱动强制（覆盖 local_has_signed 等单参读点）",
+            // 与双参重载同锚点，靠 paramTypes 区分（单参版内部直接调 SharedPreferences，不调双参版，两个都得挂）
+            dex = DexHint(
+                strings = listOf("themename"),
+                paramTypes = listOf("java.lang.String"),
+            ),
+        )
+    }
+
+    // ---------------- F2：美豆（金币/福利）服务端槽位源头裁剪（挂载点 S1） ----------------
+
+    /**
+     * **S1 服务端槽位源头裁剪**：钩 `hitop.mate.SlotData#getList()`（服务端响应反序列化后的**域模型出口**），
+     * 在把载荷交给任何 Model / Provider 之前，按 [AdSlotFilter] 的表剔掉美豆营销槽位：
+     *
+     * - 整体丢弃 [AdSlotFilter.PRUNED_SLOT_TYPES] 命中的 `SlotList`（腰封 5 / 搜索框左右 20·22 / 福利中心 25·27）；
+     * - 仅从 `SlotList.list` 内删掉 [AdSlotFilter.PRUNED_TARGET_IDS] 命中的 `Slot`（灯笼位里内嵌的「免费领」，
+     *   保留灯笼位其余图标）。
+     *
+     * 为什么选这个点（而不是逐个消费方去拦）：数据链是
+     * `POST themeServer/themeBiz/slot|searchSlot` → Retrofit/Gson → `SlotData` → 各 Model/Provider → UI。
+     * 请求体只有 `appPage`，**没有能关掉单个槽位的参数**，云控布尔表里也没有对应 key ⇒ 服务端载荷进入域模型
+     * 之前的这一个出口，才是能一处覆盖全部入口（我的页腰封 / 推荐页免费领 / 福利中心 / 搜索框两侧）的位置。
+     * 载荷实测与判据来源见 [AdSlotFilter] 类注释（调试期真机探针打印的原始 `SlotData.getList()`；探针已按冗余审计删除）。
+     */
+    private fun collectAdSlotPruneHooks(pending: MutableList<MountTask>) {
+        pending += MountTask(
+            kind = MountKind.SLOT_PRUNE,
+            className = CLS_SLOT_DATA_MATE,
+            methodName = "getList",
+            paramCount = 0,
+            returnType = "java.util.List",
+            value = null,
+            id = "adsource:SlotData.getList",
+            description = "美豆 S1 槽位源头裁剪（SlotData.getList 出口按 AdSlotFilter 表剔营销槽位：" +
+                "类型 ${AdSlotFilter.PRUNED_SLOT_TYPES.joinToString("/") { it.value }} + targetId " +
+                "${AdSlotFilter.PRUNED_TARGET_IDS.joinToString("/") { it.value }}）",
+        )
+    }
+
+    // ---------------- S2：底部导航 tab 源头裁剪（挂载点 S2） ----------------
+
+    /**
+     * **S2 底部 tab 源头裁剪**：钩 `hitop.entity.BottomTabConfigs#getBottomTabConfigs()`
+     * （AMS 在线配置 JSON 反序列化后的**域模型出口**，全工程唯一调用点 `SystemParamSource.java:208`），
+     * 在把 tab 清单交给 Model 之前，按 [BottomTabFilter] 的表剔掉目标 tab（VIP / 福利）。
+     *
+     * 为什么选这个点：底部 tab 的完整数据链是
+     * `AMS systemParam（在线配置 JSON）→ Gson → `BottomTabConfigs` → `countBottomTabConfig()` →
+     * `HwThemeManagerModel.getBottomTabConfig()`（StateFlow）→ `createTabs()` 建 tab + `doSupportOnline()` 建 Fragment`。
+     * 列表出口只有这一个，裁掉即**tab 与页面同步消失**。
+     *
+     * 为什么不关总闸 `AgreeRepo.isSupportVip()`（key `vip_support`）：该闸另有 20+ 处消费点
+     * （详情页按钮组、字体 VIP 区、推荐流副文案…），强改会外溢到与"删 tab"无关的 UI。
+     * 详见 [BottomTabFilter] 类注释。
+     */
+    private fun collectBottomTabPruneHooks(pending: MutableList<MountTask>) {
+        pending += MountTask(
+            kind = MountKind.BOTTOM_TAB_PRUNE,
+            className = CLS_BOTTOM_TAB_CONFIGS,
+            methodName = "getBottomTabConfigs",
+            paramCount = 0,
+            returnType = "java.util.List",
+            value = null,
+            id = "adsource:BottomTabConfigs.getBottomTabConfigs",
+            description = "底部 tab 源头裁剪（BottomTabConfigs.getBottomTabConfigs 出口按 BottomTabFilter 表剔除 " +
+                BottomTabFilter.PRUNED_TABS.joinToString("/") { "${it.name}(${it.id})" } + "）",
+        )
+    }
+
+    // ---------------- F1：开启 VIP（归组 F1） ----------------
+
+    /**
+     * F1 VIP：VipManager 读/写点 + VipState 散读直改（原「VipModel 双漏斗」已删，依据见 audit §五）——
+     * `VipState` 字段**全部 private** ⇒ 类外读取**只能**经过 VipState 的 7 个 getter，而 getter 已被
+     * 短路为会员常量 ⇒ getter 短路即全覆盖，无需任何实例字段改写层。
      */
     private fun collectVipHooks(pending: MutableList<MountTask>) {
         // B1 保留：VipManager 页面级直接判定读点（非 VipState 实例散读）
-        addConst(pending, CLS_VIP_MANAGER, "isVipUser", 0, "boolean", true, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_MANAGER, "isVipUser", 0, "boolean", true,
             "theme:VipManager.isVipUser", "F1 B1 VIP 判定读点（首选）→ 是 VIP")
         // B2 保留：任何 setVipUser(false)（含服务端拉到的过期状态）强制写 true，覆盖登出/特权撤销/网络回写
-        addForceArg(pending, CLS_VIP_MANAGER, "setVipUser", 1, "void", true, KEY_F1_VIP_ENABLED,
+        addForceArg(pending, CLS_VIP_MANAGER, "setVipUser", 1, "void", true,
             "theme:VipManager.setVipUser", "F1 B2 VIP 写点 → 强制置 true")
         // VipState 散读点恢复（2026-10-09 真机验证回归：漏斗改写依赖"消费方走漏斗"的静态实证，真机上
         // VIP tab 判定/到期显示未走漏斗——散读方法级直改不依赖任何调用链假设，与漏斗双层并存）：
         // 到期时间/剩余时长/状态/类型/判定/展示 getter 全部直返会员态（消费方实证见 2e2b0f1^ 版类注释）
-        addConst(pending, CLS_VIP_STATE, "getExpireTimeTimestamp", 0, "long", TS_2088_08_08_MILLIS, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "getExpireTimeTimestamp", 0, "long", TS_2088_08_08_MILLIS,
             "theme:VipState.getExpireTimeTimestamp", "F1 B3 到期时间戳 → 2088-08-08")
-        addConst(pending, CLS_VIP_STATE, "getRemainingTime", 0, "java.lang.Long", System.currentTimeMillis() + 1_950_000_000_000L, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "getRemainingTime", 0, "java.lang.Long", System.currentTimeMillis() + 1_950_000_000_000L,
             "theme:VipState.getRemainingTime", "F1 剩余时长 → 到 2088 的真实剩余（防消费端 now+X 溢出，A1 审计值语义修正）")
-        addConst(pending, CLS_VIP_STATE, "getVipStatus", 0, "int", 2, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "getVipStatus", 0, "int", 2,
             "theme:VipState.getVipStatus", "F1 T5 VIP 状态 → 2 会员态（1=NOT_VIP '新用户专享'卡根因）")
-        addConst(pending, CLS_VIP_STATE, "getVipType", 0, "java.lang.Integer", 2, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "getVipType", 0, "java.lang.Integer", 2,
             "theme:VipState.getVipType", "F1 T6 VIP 类型 → 2 连续包月（激活续费入口/账户已开通识别）")
-        addConst(pending, CLS_VIP_STATE, "isVipUser", 0, "boolean", true, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "isVipUser", 0, "boolean", true,
             "theme:VipState.isVipUser", "F1 VipState 实例内判定 → 是 VIP（VipState.java:355 独立字段读路径）")
-        addConst(pending, CLS_VIP_STATE, "getDisplayTimeTimestamp", 0, "long", TS_2088_08_08_MILLIS, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "getDisplayTimeTimestamp", 0, "long", TS_2088_08_08_MILLIS,
             "theme:VipState.getDisplayTimeTimestamp", "F1 到期日期展示时间戳 → 2088-08-08（UI 展示链 MineVipCardView:430/441、HwThemeManagerActivity:894/901）")
-        addConst(pending, CLS_VIP_STATE, "getDisplayTime", 0, "java.lang.String", TS_2088_08_08_STR, KEY_F1_VIP_ENABLED,
+        addConst(pending, CLS_VIP_STATE, "getDisplayTime", 0, "java.lang.String", TS_2088_08_08_STR,
             "theme:VipState.getDisplayTime", "F1 到期展示字符串 → 2088-08-08")
-        // 已删（2026-10-09 审计）：fetchShouldDialogBy* 休眠点——零调用链实证：唯一调用点
-        // VipCheckVM.java:164 在 refreshShouldDialog 自环内、全工程无真实调用方（HwThemeManagerActivity.java:2785
-        // 仅定义处）；真机弹窗走 overallretentiondialog 链已由展示咽喉拦截（theme-ui-real-chain.md §4.4）
-        // 已删（2026-10-09 审计）：T8 getVipCardType 深签名冗余点——T5 getVipStatus→2 已使同一 switch
-        // （MineVipCardView.java:1880-1904）走 SINGLE_WITH_SAVE 分支
-        pending += MountTask(
-            kind = MountKind.VIP_STATE_FIX,
-            className = CLS_VIP_MANAGER,
-            methodName = "getLocalVipState",
-            paramCount = 0,
-            returnType = CLS_VIP_STATE,
-            value = null,
-            featureKey = KEY_F1_VIP_ENABLED,
-            id = "theme:VipManager.getLocalVipState",
-            description = "F1 漏斗1 页面级 VIP 状态汇聚点改写（VipManager.java:55；DetailSource:219/ApplySource:1149/WidgetUtil:131/AdsRequestSource:285/ApplyResourceServer:357 实证）",
-        )
-        pending += MountTask(
-            kind = MountKind.VIP_STATE_FIX,
-            className = CLS_VIP_MANAGER,
-            methodName = "getVipState",
-            paramCount = 0,
-            returnType = CLS_VIP_STATE,
-            value = null,
-            featureKey = KEY_F1_VIP_ENABLED,
-            id = "theme:VipManager.getVipState",
-            description = "F1 漏斗2 会员中心直读点改写（VipManager.java:88；VipMemberCenterActivity:345/VipCenterModel:1131/ArrivedPushManager:3228 实证）",
-        )
+        // 已删的历史挂载点（fetchShouldDialogBy* 休眠链 / T8 getVipCardType / VipManager 读点漏斗 /
+        // VipModel 双漏斗）依据全部归档于 docs/hook-inventory-audit.md §五。
+        // **F1 现状：VipManager 2 点 + VipState 7 个 getter，共 9 点。**
     }
 
     // ---------------- F1：挽留弹窗拦截（VIP 已过期挽留弹窗，双保险；归组 F1） ----------------
 
-    /**
-     * 挽留弹窗（docs/theme-ui-real-chain.md §现象四 4.5，唯一依据）：走 overallretentiondialog 子系统
-     * （pushType=VIP_ARRIVED→MEMBER_EXPIRE=4 等，展示咽喉唯一出口是 showDialog）；旧 fetchShouldDialogBy*
-     * hook 拦不住——它是休眠消费链（4.4 实证）。拦截点选展示咽喉，F1/F2 双保险：
-     * - F1 showDialog 空实现（void 拦截器返 null = 不调原方法，libxposed api 语义，
-     *   AI-lsposed-temlate SKILL.md:102 实证）：单点覆盖全部 6 型（RESOURCE_TRIAL_END=1/
-     *   MEMBER_SOON_EXPIRE=2/EXPIRED_RESOURCES=3/MEMBER_EXPIRE=4/EXPIRED_SPRITE=5/MEMBER_LOGOUT=6），
-     *   含真机 MEMBER_EXPIRE；
-     * - F2 onCreate 先 proceed 后 finish（ARouter 直启绕过 F1 的兜底）：不 proceed 会让生命周期在未
-     *   初始化状态下走完（onDestroy 等回调可能 NPE），proceed 后再 finish 更稳。
-     * F3/F5 不挂的原因见类注释"不挂的点"。
-     */
+    /** F1/F2 双保险拦截 VIP 挽留弹窗（展示咽喉 showDialog + ARouter 直启兜底）。依据见 design.md §三 F1 挽留弹窗。 */
     private fun collectRetentionDialogHooks(pending: MutableList<MountTask>) {
         pending += MountTask(
             kind = MountKind.BLOCK,
@@ -378,7 +387,6 @@ object ThemeStoreHook : TargetHook {
             paramCount = 1,
             returnType = "void",
             value = null,
-            featureKey = KEY_F1_VIP_ENABLED,
             id = "theme:RetentionMgr.showDialog",
             description = "F1 挽留弹窗公共咽喉空实现（全部 6 型，OverallRetentionDialogActivity.java:158 实证）",
         )
@@ -389,7 +397,6 @@ object ThemeStoreHook : TargetHook {
             paramCount = 1,
             returnType = "void",
             value = null,
-            featureKey = KEY_F1_VIP_ENABLED,
             id = "theme:RetentionActivity.onCreate",
             description = "F2 兜底 ARouter 直启：原 onCreate 走完后 finish（OverallRetentionDialogActivity.java:861 实证）",
         )
@@ -397,22 +404,25 @@ object ThemeStoreHook : TargetHook {
 
     // ---------------- F3：试用无倒计时 + F4：回退路径判定放行 ----------------
 
-    /** 功能位归组：C1/C2 为 F3/F4 双用途、归组不确定 → 保守归 F2；C3/C5/C6/C8 → F3；C4 → F4。 */
+    /** 功能位归组：C1/C2 为 F3/F4 双用途、归组不确定 → 保守归 F2；C5/C6 → F3；C4 → F4。 */
     private fun collectTrialHooks(pending: MutableList<MountTask>) {
-        addConst(pending, CLS_TRYOUT, "isValidTheme", 0, "boolean", true, KEY_F2_FREE_ENABLED,
-            "theme:TryOut.isValidTheme", "F3/F4 C1 离线试用有效判定（8 分钟窗）→ 永久有效（归组不确定，保守归 F2）")
-        addConst(pending, CLS_TRYOUT, "isWareOutDated", 1, "boolean", false, KEY_F2_FREE_ENABLED,
-            "theme:TryOut.isWareOutDated", "F3/F4 C2 SP 超窗判定 → 永不过期（归组不确定，保守归 F2）")
-        addConst(pending, CLS_TRYOUT, "isSupportTrial", 0, "boolean", true, KEY_F3_TRIAL_ENABLED,
-            "theme:TryOut.isSupportTrial", "F3 C3 支持试用 → 常显可用")
-        addConst(pending, CLS_TRYOUT, "checkCurrentTheme", 0, "boolean", true, KEY_F4_NO_RESET_ENABLED,
-            "theme:TryOut.checkCurrentTheme", "F4 C4 当前主题试用态核查 → 有效（防 fence 到期回收）")
-        addConst(pending, CLS_INCENTIVE_INFO, "duringIncentive", 0, "boolean", true, KEY_F3_TRIAL_ENABLED,
+        // CLS_TRYOUT = $PKG.tryout.a —— **混淆名**，各点带 DexKit 锚点：
+        // 类内日志 TAG "TryOutHelper" 是类级稳定字符串；isValidTheme/checkCurrentTheme 的方法体另有独有串。
+        addConst(pending, CLS_TRYOUT, "isValidTheme", 0, "boolean", true,
+            "theme:TryOut.isValidTheme", "F3/F4 C1 离线试用有效判定（8 分钟窗）→ 永久有效（归组不确定，保守归 F2）",
+            dex = DexHint(strings = listOf("not register theme ware")))
+        addConst(pending, CLS_TRYOUT, "isWareOutDated", 1, "boolean", false,
+            "theme:TryOut.isWareOutDated", "F3/F4 C2 SP 超窗判定 → 永不过期（归组不确定，保守归 F2）",
+            dex = DexHint(classStrings = listOf("TryOutHelper"), paramTypes = listOf("int")))
+        addConst(pending, CLS_TRYOUT, "checkCurrentTheme", 0, "boolean", true,
+            "theme:TryOut.checkCurrentTheme", "F4 C4 当前主题试用态核查 → 有效（防 fence 到期回收）",
+            dex = DexHint(strings = listOf("isFileExists")))
+        addConst(pending, CLS_INCENTIVE_INFO, "duringIncentive", 0, "boolean", true,
             "theme:Incentive.duringIncentive", "F3 C5 在线任务授权窗判定 → 永久有效")
-        addConst(pending, CLS_INCENTIVE_INFO, "getIncentiveExpireTime", 0, "long", Long.MAX_VALUE, KEY_F3_TRIAL_ENABLED,
+        addConst(pending, CLS_INCENTIVE_INFO, "getIncentiveExpireTime", 0, "long", Long.MAX_VALUE,
             "theme:Incentive.getIncentiveExpireTime", "F3 C6 授权到期时间 → 拉远")
-        addConst(pending, CLS_AGREE_REPO, "isTrialSupportOnline", 0, "boolean", true, KEY_F3_TRIAL_ENABLED,
-            "theme:AgreeRepo.isTrialSupportOnline", "F3 C8 云控试用开关 → 常开")
+        // C8 isTrialSupportOnline → 已并入云控统一读点表（CloudSwitchTable: trial_support_online → true），
+        // 不再单独挂 AgreeRepo 方法（同一 key 只保留一个拦截点）。已删 C3（零调用者）见 audit §三.1。
     }
 
     /** C7/C9：ROM ThemeProvider 路径——试用态判定（含回退来源）与试用角标都走 ThemeResManager。 */
@@ -427,7 +437,6 @@ object ThemeStoreHook : TargetHook {
             paramCount = 0,
             returnType = CLS_THEME_APPLY_STATE,
             value = null,
-            featureKey = KEY_F4_NO_RESET_ENABLED,
             id = "theme:ThemeResManager.getThemeApplyState",
             description = "F4 C7 主题应用状态 → PERMANENT（永非试用态，不回退）",
             resolveValue = { loader ->
@@ -437,61 +446,44 @@ object ThemeStoreHook : TargetHook {
                 }.getOrNull()
             },
         )
-        addConst(pending, CLS_THEME_RES_MANAGER, "isTrialTheme", 1, "boolean", false, KEY_F3_TRIAL_ENABLED,
+        addConst(pending, CLS_THEME_RES_MANAGER, "isTrialTheme", 1, "boolean", false,
             "theme:ThemeResManager.isTrialTheme", "F3 C9 移除'试用中'判定 → 无试用角标/到期提醒")
     }
 
-    // ---------------- 挂载执行：懒加载重试（HC postDelayed 模式）+ 汇总（G1/G2） ----------------
-
-    /** 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。 */
-    private enum class MountResult { OK, FAILED, NOT_RESOLVED }
+    // ---------------- 挂载执行：本目标私有任务定义（重试/汇总/解析在共享 [MountEngine]） ----------------
 
     /**
      * 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制；
+     * [KEY_OVERRIDE] 云控读点按 key 查表强制（数据在 [CloudSwitchTable]）；
+     * [SLOT_PRUNE] 服务端槽位载荷出口裁剪（数据在 [top.honorhook.xposed.AdSlotFilter]）；
+     * [BOTTOM_TAB_PRUNE] 服务端底部 tab 配置出口裁剪（数据在 [top.honorhook.xposed.BottomTabFilter]）；
      * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，AI-lsposed-temlate SKILL.md:102 实证）；
-     * [FINISH_ACTIVITY] 先 proceed 再 finish（不 proceed 生命周期会在未初始化状态走完，可能 NPE）；
-     * [VIP_STATE_FIX] after 改写 VipState 实例字段（失败放行原逻辑，PROTECTIVE 纪律，见 fixVipState）。
+     * [FINISH_ACTIVITY] 先 proceed 再 finish（不 proceed 生命周期会在未初始化状态走完，可能 NPE）。
      */
-    private enum class MountKind { CONST, FORCE_ARG, BLOCK, FINISH_ACTIVITY, VIP_STATE_FIX }
+    private enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS }
 
-    /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[ARG] H2 第 uriArgIndex 参；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
-    private enum class UriOwner { THIS, ARG, GET_DOWNLOAD_INFO }
+    /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
+    private enum class UriOwner { THIS, GET_DOWNLOAD_INFO }
 
     private class MountTask(
         val kind: MountKind,
-        val className: String,
-        val methodName: String,
-        val paramCount: Int,
-        val returnType: String,
+        override val className: String,
+        override val methodName: String,
+        override val paramCount: Int,
+        override val returnType: String,
         val value: Any?,
-        val featureKey: String,
-        val id: String,
-        val description: String,
-        val resolveValue: ((ClassLoader) -> Any?)? = null,
-        /** 条件路由（下载链 H1/H2/H2b）：仅 uri 为空（null/空串）时短路/改参，非空放行（不误伤正常免费/已购项）。 */
+        override val id: String,
+        override val description: String,
+        override val resolveValue: ((ClassLoader) -> Any?)? = null,
+        /** 条件路由（下载链 H1/H2b）：仅 uri 为空（null/空串）时短路/改参，非空放行（不误伤正常免费/已购项）。 */
         val uriEmptyRoute: Boolean = false,
         /** DownloadInfo 实例获取路径（见 [UriOwner]）。 */
         val uriOwner: UriOwner = UriOwner.THIS,
-        /** [UriOwner.ARG] 时 DownloadInfo 所在参数下标（0 起；H2 为 1）。 */
-        val uriArgIndex: Int = -1,
         /** [MountKind.FORCE_ARG] 强制参数下标（0 起；默认 0 = 既有 setter 首参语义不变）。 */
         val forceArgIndex: Int = 0,
-    )
-
-    /** 已完成重试轮数（节奏见 RETRY_* 常量；HC installCustomTileHooks postDelayed 同款）。 */
-    private var retryRounds = 0
-    private var okCount = 0
-    private var totalCount = 0
-    private val failedIds = mutableListOf<String>()
-    /** 目标 APK 磁盘路径（install 期写入，MethodResolver 第二轨 DexKit 兜底用；null 时跳过）。 */
-    private var apkPath: String? = null
-
-    private const val MAX_RETRY_ROUNDS = 2
-    private const val RETRY_DELAY_MS = 500L
-    private const val RETRY_FINAL_DELAY_MS = 2000L
-
-    /** 挂载细节日志门控（默认关；汇总日志不受门控、始终输出）。 */
-    private const val DEBUG_LOGGING = false
+        /** DexKit 兜底特征（混淆名目标用；null = 仅直连轨；四维强度与纪律见 [DexHint]）。 */
+        override val dex: DexHint? = null,
+    ) : MountEngine.Task
 
     private fun addConst(
         pending: MutableList<MountTask>,
@@ -500,13 +492,15 @@ object ThemeStoreHook : TargetHook {
         paramCount: Int,
         returnType: String,
         value: Any?,
-        featureKey: String,
         id: String,
         description: String,
+        /** DexKit 兜底特征（混淆名目标用；null = 仅直连轨）。 */
+        dex: DexHint? = null,
     ) {
         pending += MountTask(
             kind = MountKind.CONST, className = className, methodName = methodName, paramCount = paramCount,
-            returnType = returnType, value = value, featureKey = featureKey, id = id, description = description,
+            returnType = returnType, value = value, id = id, description = description,
+            dex = dex,
         )
     }
 
@@ -517,80 +511,40 @@ object ThemeStoreHook : TargetHook {
         paramCount: Int,
         returnType: String,
         forcedArg: Any?,
-        featureKey: String,
         id: String,
         description: String,
+        /** 强制哪个参数（0 起）。默认 0 = 既有 setter 首参语义不变。 */
+        forceArgIndex: Int = 0,
+        /** DexKit 兜底特征（混淆名目标用；null = 仅直连轨）。 */
+        dex: DexHint? = null,
     ) {
         pending += MountTask(
             kind = MountKind.FORCE_ARG, className = className, methodName = methodName, paramCount = paramCount,
-            returnType = returnType, value = forcedArg, featureKey = featureKey, id = id, description = description,
+            returnType = returnType, value = forcedArg, id = id, description = description,
+            forceArgIndex = forceArgIndex, dex = dex,
         )
     }
 
-    /** 挂载一轮 pending（HC installCustomTileHooks L408-416 postDelayed 懒加载重试同款）。 */
-    private fun attemptMount(
-        pending: MutableList<MountTask>,
-        module: XposedModule,
-        loader: ClassLoader,
-    ) {
-        val unresolved = mutableListOf<MountTask>()
-        for (task in pending) {
-            when (mountOne(task, module, loader)) {
-                MountResult.OK -> okCount++
-                MountResult.FAILED -> failedIds += task.description
-                MountResult.NOT_RESOLVED -> unresolved += task
-            }
-        }
-        if (unresolved.isEmpty()) {
-            logSummary(module)
-        } else if (retryRounds >= MAX_RETRY_ROUNDS) {
-            failedIds += unresolved.map { it.description }
-            module.log(
-                Log.WARN, TAG,
-                "部分 hook 最终未挂载（类/方法不存在，已重试 $MAX_RETRY_ROUNDS 轮，放弃）: " +
-                    unresolved.joinToString { it.description },
-            )
-            logSummary(module)
-        } else {
-            retryRounds++
-            val delay = if (retryRounds == 1) RETRY_DELAY_MS else RETRY_FINAL_DELAY_MS
-            MountScheduler.postDelayed(delay) {
-                runCatching { attemptMount(unresolved, module, loader) }
-                    .onFailure { t -> module.log(Log.ERROR, TAG, "懒加载重试挂载异常", t) }
-            }
-        }
-    }
-
-    /** 单个挂载任务执行（失败分级见 [MountResult]）。 */
+    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 kind 分派的 intercept 构造）。 */
     private fun mountOne(
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-    ): MountResult {
-        val resolved = task.resolveValue?.invoke(loader)
-        if (task.resolveValue != null && resolved == null) {
-            module.log(Log.WARN, TAG, "hook 未挂载（依赖项未解析，将重试）: ${task.description}")
-            return MountResult.NOT_RESOLVED
-        }
-        val method = findMethod(loader, task.className, task.methodName, task.paramCount, task.returnType)
-            ?: MethodResolver.resolveMethod(loader, task.className, task.methodName, task.paramCount, task.returnType, apkPath)
-        if (method == null) {
-            module.log(Log.WARN, TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
-            return MountResult.NOT_RESOLVED
-        }
-        val value = resolved ?: task.value
+    ): MountEngine.Result {
+        val method = engine.resolveTask(task, module, loader)
+            ?: return MountEngine.Result.NOT_RESOLVED
+        // resolveValue 幂等（enumConstants 纯查找，无副作用），此处二次调用仅为取值；null 情况已在 engine 内拦截
+        val value = task.resolveValue?.invoke(loader) ?: task.value
         return runCatching {
             val builder = module.hook(method).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId(task.id)
             when (task.kind) {
                 // 常量短路（每次调用现读远程 prefs——不捕获 install 期，防 null 冻结坑）
                 MountKind.CONST -> builder.intercept { chain ->
-                    val prefs = RemotePrefsHolder.obtain(module)
-                    if (routeActive(chain, prefs, module, task)) value else chain.proceed()
+                    if (routeActive(chain, module, task)) value else chain.proceed()
                 }
                 // 参数强制（setter 写点 / 下载类型路由点）
                 MountKind.FORCE_ARG -> builder.intercept { chain ->
-                    val prefs = RemotePrefsHolder.obtain(module)
-                    if (routeActive(chain, prefs, module, task)) {
+                    if (routeActive(chain, module, task)) {
                         val args = chain.args?.toTypedArray() ?: arrayOfNulls<Any?>(task.forceArgIndex + 1)
                         args[task.forceArgIndex] = value
                         chain.proceedWith(chain.thisObject, args)
@@ -598,12 +552,39 @@ object ThemeStoreHook : TargetHook {
                         chain.proceed()
                     }
                 }
+                // 云控读点：按第 1 参 key 查表，命中即短路返回强制值；未命中放行原逻辑（对非表内 key 零影响）
+                MountKind.KEY_OVERRIDE -> builder.intercept { chain ->
+                    val key = runCatching { chain.getArg(0) as? String }.getOrNull()
+                    val forced = CloudSwitchTable.forced(key)
+                    if (key != null && forced != null) {
+                        logCloudOverride(module, key, forced)
+                        forced
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                // 服务端槽位载荷出口裁剪（美豆 S1）：proceed 拿到 SlotData.list 后按表剔营销槽位，失败放行原值
+                MountKind.SLOT_PRUNE -> builder.intercept { chain ->
+                    if (routeActive(chain, module, task)) {
+                        val orig = chain.proceed()
+                        pruneSlotPayload(orig, module) ?: orig
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                // 服务端底部 tab 配置出口裁剪（S2）：proceed 拿到 tab 列表后按表剔 VIP/福利 tab，失败放行原值
+                MountKind.BOTTOM_TAB_PRUNE -> builder.intercept { chain ->
+                    if (routeActive(chain, module, task)) {
+                        val orig = chain.proceed()
+                        pruneBottomTabPayload(orig, module) ?: orig
+                    } else {
+                        chain.proceed()
+                    }
+                }
                 // void 空实现阻断（挽留弹窗 F1；判据日志不受 DEBUG_LOGGING 门控）
                 MountKind.BLOCK -> builder.intercept { chain ->
-                    val prefs = RemotePrefsHolder.obtain(module)
-                    if (routeActive(chain, prefs, module, task)) {
+                    if (routeActive(chain, module, task)) {
                         module.log(Log.INFO, TAG, "挽留弹窗已拦截: ${task.methodName}")
-                        LogRing.push(module, RING_TAG, "挽留弹窗已拦截: ${task.methodName}")
                         null
                     } else {
                         chain.proceed()
@@ -613,152 +594,193 @@ object ThemeStoreHook : TargetHook {
                 // onStart/onDestroy 等在未初始化状态跑，可能 NPE；fanqie MainHook.java:689 先例，HC 的
                 // finish+不 proceed 模式不采用）
                 MountKind.FINISH_ACTIVITY -> builder.intercept { chain ->
-                    val prefs = RemotePrefsHolder.obtain(module)
-                    if (routeActive(chain, prefs, module, task)) {
+                    if (routeActive(chain, module, task)) {
                         val result = chain.proceed()
                         (chain.thisObject as? Activity)?.finish()
                         module.log(Log.INFO, TAG, "挽留弹窗已拦截: ${task.methodName}")
-                        LogRing.push(module, RING_TAG, "挽留弹窗已拦截: ${task.methodName}")
                         result
                     } else {
                         chain.proceed()
                     }
                 }
-                // VIP 状态漏斗改写（F1 双漏斗，2026-10-09 审计新增；失败放行原逻辑，PROTECTIVE 纪律）
-                MountKind.VIP_STATE_FIX -> builder.intercept { chain ->
-                    val prefs = RemotePrefsHolder.obtain(module)
-                    if (routeActive(chain, prefs, module, task)) {
-                        fixVipState(chain, module, loader, task)
-                    } else {
-                        chain.proceed()
+                // 前置数据修正：proceed 前修正 this 对象的字段（壁纸 packagePath 路径撕裂修复 W1），再原样放行
+                MountKind.PRE_PROCESS -> builder.intercept { chain ->
+                    if (routeActive(chain, module, task)) {
+                        fixWallpaperPackagePath(chain, module)
                     }
+                    chain.proceed()
                 }
             }
         }.fold(
             onSuccess = {
-                if (DEBUG_LOGGING) {
+                if (MountEngine.DEBUG_LOGGING) {
                     val verb = when (task.kind) {
                         MountKind.CONST -> "常返"
                         MountKind.FORCE_ARG -> "参数强制"
+                        MountKind.KEY_OVERRIDE -> "云控表强制"
+                        MountKind.SLOT_PRUNE -> "槽位载荷裁剪"
+                        MountKind.BOTTOM_TAB_PRUNE -> "底部 tab 裁剪"
                         MountKind.BLOCK -> "空实现阻断"
                         MountKind.FINISH_ACTIVITY -> "放行后 finish"
-                        MountKind.VIP_STATE_FIX -> "实例改写"
+                        MountKind.PRE_PROCESS -> "前置修正"
                     }
-                    module.log(Log.INFO, TAG, "hook 已挂载: ${task.description} → $verb ${value ?: "null"} (feature=${task.featureKey})")
+                    module.log(Log.INFO, TAG, "hook 已挂载: ${task.description} → $verb ${value ?: "null"}")
                 }
-                MountResult.OK
+                MountEngine.Result.OK
             },
             onFailure = { t ->
                 module.log(Log.WARN, TAG, "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t)
-                MountResult.FAILED
+                MountEngine.Result.FAILED
             },
         )
     }
 
-    // ---------------- VIP_STATE_FIX 漏斗改写（F1，2026-10-09 哲学审计新增） ----------------
+    // ---------------- SLOT_PRUNE 实现（美豆 S1：服务端槽位载荷源头裁剪） ----------------
 
-    /** vip-state 漏斗日志节流 ≤3 次（getLocalVipState/getVipState 是高频 LiveData 汇聚点，防刷屏）。 */
-    private var vipFixLogCount = 0
+    /** 反射方法缓存（`类名#方法名` → Method），避免在 getList 这类的取数路径上反复查找。 */
+    private val reflMethodCache = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<Method>>()
+
+    private fun cachedMethod(o: Any, name: String): Method? = reflMethodCache.computeIfAbsent(
+        "${o.javaClass.name}#$name",
+    ) { key ->
+        java.util.Optional.ofNullable(
+            runCatching { o.javaClass.getMethod(key.substringAfterLast('#')) }.getOrNull(),
+        )
+    }.orElse(null)
+
+    private fun reflectGet(o: Any, name: String): Any? =
+        runCatching { cachedMethod(o, name)?.invoke(o) }.getOrNull()
 
     /**
-     * VIP_STATE_FIX 改写（after 语义）：先 proceed 拿 VipState 实例 → 逐 setter 填永久 VIP 值；
-     * 实例 null（getVipState 首查可能）→ 无参构造自建（VipState.java:94 数据类全默认参）后返回。
-     * setter 签名按 jadx VipState.java 实证：setVipUser(Z)/setVipStatus(I)/setVipType(Integer)/
-     * setExpireTimeTimestamp(J)/setDisplayTime(String)/setRemainingTime(Long)；逐个独立 runCatching，
-     * 缺失的 setter（版本漂移）跳过记 WARN；整体失败放行原逻辑（PROTECTIVE 纪律）。
-     * 真机判据日志：`vip-state 漏斗改写: <method> vipUser=true vipStatus=2 ...`（节流 ≤3 次）。
+     * `SlotData.getList()` 出口裁剪：按 [AdSlotFilter] 表剔掉美豆营销槽位。
+     *
+     * 返回 `null` 表示**未裁剪/不可裁剪**（调用方放行原值，PROTECTIVE 纪律）：
+     * 非 List、空表、反射失败（版本漂移）一律原样返回。
+     * 裁剪分两级：① 命中 [AdSlotFilter.isPrunedSlotType] 的整个 `SlotList` 丢弃；
+     * ② 其余 `SlotList` 只从内层 `list` 里删掉命中 [AdSlotFilter.isPrunedTargetId] 的 `Slot`（写回 `setList`）。
      */
-    private fun fixVipState(
-        chain: XposedInterface.Chain,
-        module: XposedModule,
-        loader: ClassLoader,
-        task: MountTask,
-    ): Any? {
-        val orig = runCatching { chain.proceed() }.getOrNull()
-        val state = orig ?: runCatching {
-            loader.loadClass(CLS_VIP_STATE).getDeclaredConstructor().newInstance()
-        }.getOrNull()
-        if (state == null) {
-            module.log(Log.WARN, TAG, "vip-state 漏斗改写失败（实例不可得），放行原逻辑: ${task.methodName}")
-            return orig
+    private fun pruneSlotPayload(orig: Any?, module: XposedModule): List<*>? {
+        val list = orig as? List<*> ?: return null
+        if (list.isEmpty()) return null
+        var changed = false
+        val out = ArrayList<Any>(list.size)
+        for (slotList in list) {
+            if (slotList == null) {
+                changed = true
+                continue
+            }
+            val slotType = reflectGet(slotList, "getSlotType") as? String
+            if (AdSlotFilter.isPrunedSlotType(slotType)) {
+                changed = true
+                logSlotPrune(module, "slotList", slotType!!, reflectGet(slotList, "getTitle")?.toString())
+                continue
+            }
+            // 混合槽位（如灯笼位）：只摘掉内嵌的美豆入口 Slot，保留其余图标
+            val inner = reflectGet(slotList, "getList") as? List<*>
+            if (inner != null && inner.isNotEmpty()) {
+                val kept = ArrayList<Any>(inner.size)
+                var innerChanged = false
+                for (slot in inner) {
+                    val targetId = if (slot == null) null else reflectGet(slot, "getTargetId") as? String
+                    if (slot != null && AdSlotFilter.isPrunedTargetId(targetId)) {
+                        innerChanged = true
+                        logSlotPrune(module, "slot", targetId!!, reflectGet(slot, "getTitle")?.toString())
+                    } else if (slot != null) {
+                        kept.add(slot)
+                    }
+                }
+                if (innerChanged) {
+                    changed = true
+                    runCatching {
+                        slotList.javaClass.getMethod("setList", java.util.List::class.java).invoke(slotList, kept)
+                    }.onFailure { t ->
+                        module.log(Log.WARN, TAG, "美豆槽位裁剪：内层 setList 失败（放行原对象）— ${t.message}")
+                    }
+                }
+            }
+            out.add(slotList)
         }
-        // 剩余时长 = now + 1_950_000_000_000L（到 2088 的真实剩余；原"常量绝对时间戳当剩余时长"语义错误，
-        // 防消费端 now+X 计算溢出，2026-10-09 一行语义修正）
-        val filled = listOf(
-            Triple("setVipUser", java.lang.Boolean.TYPE, true as Any),
-            Triple("setVipStatus", java.lang.Integer.TYPE, 2 as Any),
-            Triple("setVipType", java.lang.Integer::class.java, 2 as Any),
-            Triple("setExpireTimeTimestamp", java.lang.Long.TYPE, TS_2088_08_08_MILLIS as Any),
-            Triple("setDisplayTime", String::class.java, TS_2088_08_08_STR as Any),
-            Triple("setRemainingTime", java.lang.Long::class.java, System.currentTimeMillis() + 1_950_000_000_000L),
-        ).count { (name, paramType, value) -> invokeVipSetter(state, name, paramType, value, module) }
-        if (filled == 0) {
-            module.log(Log.WARN, TAG, "vip-state 漏斗改写失败（全部 setter 缺失/异常），放行原逻辑: ${task.methodName}")
-            return orig
-        }
-        if (vipFixLogCount < 3) {
-            vipFixLogCount++
-            val msg =
-                "vip-state 漏斗改写: ${task.methodName} setter=${filled}/6 vipUser=true vipStatus=2 " +
-                    "vipType=2 expireTimeTimestamp=$TS_2088_08_08_MILLIS displayTime=$TS_2088_08_08_STR remainingTime=now+1.95e12"
-            module.log(
-                Log.INFO, TAG,
-                msg,
-            )
-            // vip-state 改写生效判据，双写进环形缓冲（随节流同步，只进前 3 次）
-            LogRing.push(module, RING_TAG, msg)
-        }
-        return state
+        return if (changed) out else null
     }
 
-    /** 单个 VipState setter 反射调用（实证签名精确匹配；失败跳过 = 版本漂移容错，不阻断）。 */
-    private fun invokeVipSetter(
-        state: Any,
-        name: String,
-        paramType: Class<*>,
-        value: Any,
-        module: XposedModule,
-    ): Boolean = runCatching {
-        state.javaClass.getMethod(name, paramType).invoke(state, value)
-    }.onFailure { t ->
-        module.log(Log.WARN, TAG, "vip-state setter 缺失/失败（跳过）: $name — ${t.message}")
-    }.isSuccess
+    /** 裁剪判据日志（节流，每 key 前 2 次；真机核对"美豆入口已从载荷剔除"用）。 */
+    private val slotPruneLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
-    /** 挂载汇总始终输出，不受 [DEBUG_LOGGING] 门控（Rain "installed N/M" + fanqie 汇总行模式）。 */
-    private fun logSummary(module: XposedModule) {
-        val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
-        val msg = "ThemeStoreHook: installed $okCount/$totalCount$failurePart"
-        module.log(
-            if (failedIds.isEmpty()) Log.INFO else Log.WARN,
-            TAG,
-            msg,
-        )
-        // 汇总级双写进环形缓冲（含失败清单；单点"挂载失败"高频 WARN 不进，只进汇总级）
-        LogRing.push(module, RING_TAG, msg)
+    private fun logSlotPrune(module: XposedModule, kind: String, value: String, title: String?) {
+        val key = "$kind:$value"
+        val n = slotPruneLogCount.merge(key, 1) { a, b -> a + b } ?: 1
+        if (n <= 2) {
+            module.log(Log.INFO, TAG, "美豆槽位已从服务端载荷剔除: $kind=$value title=$title（AdSlotFilter）")
+        }
+    }
+
+    // ---------------- BOTTOM_TAB_PRUNE 实现（S2：服务端底部 tab 配置源头裁剪） ----------------
+
+    /**
+     * `BottomTabConfigs.getBottomTabConfigs()` 出口裁剪：按 [BottomTabFilter] 表剔掉 VIP / 福利 tab。
+     *
+     * 返回 `null` 表示**未裁剪/不可裁剪**（调用方放行原值，PROTECTIVE 纪律）：非 List、空表、
+     * 反射取不到 `getBottomTabId()`（版本漂移）一律原样保留。
+     * `getBottomTabId()` 返回 int（`MenuType.getValue()`），故按 Number 取值比较。
+     *
+     * **保护**：裁剪后若不足 [BottomTabFilter.MIN_LIST_SIZE] 项则**整体放行**——宿主在 `size < 3` 时会走
+     * 静态硬编码回退分支，而那支的 VIP tab 由 `isSupportVip` 控制、会重新出现（详见 BottomTabFilter 注释）。
+     */
+    private fun pruneBottomTabPayload(orig: Any?, module: XposedModule): List<*>? {
+        val list = orig as? List<*> ?: return null
+        if (list.isEmpty()) return null
+        var changed = false
+        val out = ArrayList<Any>(list.size)
+        val pruned = ArrayList<BottomTabFilter.Rule>()
+        for (item in list) {
+            if (item == null) {
+                changed = true
+                continue
+            }
+            val id = (reflectGet(item, "getBottomTabId") as? Number)?.toInt()
+            val rule = if (id == null) null else BottomTabFilter.ruleFor(id)
+            if (rule != null) {
+                changed = true
+                pruned += rule
+                continue
+            }
+            out.add(item)
+        }
+        if (!changed) return null
+        if (out.size < BottomTabFilter.MIN_LIST_SIZE) {
+            module.log(
+                Log.WARN, TAG,
+                "底部 tab 裁剪已放弃：裁后仅 ${out.size} 项（< ${BottomTabFilter.MIN_LIST_SIZE} " +
+                    "会触发宿主静态回退分支、VIP tab 反而复活），放行原配置",
+            )
+            return null
+        }
+        // 确认真正裁剪后才打判据日志（避免出现"记了日志却没裁"的误导）
+        pruned.forEach { logBottomTabPrune(module, it) }
+        return out
+    }
+
+    /** 裁剪判据日志（每 tab 前 2 次；真机核对"VIP tab 已从服务端配置剔除"用）。 */
+    private val bottomTabPruneLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private fun logBottomTabPrune(module: XposedModule, rule: BottomTabFilter.Rule) {
+        val n = bottomTabPruneLogCount.merge(rule.name, 1) { a, b -> a + b } ?: 1
+        if (n <= 2) {
+            module.log(Log.INFO, TAG, "底部 tab 已从服务端配置剔除: ${rule.name}(bottomTabId=${rule.id})（BottomTabFilter）")
+        }
     }
 
     // ---------------- 通用挂载工具 ----------------
 
-    /** 总开关现读（每次 intercept 调用）：prefs 获取失败返回 false = 原逻辑放行（安全默认）。 */
-    private fun hookEnabled(prefs: SharedPreferences?): Boolean = prefs?.getBoolean(KEY_HOOK_ENABLED, true) ?: false
-
-    /** 功能位开关 = 总开关（上位语义）&& 对应 key（默认 true）；prefs 失败 = false 放行（安全默认）。 */
-    private fun featureEnabled(prefs: SharedPreferences?, key: String): Boolean =
-        hookEnabled(prefs) && (prefs?.getBoolean(key, true) ?: true)
-
     /**
-     * 路由激活判定（含下载链 H1/H2/H2b 的 uri 空条件）：总开关 × 功能位开关现读（关 = 原逻辑放行）；
-     * uriEmptyRoute=true 时额外要求 DownloadInfo.uri 为空（null/空串）才激活，非空放行；uri 读取失败
-     * （版本漂移）放行（安全默认）。触发时输出判据日志（INFO 不受 DEBUG_LOGGING 门控）——
-     * 真机从 LSPosed 日志（TAG HonorHook）确认修复链路是否生效（theme-download-chain.md §5）。
+     * 路由激活判定：uriEmptyRoute=false 时恒激活；=true 时额外要求 DownloadInfo.uri 为空才激活
+     * （非空放行；uri 读取失败按版本漂移放行，安全默认）。触发时输出 INFO 判据日志（不受 DEBUG_LOGGING 门控）。
      */
     private fun routeActive(
         chain: XposedInterface.Chain,
-        prefs: SharedPreferences?,
         module: XposedModule,
         task: MountTask,
     ): Boolean {
-        if (!featureEnabled(prefs, task.featureKey)) return false
         if (!task.uriEmptyRoute) return true
         val blank = isUriBlank(chain, task)
         if (blank) {
@@ -768,31 +790,42 @@ object ThemeStoreHook : TargetHook {
                 msg,
             )
             // 路由触发 = 下载修复链路生效的判据，双写进环形缓冲供 UI 日志页核对
-            LogRing.push(module, RING_TAG, msg)
         }
         return blank
+    }
+
+    /** 云控强制命中计数（key → 已打印次数）。读点高频（多处循环内读取），每 key 只打前 [CLOUD_LOG_PER_KEY] 次防刷屏。 */
+    private val cloudHitLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    private const val CLOUD_LOG_PER_KEY = 2
+
+    /** 云控强制命中判据日志（节流；真机确认表驱动拦截生效用）。 */
+    private fun logCloudOverride(module: XposedModule, key: String, value: Boolean) {
+        val n = cloudHitLogCount.merge(key, 1) { a, b -> a + b } ?: 1
+        if (n <= CLOUD_LOG_PER_KEY) {
+            module.log(Log.INFO, TAG, "cloud-switch 强制: $key → $value")
+        }
     }
 
     private fun actionDesc(task: MountTask): String = when (task.kind) {
         MountKind.CONST -> "常返 ${task.value}"
         MountKind.FORCE_ARG -> "第 ${task.forceArgIndex + 1} 参强制 ${task.value}"
+        MountKind.KEY_OVERRIDE -> "云控 key 命中即短路（表见 CloudSwitchTable）"
+        MountKind.SLOT_PRUNE -> "SlotData.list 按 AdSlotFilter 表裁剪"
+        MountKind.BOTTOM_TAB_PRUNE -> "BottomTabConfigs.list 按 BottomTabFilter 表裁剪"
         MountKind.BLOCK -> "空实现阻断（不调原方法）"
         MountKind.FINISH_ACTIVITY -> "放行原方法后 finish Activity"
-        MountKind.VIP_STATE_FIX -> "VipState 实例字段改写"
+        MountKind.PRE_PROCESS -> "前置修正 this 数据后放行原方法"
     }
 
     /**
-     * 条件路由的 uri 判空：按 [UriOwner] 取 DownloadInfo 实例，反射读 public String uri
-     * （DownloadInfo.java:145 实证）。四分支：① 实例 null → 视为空（H2 场景参数 null 时原入口本就
-     * 提前 return，路由无害）；② 字段值 null/空串/"null" 占位串/非 URL 形态（无 "://"）→ 空、
-     * 触发路由（占位串是服务端 JSON 反序列化的常见形态——真机 0% 静默悬停的另一形态；
-     * 真免费资源 fileUrl 是 CDN 直链必含 "://"，不受影响）；③ 反射异常（版本漂移）→ 放行原逻辑
-     * （安全默认）。
+     * 条件路由的 uri 判空：按 [UriOwner] 取 DownloadInfo 实例，反射读 public String uri。四分支：
+     * ① 实例 null → 视为空；② 字段 null/空串/"null" 占位/无 "://" → 空（触发路由，真免费 CDN 直链必含
+     * "://" 不受影响）；③ 反射异常（版本漂移）→ 放行原逻辑。
      */
     private fun isUriBlank(chain: XposedInterface.Chain, task: MountTask): Boolean {
         val info: Any? = when (task.uriOwner) {
             UriOwner.THIS -> chain.thisObject
-            UriOwner.ARG -> chain.args?.getOrNull(task.uriArgIndex)
             UriOwner.GET_DOWNLOAD_INFO -> runCatching {
                 chain.thisObject?.javaClass?.getMethod("getDownloadInfo")?.invoke(chain.thisObject)
             }.getOrElse { return false }  // ③ 探测异常（版本漂移）→ 放行（安全默认）
@@ -804,22 +837,37 @@ object ThemeStoreHook : TargetHook {
         return s.isNullOrEmpty() || s == "null" || !s.contains("://")  // ② 空/占位/非 URL → 触发路由
     }
 
-    /** 直连反射解析（双轨第一轨，HookEntry.resolveTargetMethod 同构）；未命中时 mountOne 转第二轨
-     * [MethodResolver.resolveMethod] DexKit 按特征兜底（对抗 OTA 混淆漂移，需 [apkPath]；null 跳过）。 */
-    private fun findMethod(
-        loader: ClassLoader,
-        className: String,
-        methodName: String,
-        paramCount: Int,
-        returnType: String,
-    ): Method? = runCatching {
-        loader.loadClass(className).declaredMethods.firstOrNull { m ->
-            m.name == methodName && m.parameterCount == paramCount && m.returnType.name == returnType
+    /**
+     * W1：动态壁纸 `packagePath` 路径撕裂修正（[MountKind.PRE_PROCESS]，apply 前置）。
+     *
+     * **根因**：付费动态壁纸的包文件落盘在 `HWTHEMES/PAYED_HWTHEMES/`（下载侧判定 `DownloadInfo.isPayedItem()`
+     * 是 `price` **字段直读**，不受 hook 影响 → payed 目录）；而预览页 `updateStatus()`（`OnlineWallpaperPreview
+     * LowActivity.java:2660`）用 `mInfo.isNeedPayItem()` 重算 `packagePath` —— 该方法被本模块 A1 强制 false
+     * ⇒ packagePath 指向**不带 PAYED_HWTHEMES 的错误目录**。点「应用」→ `applyLiveWallpaperPrepare()` 里
+     * `isFileExists(packagePath)` 为 false → 上报 402 后**静默 return**（构造的 Message 从未发送，零 UI 反馈）。
+     *
+     * **修法**：proceed 前把 `mInfo.packagePath` 修正为真实存在的文件 —— 复用宿主自己的
+     * `WallPaperInfo.getAbsolutExistFilePath()`（它按 `this.price` **字段直读**判 payed，inner/outer ×
+     * PAYED_HWTHEMES/正常目录 四处探测，天然不受 hook 影响）。修正失败（null/反射异常）一律不动原数据（PROTECTIVE）。
+     * `doLiveWallPaperApply` 后续读的是同一 `mInfo.packagePath`，一次修正全链路生效。
+     */
+    private fun fixWallpaperPackagePath(chain: XposedInterface.Chain, module: XposedModule) {
+        runCatching {
+            val activity = chain.thisObject ?: return
+            val info = activity.javaClass.getDeclaredField("mInfo").apply { isAccessible = true }.get(activity)
+                ?: return
+            val pathField = info.javaClass.getField("packagePath")
+            val cur = pathField.get(info) as? String
+            if (!cur.isNullOrEmpty() && java.io.File(cur).exists()) return  // 路径本就正确（免费项常态）→ 零干预
+            val real = info.javaClass.getMethod("getAbsolutExistFilePath").invoke(info) as? String
+            if (!real.isNullOrEmpty() && java.io.File(real).exists() && real != cur) {
+                pathField.set(info, real)
+                module.log(Log.INFO, TAG, "壁纸 packagePath 已修正: $cur → $real")
+            }
+        }.onFailure { t ->
+            module.log(Log.WARN, TAG, "壁纸 packagePath 修正失败（放行原逻辑）: ${t.message}")
         }
-    }.getOrNull()
-
-    /** LogRing 环形缓冲行内短标识（UI 日志页按 tag 归类展示）。 */
-    private const val RING_TAG = "theme"
+    }
 
     private const val TAG = "HonorHook"
 }

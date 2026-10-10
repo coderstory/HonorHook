@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅用于承载 LSPosed Manager 展示的模块简介 —— `android:description` 属性格式是 reference（只接受 @string 引用，
+  不接受字面量，真机 aapt2 实证：字面量报 "incompatible with attribute description (attr) reference"），
+  故必须落一个字符串资源。这是本模块唯一的 res 资源，与应用 UI 无关（无 Activity/图标/布局）。
+-->
+<resources>
+    <string name="module_description">专噶耀子的腰子。</string>
+</resources>

@@ -13,7 +13,7 @@ import io.github.libxposed.api.XposedModuleInterface
  */
 interface TargetHook {
 
-    /** hook 目标包名（注册表键，如 com.android.packageinstaller） */
+    /** hook 目标包名（注册表键，如 com.hihonor.android.thememanager） */
     val packageName: String
 
     /** 安装本目标的全部 hook；幂等性由调用方（TargetRegistry.installed）保证，实现内不需要自加 installed 标志 */

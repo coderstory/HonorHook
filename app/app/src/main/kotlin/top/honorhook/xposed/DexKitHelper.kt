@@ -3,6 +3,7 @@ package top.honorhook.xposed
 import android.util.Log
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindMethod
+import org.luckypray.dexkit.query.matchers.ClassMatcher
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -94,13 +95,20 @@ object DexKitHelper {
      *
      * 特征全可选、AND 组合：[packages] 包名白名单 / [methodName] 方法名（混淆后可能失配，可留空）/
      * [returnType] 返回类型（DexKit 内部类型名，如 "boolean"、"java.lang.String"）/ [paramCount] 参数个数 /
-     * [usingStrings] 方法体引用字符串（版本适配最稳，照 HC FRAME_METHOD_MARKER 用法）。
+     * [paramTypes] **参数类型序列**（按声明顺序，比 paramCount 强得多）/ [usingStrings] 方法体引用的字符串 /
+     * [declaredClassStrings] **所在类**引用的字符串（用 `declaredClass(ClassMatcher.usingStrings)` 表达，
+     * 用于"类与方法名都被混淆、但类里有稳定字符串"的场景）/
+     * [declaredClassFieldTypes] **所在类的字段类型集合**（`ClassMatcher.addFieldForType`；字段类型引用的是类名，
+     * 其中的可读类名稳定，用于"类内无字符串"的场景，如 `common.a` 的 `WeakReference` + `DownloadInfo`）。
      *
-     * API 实证状态（对照 HC 实码 reference/HyperChanger/.../ScreenRecorderModule.kt）：
-     * ✅ 已验：`DexKitBridge.create`、`bridge.findMethod(FindMethod)`、`FindMethod.create()`、
-     *   `MethodMatcher.create().usingStrings(...)`、`MethodInfo.getMethodInstance(loader)`、`bridge.close()`
-     * ⚠️ 待真机：`FindMethod.searchPackages(...)`、`MethodMatcher.name(...)/returnType(...)/paramCount(...)`
-     *   （DexKit 2.x 通用 API 编写，HC 实码未出现）
+     * 特征选取优先级（抗混淆强度）：字符串常量 > 可读参数类型 > 返回类型/参数个数 > 方法名。
+     * **字符串常量混淆不改，是最稳的锚点**（版本适配最稳，照 HC FRAME_METHOD_MARKER 用法）。
+     *
+     * API 实证状态（2026-10-10 对 dexkit-2.2.0-api.jar 逐项 javap 核对）：
+     * ✅ `DexKitBridge.create` / `bridge.findMethod(FindMethod)` / `FindMethod.create()` /
+     *   `MethodMatcher.create().name(...)/returnType(...)/paramCount(...)/paramTypes(vararg)/usingStrings(vararg)` /
+     *   `MethodMatcher.declaredClass(ClassMatcher)` / `ClassMatcher.usingStrings(vararg)` /
+     *   `MethodInfo.getMethodInstance(loader)` / `FindMethod.searchPackages(...)`
      *
      * @return 已反射解析并过滤的 [Method] 列表（非接口/非抽象/非 native/非 static + 签名串去重），可能为空
      */
@@ -111,19 +119,33 @@ object DexKitHelper {
         methodName: String? = null,
         returnType: String? = null,
         paramCount: Int? = null,
+        paramTypes: List<String>? = null,
         usingStrings: List<String>? = null,
+        declaredClassStrings: List<String>? = null,
+        declaredClassFieldTypes: List<String>? = null,
     ): List<Method> {
         val matcher = MethodMatcher.create()
-        // 已验证（HC）：usingStrings(vararg String)
+        // 方法体引用的字符串常量（最稳特征）
         usingStrings?.takeIf { it.isNotEmpty() }
             ?.let { matcher.usingStrings(*it.toTypedArray()) }
-        // TODO(待真机验证): matcher.name/returnType/paramCount 为 DexKit 2.x 通用 API，HC 实码只见过 usingStrings
+        // 参数类型序列（比 paramCount 强：可含未被混淆的可读类名，如 common.DownloadInfo）
+        paramTypes?.takeIf { it.isNotEmpty() }
+            ?.let { matcher.paramTypes(*it.toTypedArray()) }
+        // 所在类特征（类名+方法名都被混淆时的兜底锚点）：类内字符串 / 类字段类型
+        if (!declaredClassStrings.isNullOrEmpty() || !declaredClassFieldTypes.isNullOrEmpty()) {
+            val classMatcher = ClassMatcher.create()
+            declaredClassStrings?.takeIf { it.isNotEmpty() }
+                ?.let { classMatcher.usingStrings(*it.toTypedArray()) }
+            declaredClassFieldTypes?.forEach { classMatcher.addFieldForType(it) }
+            matcher.declaredClass(classMatcher)
+        }
+        // 2026-10-10：以下三个为 DexKit 2.x 通用 API，已对 2.2.0-api.jar javap 核对存在
         if (methodName != null) matcher.name(methodName)
         if (returnType != null) matcher.returnType(returnType)
         if (paramCount != null) matcher.paramCount(paramCount)
 
         val findMethod = FindMethod.create()
-        // TODO(待真机验证): searchPackages 为 DexKit 2.x 通用 API，HC 实码未见（Rain 旧版语义为 searchPackages 白名单）
+        // searchPackages 为 DexKit 2.x 通用 API（Rain 旧版语义为 searchPackages 白名单）
         packages?.takeIf { it.isNotEmpty() }
             ?.let { findMethod.searchPackages(*it.toTypedArray()) }
         findMethod.matcher(matcher)

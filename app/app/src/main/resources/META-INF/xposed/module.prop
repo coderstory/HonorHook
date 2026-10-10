@@ -1,4 +1,5 @@
 minApiVersion=102
 targetApiVersion=102
 staticScope=true
-description=HonorHook 荣耀系统增强模块
+exceptionMode=protective
+description=专噶耀子的腰子。
