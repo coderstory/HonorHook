@@ -38,6 +38,8 @@ HonorHook 开发工具
   build-release    编译 release APK（混淆+收缩）
   install          安装 debug APK 到已连接设备（-r 覆盖）
   install-release  安装 release APK
+  enable-module    重装后自动重新启用 LSPosed 模块（点通知+开关，含作用域进程清理）
+  deploy-release   一键全流程：build-release + install-release + enable-module
   devices          列出已连接设备与授权状态
   launch           冷启动模块 App（主 Activity）
   log              实时日志：宿主阻断 + HonorHook tag
@@ -189,6 +191,113 @@ EOF
     info "先卸载旧包（用户约定：每次安装前必须卸载）"
     "$ADB" uninstall top.honorhook 2>&1 | tr -d '\r' || true
     "$ADB" install -r "$APK_RELEASE" | tr -d '\r'
+    ;;
+
+  enable-module)
+    # 重装后 LSPosed 停用模块并发"尚未激活"通知（深链直达模块页）——模拟点击通知+开关全自动重新启用。
+    # 通知栏与寄生管理器对 uiautomator 均不可见 ⇒ 全程 screencap + PIL：
+    #   通知定位 = 图标列的 LSPosed 深灰蓝像素带 (85,98,105)+白色并存；
+    #   开关状态 = 模块页固定位置取色（ON=蓝 74,128,247 / OFF=白底+灰边 230）。
+    # 注意：先跑 install-release（触发通知）再跑本命令；deploy-release 已串好。
+    require "$ADB"
+    PYVENV="C:/Users/coderstory/.workbuddy/binaries/python/envs/default/Scripts/python.exe"
+    [ -x "$PYVENV" ] || die "缺少 venv python（含 Pillow）：$PYVENV"
+    LSP_FOCUS="com.android.shell/org.lsposed.manager"
+
+    SZ=$("$ADB" shell wm size | tr -d '\r' | grep -oE '[0-9]+x[0-9]+')
+    W=${SZ%x*}; H=${SZ#*x}
+    SX=$((W * 1000 / 1272)); SY=$((H * 1000 / 2800))   # 千分比缩放（基准 1272x2800）
+    SW_X=$((1054 * SX / 1000)); SW_Y=$((604 * SY / 1000))
+
+    shade_classify() {  # 截屏模块页开关区 → stdout: on / off / other
+      "$ADB" exec-out screencap -p > "$LOG_OUT/enable_page.png" 2>/dev/null
+      "$PYVENV" - "$LOG_OUT/enable_page.png" "$SW_X" "$SW_Y" << 'PYEOF'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+sx, sy = int(sys.argv[2]), int(sys.argv[3])
+blue = gray_edge = white = 0
+for dx in range(-40, 41, 10):
+    r, g, b = im.getpixel((sx + dx, sy))[:3]
+    if abs(r-74) < 40 and abs(g-128) < 40 and abs(b-247) < 40: blue += 1
+    elif r > 245 and g > 245 and b > 245: white += 1
+    if abs(r-230) < 12 and abs(g-230) < 12 and abs(b-230) < 12: gray_edge += 1
+print("on" if blue >= 6 else ("off" if white >= 5 and gray_edge >= 1 else "other"))
+PYEOF
+    }
+
+    shade_candidates() {  # 展开通知栏 → 截屏 → 输出 LSPosed 图标候选 y（自上而下）
+      "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1
+      sleep 2
+      "$ADB" exec-out screencap -p > "$LOG_OUT/enable_shade.png" 2>/dev/null
+      "$PYVENV" - "$LOG_OUT/enable_shade.png" << 'PYEOF'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+W, H = im.size
+px = im.load()
+counts = {}
+for y in range(300, H, 3):
+    slate = white = 0
+    for x in range(80, 250, 4):   # 通知图标列
+        r, g, b = px[x, y]
+        if abs(r-85) < 25 and abs(g-98) < 25 and abs(b-105) < 25: slate += 1
+        elif r > 240 and g > 240 and b > 240: white += 1
+    if slate >= 8 and white >= 2:
+        counts[y] = True
+rows = sorted(counts)
+bands = []
+for y in rows:
+    if bands and y - bands[-1][1] <= 40: bands[-1][1] = y
+    else: bands.append([y, y])
+print(" ".join(str((a + b) // 2) for a, b in bands))
+PYEOF
+    }
+
+    info "展开通知栏，扫描 LSPosed 通知…"
+    BANDS=$(shade_candidates)
+    [ -n "$BANDS" ] || die "通知栏里没找到 LSPosed 通知（先 install-release 重装触发）"
+    info "候选: $BANDS"
+
+    done_flag=0
+    for y in $BANDS; do
+      "$ADB" shell "input tap $((W / 2)) $y" 2>/dev/null
+      sleep 3
+      FOCUS=$("$ADB" shell "dumpsys window | grep mCurrentFocus" 2>/dev/null | tr -d '\r')
+      case "$FOCUS" in
+        *"$LSP_FOCUS"*) ;;
+        *NotificationShade*) "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 1; continue ;;
+        *) "$ADB" shell "input keyevent 4" >/dev/null 2>&1; "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 2; continue ;;
+      esac
+      # 管理器已打开：判别落在哪个页
+      STATE=$(shade_classify)
+      case "$STATE" in
+        on)  info "模块页已打开且模块为启用状态"; done_flag=1; break ;;
+        off) info "模块页已打开（开关 OFF），点击启用…"
+             "$ADB" shell "input tap $SW_X $SW_Y"; sleep 2
+             STATE2=$(shade_classify)
+             [ "$STATE2" = "on" ] || die "点击开关后未变蓝（截屏 $LOG_OUT/enable_page.png 人工核对）"
+             info "模块已重新启用 ✓"; done_flag=1; break ;;
+        *)   info "落点非模块页（管理器首页），返回重试下一候选"
+             "$ADB" shell "input keyevent 4" >/dev/null 2>&1
+             "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 2 ;;
+      esac
+    done
+    [ "$done_flag" = 1 ] || die "未能进入模块页完成启用（通知可能失效，重跑 install-release 再试）"
+    "$ADB" shell "cmd statusbar collapse" >/dev/null 2>&1
+    # 作用域进程全部强停（hook 必须强停重启才生效），下次拉起即带 hook
+    for pkg in com.hihonor.android.thememanager com.android.packageinstaller com.android.settings; do
+      "$ADB" shell "am force-stop $pkg" >/dev/null 2>&1
+    done
+    info "作用域进程已强停（thememanager/packageinstaller/settings）"
+    ;;
+
+  deploy-release)
+    # 全流程一键：编译 → 卸载重装（触发 LSPosed 停用）→ 自动重新启用 → 清作用域进程
+    "$0" build-release
+    "$0" install-release
+    sleep 4   # 等 LSPosed 发"尚未激活"通知
+    "$0" enable-module
     ;;
 
   devices)
