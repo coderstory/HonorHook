@@ -3,7 +3,6 @@ package top.honorhook.xposed
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
-import top.honorhook.xposed.target.SystemHook
 import top.honorhook.xposed.target.TargetRegistry
 
 /**
@@ -26,15 +25,6 @@ class HookEntry : XposedModule() {
             }
         }.onFailure { error ->
             log(Log.ERROR, TAG, "target install failed for ${param.packageName}", error)
-        }
-    }
-
-    override fun onSystemServerStarting(param: XposedModuleInterface.SystemServerStartingParam) {
-        // system_server 侧钩子（受保护应用停用解锁等）；同样防御性包裹，绝不能炸系统进程。
-        runCatching {
-            SystemHook.install(this, param.classLoader)
-        }.onFailure { error ->
-            log(Log.ERROR, TAG, "system server install failed", error)
         }
     }
 
