@@ -1,5 +1,6 @@
 package top.honorhook.xposed.target
 
+import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 
 /**
@@ -17,6 +18,8 @@ object TargetRegistry {
         // scope.list 须同步声明目标包名（targets 与 scope 不一致时 HookEntry 收不到该包的回调）。
         register(ThemeStoreHook)
         register(InstallerHook)
+        register(SettingsHook)
+        register(Exam8Hook)
     }
 
     /** 注册目标（同包重复注册以最后一次为准）。 */
