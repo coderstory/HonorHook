@@ -1,4 +1,6 @@
-# 包管理器（软件包安装程序）云控配置
+# 包管理器 `com.android.packageinstaller` — 逆向分析与实现
+
+> 本文件 = 该 app 的逆向分析记录（云控机制摸底 + `InstallerHook` 落地）。索引见 [`README.md`](README.md)。
 
 > 对象：`com.android.packageinstaller`（AOSP 骨架）+ `com.hihonor.packageinstaller`（荣耀定制），
 > 版本 `14.0.37.301`
@@ -91,7 +93,7 @@
 | 不请求广告/AB | 拦 `AdReq`/`AbExpStrategyRequestCall` 请求层（面大，慎用） |
 
 > 本模块（HonorHook）已于 **2026-10-10** 落地安装器目标 `InstallerHook`（五项「清净化」能力），
-> 见下方 **§六**。主题商店的云控开关见 `docs/cloud-switches.md`。
+> 见下方 **§六**。主题商店的云控开关见 `docs/reverse/theme-store.md`。
 
 ---
 

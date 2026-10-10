@@ -1,4 +1,6 @@
-# SystemUI 副卡（SIM2）状态栏信号图标隐藏 — 分析与实现
+# SystemUI `com.android.systemui` — 逆向分析与实现
+
+> 本文件 = 该 app 的逆向分析记录（信号图标渲染链 + `SystemUiHook` 落地）。索引见 [`README.md`](README.md)。
 
 > 2026-10-10 · 目标 `com.android.systemui` 基线 **17.0.0.1**（versionCode 1700000001，AAK-AN00，Android 17，双卡 DSDS 双联通在网）。
 > 实现 = `SystemUiHook`（1 挂载点），单点 `MobileDataControllerImpl.updateSubs(List)` 入参剔除副卡。

@@ -1,7 +1,9 @@
-# 系统桌面「卡片下方文本」（YOYO建议）隐藏分析
+# 系统桌面 `com.hihonor.android.launcher` — 逆向分析与实现
+
+> 本文件 = 该 app 的逆向分析记录（卡片标题渲染链 + 隐藏判定链 + `LauncherCardTitleHook` 落地）。索引见 [`README.md`](README.md)。
 
 > 真机实证：AAK-AN00 / MagicOS 11.0.0 / `ro.build.magic_api_level=43` / launcher `18.0.0.234`（2026-10-10）。
-> 静态基线：`YOYOCardStackPlugin.apk` + `HnLauncher6.apk`（拉取于 `.buildtmp/launcher/`）。
+> 静态基线：`YOYOCardStackPlugin.apk` + `HnLauncher6.apk`（原拉取于 `.buildtmp/launcher/`，该临时目录 2026-10-10 已清理，需要时从设备重拉）。
 
 ---
 

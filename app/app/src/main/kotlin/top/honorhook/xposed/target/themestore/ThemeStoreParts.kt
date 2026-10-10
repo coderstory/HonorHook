@@ -9,7 +9,7 @@ import top.honorhook.xposed.core.MountEngine.DexHint
 /**
  * 主题商店 hook 的**共享部件**：目标类名常量、挂载任务类型、任务构建器与跨文件运行时工具。
  * 各功能组的挂载表构建（collect*）在 `Collectors*.kt`，装配与 kind 分派在 [ThemeStoreHook]。
- * 设计依据归档于 `docs/theme-store-hook-design.md`；删除历史见 `docs/hook-inventory-audit.md` §五。
+ * 设计依据归档于 `docs/theme-store.md`；删除历史见 `docs/hook-inventory-audit.md` §五。
  */
 /** 全模块统一日志 TAG（与 MountEngine.TAG 同值；包级常量供同包文件免导入使用）。 */
 internal const val TAG = "HonorHook"
@@ -24,7 +24,7 @@ internal const val CLS_VIP_STATE = "$PKG.vip.data.VipState"
 // VipModel（服务端响应 → VipState 唯一转换器）曾挂 2 个 VIP_STATE_FIX 漏斗点 + 挽留弹窗休眠链等，
 // 已于 2026-10-09/10 三轮审计删除——历史依据归档见 docs/hook-inventory-audit.md §五。
 
-// 2026-10 反查新增（docs/theme-ui-real-chain.md §五 T1，jadx 实证）
+// 2026-10 反查新增（docs/reverse/theme-store.md §五 T1，jadx 实证）
 internal const val CLS_INCENTIVE_DATA = "$PKG.incentive.IncentiveData"
 // 详情页 Activity：仅用于「购买」按钮隐藏（changeVipBtnsVisibility 第 1 参 buy，:2837 定义 / :2920 设 mBuyBtn）。
 // 已删的按钮策略类目标（needShowBuyButton 门 / MineVipCardView T8）历史见 docs/hook-inventory-audit.md §五。
@@ -32,7 +32,7 @@ internal const val CLS_PREVIEW = "$PKG.OnlinePreviewBaseActivity"
 // 在线壁纸预览页（类名未混淆）；W1 挂 applyLiveWallpaperPrepare 用，见 collectDownloadChainHooks。
 internal const val CLS_WALLPAPER_PREVIEW_LOW = "$PKG.wallpaper.OnlineWallpaperPreviewLowActivity"
 
-// 2026-10 挽留弹窗拦截（docs/theme-ui-real-chain.md §现象四 4.5，jadx 实证）：
+// 2026-10 挽留弹窗拦截（docs/reverse/theme-store.md §现象四 4.5，jadx 实证）：
 // Manager 是 Activity 的 Kotlin object 嵌套静态类（Activity.java:150-163；showDialog L158-161
 // ARouter 带 Parcelable DIALOG_PARAMS）；F2 目标即 Activity 自身（onCreate L861 protected，extends FragmentActivity）
 internal const val CLS_RETENTION_DIALOG_ACTIVITY = "$PKG.overallretentiondialog.ui.OverallRetentionDialogActivity"
@@ -52,7 +52,7 @@ internal const val CLS_INCENTIVE_INFO = "$PKG.incentive.entity.TimeLimitIncentiv
 internal const val CLS_THEME_RES_MANAGER = "$PKG.theme.apply.ThemeResManager"
 internal const val CLS_THEME_APPLY_STATE = "$PKG.theme.apply.ThemeApplyState"
 
-// 2026-10 下载链（docs/theme-download-chain.md §4）：DownloadInfo（uri L145 public String /
+// 2026-10 下载链（docs/reverse/theme-store.md §4）：DownloadInfo（uri L145 public String /
 // isPayedItem L939 只看 price）。已删 H2（`o52.addDownloadItem`，被 H2b 完全覆盖）历史依据见 audit §三.2。
 internal const val CLS_DOWNLOAD_INFO = "$PKG.common.DownloadInfo"
 // DownloadModel builder 产物（package 内混淆名）；DexKit 锚点 = 类字段类型 WeakReference + common.DownloadInfo。
@@ -63,7 +63,7 @@ internal const val CLS_DOWNLOAD_MODEL = "$PKG.common.a"
 internal const val CLS_SHAREPREF_UTILS = "u15"
 
 // 美豆（bonus/金币/福利）入口——服务端下发的**槽位**；旧口径（collect 层拦截）已废弃改源头，
-// 历史见 docs/theme-store-hook-design.md §九。
+// 历史见 docs/theme-store.md §九。
 internal const val CLS_SLOT_DATA_MATE = "$PKG.hitop.mate.SlotData"
 
 // 底部导航 tab —— AMS systemParam 在线配置 JSON；唯一域模型出口 = getBottomTabConfigs()。
