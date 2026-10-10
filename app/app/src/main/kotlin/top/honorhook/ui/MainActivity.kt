@@ -10,25 +10,22 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cottage
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,9 +35,6 @@ import androidx.compose.ui.unit.sp
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
 import top.honorhook.ui.component.HonorHookTheme
-import top.honorhook.ui.component.LocalEnableBlur
-import top.honorhook.ui.component.LocalEnableFloatingBottomBar
-import top.honorhook.ui.component.LocalEnableFloatingBottomBarBlur
 import top.honorhook.ui.screen.FeaturesScreen
 import top.honorhook.ui.screen.HomeScreen
 import top.honorhook.ui.screen.SettingsScreen
@@ -77,11 +71,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // rememberSaveable：旋屏/进程重建后仍停在当前 Tab（原 remember 会掉回首页）
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     // 照抄 KernelSU MainActivity.kt:352-355 —— 记录层必须先铺 surface 底色再录内容，
     // 否则 drawBackdrop 采样到空/半透明内容，实色 onDrawSurface 会盖住整个药丸，玻璃感全无。
     val surfaceColor = MiuixTheme.colorScheme.surface
+    // AMOLED 纯黑模式：页面底色直接给黑（其余模式不变，避免顺手改掉既有观感）
+    val rootColor = if (AppSettings.colorMode.isAmoled) Color.Black else surfaceColor
 
     // **直接订阅 AppSettings 的 State**，不绕 CompositionLocal。
     // 依赖 CompositionLocal 的写法在「从二级页返回」时不会触发重组（CompositionLocal
@@ -90,11 +87,19 @@ private fun AppRoot() {
     // 直接读 AppSettings.xxx（内部是 mutableStateOf）能保证重组必然发生。
     val floatingBar = AppSettings.floatingBar
     val floatingBarGlass = AppSettings.floatingBarGlass
-    val enableFloatingBlur = floatingBar && floatingBarGlass && Build.VERSION.SDK_INT >= 33
+    // 「启用模糊」总闸（AppSettings.liquidGlass）原先只喂给一个无人读取的 CompositionLocal，
+    // 开关点了没有任何效果 —— 这里与底栏玻璃一起作为真实生效条件。
+    val liquidGlass = AppSettings.liquidGlass
+    val enableFloatingBlur =
+        floatingBar && floatingBarGlass && liquidGlass && Build.VERSION.SDK_INT >= 33
 
-    val backdrop = rememberLayerBackdrop {
-        drawRect(surfaceColor)
-        drawContent()
+    // key(rootColor)：backdrop 的 draw 回调只在创建时捕获一次颜色，换深浅色/AMOLED 后
+    // 若不重建，玻璃底色会停在旧色上。
+    val backdrop = key(rootColor) {
+        rememberLayerBackdrop {
+            drawRect(rootColor)
+            drawContent()
+        }
     }
 
     val items = remember {
@@ -119,7 +124,7 @@ private fun AppRoot() {
     // 底栏作为同级兄弟绘制并消费 backdrop。若把 layerBackdrop 挂在同时包含底栏的父节点上，
     // 底栏会采样到「包含自己」的 backdrop → RenderThread 递归栈溢出（SIGSEGV）。
     // 也不用 Miuix Scaffold 的 bottomBar slot（它在 content 之前绘制，采样不到本帧内容）。
-    Box(modifier = Modifier.fillMaxSize().background(surfaceColor)) {
+    Box(modifier = Modifier.fillMaxSize().background(rootColor)) {
         Box(
             modifier = Modifier
                 .fillMaxSize()

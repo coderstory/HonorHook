@@ -2,6 +2,7 @@ package top.honorhook.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.runtime.Composable
@@ -27,13 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import top.honorhook.ui.AppSettings
-import top.honorhook.ui.component.LocalEnableBlur
+import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -78,7 +79,6 @@ private fun SettingsMain(
     onOpenAbout: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    val glass = AppSettings.liquidGlass
 
     Scaffold(
         topBar = {
@@ -125,23 +125,13 @@ private fun SettingsMain(
                     }
 
                     // 第二组：关于
+                    // 原「运行日志」项 onClick 为空实现却带右箭头（点进去什么都没有），已移除。
+                    // 判据日志的真入口是 `tools/dev.sh modlog` / `wait-hook`（LSPosed 框架日志）。
                     Card(
                         modifier = Modifier
                             .padding(top = 12.dp)
                             .fillMaxWidth(),
                     ) {
-                        ArrowPreference(
-                            title = "运行日志",
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.BugReport,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "运行日志",
-                                    tint = colorScheme.onBackground,
-                                )
-                            },
-                            onClick = {},
-                        )
                         ArrowPreference(
                             title = "关于",
                             startAction = {
@@ -168,7 +158,28 @@ private fun SettingsMain(
     }
 }
 
-/** 关于页（照 KernelSU AboutMiuix：Card + ArrowPreference 信息行）。 */
+/**
+ * 关于页的信息行：**纯展示**，不带右箭头也不可点。
+ * 原先用 `ArrowPreference` + 空 `onClick`，右箭头会给出"点进去还有东西"的错觉。
+ */
+@Composable
+private fun AboutRow(title: String, summary: String) {
+    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+        Text(
+            text = title,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            color = colorScheme.onSurface,
+        )
+        Text(
+            text = summary,
+            fontSize = 12.sp,
+            color = colorScheme.onSurfaceVariantSummary,
+        )
+    }
+}
+
+/** 关于页（照 KernelSU AboutMiuix 的卡片结构）。 */
 @Composable
 private fun AboutPage(
     onBack: () -> Unit,
@@ -203,21 +214,11 @@ private fun AboutPage(
                         .padding(top = 12.dp)
                         .fillMaxWidth(),
                 ) {
-                    ArrowPreference(
-                        title = "Re:荣耀",
-                        summary = "版本 ${appVersionLabel()}",
-                        onClick = {},
-                    )
-                    ArrowPreference(
-                        title = "出品",
-                        summary = "©2027 CoderStory 出品",
-                        onClick = {},
-                    )
-                    ArrowPreference(
-                        title = "第三方库",
-                        summary = "LSPosed API · Compose · Miuix · DexKit",
-                        onClick = {},
-                    )
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        AboutRow("Re:荣耀", "版本 ${appVersionLabel()}")
+                        AboutRow("出品", "©${java.time.Year.now().value} CoderStory 出品")
+                        AboutRow("第三方库", "LSPosed API · Compose · Miuix · DexKit")
+                    }
                 }
                 Spacer(
                     Modifier.height(

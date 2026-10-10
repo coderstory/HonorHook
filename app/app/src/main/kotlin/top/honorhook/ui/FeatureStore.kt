@@ -2,6 +2,8 @@ package top.honorhook.ui
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
+import androidx.compose.runtime.mutableStateMapOf
 import top.honorhook.FeatureCatalog
 
 /**
@@ -15,25 +17,52 @@ object FeatureStore {
 
     private const val PREFS = "honorhook_features"
 
+    private const val TAG = "HonorHook"
+
     @Volatile
     private var prefs: SharedPreferences? = null
 
+    /**
+     * 开关状态的 **Compose 可观察镜像**（[init] 时从本地 prefs 灌入）。
+     *
+     * 直接读 `SharedPreferences` 不是 snapshot state，改开关不会让读它的组合失效——
+     * 「已启用 N/M」「运行中/待启用」这类计数就会一直停在旧值。所有读写都走这张表，
+     * 一处改动可同时刷新二级开关、二级页计数与一级列表标签。
+     */
+    private val states = mutableStateMapOf<String, Boolean>()
+
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        FeatureCatalog.targets.forEach { target ->
+            target.features.forEach { feature ->
+                states[feature.key] = prefs?.getBoolean(feature.key, true) ?: true
+            }
+        }
     }
 
-    /** 读开关（本地镜像；默认开）。 */
-    fun isEnabled(key: String): Boolean = prefs?.getBoolean(key, true) ?: true
+    /** 读开关（Compose 可观察；默认开）。 */
+    fun isEnabled(key: String): Boolean = states[key] ?: true
 
-    /** 写开关：本地镜像 + 远端下发（框架未连接时仅本地，hook 侧保持默认开）。 */
-    fun setEnabled(key: String, enabled: Boolean) {
+    /**
+     * 写开关：本地镜像 + 远端下发。
+     *
+     * @return 远端下发是否成功。`false` 表示框架未连接或写入抛异常 —— 此时 hook 侧读不到，
+     *   仍按默认全开运行，UI 必须如实告知用户（不能只改本地就当生效了）。
+     */
+    fun setEnabled(key: String, enabled: Boolean): Boolean {
+        states[key] = enabled
         prefs?.edit()?.putBoolean(key, enabled)?.apply()
-        try {
-            FrameworkState.current()
-                ?.getRemotePreferences(FeatureCatalog.REMOTE_GROUP)
-                ?.edit()?.putBoolean(key, enabled)?.apply()
-        } catch (_: Throwable) {
-            // 框架未连接/写失败：静默，仅本地生效
+        val service = FrameworkState.current() ?: run {
+            Log.w(TAG, "LSPosed 未连接，开关只写入本地（hook 侧保持默认开）: $key")
+            return false
+        }
+        return runCatching {
+            service.getRemotePreferences(FeatureCatalog.REMOTE_GROUP)
+                .edit().putBoolean(key, enabled).apply()
+            true
+        }.getOrElse { t ->
+            Log.w(TAG, "远端 prefs 下发失败（本地已生效，hook 侧保持默认开）: $key", t)
+            false
         }
     }
 }

@@ -28,13 +28,13 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.CallToAction
 import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DesignServices
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Wallpaper
@@ -134,14 +134,48 @@ internal fun ThemeSettingsPage(
                     tabs = listOf("跟随系统", "浅色", "深色"),
                     selectedTabIndex = ui.toNonMonetMode().coerceIn(0, 2),
                     onTabSelected = { index ->
+                        val picked = ColorMode.fromValue(index)
+                        // Monet 开着时切到对应的 Monet 变体（TabRow 只暴露 3 档非 Monet 选项）
                         AppSettings.setColorMode(
-                            ColorMode.fromValue(index).let {
-                                if (AppSettings.miuixMonet) it.toMonetMode().let { v -> ColorMode.fromValue(v) }
-                                else it
-                            }
+                            if (AppSettings.miuixMonet) ColorMode.fromValue(picked.toMonetMode())
+                            else picked
                         )
                     },
                 )
+
+                // 纯黑（AMOLED）：深色模式下才可选。
+                // 此前 `ColorMode.DARK_AMOLED` 在 Theme.kt 里有完整分支却**没有任何 UI 入口**，
+                // 等于死代码；补上入口后 MainActivity 的纯黑底色才会真正被触发。
+                AnimatedVisibility(visible = isDark) {
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        SwitchPreference(
+                            title = "纯黑背景（AMOLED）",
+                            summary = "深色模式下页面底色改为纯黑（更省电、对比更强）",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.DarkMode,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "纯黑背景（AMOLED）",
+                                    tint = colorScheme.onBackground,
+                                )
+                            },
+                            checked = ui.isAmoled,
+                            onCheckedChange = { on ->
+                                AppSettings.setColorMode(
+                                    when {
+                                        on -> ColorMode.DARK_AMOLED
+                                        AppSettings.miuixMonet -> ColorMode.MONET_DARK
+                                        else -> ColorMode.DARK
+                                    }
+                                )
+                            },
+                        )
+                    }
+                }
 
                 // Monet + 取色
                 Card(

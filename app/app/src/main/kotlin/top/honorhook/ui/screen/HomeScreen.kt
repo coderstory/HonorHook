@@ -25,16 +25,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeveloperBoard
 import androidx.compose.material.icons.filled.Fingerprint
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Tag
-import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,9 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import top.honorhook.FeatureCatalog
 import top.honorhook.ui.AppSettings
-import top.honorhook.ui.FeatureStore
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.Card
@@ -121,14 +114,14 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                         StatusCard(
                             active = active,
                             isDynamicColor = isDynamicColor,
-                            workingText = if (active) "工作中" else "未安装",
+                            workingText = if (active) "工作中" else "未激活",
                             versionText = if (active) {
                                 listOf(frameworkName, frameworkVersion)
                                     .filter { it.isNotBlank() }
                                     .joinToString(" ")
                                     .ifBlank { "LSPosed" } + " · API $apiVersion"
                             } else {
-                                "LSPosed 未安装"
+                                "未连接 LSPosed（已安装但未激活，或模块未启用）"
                             },
                         )
 

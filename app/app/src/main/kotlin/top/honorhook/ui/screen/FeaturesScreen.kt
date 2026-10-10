@@ -3,7 +3,6 @@ package top.honorhook.ui.screen
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
-import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -13,7 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -32,9 +30,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,12 +54,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
+import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -106,11 +107,13 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
 
     // 只展示**本机确实装了**的目标应用：没装的功能列出来也没意义（点了必然无效果）。
     // getApplicationInfo 依赖 QUERY_ALL_PACKAGES（已在 manifest 声明）。
-    val installedTargets = remember {
-        FeatureCatalog.targets.filter { target ->
-            runCatching {
-                context.packageManager.getApplicationInfo(target.packageName, 0)
-            }.isSuccess
+    // 走 IO 线程：6 次跨进程查询不该压在组合期主线程上；null = 尚未返回（加载态）。
+    val installedTargets by produceState<List<FeatureCatalog.Target>?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) {
+            val pm = context.packageManager
+            FeatureCatalog.targets.filter { target ->
+                runCatching { pm.getApplicationInfo(target.packageName, 0) }.isSuccess
+            }
         }
     }
 
@@ -139,12 +142,29 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
             ),
             overscrollEffect = null,
         ) {
-            items(count = installedTargets.size) { index ->
-                val target = installedTargets[index]
-                TargetGroupCard(
-                    target = target,
-                    onClick = { onOpenTarget(target) },
+            item {
+                SwitchSemanticsCard(
+                    // 一级页只讲"开关到底下没下发到进程"，其余提示留给二级页
+                    noticeWhenInactive = true,
+                    restartHint = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
                 )
+            }
+            when {
+                installedTargets == null -> item { EmptyHint("正在读取设备上已安装的目标应用…") }
+                installedTargets!!.isEmpty() -> item {
+                    EmptyHint("设备上未检测到任何目标应用。\n本模块的 6 个目标都是荣耀系统应用与指定第三方应用，装齐后会显示在这里。")
+                }
+                else -> items(count = installedTargets!!.size) { index ->
+                    val target = installedTargets!![index]
+                    TargetGroupCard(
+                        target = target,
+                        onClick = { onOpenTarget(target) },
+                    )
+                }
             }
         }
     }
@@ -443,6 +463,17 @@ private fun FeatureListScreen(
             ),
             overscrollEffect = null,
         ) {
+            item {
+                SwitchSemanticsCard(
+                    noticeWhenInactive = true,
+                    restartHint = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                )
+            }
+
             // ---- 顶部应用信息卡（KernelSU 详情页同款：图标 + 名称 + 包名/版本 + 状态标签）----
             item {
                 AppHeaderCard(
@@ -459,9 +490,9 @@ private fun FeatureListScreen(
 
             items(count = target.features.size) { index ->
                 val feature = target.features[index]
-                var enabled by remember(feature.key) {
-                    mutableStateOf(FeatureStore.isEnabled(feature.key))
-                }
+                // 直接读 FeatureStore 的可观察镜像：开关一变，本项、顶部「已启用 N/M」
+                // 与一级列表的计数标签同时重组（原先用 item 局部 remember，只有本项会刷新）。
+                val enabled = FeatureStore.isEnabled(feature.key)
                 // 整个 Row 统一带上/下边距，保证左侧色条与卡片同步留白
                 Row(
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -493,10 +524,7 @@ private fun FeatureListScreen(
                             // 用户要求：二级菜单每个选项都带功能说明
                             summary = feature.description,
                             checked = enabled,
-                            onCheckedChange = {
-                                FeatureStore.setEnabled(feature.key, it)
-                                enabled = it
-                            },
+                            onCheckedChange = { FeatureStore.setEnabled(feature.key, it) },
                             // 卡片内边距：原来只设了 horizontal，内容贴着上下边缘很挤
                             insideMargin = PaddingValues(
                                 start = 9.dp,
@@ -509,6 +537,65 @@ private fun FeatureListScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * 开关语义提示卡。
+ *
+ * 两个必须讲清楚、否则用户会误判的点：
+ * 1. **框架未激活**时 [FeatureStore.setEnabled] 只写本地，hook 侧读不到 ⇒ 开关看起来生效了
+ *    （UI 状态变了）而实际行为没变，属于最坏的一类"假反馈"。
+ * 2. 框架正常时，开关也要等**目标进程下次启动**才被读到（远端 prefs 是注入期一次性读取的）。
+ */
+@Composable
+private fun SwitchSemanticsCard(
+    noticeWhenInactive: Boolean,
+    restartHint: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val inactive = noticeWhenInactive && !FrameworkState.active
+    if (!inactive && !restartHint) return
+    val title = if (inactive) "LSPosed 未激活" else "改动何时生效"
+    val summary = if (inactive) {
+        "开关只会保存到本地，不会下发到目标进程；hook 侧仍按默认全开运行。"
+    } else {
+        "开关在目标进程下次启动时读取 —— 改完请强停并重开对应应用。"
+    }
+    val bg = if (inactive) colorScheme.tertiaryContainer.copy(alpha = 0.6f) else colorScheme.secondaryContainer.copy(alpha = 0.6f)
+    val fg = if (inactive) colorScheme.onTertiaryContainer else colorScheme.onSecondaryContainer
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = fg,
+            )
+            Text(
+                text = summary,
+                fontSize = 11.sp,
+                color = fg,
+            )
+        }
+    }
+}
+
+/** 列表空态/加载态提示（此前列表为空时整屏空白，看起来像坏了）。 */
+@Composable
+private fun EmptyHint(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            color = colorScheme.onSurfaceVariantSummary,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
     }
 }
 

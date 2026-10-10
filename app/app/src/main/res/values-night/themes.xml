@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式下的宿主 UI 主题：只覆盖 windowBackground。
+         原来是单一 values/themes.xml 里的纯白 windowBackground，深色模式冷启动会闪一下白屏。 -->
+    <style name="Theme.HonorHook" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/background_dark</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

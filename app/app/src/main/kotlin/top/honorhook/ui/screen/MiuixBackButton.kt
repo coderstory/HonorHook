@@ -29,7 +29,7 @@ internal fun MiuixBackButton(onClick: () -> Unit) {
                 if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
             },
             imageVector = MiuixIcons.Back,
-            contentDescription = null,
+            contentDescription = "返回",
             tint = colorScheme.onBackground,
         )
     }

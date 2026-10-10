@@ -8,7 +8,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -27,20 +26,9 @@ import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 /** 当前颜色模式的原始 value（0-6），供 `isInDarkTheme()` 判定。 */
 val LocalColorMode = staticCompositionLocalOf { 0 }
 
-/**
- * 是否启用玻璃（KernelSU: `LocalEnableBlur`，影响顶栏/底栏是否走 backdrop）。
- *
- * 必须用 `compositionLocalOf` 而**不是** `staticCompositionLocalOf`：
- * static 的值变更不会触发读取方重组（只在组合结束才生效），
- * 表现为「在主题页改了开关，返回主界面玻璃状态没变」。
- */
-val LocalEnableBlur = compositionLocalOf { true }
-
-/** 是否启用悬浮底栏。 */
-val LocalEnableFloatingBottomBar = compositionLocalOf { true }
-
-/** 是否启用底栏玻璃（lens 折射）。 */
-val LocalEnableFloatingBottomBarBlur = compositionLocalOf { true }
+// 原 KernelSU 风格的 `LocalEnableBlur` / `LocalEnableFloatingBottomBar` / `LocalEnableFloatingBottomBarBlur`
+// 三个 CompositionLocal 已删除：全工程只 provide、无人 `.current` 读取（MainActivity 改为直接订阅
+// AppSettings 的 State，见其 `AppRoot` 注释），留着只会让"改了开关没反应"更难查。
 
 /** SPEC_2025 只在部分配色风格下生效（照抄 KernelSU 的 `supportsSpec2025`）。 */
 val PaletteStyle.supportsSpec2025: Boolean
@@ -111,9 +99,6 @@ fun HonorHookTheme(content: @Composable () -> Unit) {
     ) {
         CompositionLocalProvider(
             LocalColorMode provides colorMode.value,
-            LocalEnableBlur provides AppSettings.liquidGlass,
-            LocalEnableFloatingBottomBar provides AppSettings.floatingBar,
-            LocalEnableFloatingBottomBarBlur provides AppSettings.floatingBarGlass,
             LocalContentColor provides MiuixTheme.colorScheme.onBackground,
         ) {
             LaunchedEffect(darkTheme) {
@@ -137,23 +122,5 @@ fun isInDarkTheme(): Boolean = when (LocalColorMode.current) {
     else -> isSystemInDarkTheme()  // 跟随系统
 }
 
-/** 深色模式下页面底色（AMOLED 纯黑）。 */
-@Composable
-fun pageBackground(): Color =
-    if (AppSettings.colorMode.isAmoled) Color.Black else MiuixTheme.colorScheme.background
-
-/** 卡片底色（Miuix `surfaceContainer`）。 */
-@Composable
-fun cardColor(): Color = MiuixTheme.colorScheme.surfaceContainer
-
-/** 次级文字。 */
-@Composable
-fun secondaryText(): Color = MiuixTheme.colorScheme.onBackgroundVariant
-
-/** 强调主色（底栏图标/文字高亮）。 */
-@Composable
-fun accentPrimary(): Color = MiuixTheme.colorScheme.primary
-
-/** 主色上的前景色。 */
-@Composable
-fun onPrimary(): Color = MiuixTheme.colorScheme.onPrimary
+// 原有 pageBackground / cardColor / secondaryText / accentPrimary / onPrimary 五个颜色 helper
+// 无任何调用者（各页面直接读 `MiuixTheme.colorScheme`），已删除。
