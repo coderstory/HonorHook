@@ -1,0 +1,15 @@
+Vendored third-party content
+============================
+
+Source skill : apk-reverse v1.0 (Claude Code plugin, now unmaintained)
+License      : MIT (declared in the upstream SKILL.md frontmatter:
+               "license: MIT — see LICENSE at the repository root")
+               The upstream repository-root LICENSE file was NOT present in the
+               installed copy, so it could not be vendored here. Upstream
+               copyright holders retain all rights under the MIT terms.
+Copied as-is : references/ (46), scripts/ (56), evidence/ (3), SKILL.md -> UPSTREAM-SKILL.md
+Not copied   : evals/ (upstream test fixtures)
+Vendored on  : 2026-10-11
+Modifications: none (content verbatim; only the file name SKILL.md was changed to
+               UPSTREAM-SKILL.md, and this README/NOTICE added)
+Metadata     : upstream last_reconstruction_pass 2026-09-22

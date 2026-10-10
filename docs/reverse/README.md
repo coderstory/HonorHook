@@ -37,6 +37,17 @@
 | 主题引擎 `com.hihonor.mocoolengine`（11.0.1.122） | **引擎内零付费逻辑**（全文检索 free/vip/member/price/trial 仅命中 `MemberClasses` 注解与 DRM 错误码）⇒ 不需要 hook，付费门禁全在商店侧 |
 | system_server 守卫（设置类） | 该 fork 只回调 `onSystemServerLoaded`，api 102 无此类型，合成 stub 成本 > 收益 ⇒ **放弃，勿重新评估** |
 
+## 三·2、放弃理由的通用判据（外部 skill `apk-reverse`）
+
+三个放弃目标不是"我们没本事"，而是**交付形态够不到那一层**。该插件已废弃，其内容已**整份 vendor 进仓库** → [`.claude/skills/apk-reverse/`](../../.claude/skills/apk-reverse/)（MIT，未维护，索引见其 `README.md` 与 `UPSTREAM-SKILL.md`）：
+
+| 我们放弃的 | 对应的层 | 去哪儿看 |
+|---|---|---|
+| wangxiao DEX 虚拟化双壳 | 抽取式 dex / dex VMP —— **LSPosed 模块够不到**（原方法体可能根本不以 dex 存在） | `.claude/skills/apk-reverse/references/code-virtualization-and-custom-linkers.md`、`vmp-differential-analysis.md`（已知明文差分）、`advanced-unpacking.md`（主动调用式抽取）；脚本 `scripts/dex_mem_scan.py` + `dex_dump_validate.py`（内存找 dex 并校验，胜过"落盘找不到就放弃"） |
+| s20cxq Flutter AOT | Dart AOT（Java 层只是壳，业务在 `libapp.so`） | `references/dart-aot.md` |
+| exam8 服务端正文 | 服务端决策 —— **hook 与 patch 同样无能为力** | `references/server-api.md`（门所有者请求矩阵）、`membership-and-limits.md`（可做/不可做清单 + 该怎么对外表述） |
+| （顺带）为什么本模块选 hook 而非改包 | 路线取舍：模块 / Frida / 重打包三者交付物与存活期不同；改包还会撞签名校验与签名派生密钥 | `references/lsposed-and-modules.md`（含"模块够不到的层"总表）、`signature-derived-keys.md` |
+
 ## 四、按需求读
 
 | 我要做的事 | 先读 |

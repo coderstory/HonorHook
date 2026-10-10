@@ -26,7 +26,13 @@
 | [`ui-miuix-overview.md`](ui-miuix-overview.md) | 宿主 UI（Miuix Compose）结构与开关下发通道 |
 | [`hook-philosophy-manifesto.md`](hook-philosophy-manifesto.md) | hook 设计哲学（哲学表述版 + 工程条款版，七条原则与审计应用） |
 
-## 四、不在 docs/
+## 四、外部知识库（已 vendor 成项目 skill）
+
+| 位置 | 内容 |
+|---|---|
+| [`.claude/skills/apk-reverse/`](../.claude/skills/apk-reverse/) | 第三方 skill `apk-reverse` 全量副本（MIT · **上游已废弃不更新** · 原样未改 · 作为项目 skill 入库，**会被自动发现**）：461 篇参考/脚本/证据里的深度逆向路线，覆盖「LSPosed 够不到哪一层」「服务端门 vs 客户端门」「DEX 虚拟化双壳 / Dart AOT / 落盘探查」等本项目缺口。索引见其 `README.md`，用法与冲突处理也在那里 |
+
+## 五、不在 docs/
 
 - 协作纪律与铁律：根 `CLAUDE.md`；功能台账与验证清单：根 `README.md`
 - 命令与工具路径：`tools/dev.sh help` / `tools/dev.sh env`，索引见 skill `honorhook-dev`

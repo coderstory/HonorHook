@@ -61,5 +61,5 @@ hook = 运行时内存修改，**不改 apk**；app 重启后重新 hook。
 
 - **服务端校验绕不过**：会员权益等由服务端判定，hook 只改本地状态（本项目 exam8 实证：UI 门可过、正文取不到）。
 - **加固壳需脱壳**；**native 逻辑需 frida/IDA**（非 Xposed Java 层）。
-- **内存级不持久**：app 重启重新 hook；改包固化是另一条路（见 `apk-reverse` skill）。
+- **内存级不持久**：app 重启重新 hook；改包固化是另一条路（见 `.claude/skills/apk-reverse/SKILL.md`）。
 - **静态点 ≠ 运行时生效点**：挂之前数消费点数、确认可达（详见 `static-analysis` 与 `docs/hook-craft.md`）。

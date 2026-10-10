@@ -31,12 +31,11 @@ app/.kotlin/
 # gh CLI 便携版（本地安装，不入库）
 tools/gh-cli/
 
-# AI 工具安装的 skill 副本与锁文件（apk-reverse 等，由工具链自行管理，不属于工程代码）
+# AI 工具安装的 skill 副本与锁文件（由工具链自行管理，不属于工程代码；项目自身 skill 已入库）
 .agents/
 .codebuddy/
 skills-lock.json
 # 注：.claude/skills/ 下 6 个项目 skill 已入库（项目知识沉淀，非工具副本）
-.claude/skills/apk-reverse/
 
 # native hook 路线遗留（当前无 cpp 代码；Dobby 为中途放弃的 s20cxq 实验素材）
 app/app/src/main/cpp/
