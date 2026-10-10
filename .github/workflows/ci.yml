@@ -22,8 +22,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub 托管镜像已预装 Android SDK（/usr/local/lib/android/sdk，许可证已预授权），
+      # 缺失的 platform/build-tools 由 AGP 在构建时自动补齐，无需 setup-android action。
 
       - name: Extract version
         id: ver
