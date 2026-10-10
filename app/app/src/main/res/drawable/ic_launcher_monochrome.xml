@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 来源：Rain LSPosed 模块（love.nairain.hook）res/drawable/ic_launcher_monochrome.xml（Apache-2.0），原样复制。
-     monochrome 层：白色雨滴矢量（主题图标单色层）。 -->
-<vector android:height="108.0dp" android:width="108.0dp" android:viewportWidth="108.0" android:viewportHeight="108.0"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <path android:fillColor="#ffffff" android:pathData="M54,18 C54,18 28,52 28,68 C28,82.358 39.642,94 54,94 C68.358,94 80,82.358 80,68 C80,52 54,18 54,18 Z M54,86 C44.059,86 36,77.941 36,68 C36,58 54,30 54,30 C54,30 72,58 72,68 C72,77.941 63.941,86 54,86 Z" />
-</vector>

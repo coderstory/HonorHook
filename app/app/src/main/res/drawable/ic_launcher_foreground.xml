@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- 来源：Rain LSPosed 模块（love.nairain.hook）res/drawable/ic_launcher_foreground.xml（Apache-2.0），原样复制。
-     前景层 = bitmap 引用 drawable-nodpi/ic_launcher_fg.webp（Rain 的雨图标位图，同目录复制）。
-     原 HonorHook 自绘 H 字母前景（脚手架阶段手写 Path）已移除。 -->
-<bitmap android:gravity="center" android:src="@drawable/ic_launcher_fg"
-  xmlns:android="http://schemas.android.com/apk/res/android" />
