@@ -8,34 +8,7 @@ import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.data.InstallerConfigTable
 
-/**
- * 包管理器（软件包安装程序 `com.android.packageinstaller`，荣耀定制 14.0.37.301）目标 —— 五项「清净化」能力：
- *
- * 1. **不请求广告**：钩广告请求**条件门** `lt1.b(String)`（`checkIsSupportAdRequest`）恒 false ——
- *    `lt1` 是 `wt1` 接口的**唯一**实现，V4（`zv1.m`）与 V3（`mt1.m`）两条广告链都先问它，恒 false ⇒
- *    两条链路都走宿主自带的「不支持广告请求」分支（写错误码 + 回调 errorCode），**不发请求且回调完整**。
- * 2. **不展示安装页广告**：钩广告响应**数据源** `AdRespV4.getAdAppList()` 恒空表 —— 即便有缓存响应，
- *    渲染链（`AbstractAdBusinessPresenter.v1()`）也走宿主自带的「ad is empty after filter」分支、不渲染。
- * 3. **不请求 AB**：空实现阻断 AB 实验入口 `sx1.Q(boolean)`（`updateAbExpStrategy`）—— 不发 `AbExpReq`
- *    （全工程唯一调用点 `InstallStart:373` / `wb2:14`）。
- * 4. **三方安装异常跳转不拦截**：`CommonConfigManager.j(String)` 恒 false（拦截名单不命中，含 `"ALL"` 通配）。
- * 5. **安全模式默认不开启 / 不提示开启安全模式**：
- *    - 默认不开启 → `CommonConfigManager.g()` / `h(CommonConfigResponse)` 恒返
- *      [InstallerConfigTable.SAFE_MODE_ALL_OFF_JSON]（`{easyModeDefaultOpen:0, superProtectModeDefaultOpen:0}`）；
- *    - 不提示 → 「安全模式引导弹窗」唯一展示门 `n12.f(int, SafeModeRise, RbiTempBean, boolean)` 恒 false
- *      （`InstallSuccess` 两处调用：立即弹 `if(f(1,..)) r1()` → 落 `else finish()`；延后弹
- *      `k0 = f(2,..)` → false ⇒ `l0()` 不再弹）。
- *
- * **设计依据、挂载点理由与真机判据全部归档在 `docs/installer-cloud-config.md`**，本文件只保留代码。
- * 混淆名目标（默认包 `lt1`/`sx1`/`n12`，以及可读类名的单字母方法）都配了 DexKit 内容锚点；
- * 锚点四维强度与纪律见 [DexHint]、[MethodResolver]（**直连轨优先，锚点仅在直连失败时生效**）。
- *
- * 源列表：
- * - 云控配置：`$PKG_HN.hncust.commonconfig.CommonConfigManager`（方法 b..j）
- * - 广告：`lt1`(AdRequestConditionImpl) / `$PKG_HN.entity.resp.AdRespV4` / `$PKG_HN.presenter.AbstractAdBusinessPresenter`
- * - AB：`sx1`(AbExpUtils)
- * - 安全模式弹窗门：`n12`(InstalledGuideDialogHelper)
- */
+/** 包管理器目标（14.0.37.301）：五项「清净化」。 */
 object InstallerHook : TargetHook {
 
     override val packageName = "com.android.packageinstaller"
@@ -79,15 +52,7 @@ object InstallerHook : TargetHook {
 
     // ---------------- R4 不请求广告 + R1 不展示安装页广告 ----------------
 
-    /**
-     * 广告「不请求 + 不展示」双闸（源头优先）：
-     *
-     * - **请求条件门** `lt1.b(String)`：`lt1` 是 `wt1` 接口唯一实现，`zv1.m`（V4）与 `mt1.m`（V3）都用它判
-     *   「是否支持广告请求」。恒 false ⇒ 走宿主自带 early-return（`this.c.put(错误码)` + `vt1.d(code,..)`），
-     *   请求根本不发出、且 presenter 拿到完整 errorCode 回调 —— 比直接阻断 `m()` 更安全（不会挂起等待）。
-     * - **响应数据源** `AdRespV4.getAdAppList()`：恒空表 ⇒ 即便存在缓存响应，渲染链 `v1()` 也走宿主自带的
-     *   「ad is empty after filter」分支（带正常上报），不渲染任何广告卡片。属"源头裁剪"，非视图隐藏。
-     */
+/** 广告「不请求 + 不展示」双闸（源头优先）。 */
     private fun collectAdRequestHooks(pending: MutableList<MountTask>) {
         addConst(
             pending, CLS_AD_REQUEST_CONDITION, "b", 1, "boolean",

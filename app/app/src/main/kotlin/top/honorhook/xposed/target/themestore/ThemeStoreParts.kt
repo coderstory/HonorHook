@@ -71,15 +71,7 @@ internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
 // 主页 Activity（未混淆 keep 名单）——createTabs 的宿主，S2b 前置裁剪挂载点。
 internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 
-/**
- * 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制；
- * [KEY_OVERRIDE] 云控读点按 key 查表强制（数据在 `CloudSwitchTable`）；
- * [SLOT_PRUNE] 服务端槽位载荷出口裁剪（数据在 `AdSlotFilter`）；
- * [BOTTOM_TAB_PRUNE] 服务端底部 tab 配置出口裁剪（数据在 `BottomTabFilter`）；
- * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，AI-lsposed-temlate SKILL.md:102 实证）；
- * [FINISH_ACTIVITY] 先 proceed 再 finish（不 proceed 生命周期会在未初始化状态走完，可能 NPE）；
- * [PRE_PROCESS] proceed 前修正 this 数据（W1 壁纸路径），再原样放行。
- */
+/** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制； */
 internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX }
 
 /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */

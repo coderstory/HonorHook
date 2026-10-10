@@ -8,16 +8,7 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
-/**
- * DexKit 查找工具类（照 HC ScreenRecorderModule 实码 + Rain v00 过滤逻辑；docs/rain-hook-architecture.md §2.4）：
- * 双轨解析的"按特征兜底"线，特征 = 包名白名单/方法名/返回类型/参数个数/usingString，
- * 与直连反射结果按签名串去重合并再挂 hook。
- *
- * Bridge 进程级缓存：[withBridge] 同 apkPath 复用已创建的 [DexKitBridge]，防止版本漂移场景
- * （多轮挂载重试 × 多次查询）重复 create + 全 dex 索引重建（秒级重操作）；缓存后不 close，
- * 进程持有期释放交给系统（原 HC finally-close 的 use 语义因缓存复用而废弃）；
- * 创建处 synchronized + @Volatile 双重检查保证只 create 一次（调用方为 MountScheduler 后台线程）。
- */
+/** DexKit 特征查找工具（方法体字符串/参数类型/类字段类型四维锚点）。 */
 object DexKitHelper {
 
     private const val TAG = "HonorHook"
@@ -90,28 +81,7 @@ object DexKitHelper {
         }
     }
 
-    /**
-     * 按特征查找方法并过滤。
-     *
-     * 特征全可选、AND 组合：[packages] 包名白名单 / [methodName] 方法名（混淆后可能失配，可留空）/
-     * [returnType] 返回类型（DexKit 内部类型名，如 "boolean"、"java.lang.String"）/ [paramCount] 参数个数 /
-     * [paramTypes] **参数类型序列**（按声明顺序，比 paramCount 强得多）/ [usingStrings] 方法体引用的字符串 /
-     * [declaredClassStrings] **所在类**引用的字符串（用 `declaredClass(ClassMatcher.usingStrings)` 表达，
-     * 用于"类与方法名都被混淆、但类里有稳定字符串"的场景）/
-     * [declaredClassFieldTypes] **所在类的字段类型集合**（`ClassMatcher.addFieldForType`；字段类型引用的是类名，
-     * 其中的可读类名稳定，用于"类内无字符串"的场景，如 `common.a` 的 `WeakReference` + `DownloadInfo`）。
-     *
-     * 特征选取优先级（抗混淆强度）：字符串常量 > 可读参数类型 > 返回类型/参数个数 > 方法名。
-     * **字符串常量混淆不改，是最稳的锚点**（版本适配最稳，照 HC FRAME_METHOD_MARKER 用法）。
-     *
-     * API 实证状态（2026-10-10 对 dexkit-2.2.0-api.jar 逐项 javap 核对）：
-     * ✅ `DexKitBridge.create` / `bridge.findMethod(FindMethod)` / `FindMethod.create()` /
-     *   `MethodMatcher.create().name(...)/returnType(...)/paramCount(...)/paramTypes(vararg)/usingStrings(vararg)` /
-     *   `MethodMatcher.declaredClass(ClassMatcher)` / `ClassMatcher.usingStrings(vararg)` /
-     *   `MethodInfo.getMethodInstance(loader)` / `FindMethod.searchPackages(...)`
-     *
-     * @return 已反射解析并过滤的 [Method] 列表（非接口/非抽象/非 native/非 static + 签名串去重），可能为空
-     */
+/** 按特征查找方法并过滤。 */
     fun findMethodByFeatures(
         bridge: DexKitBridge,
         loader: ClassLoader,

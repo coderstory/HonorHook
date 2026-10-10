@@ -5,36 +5,13 @@ import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import java.lang.reflect.Method
 
-/**
- * 各目标 hook（ThemeStoreHook / InstallerHook）**共享的挂载基建**：懒加载重试循环、失败分级、
- * 统一方法解析（直连 + DexKit 特征兜底）、汇总日志与 DexKit 特征声明。
- *
- * 目标侧只保留「挂载表构建 + 各 kind 的 intercept 逻辑」（[Task] 协议 + [attemptMount] 的
- * `mountOne` 回调），目标私有字段（kind 枚举、uri 路由、裁剪实现等）不进本类——
- * 2026-10-10 P3 审计：原先两份逐字重复的基建（约 120 行 × 2）收敛于此，改一处即两目标同步生效。
- *
- * 状态语义：模块 dex 被注入到**每个目标进程**独立加载，两目标永不同进程 ⇒ 每目标各持一个
- * [MountEngine] 实例（object 字段）即天然隔离；[begin] 在 install() 时重置计数。
- */
+/** 各目标 hook 共享的挂载基建：懒加载重试、失败分级、统一解析、汇总日志。 */
 class MountEngine(private val hookName: String, private val hostPackage: String) {
 
     /** 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。 */
     enum class Result { OK, FAILED, NOT_RESOLVED }
 
-    /**
-     * DexKit 兜底特征声明 —— 用于**混淆名目标**（类名/方法名随时可能被 R8 重映射）。
-     *
-     * 四个维度按"抗混淆强度"降序，可任意组合（AND 语义）：
-     * 1. [strings]         方法体内引用的**字符串常量** —— 混淆**不改**字符串，最强锚点（如 `u15` 的 SP 文件名 `themename`）；
-     * 2. [paramTypes]      **参数类型序列**（DexKit 内部类型名，按声明顺序）—— 参数里的**可读类名**天然稳定
-     *    （如 `o52.addDownloadItem(Context, DownloadInfo, int, boolean)` 里的 `common.DownloadInfo`）；
-     * 3. [classStrings]    **所在类**引用的字符串常量 —— 类名与方法名都被混淆时的兜底（如 `tryout.a` 的日志 TAG `TryOutHelper`）；
-     * 4. [classFieldTypes] **所在类的字段类型集合** —— 字段类型引用的是**类名**，可读类名天然稳定
-     *    （如 `common.a` 同时有 `WeakReference` 与 `common.DownloadInfo` 两种字段类型）。
-     *
-     * 纪律：**特征必须包含至少一项"内容性锚点"**（1/2/3/4 任一），否则默认包类不会走 DexKit 兜底，
-     * 以免退化为"全 APK 找同名同签名"的假兜底（详见 [MethodResolver.resolveMethod] 注释）。
-     */
+/** DexKit 兜底特征声明 —— 用于**混淆名目标**（类名/方法名随时可能被 R8 重映射）。 */
     class DexHint(
         val strings: List<String>? = null,
         val paramTypes: List<String>? = null,

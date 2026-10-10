@@ -5,20 +5,7 @@ import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * 双轨目标解析共享入口（从 HookEntry.resolveTargetMethod 提取为公开基建，供各 TargetHook 接线）。
- * 第一轨直连反射（最快、零 so 依赖）；未命中且提供 [apkPath] 时第二轨 DexKit 按特征兜底
- * （磁盘 dex 扫描 + 包名白名单 + 方法体字符串特征），对抗 OTA 混淆漂移（单字母类名被重映射后直连失效）。
- * **第二轨的范围纪律（2026-10-10 审计）**：包名可作白名单时按包名限定；**默认包类**（无包名，如 `u15`/`o52`）
- * 无法限定范围，**必须由调用方提供 `usingStrings` 字符串特征**才允许兜底，否则跳过（避免全 APK 同名方法误命中）。
- * 两轨失败返回 null，调用方归入 NOT_RESOLVED 懒加载重试，只记日志不炸宿主。
- *
- * 纪律：类解析只走 loadClass、不触发 <clinit>——boot-loop 纪律（v2.3 事故模式）；
- * 只在挂载/重试线程调用，禁止在 intercept 热路径调用（DexKit bridge 创建为秒级重操作）。
- * 缓存：第二轨结果（含 null）进程级缓存（[dexkitHits]/[dexkitMisses]）——版本漂移场景每轮重试
- * 不对同 key 重复做秒级磁盘扫描（挂载线程并发读写安全）；第一轨**不缓存**——调用便宜，
- * 且重试机制正靠它赌类稍后可加载（缓存 null 会让重试失去意义）。
- */
+/** 双轨目标解析共享入口（从 HookEntry.resolveTargetMethod 提取为公开基建，供各 TargetHook 接线）。 */
 object MethodResolver {
 
     private const val TAG = "HonorHook"
@@ -68,9 +55,6 @@ object MethodResolver {
             return null
         }
         // ★ 2026-10-10 审计修正：**默认包类**（className 不含 "."，如混淆名 `u15` / `o52`）无法用包名限定搜索范围，
-        // 原实现把 packages 传成 null ⇒ DexKit 退化为"全 APK 按同名+同签名找第一个" ⇒ 极易命中无关类的方法，
-        // 属于"看起来有兜底、实际有害"的假兜底。现改为：**必须提供"内容性锚点"才允许兜底**——即至少有一项
-        // 混淆不改的约束（方法体字符串 / 参数类型序列 / 所在类字符串）；否则诚实跳过（仍可依赖直连轨 + 懒加载重试）。
         val pkg = className.substringBeforeLast('.', "").takeIf { it.isNotBlank() }
         val hasAnchor = !usingStrings.isNullOrEmpty() ||
             !paramTypes.isNullOrEmpty() ||

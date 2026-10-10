@@ -1,19 +1,6 @@
 package top.honorhook.xposed.data
 
-/**
- * 主题商店云控布尔开关「强制表」—— key 与 hook 逻辑分离的唯一数据源。
- *
- * 机制：主题商店的全部云控布尔开关，最终都由 `SharepreferenceUtils`（混淆名 `u15`，默认包）的
- * `getBoolean(String, boolean)` / `getBoolean(String)` 从 SP（`themename`）读出 —— 全 APK 83 处布尔
- * 读点全部汇聚于此（含 `ams/mgr/AgreeRepo` 约 30 个 `is*()` 开关方法与 `ads/AdStrategy` 的广告总闸）。
- * 因此只需在这两个重载上挂**一次**统一拦截：命中本表的 key 直接短路返回强制值，未命中放行原逻辑；
- * 将来版本新增的读点也自动被覆盖（无需逐点挂）。
- *
- * **新增/删除开关只改本文件，不动 hook 代码。**
- *
- * key 取值来源：jadx `com/hihonor/android/thememanager/common/i.java`（部分 key 为字面量）；
- * 每个 key 的读点、默认值与作用见 `docs/cloud-switches.md` 与 `docs/theme-store-hook-design.md §九`。
- */
+/** 主题商店云控布尔开关「强制表」—— key 与 hook 逻辑分离的唯一数据源。 */
 object CloudSwitchTable {
 
     /**

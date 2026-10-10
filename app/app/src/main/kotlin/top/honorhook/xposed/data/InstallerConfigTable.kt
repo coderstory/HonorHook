@@ -1,18 +1,6 @@
 package top.honorhook.xposed.data
 
-/**
- * 包管理器（软件包安装程序 `com.android.packageinstaller`）云控强制表 —— key 与 hook 逻辑分离的唯一数据源。
- *
- * **与主题商店的机制差异**（详见 `docs/installer-cloud-config.md`）：安装器**没有** `u15.getBoolean` 那样的
- * 布尔开关表，它的云控 = 「`CommonConfig` 键值 JSON」（`CommonConfigManager`）+ 「AB 实验」（`sx1`）。
- * 广告也不是开关型，而是**内容下发型**（服务端返回 `AdRespV4.adAppList` 由页面渲染）。
- *
- * 因此本表不按「key → 布尔」组织，而是按**每一项需求对应的"云控取值"**组织；
- * 表格值来源：jadx `com/hihonor/packageinstaller/hncust/commonconfig/CommonConfigManager.java` 与
- * `com/hihonor/packageinstaller/entity/resp/SafeModeConfig.java`。
- *
- * 新增/调整只改本文件，不动 [top.honorhook.xposed.target.InstallerHook] 的挂载代码。
- */
+/** 包管理器（软件包安装程序 `com.android.packageinstaller`）云控强制表 —— key 与 hook 逻辑分离的唯一数据源。 */
 object InstallerConfigTable {
 
     /**

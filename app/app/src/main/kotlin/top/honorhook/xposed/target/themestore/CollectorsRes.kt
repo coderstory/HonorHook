@@ -13,10 +13,6 @@ internal fun collectFreeJudgmentHooks(pending: MutableList<MountTask>) {
     addConst(pending, CLS_ITEM_INFO, "isPayed", 0, "boolean", true,
         "theme:ItemInfo.isPayed", "F2 A3 已购读点2 → 已购")
     // A4 VIP 专属标记：挂 **getVipOnly()** 而不是 `isVipResouce()`（2026-10-10 审计修正）——
-    // ① `isVipResouce()` 实现就是 `getVipOnly() == 1`（ItemInfo.java:781）⇒ 改挂后它自然为 false，覆盖不缩水；
-    // ② `getVipOnly()` 另有**直连消费点**（BrowseDataHelper:60/98/129/229/266 遍历
-    //    ThemeInfo/WallPaperInfo/FontInfo/MagicBabyInfo，四者均 extends ItemInfo 且未覆盖该方法）
-    //    ⇒ 只挂 isVipResouce 会漏掉这条链。详见 docs/hook-inventory-audit.md §三.3。
     addConst(pending, CLS_ITEM_INFO, "getVipOnly", 0, "int", 0,
         "theme:ItemInfo.getVipOnly", "F2 A4 VIP 专属标记源头 → 0（同时覆盖 isVipResouce() 与直连 getVipOnly() 消费点）")
 }
@@ -46,21 +42,7 @@ internal fun collectBeanSourceZeroHooks(pending: MutableList<MountTask>) {
 // A6-A10（5 个 is*BtnShow 门）与按钮显隐汇总点均已**删除**：不再逐按钮硬掰门/藏按钮，
 // 按钮显隐交由"用户 VIP + 资源免费"的数据态驱动（ToolBarGroupLayout 原生 switch）。依据见 design.md §十。
 
-/**
- * T1：详情页按钮组类型 → **-1（无激励）**。
- *
- * 2026-10-09 真机回归修正（原取值 0 是错的）：`OnlinePreviewBaseActivity.updateButtons` 的 switch 实证——
- * `case 0` 显示 `freeReceiveSmallView`、`case 1` 显示 `freeReceiveBigView`（二者即「免费领」= 美豆入口）；
- * 而 **`case 2/3/4/5` 在 `VipManager.isVipUser()==true` 时同样落到 `freeReceiveSmallView.setVisibility(0)`**
- * ——把用户强制成 VIP 后，普通中段值也全都会显示免费领。
- *
- * `case -1` → `hideLayout()`，而 `hideLayout` 只隐藏激励类视图（freeReceiveSmall/BigView、freeReceiveBtn、
- * vipReceiveSmall/BigView、timeLimitDownloadBtn，OnlinePreviewBaseActivity:1751 实证），
- * **不碰 mDownloadBtn/mApplyBtn/mBuyBtn** → 免费领（美豆）消失、下载/应用照常。
- * （旧注释"−1 会把按钮全隐藏"系误读，已更正；-1 另有 `getIncentiveData()!=null` 守卫，无数据时本就保持隐藏态。）
- *
- * 依据见 design.md §三 T1。
- */
+/** T1：详情页按钮组类型 → **-1（无激励）**。 */
 internal fun collectRealChainHooks(pending: MutableList<MountTask>) {
     addConst(pending, CLS_INCENTIVE_DATA, "getThemeDetailButtonType", 0, "int", -1,
         "theme:IncentiveData.getThemeDetailButtonType", "F2 T1 服务端按钮类型 → -1（无激励：hideLayout 只关「免费领/美豆」激励视图，保留下载/应用）")
@@ -104,14 +86,6 @@ internal fun collectVipHooks(pending: MutableList<MountTask>) {
     addConst(pending, CLS_VIP_STATE, "getSecondTitle", 0, "java.lang.String", "",
         "theme:VipState.getSecondTitle", "F1 二级标题横幅（服务端下发'VIP 已过期'文案）→ 空串隐藏（MineVipCardView:1789 判空）")
     // 已删的历史挂载点（fetchShouldDialogBy* 休眠链 / T8 getVipCardType）依据全部归档于
-    // docs/hook-inventory-audit.md §五。
-    // **漏斗恢复（2026-10-10 真机回归实证）**：当日审计曾以"VipState 字段全 private ⇒ 类外只走 getter ⇒
-    // 漏斗冗余"为由删除 `VipManager.getLocalVipState/getVipState` 两漏斗点——**该推理有漏**：
-    // ① `getVipState()` 可返回 null（首查未落缓存），漏斗 null 时自建实例填会员值；getter 短路救不了
-    //    "UI 拿到 null → 直接走未登录/已过期分支"的路径（"VIP 已过期"横幅回归的真机根因）；
-    // ② VipState 的 `equals/copy/writeToParcel` 等类内方法直读字段，不经过任何 getter。
-    // 漏斗（after 改写实例字段）与 getter 短路双层并存，覆盖互补。昨晚（2e2b0f1）真机验证的良好形态
-    // 即"双层并存"，今日删层即回归——教训：**审计删除必须真机 A/B，不许只凭静态推理**。
     pending += MountTask(
         kind = MountKind.VIP_STATE_FIX,
         className = CLS_VIP_MANAGER,

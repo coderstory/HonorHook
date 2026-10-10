@@ -8,16 +8,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.target.TargetHook
 
-/**
- * 荣耀主题商店目标（F1–F4）：F1 开 VIP / F2 全免费（含下载链修复）/ F3 试用无倒计时 / F4 不恢复默认。
- *
- * **装配 + kind 分派**：挂载表构建在 `CollectorsRes.kt`（ItemInfo/价格/按钮/VIP/试用）与
- * `CollectorsSource.kt`（下载链/云控/槽位/tab 源头裁剪），共享部件在 `ThemeStoreParts.kt`。
- *
- * **设计依据、挂载点理由与真机判据全部归档在 `docs/theme-store-hook-design.md`**，本文件只保留代码。
- * 真机基线主题商店 20.1.63.305（挂载数随挂载表变化，**以真机 `installed N/M` 的 M 为准**）。
- * 新增/调整挂载点前：先更新 design.md 的理由，再改代码（最少 hook 点 / 根源原则，CLAUDE.md §九）。
- */
+/** 荣耀主题商店目标（F1–F4）：F1 开 VIP / F2 全免费（含下载链修复）/ F3 试用无倒计时 / F4 不恢复默认。 */
 object ThemeStoreHook : TargetHook {
 
     override val packageName = "com.hihonor.android.thememanager"
