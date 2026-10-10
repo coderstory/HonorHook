@@ -31,7 +31,6 @@ object SettingsHook : TargetHook {
         // 挂载表 1 项；**以真机 `installed N/M` 的 M 为准。**
         val pending = mutableListOf<MountTask>()
         pending += MountTask(
-            kind = MountKind.ENABLE_DISABLE_BUTTON,
             className = CLS_APP_DETAILS,
             methodName = "Q3",
             paramCount = 0,
@@ -51,11 +50,7 @@ object SettingsHook : TargetHook {
     private const val ID_BUTTON_PANEL = "control_buttons_panel"
     private const val ID_BUTTON_DISABLE = "left_button"
 
-    /** 挂载任务类型：[ENABLE_DISABLE_BUTTON] after 语义——原决策跑完后强制启用停用按钮。 */
-    private enum class MountKind { ENABLE_DISABLE_BUTTON }
-
     private class MountTask(
-        val kind: MountKind,
         override val className: String,
         override val methodName: String,
         override val paramCount: Int,
@@ -67,12 +62,10 @@ object SettingsHook : TargetHook {
 
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
-            when (task.kind) {
-                // after 语义：原 Q3 跑完（全部业务门控保留副作用）后，强制启用停用按钮并补挂点击监听
-                //（原逻辑仅在最终 enabled 时挂监听）。按钮视图按 id 名运行时查找。
-                MountKind.ENABLE_DISABLE_BUTTON -> {
-                    chain.proceed()
-                    runCatching {
+            // 单点目标，无需 kind 分派。
+            // after 语义：原 Q3 跑完（全部业务门控保留副作用）后，强制启用停用按钮并补挂点击监听
+            //（原逻辑仅在最终 enabled 时挂监听）。按钮视图按 id 名运行时查找。
+            runCatching {
                         val self = chain.thisObject
                         val root = self.javaClass.getMethod("getView").invoke(self) as? android.view.View
                             ?: return@runCatching
@@ -86,13 +79,11 @@ object SettingsHook : TargetHook {
                         btn.isEnabled = true
                         val listener = self as? android.view.View.OnClickListener
                         if (listener != null) btn.setOnClickListener(listener)
-                        engine.judge(module, task, JUDGE_PREFIX)
-                    }.onFailure { t ->
-                        module.log(Log.WARN, MountEngine.TAG, "停用按钮启用失败（放行原状态）: ${t.message}")
-                    }
-                    null
-                }
+                engine.judge(module, task, JUDGE_PREFIX)
+            }.onFailure { t ->
+                module.log(Log.WARN, MountEngine.TAG, "停用按钮启用失败（放行原状态）: ${t.message}")
             }
+            null
         }
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */

@@ -1,3 +1,5 @@
+// vendored：上游移植件（同目录其余文件表头有具体来源），勿为压缩行数改写（见 docs/ui-miuix-overview.md §压缩边界）
+
 package top.honorhook.ui.component
 
 import androidx.compose.animation.core.Animatable

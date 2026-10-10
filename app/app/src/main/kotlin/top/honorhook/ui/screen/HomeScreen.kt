@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeveloperBoard
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.rounded.CheckCircleOutline
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.honorhook.ui.AppSettings
@@ -228,67 +230,65 @@ private fun StatusCard(
 }
 
 /**
- * 信息卡 —— 照抄 KernelSU `InfoCard`：
- * 两张 `Card`，卡内 `Column(padding 16.dp)`，每项 = 24dp 图标（end padding 12dp）
- * + `headline1` 标题（Medium）+ `body2` 内容（top padding 2dp）。
+ * 信息行 —— 照抄 KernelSU `InfoCard` 的行结构：
+ * 24dp 图标（end padding 12dp）+ `headline1` 标题（Medium）+ `body2` 内容（top padding 2dp）。
+ *
+ * 提为顶层函数（原先是声明在 [InfoCard] 内部的嵌套 composable，无法从他处复用）。
  */
 @Composable
-private fun InfoCard() {
-    @Composable
-    fun InfoText(icon: ImageVector, title: String, content: String, bottomPadding: androidx.compose.ui.unit.Dp = 24.dp) {
-        Row(
+private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPadding: Dp = 24.dp) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = bottomPadding),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = title,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = bottomPadding),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                modifier = Modifier
-                    .padding(end = 12.dp)
-                    .size(24.dp),
-                tint = colorScheme.onSurface,
+                .padding(end = 12.dp)
+                .size(24.dp),
+            tint = colorScheme.onSurface,
+        )
+        Column {
+            Text(
+                text = title,
+                fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                fontWeight = FontWeight.Medium,
+                color = colorScheme.onSurface,
             )
-            Column {
-                Text(
-                    text = title,
-                    fontSize = MiuixTheme.textStyles.headline1.fontSize,
-                    fontWeight = FontWeight.Medium,
-                    color = colorScheme.onSurface,
-                )
-                Text(
-                    text = content,
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
+            Text(
+                text = content,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
     }
+}
 
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                InfoText(Icons.Filled.Tag, "管理器版本", appVersionLabel())
-                InfoText(Icons.Filled.DeveloperBoard, "管理器包名", "top.honorhook")
-                InfoText(
-                    Icons.Filled.Smartphone, "系统版本",
-                    "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
-                )
-                InfoText(
-                    Icons.Filled.Fingerprint, "设备",
-                    "${Build.MANUFACTURER} ${Build.MODEL}",
-                )
-                InfoText(
-                    Icons.Filled.DeveloperBoard, "系统架构",
-                    Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
-                    bottomPadding = 0.dp,
-                )
-            }
+/** 信息卡 —— 照抄 KernelSU `InfoCard`：单张 `Card`，卡内 `Column(padding 16.dp)` 逐行 [InfoRow]。 */
+@Composable
+private fun InfoCard() {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            InfoRow(Icons.Filled.Tag, "管理器版本", appVersionLabel())
+            InfoRow(Icons.Filled.DeveloperBoard, "管理器包名", "top.honorhook")
+            InfoRow(
+                Icons.Filled.Smartphone, "系统版本",
+                "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+            )
+            InfoRow(
+                Icons.Filled.Fingerprint, "设备",
+                "${Build.MANUFACTURER} ${Build.MODEL}",
+            )
+            // 系统架构原来复用了 DeveloperBoard（与"管理器包名"同一个图标），换成 Memory
+            InfoRow(
+                Icons.Filled.Memory, "系统架构",
+                Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
+                bottomPadding = 0.dp,
+            )
         }
     }
 }

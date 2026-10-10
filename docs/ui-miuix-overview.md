@@ -21,3 +21,15 @@
 - **激活判定**：只有收到 LSPosed 的 `XposedService` Binder 才算「已激活」（照 LSPFRIDA），不靠包名/文件探测。
 - **液态玻璃**：`miuix-blur`（0.9.4 起提供 `Backdrop`/`blur`/`lens`）+ `io.github.kyant0:backdrop` 2.0.0 已引入，底栏走真·背景模糊；
   低版本/开关关闭时退回实色底栏（`MainActivity` 的 `enableBlurSdk` 守卫）。`miuix-blur` 声明 minSdk 33，靠 `tools:overrideLibrary` 覆盖到本项目的 minSdk 26。
+
+## 压缩边界（2026-10-11 实测）
+
+全模块 6624 行 / 41 个 kt：代码 5130、注释 906、空行 588。hook 侧 2805（注释占 22%）、UI 侧 3735（注释占 8%）。
+
+**三类行不该压**：
+
+1. **注释（906 行）= 唯一审计痕迹**。逆向实证（file:line）、"为什么这么选"、判据都只存在于注释里 —— 这是本工程"读代码得不到的信息"的全部载体，压掉就等于把可审计性清零。CLAUDE.md 的纪律条已写明。
+2. **vendored 移植件（约 1300 行）**：`component/FloatingBottomBar.kt`、`component/liquid/*`、`component/InteractiveHighlight.kt`、`component/DampedDragAnimation.kt`、`component/DragGestureInspector.kt` 是 KernelSU / AndroidLiquidGlass 体系的上游实现原样移植（表头已注明来源并加了 `vendored` 标记）。改写会与上游脱钩，升级时无法逐行比对，收益为零。
+3. **数据行**：43 个挂载点声明、16 条云控表项、13 个功能 key。这些是"表即真相"，DSL 化能少几行但更难核对，得不偿失。
+
+**实测结论：可压空间约 2~4%（100~200 行）**，且大部分"看起来能压"的样板抽取（如 5 处 `Scaffold + TopAppBar + insets` 抽 `MiuixPage`）在计入 helper 自身后是**行数中性**的 —— 收益在一致性而非行数。已做的只有真垃圾清除（单成员 `MountKind` 枚举、嵌套 composable、重复图标）。**不要再为行数做大规模重构**；真要动，先看这里。

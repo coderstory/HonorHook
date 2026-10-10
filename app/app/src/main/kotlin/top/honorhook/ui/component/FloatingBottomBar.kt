@@ -1,5 +1,6 @@
 // Adapted from compose-miuix-ui example (IosLiquidGlassNavigationBar) — Apache 2.0.
 // 照抄 KernelSU `ui/component/FloatingBottomBar.kt`，仅改包名与取色（MiuixTheme）。
+// vendored：上游移植件，勿为压缩行数改写（见 docs/ui-miuix-overview.md §压缩边界）
 
 package top.honorhook.ui.component
 
