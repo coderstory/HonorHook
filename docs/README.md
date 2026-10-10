@@ -21,6 +21,7 @@
 | `theme-download-chain.md` | 付费主题下载卡 0% 的下载链路反查与卡点定位 | 主题下载/免费化相关 hook 开发时 | 卡点 = 下载 URL 获取：付费主题服务端不在详情 JSON 下发可用直链，真实 URL 只在 sendProduct 授权接口返回 |
 | `theme-ui-real-chain.md` | 主题商店 UI 真实渲染链反查（详情页按钮/VIP tab/新用户专享） | hook 详情页按钮真机无效时必读 | isBuyBtnShow 是"门"非"开关"，真实链 = 门 + `IncentiveData.getThemeDetailButtonType()` → updateButtons switch；fetchShouldDialogBy* 消费链是休眠代码 |
 | `launcher-card-title-hide.md` | **系统桌面卡片标题（YOYO建议）隐藏**：分析 + 实现落地（节点定位 / 渲染链 / 总闸 `z.d()` / 官方「隐藏应用名称」开关 / 插件独立 ClassLoader 约束 / §八 已实现的 `LauncherCardTitleHook` 与真机判据） | 要做桌面定制、或想隐掉卡片/图标文字时 | 那行文本 = `card_indicator_title`（`HnIndicator2X4StackView`，在 `YOYOCardStackPlugin.apk` 独立 CL）；总闸 = `ThemeUtilImpl.isHiddenTitle()` ← SP `launcher_icon_title_hidden`；**已实现挂 base 包 `ThemeUtilImpl.isHiddenTitle()`→true（插件类不可经 base CL 解析，故避开）**，只隐卡片标题、保留图标名 |
+| `systemui-sim2-hide.md` | **SystemUI 副卡（SIM2）状态栏信号图标隐藏**：渲染链 / 单点 `MobileDataControllerImpl.updateSubs(List)` / 重载消歧坑 / 判据（已实现 `SystemUiHook`） | 要动状态栏信号图标、或给 SystemUI 加新功能时 | 每卡图标唯一重建出口 = `updateSubs(List)`（入参剔 slotId==1 副本，≥2 卡才剔）；该类有两个 1 参 void 重载，直连轨必须按参数类型消歧；QS 瓷贴走 pipeline 不受影响 |
 | `rain-analysis.md` | Rain_1.1.5.apk 逆向留档（基本信息/META-INF 三配置/strings 核对） | 需要 libxposed 102 参考基线与配置写法时 | Rain 是单入口 + java_init.list/module.prop/scope.list 三配置文件的标准 libxposed 102 模块样张 |
 | `rain-hook-architecture.md` | Rain hook 架构分析（入口分发/DexKit 双轨/字符串解密） | 写 hook 分发或借鉴 DexKit 双轨解析时 | 单入口 HookEntry + 接口化 per-app 适配器 + 静态注册表 + 直连反射优先/DexKit 兜底双轨解析 |
 

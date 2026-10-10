@@ -286,7 +286,7 @@ PYEOF
     [ "$done_flag" = 1 ] || die "未能进入模块页完成启用（通知可能失效，重跑 install-release 再试）"
     "$ADB" shell "cmd statusbar collapse" >/dev/null 2>&1
     # 作用域进程全部强停（hook 必须强停重启才生效），下次拉起即带 hook
-    for pkg in com.hihonor.android.thememanager com.android.packageinstaller com.android.settings; do
+    for pkg in com.hihonor.android.thememanager com.android.packageinstaller com.android.settings com.android.systemui; do
       "$ADB" shell "am force-stop $pkg" >/dev/null 2>&1
     done
     info "作用域进程已强停（thememanager/packageinstaller/settings）"
