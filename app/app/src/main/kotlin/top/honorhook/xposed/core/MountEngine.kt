@@ -70,7 +70,9 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         MountScheduler.postDelayed(1000) {
             runCatching { checkHostVersionOnce(module) }
         }
-        totalCount = pending.size
+        // 只在首轮记总数：重试轮传入的是 unresolved 子列表，若逐轮覆盖，判据行会变成
+        // "installed 累计成功数/本轮待挂数"（okCount 跨轮累计），M 失去意义。
+        if (retryRounds == 0) totalCount = pending.size
         val unresolved = mutableListOf<T>()
         for (task in pending) {
             when (mountOne(task)) {

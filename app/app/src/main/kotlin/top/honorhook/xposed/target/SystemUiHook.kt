@@ -46,7 +46,10 @@ object SystemUiHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2)) return
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2)) {
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2, "SystemUiHook")
+            return
+        }
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         val pending = listOf(

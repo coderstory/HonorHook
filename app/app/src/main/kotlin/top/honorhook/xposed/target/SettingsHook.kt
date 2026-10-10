@@ -23,7 +23,10 @@ object SettingsHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SETTINGS_DISABLE_BTN)) return
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SETTINGS_DISABLE_BTN)) {
+            logDisabled(module, FeatureCatalog.KEY_SETTINGS_DISABLE_BTN, "SettingsHook")
+            return
+        }
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 挂载表 1 项；**以真机 `installed N/M` 的 M 为准。**

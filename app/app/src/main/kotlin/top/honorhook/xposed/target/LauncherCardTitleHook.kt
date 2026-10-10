@@ -45,7 +45,10 @@ object LauncherCardTitleHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_LAUNCHER_HIDE_TITLE)) return
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_LAUNCHER_HIDE_TITLE)) {
+            logDisabled(module, FeatureCatalog.KEY_LAUNCHER_HIDE_TITLE, "LauncherCardTitleHook")
+            return
+        }
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 挂载表 1 项；**以真机 `installed N/M` 的 M 为准。**
