@@ -41,30 +41,75 @@ object SystemUiHook : TargetHook {
     /** 未混淆实现类（Dagger 绑定，jadx classes.dex 实证）。 */
     private const val CLS_MOBILE_DATA_CONTROLLER = "com.android.systemui.plugins.signal.MobileDataControllerImpl"
 
+    /** 未混淆的信号图标绑定器（jadx 实证，基线 17.0.0.1）。静态方法，6 参无重载歧义。 */
+    private const val CLS_SIGNAL_ICON_BINDER =
+        "com.android.systemui.statusbar.pipeline.mobile.ui.binder.SignalIconBinder"
+
+    /** SignalIconBinder.bind(int, View, MobileDateModel, LocationBasedMobileViewModel, int, MobileViewLogger) */
+    private const val METHOD_BIND = "bind"
+    private const val BIND_PARAM_COUNT = 6
+
+    /** 单卡信号视图布局里的 5G/4G 类型标 view id（Resource entry name，运行时 getIdentifier 取）。 */
+    private const val ID_MOBILE_TYPE = "mobile_type"
+
     /** 副卡 = 卡槽 2（SubscriptionModel.slotId 0-based；SimData slotId=1/subId=2 真机实证）。 */
     private const val HIDDEN_SLOT_ID = 1
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2)) {
-            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2, "SystemUiHook")
-            return
-        }
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        val apkPath = param.applicationInfo.sourceDir
 
-        val pending = listOf(
-            MountTask(
+        val pending = mutableListOf<MountTask>()
+
+        // U1 副卡隐藏（数据层：updateSubs 入参剔除 slotId==1）
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2)) {
+            pending += MountTask(
                 className = CLS_MOBILE_DATA_CONTROLLER,
                 methodName = "updateSubs",
                 paramCount = 1,
                 returnType = "void",
                 id = "systemui:mobileDataController.updateSubs",
                 description = "U1 副卡(SIM2)状态栏信号图标隐藏（updateSubs 入参剔除 slotId==1，≥2 卡才剔；状态栏/通知头/锁屏 cluster 同源生效）",
-                // 参数类型锚点：交给共享 MethodResolver 做重载消歧（此前本目标手写解析绕开了 DexKit 兜底与失败分级）
                 dex = DexHint(paramTypes = listOf("java.util.List")),
-            ),
-        )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+            )
+        } else {
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2, "SystemUiHook")
+        }
+
+        // U2 隐藏 5G/4G 类型标（视图层：bind 入参的 View 里 mobile_type 置 GONE）
+        //   bind 只在每卡视图创建时调一次（随 updateSubs 重建），故置 GONE 即持久，
+        //   不受后续 StateFlow 重绑影响（宿主重绑只改 drawable 与 visibility，drawable 为空时才 setVisibility(0)）。
+        // 2026-10-11 调试期临时关闭：先用「只留 U1」做对照实验，隔离 SignalIconBinder.bind 上的
+        //   NPE。已查明根因：NPE 来自 U3 的 addSignalView 误返回 null（非 void 方法），与 U2 无关，
+        //   U2 已恢复启用。
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_5G)) {
+            pending += MountTask(
+                className = CLS_SIGNAL_ICON_BINDER,
+                methodName = METHOD_BIND,
+                paramCount = BIND_PARAM_COUNT,
+                returnType = "void",
+                id = "systemui:signalIconBinder.bind",
+                description = "U2 隐藏 5G/4G 类型标（bind 入参 View 内 mobile_type 置 GONE；单卡双卡一律生效）",
+                dex = DexHint(classStrings = listOf("signal_unit_normal_view")),
+            )
+        } else {
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_5G, "SystemUiHook")
+        }
+
+        if (pending.isEmpty() && !RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL)) return
+        engine.begin(apkPath, HOST_VERSION_BASELINE)
+
+        // U3 双排合并：独立引擎（自绘视图生命周期独立于宿主 bind 链），故单独挂。
+        // 2026-10-11：崩溃根因已定位并修复（addSignalView 误返回 null），恢复启用。
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL)) {
+            MergedSignalHook.install(module, loader, apkPath)
+        } else {
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL, "SystemUiHook")
+        }
+
+        if (pending.isNotEmpty()) {
+            engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        }
     }
 
     private class MountTask(
@@ -80,35 +125,113 @@ object SystemUiHook : TargetHook {
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "systemui-hook"
 
+    /** 挂载点 id（mountOne 按 id 分派）。 */
+    private const val ID_HIDE_5G = "systemui:signalIconBinder.bind"
+
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
     private val unreadableWarned = AtomicBoolean(false)
 
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        when (task.id) {
+            ID_HIDE_5G -> mountHide5G(task, module, loader)
+            else -> mountHideSim2(task, module, loader)
+        }
+
+    /** U1 副卡隐藏：updateSubs 入参剔除 slotId==1（数据层，宿主重建时自然用改过的数据）。 */
+    private fun mountHideSim2(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
+            // ⚠️ updateSubs 是 void 方法：hook 回调**必须返回 null**。
+            // 2026-10-11 真机崩溃实证：lambda 隐式返回了最后一行 proceedWith(...) 的 Object，
+            // libxposed 抛 `ClassCastException: Return value's type from hook callback does not
+            // match the hooked method` → SystemUI 反复崩溃。下面的每个分支都显式 `return@mount null`。
             val orig = runCatching { chain.getArg(0) as? List<*> }.getOrNull()
             if (orig == null || orig.size < 2) {
                 chain.proceed()
-            } else {
-                var unreadable = 0
-                val kept = orig.filter { sub ->
-                    val slot = sub?.let {
-                        runCatching { it.javaClass.getField("slotId").getInt(it) }.getOrNull()
-                    }
-                    if (slot == null) unreadable++
-                    slot != HIDDEN_SLOT_ID
+                return@mount null
+            }
+            var unreadable = 0
+            val kept = orig.filter { sub ->
+                val slot = sub?.let {
+                    runCatching { it.javaClass.getField("slotId").getInt(it) }.getOrNull()
                 }
-                if (kept.size == orig.size) {
-                    // 一个都没剔掉：要么本来只有主卡（正常），要么 slotId 取不到（字段非 public / 版本漂移）。
-                    // 后者是静默 no-op —— 判据行照打 installed 1/1 却毫无效果，必须留痕才排得动。
-                    if (unreadable > 0) warnUnreadableOnce(module)
-                    chain.proceed()
+                if (slot == null) unreadable++
+                slot != HIDDEN_SLOT_ID
+            }
+            if (kept.size == orig.size) {
+                // 一个都没剔掉：要么本来只有主卡（正常），要么 slotId 取不到（字段非 public / 版本漂移）。
+                // 后者是静默 no-op —— 判据行照打 installed 1/1 却毫无效果，必须留痕才排得动。
+                if (unreadable > 0) warnUnreadableOnce(module)
+                chain.proceed()
+            } else {
+                engine.judge(module, task, JUDGE_PREFIX, "剔除副卡后 ${kept.size}/${orig.size} 卡")
+                // 传过滤副本：宿主内部只逐元素拷贝进 mSubscriptionInfoList，不持有入参引用，副本安全
+                chain.proceedWith(chain.thisObject, arrayOf(kept))
+            }
+            null   // void 方法：必须显式 null
+        }
+
+    /**
+     * U2 隐藏 5G/4G 类型标：`SignalIconBinder.bind` 的第 2 参是每卡的 SignalUnitNormalView，
+     * 在宿主把 `mobile_type` 交给协程绑定**之前**置 GONE——之后宿主再 setImageDrawable/setVisibility
+     * 都作用在同一个已隐藏的 View 上，不会把它显示回来（drawable 为 null 时才 setVisibility(0)，
+     * 而 5G 标有 drawable；此处以 GONE + 每次 bind 重置双保险）。
+     *
+     * 只读不改：不改宿主数据，纯粹让这个子视图不占位；宿主其它逻辑不受影响。
+     */
+    private fun mountHide5G(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
+            // SignalIconBinder.bind 是 void 方法：回调必须返回 null（见 mountHideSim2 的崩溃实证注释）
+            val cardView = runCatching { chain.getArg(1) as? android.view.View }.getOrNull()
+            if (cardView != null) {
+                val hidden = hideMobileType(cardView)
+                if (hidden) {
+                    engine.judge(module, task, JUDGE_PREFIX, "5G 类型标已隐藏")
                 } else {
-                    engine.judge(module, task, JUDGE_PREFIX, "剔除副卡后 ${kept.size}/${orig.size} 卡")
-                    // 传过滤副本：宿主内部只逐元素拷贝进 mSubscriptionInfoList，不持有入参引用，副本安全
-                    chain.proceedWith(chain.thisObject, arrayOf(kept))
+                    // view id 读不到 = 布局结构漂移；静默 no-op 必须留痕（installed N/M 照打但无效果）
+                    warnMobileTypeMissing(module)
                 }
             }
+            chain.proceed()
+            null   // void 方法：必须显式 null
         }
+
+    /** 在每卡视图里找 `mobile_type` 并置 GONE；返回是否命中。 */
+    private fun hideMobileType(cardView: android.view.View): Boolean {
+        val typeView = findByEntryName(cardView, ID_MOBILE_TYPE) ?: return false
+        runCatching {
+            typeView.visibility = android.view.View.GONE
+            // 布局占位一并去掉，否则 GONE 的 View 仍留 margin，宽度不省
+            (typeView.layoutParams as? android.view.ViewGroup.MarginLayoutParams)
+                ?.let { (typeView.layoutParams as android.view.ViewGroup.MarginLayoutParams).marginEnd = 0 }
+        }
+        return true
+    }
+
+    /** 按资源 entry name 递归查子视图（运行时 getIdentifier，不硬编码 R.id 数值——资源 id 逐版漂移）。 */
+    private fun findByEntryName(root: android.view.View, entryName: String): android.view.View? {
+        val res = root.resources
+        val targetId = runCatching { res.getIdentifier(entryName, "id", root.context.packageName) }.getOrNull()
+        if (targetId == null || targetId == 0) return null
+        if (root.id == targetId) return root
+        if (root is android.view.ViewGroup) {
+            for (i in 0 until root.childCount) {
+                findByEntryName(root.getChildAt(i), entryName)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /** mobile_type 视图找不到的一次性告警（布局结构漂移信号，不刷屏）。 */
+    private val mobileTypeMissingWarned = AtomicBoolean(false)
+
+    private fun warnMobileTypeMissing(module: XposedModule) {
+        if (mobileTypeMissingWarned.compareAndSet(false, true)) {
+            module.log(
+                Log.WARN, MountEngine.TAG,
+                "systemui-hook 未生效：单卡视图内找不到 $ID_MOBILE_TYPE（布局漂移或 view id 改名），5G 类型标未隐藏",
+            )
+        }
+    }
 
     private fun warnUnreadableOnce(module: XposedModule) {
         if (unreadableWarned.compareAndSet(false, true)) {

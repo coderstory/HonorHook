@@ -90,8 +90,8 @@ fanqie-purify `adscan.py` 思路：按关键词（广告/弹窗/会员/hybrid br
 
 ### 5. 真机取证补充（静态枚举不到的）
 静态分析枚举不到服务端下发内容（Lynx/H5/自绘），需运行时抓：
-- `adb shell uiautomator dump` → View 树 XML（看 content-desc/text/类名）
-- `adb shell dumpsys window` → 窗口层级（看浮动窗口 type/gravity/surfaceInsets）
+- `tools/dev.sh ui` → View 树 XML（看 content-desc/text/类名，已封装 uiautomator dump）
+- `tools/dev.sh exec adb shell dumpsys window` → 窗口层级（看浮动窗口 type/gravity/surfaceInsets）
 - LSPosed 日志 → hook 挂载/拦截确认
 - 本项目 `tools/dev.sh ui` → uiautomator dump 落 `.buildtmp/ui_*.xml` 并打印文本/描述节点（已封装，优先用它）
 

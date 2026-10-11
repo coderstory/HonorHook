@@ -52,7 +52,7 @@ tools/dev.sh test            # JVM 单元测试（表驱动决策回归）
 4. 强停目标应用后重开；
 5. 判据日志：`ThemeStoreHook: installed 43/43`、`InstallerHook: installed 11/11`、
    `SettingsHook: installed 1/1`、`Exam8Hook: installed 10/10`、`LauncherCardTitleHook: installed 1/1`、
-   `SystemUiHook: installed 1/1`。
+   `SystemUiHook: installed 2/2`。
 
 ### 一键部署（本仓库开发流程）
 

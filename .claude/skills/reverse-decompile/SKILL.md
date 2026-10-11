@@ -41,8 +41,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ### jadx（反编译：Java/Kotlin 伪代码）
 
 ```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)
-tools/jadx/bin/jadx --show-bad-code -d system-files/<app>-jadx <apk>
+tools/dev.sh jadx --show-bad-code -d system-files/<app>-jadx <apk>
 ```
 
 - `--show-bad-code`：混淆代码反编译不完美时也输出（带 goto），对混淆 apk **必加**。
@@ -50,12 +49,12 @@ tools/jadx/bin/jadx --show-bad-code -d system-files/<app>-jadx <apk>
 - `--no-res`：只要源码时跳过资源（更快）。
 - 产物：`sources/<package>/...java`。
 
-**坑**：`jadx-*-all.jar` 的 MANIFEST Main-Class 是 `jadx.gui.JadxGUI`（unzip -p 实证），`java -jar` 100% 进 GUI 绝不产出（不是"可能"）。正解是 `tools/jadx/bin/jadx`（内部以 `-cp ... jadx.cli.JadxCLI` 调 CLI 主类，需先 `export JAVA_HOME` 指向 21）；备选 `"$JAVA_HOME/bin/java" -Xmx4g -cp tools/jadx/lib/jadx-*-all.jar jadx.cli.JadxCLI --show-bad-code -d system-files/<app>-jadx <apk>`。
+**坑**：`jadx-*-all.jar` 的 MANIFEST Main-Class 是 `jadx.gui.JadxGUI`（unzip -p 实证），`java -jar` 100% 进 GUI 绝不产出（不是"可能"）。正解是 `tools/dev.sh jadx`（内部封装了 JAVA_HOME 解析 + CLI 主类调用，不依赖手动 export）。
 
 ### aapt2（资源 id 分析）
 
 ```bash
-aapt2 dump resources <apk> | grep <resource_name>
+tools/dev.sh exec aapt2 dump resources <apk> | grep <resource_name>
 ```
 
 按资源名查 id 数值，比对版本间 id 平移。**aapt2 已随项目内 SDK 就位**：`tools/android-sdk/build-tools/{36.0.0,36.1.0,37.0.0}/aapt2`，无需另装。替代法：apktool 产物 `res/values/public.xml` 的 id 映射 + `unzip -p <apk> <file>`。

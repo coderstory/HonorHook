@@ -37,7 +37,8 @@ CI（`.github/workflows/ci.yml`）：`dev` push = `assembleDebug` + `test`（真
 | `ThemeStoreHook` | 43/43 |
 | `InstallerHook` | 11/11 |
 | `Exam8Hook` | 10/10 |
-| `SettingsHook` / `LauncherCardTitleHook` / `SystemUiHook` | 1/1 |
+| `SettingsHook` / `LauncherCardTitleHook` | 1/1 |
+| `SystemUiHook` | 2/2 |
 
 N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**。
 

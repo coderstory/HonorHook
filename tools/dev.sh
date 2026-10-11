@@ -573,10 +573,12 @@ PYEOF
     require "$ADB"
     "$0" build
     "$0" install
+    "$0" enable-module
     "$0" launch
     sleep 3
-    info "启动后判据日志："
-    "$ADB" logcat -d -v brief "$LOG_TAG:*" 'AndroidRuntime:E' '*:S' 2>/dev/null | tr -d '\r' | tail -30
+    info "启动后判据日志（LSPosed 模块日志，非 logcat）："
+    "$ADB" shell "cat /data/adb/lspd/log/modules_*.log 2>/dev/null | grep -E 'installed [0-9]+/[0-9]+' | tail -20" 2>/dev/null || \
+      warn "未找到 LSPosed 模块日志，确认模块已启用且目标进程已启动"
     ;;
 
   clean)

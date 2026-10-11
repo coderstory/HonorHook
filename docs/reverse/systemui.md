@@ -3,11 +3,12 @@
 > 本文件 = 该 app 的逆向分析记录（信号图标渲染链 + `SystemUiHook` 落地）。索引见 [`README.md`](README.md)。
 
 > 2026-10-10 · 目标 `com.android.systemui` 基线 **17.0.0.1**（versionCode 1700000001，AAK-AN00，Android 17，双卡 DSDS 双联通在网）。
-> 实现 = `SystemUiHook`（1 挂载点），单点 `MobileDataControllerImpl.updateSubs(List)` 入参剔除副卡。
+> 2026-10-11 · 新增 U2 隐藏 5G 标 / U3 双卡信号合并（见 §七）；U1 副卡隐藏实现不变。
 
 ## 一、需求
 
 双卡时状态栏右侧显示两组信号图标（SIM1 大 + SIM2 副卡小，各含 5G 类型标 + 信号格）。隐藏 SIM2 那一组；SIM2 单独在卡时仍正常显示。
+2026-10-11 追加：不显示 5G/4G 类型标；双卡时把两张卡的信号格合并成「一个图标两排」（iOS 样式）。
 
 ## 二、渲染链（jadx 实证，`system-files/systemui-jadx`）
 
@@ -53,11 +54,143 @@ tools/dev.sh deploy-release        # 编译+装包+自动重新启用+强停作�
 tools/dev.sh modlog SystemUiHook   # LSPosed 日志判据
 ```
 
-- `SystemUiHook: installed 1/1`（无失败清单）
+- `SystemUiHook: installed N/N`（N = 开启的功能数；无失败清单）
 - 状态栏右侧只剩 SIM1 一组信号图标；插拔副卡后仍正确（拔 SIM2 → SIM1 独显；拔 SIM1 → SIM2 图标恢复显示）
 - `dumpsys activity service com.android.systemui` 中 `signal_cluster` 的 `mobile_combo` 只剩 1 个子视图
+
+各功能的单独判据见 §七（U2/U3 的判据在 §七·5 与 §七·6）。
 
 ## 六、生效范围说明
 
 同一单例也被锁屏 / 通知头 cluster 消费 ⇒ 副卡信号图标在这些位置一并隐藏（行为一致，预期内）；
 左侧运营商名称卡（`msim_status_bar_operators_card_two_id`）与本点无关，如需另做。
+
+## 七、信号格与视图树（2026-10-11 真机实证）
+
+> 本节全部为**真机取证**结论，静态 jadx 分析得不到或会得出错误结论的项已标注。
+
+### 7.1 视图树（布局实证）
+
+```
+mobile_combo (LinearLayout, horizontal, wrap_content)
+  └ mobile_combo_card (SignalUnitNormalView)      ← addSignalView 的返回值，每卡一个
+      └ FrameLayout
+          ├ mobile_inout (TintImageView)   数据活动箭头
+          ├ mobile_type  (TintImageView)   5G/4G 类型标   ← U2 隐藏它
+          ├ mobile_signal(TintImageView)   信号格 ★ 换合并图标的地方
+          └ mobile_roam  (TintImageView)   漫游标
+```
+
+四种子视图**各自独立** ⇒ 只动 `mobile_signal` 不会波及漫游标/数据箭头/5G 标。
+`mobile_type` / `mobile_signal` 的 view id **运行时 `getIdentifier` 取**，不硬编码 `R.id` 数值（资源 id 逐版漂移）。
+
+### 7.2 信号格是 6 档不是 5 档
+
+资源名形如 `stat_sys_signal_five_0` … `stat_sys_signal_five_5`（含 `_small` 小尺寸变体，状态栏用 small；
+另有 `_fully` 满格变体）。**档位数字 0~5 共 6 档**。探针实测命中 `stat_sys_signal_five_5_small`。
+
+单格尺寸 **17dp 高 × 22.67dp 宽**（vector 尺寸 `svg_regular_size_17dp = 17dp`）。
+两排上下叠需 34dp > 状态栏高度 ⇒ **自绘时每排必须压扁**（这是「iOS 双排」在 Android 状态栏的物理约束）。
+
+### 7.3 信号刷新的唯一落点
+
+```
+SignalIconBinder.bind(...) → RepeatWhenAttached {
+    collect(viewModel.commonImpl.getMobileStrengthId()) { id ->      ← SignalIconBinder.java:469
+        imageView.setVisibility(VISIBLE)
+        HnSignalUtils.setIconForView(imageView, id)                  ← :431 ★ 信号格每次变化必调
+    }
+}
+```
+
+**踩坑（重要）**：初判信号变化走 `TelephonyCallback.onSignalStrengthChanged`，
+但真机布 **9 个挂点全零触发**（framework 嵌套类 3 个 + DexKit 捞到 6 个，其中 2 个是卫星通信 SatelliteController 无关）。
+走数据开关（`svc data disable/enable`）与飞行模式均不触发。⇒ **TelephonyCallback 不是 SystemUI 侧的刷新路径，
+StateFlow → `setIconForView` 才是**。该方法（`com.android.systemui.utils.HnSignalUtils`，具名静态）是最稳的驱动点。
+
+它同时被用于 `mobile_roam` / `activityInOut` / `mobile_type`（同文件 614/695/774/925/937 行），
+故 hook 后**必须按资源名过滤**只处理 `stat_sys_signal*`。
+
+### 7.4 libxposed 102 的返回值规则（两次崩溃换来的）
+
+| 被 hook 方法 | 返回类型 | hook 回调必须返回 |
+|---|---|---|
+| `void` 方法（`updateSubs` / `bind` / `setIconForView`） | void | **`null`** |
+| `addSignalView(int)` | **ViewGroup** | **宿主视图原样返回**，返回 null 会让宿主 `bind(view=null)` → NPE |
+
+- 写死 `; null` 于 void 方法 ⇒ `ClassCastException: Return value's type from hook callback does not match` → SystemUI 崩溃循环。
+- 写死 `; null` 于 `addSignalView` ⇒ 宿主拿到 null → `SignalIconBinder.bind` 第 5 行 `view.getClass()` NPE → 崩溃循环。
+- 另：匿名类 `SignalClusterView$2` 的**外层实例不能靠 superclass 链找**（匿名类非内部类，无外部类引用），
+  要走合成字段 `this$0`。U3 最终设计绕开了这两点，只挂一个 void 方法。
+
+### 7.5 U2 隐藏 5G 标
+
+挂 `SignalIconBinder.bind`（6 参、具名、静态、无重载歧义），第 2 参是每卡的 `SignalUnitNormalView`，
+在宿主把 `mobile_type` 交给协程绑定**之前**置 `GONE`。`bind` 只在每卡视图创建时调一次（随 `updateSubs` 重建），
+故置 GONE 即持久。找不到 `mobile_type` 时**留痕告警**（布局漂移信号，不刷屏）。
+
+### 7.6 U3 双卡信号合并
+
+**设计**：只把主卡（卡序 0）的 `mobile_signal` 换成自绘 Drawable（上下两排，每排 4 根递增柱），
+同时把副卡（卡序 1）整张 `GONE` + 宽度压 0。省一整张卡的宽度，且漫游标/数据箭头不受影响。
+
+**数据**：`setIconForView` 入参资源 id → 正则 `^stat_sys_signal(?:_five)?_(\d)` 取档位；
+按 `mobile_combo_card` 在 `mobile_combo` 的 index 区分卡序。合并在 `group.post{}` 里做（等宿主建完所有卡）。
+
+**取色**：读 `mobile_signal` 自己的 `imageTintList`（宿主 DarkIconDispatcher 体系算好的），不自算 ⇒ 跟随深色模式。
+
+**未验证**：本节 U3 部分代码已实现且编译通过，但**尚未在真机验证过任何视觉效果**（设备不可用）。
+验证判据 = 日志 `HonorHookMerged: 已合并：主卡=X 副卡=Y`。验证前须在模块 UI **关闭 U1「隐藏副卡图标」**
+（U1 开启时副卡在数据层已被剔除，无第二张卡可合并）。
+
+### 7.7 自绘 Drawable 会被宿主擦掉（必须包宿主外壳）
+
+`HnSignalUtils.setIconForView` 内部有快速返回 + 强制覆盖：
+
+```java
+Drawable d = imageView.getDrawable();
+if (d instanceof ResScalingDrawableWrapper && ((ResScalingDrawableWrapper) d).iconId == i) return;  // 快速返回
+…
+imageView.setImageDrawable(new ResScalingDrawableWrapper(drawable2, i, getScaleFactor(ctx)));      // 覆盖
+```
+
+若直接 `setImageDrawable(自绘 Drawable)`：`instanceof` 不成立 ⇒ 快速返回失效 ⇒
+**每次信号强度变化宿主都会覆盖掉自绘图**，功能等于没生效（且表现为「偶尔闪一下原生图标」）。
+
+**正解（已废弃，见 §7.8）**：把自绘图包进宿主自己的 `ResScalingDrawableWrapper` ……
+该方案能防覆盖，但仍解决不了「卡序判定」与「宿主重建后状态残留」，最终被 §7.8 的架构取代。
+
+### 7.8 双排合并的最终架构（移植 HyperCeiler，2026-10-11）
+
+参考：[HyperCeiler `DualRowSignalHookV.kt`](https://github.com/ReChronoRain/HyperCeiler)（小米 HyperOS 同功能实现）。
+它证明「iOS 式双排」在 SystemUI 上可行，且**五个关注点必须分开挂**：
+
+| 层 | 荣耀 SystemUI 17.0.0.1（实证） | HyperCeiler（小米） |
+|---|---|---|
+| 视图创建 | `ModernStatusBarMobileView.constructAndBind(...)` | 同名同签名（AOSP 共同祖先） |
+| 信号数据 | `HnSignalUtils.setIconForView` 第 2 参（资源 id） | `MobileSignalController.notifyListeners` |
+| 插拔卡 | `MobileDataControllerImpl.updateSubs(List)` | `NetworkController.setCurrentSubscriptionsLocked` |
+| 反色 | 待真机验 | `MiuiMobileIconBinder.bind` 的 `tintLightColorFlow` |
+| 卡数判定 | `states` 里已建根视图数 | `mMobileSignalControllers.size()` |
+
+**为什么放弃「只挂 setIconForView 单点」**（初版方案，静态审查查出三个必然失效的问题）：
+1. **卡序画反**：靠 child index 定主副，但宿主建卡顺序不保证按卡槽（VSIM 会被挪到最前）；
+2. **重建后不再生效**：`secondaryHidden` 挂在容器上，宿主 `removeAllViews` 重建后标记残留；
+3. **宿主覆盖自绘图**：直接改 `mobile_signal` 的 drawable 会被宿主每次刷新擦掉。
+
+**新架构如何绕开**：
+- `constructAndBind` 的返回值 `ModernStatusBarMobileView` 自带 **`public int subId`** ⇒ subId 直接可读，
+  不靠 index 反推 ⇒ 解决①；
+- 双排容器是我们自己 `addView` 的子树，宿主 `removeAllViews` 清掉后**下一轮 constructAndBind 重建**，
+  状态挂 rootView（WeakHashMap）随视图一起报废 ⇒ 无残留，解决②；
+- 合并图放在**自建容器**里，与宿主 `mobile_signal` 的 `setImageDrawable` 完全隔离 ⇒ 不被覆盖，解决③。
+
+**注意（移植时易错）**：`constructAndBind` **非 void**（返回 View），hook 回调必须**原样返回宿主视图**；
+返回 null 会让宿主后续 `bind` 收到 null 视图而 NPE（2026-10-11 崩溃实证）。
+
+**形态**：每卡视图里 `mobile_combo` 装各子图标。双排时把原生 `mobile_signal` 隐藏，
+在 `mobile_combo` 里插入一个 FrameLayout，内含两个 ImageView（上=数据卡 / 下=非数据卡），
+并只保留卡槽 0 那组视图（slot>0 整组 GONE）⇒ 视觉上「一个图标两排」，宽度省掉一整组。
+
+**未验证**：U3 仍**零真机验证**。新架构只做了编译与单测（档位解析 10 例）。
+验证判据 = 日志 `HonorHookMerged` 前缀。验证前须在模块 UI **关闭 U1「隐藏副卡图标」**。

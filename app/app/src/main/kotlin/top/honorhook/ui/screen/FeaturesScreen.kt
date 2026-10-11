@@ -428,7 +428,11 @@ private fun FeatureListScreen(
         }.getOrNull()
     }
     val versionText: String? = remember(pkgInfo) {
-        pkgInfo?.let { info -> "${info.versionName} (${info.longVersionCode})" }
+        pkgInfo?.let { info ->
+            val code = runCatching { info.longVersionCode }.getOrNull()
+                ?: @Suppress("DEPRECATION") { info.versionCode.toLong() }
+            "${info.versionName} ($code)"
+        }
     }
     val uid: Int? = remember(pkgInfo) {
         runCatching {

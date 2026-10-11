@@ -77,7 +77,12 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         if (retryRounds == 0) totalCount = pending.size
         val unresolved = mutableListOf<T>()
         for (task in pending) {
-            when (mountOne(task)) {
+            // per-task try/catch 隔离：单任务异常不阻断同批其他任务，汇总行始终输出
+            val result = runCatching { mountOne(task) }.getOrElse {
+                module.log(Log.ERROR, TAG, "$hookName 挂载异常（任务隔离）: ${task.description}", it)
+                Result.FAILED
+            }
+            when (result) {
                 Result.OK -> okCount++
                 Result.FAILED -> failedIds += task.description
                 Result.NOT_RESOLVED -> unresolved += task

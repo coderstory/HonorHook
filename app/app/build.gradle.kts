@@ -89,11 +89,7 @@ dependencies {
     // Extended 图标：KernelSU 首页/设置页用的 Tag、Security、Smartphone、Fingerprint、
     // DeveloperBoard、Block 等全在 extended 里，core 只有几十个基础图标。
     implementation(libs.compose.material.icons.extended)
-    // 液态玻璃：真·背景模糊（vibrancy + blur，API 33+ 走 RuntimeShader，低版本自动降级磨砂）
-    implementation(libs.backdrop)
-
     implementation(libs.activity.compose)
-    implementation(libs.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
 
     // JVM 单元测试（表驱动决策的回归；这些对象无 Android 依赖，不需要 Robolectric）

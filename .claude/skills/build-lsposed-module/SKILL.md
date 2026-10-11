@@ -75,7 +75,8 @@ dependencies {
 
 ```proguard
 -adaptresourcefilecontents META-INF/xposed/java_init.list
--keep,allowobfuscation,allowoptimization public class * extends io.github.libxposed.api.XposedModule {
+# 入口类必须具名 keep，禁止通配 + allowobfuscation——R8 改行为时构建零报错但模块被静默跳过
+-keep public class <你的包名>.HookEntry {
     public void onModuleLoaded(...);
     public void onPackageLoaded(...);
     public void onPackageReady(...);
@@ -139,7 +140,7 @@ UI 写法详见 `reference/LSPFRIDA（同类插件）`、`reference/HyperChanger
 ## 6. 构建产出
 
 ```bash
-./gradlew :app:assembleDebug
+tools/dev.sh build
 ```
 产出 `app/build/outputs/apk/debug/app-debug.apk`。安装后 LSPosed Manager 启用模块 + 勾选作用域。
 

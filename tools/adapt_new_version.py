@@ -42,8 +42,8 @@ HonorHook 版本适配检查脚本 —— 「一键检测新版本 APK 的 hook 
       --expect-pkg com.hihonor.android.thememanager --report system-files/adapt-report-baseline.md
   python tools/adapt_new_version.py new.apk --reuse .buildtmp/adapt_jadx_new.apk
 
-依赖：tools/jadx/bin/jadx.bat（本项目自带）+ JDK 21（优先 HH_JAVA_HOME 环境变量 →
-  C:\\Program Files\\Eclipse Adoptium\\jdk-21* → JAVA_HOME → 系统 C:\\Program Files\\Java\\jdk-21*）。
+依赖：tools/jadx/bin/jadx（本项目自带）+ JDK 21（优先 HH_JAVA_HOME 环境变量 →
+  macOS java_home → JAVA_HOME → 系统常见位置；或用 tools/dev.sh env 查看解析结果）。
 """
 
 import argparse
@@ -63,7 +63,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 REPO = Path(__file__).resolve().parent.parent          # lsposed-plugin/
 TARGET_DIR = (REPO / 'app' / 'app' / 'src' / 'main' / 'kotlin'
               / 'top' / 'honorhook' / 'xposed' / 'target')
-JADX_BAT = REPO / 'tools' / 'jadx' / 'bin' / 'jadx.bat'
+JADX_BIN = REPO / 'tools' / 'jadx' / 'bin' / ('jadx.bat' if sys.platform == 'win32' else 'jadx')
 BUILDTMP = REPO / '.buildtmp'
 
 # ---------------- 挂载点提取（Hook 源码 → 挂载表） ----------------
@@ -78,19 +78,26 @@ class MountPoint:
     return_type: str     # hook 期望的返回类型（ThemeStoreHook 另按它匹配；空串表无）
     mount_id: str        # 幂等 ID（如 theme:ItemInfo.isNeedPayItem），报告追溯用
 
-CLS_DEF_RE = re.compile(r'private\s+const\s+val\s+(CLS_\w+)\s*=\s*"((?:[^"\\]|\\.)*)"')
-PKG_DEF_RE = re.compile(r'private\s+const\s+val\s+PKG\s*=\s*"((?:[^"\\]|\\.)*)"')
+CLS_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+(CLS_\w+)\s*=\s*"((?:[^"\\]|\\.)*)"')
+PKG_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG\s*=\s*"((?:[^"\\]|\\.)*)"')
+PKG_HN_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG_HN\s*=\s*"((?:[^"\\]|\\.)*)"')
 POS_MOUNT_RE = re.compile(
     r'\b(?:addConst|addForceArg)\(\s*pending\s*,\s*'
     r'(CLS_[A-Z0-9_]+|"(?:[^"\\]|\\.)*")\s*,\s*'
     r'"((?:[^"\\]|\\.)*)"\s*,\s*(\d+)\s*,\s*'
     r'"((?:[^"\\]|\\.)*)"')
 NAMED_MOUNT_RE = re.compile(
-    r'MountTask\(\s*kind\s*=\s*MountKind\.\w+\s*,\s*'
+    r'MountTask\(\s*(?:kind\s*=\s*MountKind\.\w+\s*,\s*)?'
     r'className\s*=\s*(CLS_[A-Z0-9_]+|"(?:[^"\\]|\\.)*")\s*,\s*'
     r'methodName\s*=\s*"((?:[^"\\]|\\.)*)"\s*,\s*'
     r'paramCount\s*=\s*(\d+)',
     re.DOTALL)
+POS_MOUNT_TASK_RE = re.compile(
+    r'MountTask\(\s*MountKind\.\w+\s*,\s*'
+    r'(CLS_[A-Z0-9_]+|"(?:[^"\\]|\\.)*")\s*,\s*'
+    r'"((?:[^"\\]|\\.)*)"\s*,\s*'
+    r'(\d+)\s*,\s*'
+    r'"((?:[^"\\]|\\.)*)"')
 
 def unescape_kotlin_str(raw: str) -> str:
     """Kotlin 字符串字面量 → 实际值（本项目只出现 \\$ 转义；通用处理 \\x）。"""
@@ -117,20 +124,39 @@ def extract_call_block(text: str, start: int) -> str:
 def extract_mounts() -> list:
     """从 target/ 目录全部 Hook 源码提取挂载点清单（按文件内出现顺序）。"""
     mounts: list = []
-    hook_files = sorted(TARGET_DIR.glob('*Hook.kt'))
+    hook_files = sorted(TARGET_DIR.rglob('*.kt'))
     hook_files = [f for f in hook_files if f.name != 'TargetHook.kt']
     if not hook_files:
         raise SystemExit(f'未在 {TARGET_DIR} 找到 Hook 源码文件')
+    # 全局常量表（跨文件引用支持）
+    global_clss: dict = {}
+    global_pkg: str = ''  # 全局 PKG（从 ThemeStoreParts.kt 继承）
+    global_pkg_hn: str = ''  # 全局 PKG_HN（从 InstallerHook.kt 继承）
     for hf in hook_files:
         src = hf.read_text(encoding='utf-8', errors='replace')
         pkg_m = PKG_DEF_RE.search(src)
-        pkg = unescape_kotlin_str(pkg_m.group(1)) if pkg_m else ''
-        clss = {}
+        if pkg_m:
+            global_pkg = unescape_kotlin_str(pkg_m.group(1))
+        pkg_hn_m = PKG_HN_DEF_RE.search(src)
+        if pkg_hn_m:
+            global_pkg_hn = unescape_kotlin_str(pkg_hn_m.group(1))
+    # 构建全局常量表（应用模板替换）
+    for hf in hook_files:
+        src = hf.read_text(encoding='utf-8', errors='replace')
         for name, raw in CLS_DEF_RE.findall(src):
             val = unescape_kotlin_str(raw)
-            if '$PKG' in val and pkg:
-                val = val.replace('$PKG', pkg)      # Kotlin 字符串模板展开
-            clss[name] = val
+            # 先替换 $PKG_HN（更长，必须优先），再替换 $PKG
+            if '$PKG_HN' in val and global_pkg_hn:
+                val = val.replace('$PKG_HN', global_pkg_hn)
+            if '$PKG' in val and global_pkg:
+                val = val.replace('$PKG', global_pkg)      # Kotlin 字符串模板展开
+            if name not in global_clss:
+                global_clss[name] = val
+    for hf in hook_files:
+        src = hf.read_text(encoding='utf-8', errors='replace')
+        pkg = global_pkg
+        pkg_hn = global_pkg_hn
+        clss = dict(global_clss)  # 从全局常量表继承（已应用模板替换）
         seen = set()
         for m in NAMED_MOUNT_RE.finditer(src):
             cls_ref, method, pcount = m.group(1), m.group(2), int(m.group(3))
@@ -140,6 +166,12 @@ def extract_mounts() -> list:
             id_m = re.search(r'\bid\s*=\s*"([^"]+)"', block)
             _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
                  method, pcount, ret, id_m.group(1) if id_m else '')
+        for m in POS_MOUNT_TASK_RE.finditer(src):
+            cls_ref, method, pcount, ret = (m.group(1), m.group(2), int(m.group(3)), m.group(4))
+            block = extract_call_block(src, m.start())
+            id_m = re.search(r'"(?:theme|honorhook):[^"]+"', block)
+            _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
+                 method, pcount, unescape_kotlin_str(ret), id_m.group(0).strip('"') if id_m else '')
         for m in POS_MOUNT_RE.finditer(src):
             cls_ref, method, pcount, ret = (m.group(1), m.group(2), int(m.group(3)), m.group(4))
             block = extract_call_block(src, m.start())
@@ -320,28 +352,47 @@ def verify_mount(sources: Path, mp: MountPoint, apk: Path, expect_pkg: str = '',
 # ---------------- jadx 反编译 ----------------
 
 def find_java_home() -> str:
-    """JDK 定位（三段式：env 覆盖 → 用户级/常见位置 → 系统位 → throw）。"""
+    """JDK 定位（跨平台：env 覆盖 → 系统常见位置 → throw）。"""
     cands = []
     if os.environ.get('HH_JAVA_HOME'):
         cands.append(os.environ['HH_JAVA_HOME'])
-    cands += glob.glob(r'C:\Program Files\Eclipse Adoptium\jdk-21*')
     if os.environ.get('JAVA_HOME'):
         cands.append(os.environ['JAVA_HOME'])
-    cands += glob.glob(r'C:\Program Files\Java\jdk-21*')
+    if sys.platform == 'darwin':
+        # macOS: /usr/libexec/java_home -v 21
+        import subprocess as _sp
+        try:
+            out = _sp.check_output(['/usr/libexec/java_home', '-v', '21'],
+                                   text=True, stderr=_sp.DEVNULL).strip()
+            if out:
+                cands.append(out)
+        except Exception:
+            pass
+    elif sys.platform == 'win32':
+        cands += glob.glob(r'C:\Program Files\Eclipse Adoptium\jdk-21*')
+        cands += glob.glob(r'C:\Program Files\Java\jdk-21*')
+    else:
+        # Linux: 常见位置
+        cands += glob.glob('/usr/lib/jvm/*jdk*21*')
+        cands += glob.glob('/usr/lib/jvm/*-21-*')
     for c in cands:
-        if Path(c, 'bin', 'java.exe').exists():
+        java_exe = 'java.exe' if sys.platform == 'win32' else 'java'
+        if Path(c, 'bin', java_exe).exists():
             return c
-    raise SystemExit('未找到 JDK 21：请设置 HH_JAVA_HOME 指向含 bin/java.exe 的 JDK21 目录'
-                     '（或安装 Eclipse Adoptium jdk-21）')
+    raise SystemExit('未找到 JDK 21：请设置 HH_JAVA_HOME 指向含 bin/java 的 JDK21 目录'
+                     '（或用 tools/dev.sh env 查看解析结果）')
 
 def run_jadx(apk: Path, out_dir: Path, threads: int):
-    if not JADX_BAT.exists():
-        raise SystemExit(f'未找到 jadx: {JADX_BAT}')
+    if not JADX_BIN.exists():
+        raise SystemExit(f'未找到 jadx: {JADX_BIN}')
     java_home = find_java_home()
     if out_dir.exists():
         shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
-    cmd = ['cmd', '/c', str(JADX_BAT), '--no-res']
+    if sys.platform == 'win32':
+        cmd = ['cmd', '/c', str(JADX_BIN), '--no-res']
+    else:
+        cmd = [str(JADX_BIN), '--no-res']
     if threads:
         cmd += ['-j', str(threads)]
     cmd += ['-d', str(out_dir), str(apk)]

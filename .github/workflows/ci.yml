@@ -36,10 +36,11 @@ jobs:
       # dev 分支：编译 debug + 单测
       - name: Build debug (dev)
         if: github.ref_name == 'dev'
-        run: |
-          ./app/gradlew -p app assembleDebug --no-daemon --stacktrace
-          # 真门禁（不加 `|| true`）：跑 :app:testDebugUnitTest，覆盖表驱动决策的回归。
-          ./app/gradlew -p app test --no-daemon
+        run: ./app/gradlew -p app assembleDebug --no-daemon --stacktrace
+
+      # 单测门禁（dev + master 均跑，master 发布前必须通过）
+      - name: Run tests
+        run: ./app/gradlew -p app test --no-daemon --stacktrace
 
       - name: Upload debug APK (dev)
         if: github.ref_name == 'dev'

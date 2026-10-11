@@ -388,7 +388,7 @@ F3/F4 试用永久化 hook 闭环。
 
 | # | 类 | 方法/字段 | 签名 | 建议改法 | 覆盖现象 |
 |---|---|---|---|---|---|
-| T1 | incentive.IncentiveData | `getThemeDetailButtonType` | `()I` | 常返 **0**（免费领小按钮组）或 **1**；绝不留 -1（会 hideLayout 全隐藏） | 详情页按钮组显示 |
+| T1 | incentive.IncentiveData | `getThemeDetailButtonType` | `()I` | 常返 **-1**（无激励，只隐藏激励视图，保留下载/应用/购买） | 详情页按钮组显示 |
 | T2 | entity.ToolBarGroupLayout | `needShowBuyButton` | `(LWallPaperInfo;)Z` | **常返 false**（购买门直接关，走免费/下载分支） | 壁纸/挂件详情【购买】 |
 | T3 | detail.WallpaperDetailView | `needShowBuyButton` | `(LWallPaperInfo;)Z` | 常返 false（同 T2 副本） | 壁纸详情弹窗【购买】 |
 | T4 | common.ItemInfo | `isNeedPayItem` / `getPayed` | `()Z` | isNeedPayItem 常返 false + getPayed 常返 true（列表/详情价格门） | 列表与详情所有收费态 |
@@ -401,7 +401,7 @@ F3/F4 试用永久化 hook 闭环。
 
 **组合建议（最小集）**：T1 + T2 + T4 + T5（或 T8）＋ T9。T2/T3 二选一按真机进入壁纸还是主题详情，建议都上（方法短、无副作用）。
 
-**警告**：T1 返回 -1 会把按钮组全部 hideLayout()（含下载/应用按钮），勿用 -1；hook `isBuyBtnShow` 常返 false 的旧做法会使 updateButtons 不执行、按钮停留初始态，**不要再单独用**（可配合 T2 用常返 true 保持门开着）。
+**警告**：T1 必须返回 -1（详见 §F2 T1 更正记录——旧版"−1 会隐藏全部按钮"是误读，实际只隐藏激励视图）；hook `isBuyBtnShow` 常返 false 的旧做法会使 updateButtons 不执行、按钮停留初始态，**不要再单独用**（可配合 T2 用常返 true 保持门开着）。
 
 ---
 
@@ -926,13 +926,12 @@ URL 写入 `downloadInfo.uri` 后 `super.downloadItem()` 直下。）
 - **B3–B9：`VipState` 的 7 个 getter 散读直改**（方法级短路，不依赖任何调用链假设）：
   `getExpireTimeTimestamp`（到期时间戳）、`getDisplayTimeTimestamp` / `getDisplayTime`（到期展示）、
   `getRemainingTime`（剩余时长）、`getVipStatus`→2、`getVipType`→2、`isVipUser`→true。
-- ~~**双漏斗 VIP_STATE_FIX**~~ —— **已于 2026-10-10 审计删除**（原为 `VipModel.changeToVipState` +
-  `checkVipStateOnline` 两点，intercept 后逐 setter 改写 `VipState` 实例字段）。删除依据：
-  **`VipState` 字段全部 private**（`VipState.java:32/37/58/69/72`）⇒ 类外读取**只能**经过上面这 7 个 getter，
-  而 getter 已被短路成常量 ⇒ 漏斗改写的实例字段**没有任何消费方能读到**（除类内 `toString`/`copy` 等），
-  属冗余的第二层兜底。删除后挂载表 **42 → 40**。
-
-**F1 现状 = 9 点**（`VipManager` 读/写 2 + `VipState` getter 7）。
+- **双漏斗 VIP_STATE_FIX** —— **2026-10-10 真机回归后恢复**（`VipManager.getLocalVipState` +
+  `VipManager.getVipState` 两点，intercept 后逐 setter 改写 `VipState` 实例字段）。恢复依据：
+  getter 短路覆盖不了 **null 实例路径**——`getVipState` 首查未落缓存时返回 null，UI 拿到 null
+  直接走"已过期/未登录"分支（"VIP 已过期"横幅回归的真机根因）。漏斗改写 after 语义：先 proceed
+  拿实例 → 逐 setter 填永久 VIP 值；实例 null 时无参构造自建后返回。与 getter 散读直改**双层并存**。
+  恢复后 F1 现状 = **12 点**（`VipManager` 读/写 2 + `VipState` getter 8 + 漏斗 2）。
 
 ### F1 挽留弹窗拦截（`docs/reverse/theme-store.md` §现象四 4.5，F1/F2 双保险）
 
