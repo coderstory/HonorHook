@@ -38,7 +38,11 @@ object FeatureCatalog {
 
     data class Feature(val key: String, val title: String, val description: String)
 
-    data class Target(val packageName: String, val name: String, val features: List<Feature>)
+    /**
+     * [iconKey] 虚拟目标（非真实 app）的内置图标提示，UI 侧据此画 vector 而非 PackageManager 图标。
+     * 真实 app 目标留 null。当前取值："shield"。
+     */
+    data class Target(val packageName: String, val name: String, val features: List<Feature>, val iconKey: String? = null)
 
     val targets: List<Target> = listOf(
         Target(
@@ -98,6 +102,7 @@ object FeatureCatalog {
                     "拦截荣耀埋点 SDK（com.hihonor.hianalytics）上报：日历/天气/浏览器/游戏中心/视频/云音乐的事件·会话·点击·曝光埋点与 OAID 标识注入全部短路，数据不落库不出网",
                 ),
             ),
+            iconKey = "shield",
         ),
     )
 }

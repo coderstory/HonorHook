@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,8 +38,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
@@ -230,30 +234,58 @@ private class DrawablePainter(private val drawable: Drawable) : Painter() {
     }
 }
 
-/** 图标槽位：有图标画图标，无图标画首字母色块（不留空白）。 */
+/** iconKey → 内置 vector（虚拟目标专用）；未匹配返回 null 走 PackageManager 图标。 */
+private fun vectorForIconKey(key: String?): ImageVector? = when (key) {
+    "shield" -> Icons.Rounded.Shield
+    else -> null
+}
+
+/**
+ * 图标槽位：虚拟目标（iconKey 命中）画内置 vector；真实 app 画 PackageManager 图标；
+ * 无图标画首字母色块（不留空白）。
+ */
 @Composable
 private fun AppIconSlot(
     packageName: String,
     fallbackText: String,
     modifier: Modifier = Modifier,
+    iconKey: String? = null,
 ) {
-    val icon = rememberAppIcon(packageName)
-    if (icon != null) {
-        Image(painter = icon, contentDescription = null, modifier = modifier)
-    } else {
-        // 兜底：Miuix 次强调色圆角块 + 首字母，避免"图标空白"看起来像 bug
-        Box(
-            modifier = modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = fallbackText.take(1).uppercase(),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = colorScheme.onPrimaryContainer,
-            )
+    val vector = vectorForIconKey(iconKey)
+    val icon = if (vector == null) rememberAppIcon(packageName) else null
+    when {
+        vector != null -> {
+            // 虚拟目标：圆角块底 + tint vector，与首字母兜底块同构
+            Box(
+                modifier = modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    imageVector = vector,
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(colorScheme.onPrimaryContainer),
+                    modifier = Modifier.fillMaxSize(0.62f),
+                )
+            }
+        }
+        icon != null -> Image(painter = icon, contentDescription = null, modifier = modifier)
+        else -> {
+            // 兜底：Miuix 次强调色圆角块 + 首字母，避免"图标空白"看起来像 bug
+            Box(
+                modifier = modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = fallbackText.take(1).uppercase(),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colorScheme.onPrimaryContainer,
+                )
+            }
         }
     }
 }
@@ -286,6 +318,7 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
             AppIconSlot(
                 packageName = target.packageName,
                 fallbackText = target.name,
+                iconKey = target.iconKey,
                 modifier = Modifier
                     .padding(end = 10.dp)
                     .size(48.dp),
@@ -354,6 +387,7 @@ private fun AppHeaderCard(
             AppIconSlot(
                 packageName = target.packageName,
                 fallbackText = target.name,
+                iconKey = target.iconKey,
                 modifier = Modifier.size(44.dp),
             )
             Column(
