@@ -273,8 +273,8 @@ private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPad
 private fun InfoCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, "管理器版本", appVersionLabel())
-            InfoRow(Icons.Filled.DeveloperBoard, "管理器包名", "top.honorhook")
+            InfoRow(Icons.Filled.Tag, "插件版本", appVersionLabel())
+            InfoRow(Icons.Filled.DeveloperBoard, "插件包名", "top.honorhook")
             InfoRow(
                 Icons.Filled.Smartphone, "系统版本",
                 "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
@@ -283,7 +283,7 @@ private fun InfoCard() {
                 Icons.Filled.Fingerprint, "设备",
                 "${Build.MANUFACTURER} ${Build.MODEL}",
             )
-            // 系统架构原来复用了 DeveloperBoard（与"管理器包名"同一个图标），换成 Memory
+            // 系统架构原来复用了 DeveloperBoard（与"插件包名"同一个图标），换成 Memory
             InfoRow(
                 Icons.Filled.Memory, "系统架构",
                 Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
