@@ -98,4 +98,6 @@ dependencies {
 
     // JVM 单元测试（表驱动决策的回归；这些对象无 Android 依赖，不需要 Robolectric）
     testImplementation(libs.junit)
+    // UpdateChecker 网络测试用真实 JSON 解析器（Android 运行时自带 org.json，JVM stub 会抛 Stub!）
+    testImplementation("org.json:json:20240303")
 }
