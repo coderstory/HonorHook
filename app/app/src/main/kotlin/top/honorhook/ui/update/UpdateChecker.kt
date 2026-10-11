@@ -65,8 +65,10 @@ object UpdateChecker {
                     break
                 }
             }
-            return parseTag(json.getString("tag_name"), apkUrl)
+            val rel = parseTag(json.getString("tag_name"), apkUrl)
                 ?: error("tag 不符合 v<version>.r<build> 契约")
+            android.util.Log.i("HonorHookUpdate", "fetchLatest ${rel.tag} apk=${apkUrl.isNotEmpty()}")
+            return rel
         } finally {
             conn.disconnect()
         }
@@ -93,6 +95,9 @@ object UpdateState {
     var probedUrl by mutableStateOf<String?>(null)
         private set
 
+    private var probeJob: kotlinx.coroutines.Job? = null
+    private var probedForApk: String? = null
+
     private val scope = CoroutineScope(Dispatchers.IO)
 
     /** manual = 用户点了「检查更新」，必须有反馈（弹窗/Toast）；false = 启动静默检查。 */
@@ -106,9 +111,14 @@ object UpdateState {
                         latest = r
                         if (UpdateChecker.isNewer(r, BuildConfig.VERSION_NAME, BuildConfig.BUILD_NUM)) {
                             showDialog = true
-                            // 弹窗弹出即并行探测全部下载源，用户点下载时直接用可用源（零等待）
-                            probedUrl = null
-                            launch { probedUrl = ApkInstaller.probeSources(r.apkUrl) }
+                            // 弹窗弹出即并行探测全部下载源（同一 apkUrl 不重复探，手动重查不白等）
+                            val apk = r.apkUrl
+                            if (apk != probedForApk || probeJob?.isActive != true) {
+                                probedForApk = apk
+                                probedUrl = null
+                                probeJob?.cancel()
+                                probeJob = launch { probedUrl = ApkInstaller.probeSources(apk) }
+                            }
                         } else if (manual) {
                             notice = "已是最新版本 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_NUM}）"
                         }
@@ -121,6 +131,15 @@ object UpdateState {
                 }
             withContext(Dispatchers.Main) { checking = false }
         }
+    }
+
+    /** 点下载时调用：探测进行中先等它出结果（比老链直连卡 10s 快），完成立即返回。 */
+    suspend fun awaitProbe(timeoutMs: Long = 12_000): String? {
+        val job = probeJob
+        if (job != null && job.isActive) {
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { job.join() }
+        }
+        return probedUrl
     }
 
     fun dismissDialog() {

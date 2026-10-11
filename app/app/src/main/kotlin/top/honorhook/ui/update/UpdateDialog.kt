@@ -47,9 +47,9 @@ fun UpdateDialog(onDismiss: () -> Unit) {
             try {
                 val dest = File(context.cacheDir, "update/app-release.apk")
                 withContext(Dispatchers.IO) {
-                    val probed = UpdateState.probedUrl
+                    // 探测进行中先等它出结果（TLS 探活 ~2s），拿不到再走逐源兜底链
+                    val probed = UpdateState.awaitProbe()
                     if (probed != null) {
-                        // 弹窗期已并行探明的可用源，直下零等待
                         ApkInstaller.downloadFrom(probed, dest) { p -> phase = Phase.Downloading(p) }
                     } else {
                         ApkInstaller.download(release.apkUrl, dest) { p -> phase = Phase.Downloading(p) }

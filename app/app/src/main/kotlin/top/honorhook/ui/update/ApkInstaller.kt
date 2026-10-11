@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -15,6 +16,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object ApkInstaller {
+
+    private const val TAG = "HonorHookUpdate"
 
     /** 下载源候选：直连 + GitHub 加速镜像前缀（镜像可用性时变，逐个试到成功；全挂走浏览器兜底）。 */
     private val SOURCE_PREFIXES = listOf(
@@ -31,6 +34,7 @@ object ApkInstaller {
         var lastErr: Exception? = null
         for (prefix in SOURCE_PREFIXES) {
             try {
+                Log.i(TAG, "download try ${prefix.ifEmpty { "direct" }}")
                 downloadFrom(prefix + url, dest, onProgress)
                 return
             } catch (e: Exception) {
@@ -42,10 +46,10 @@ object ApkInstaller {
     }
 
     /**
-     * 并行探测所有源（Range GET 1 字节，探通即弃），返回第一个可用源的完整 URL；
-     * 全挂返回 null。弹窗弹出时调用，把逐源等待挪到用户点下载之前。
+     * 并行探测所有源，返回第一个可用源的完整 URL；全挂返回 null。
+     * 判定标准 = TCP+TLS 握手成功（connect()），不等 TTFB——慢镜像首包经常 >6s 但链路可用。
      */
-    suspend fun probeSources(url: String, timeoutMs: Int = 6_000): String? = coroutineScope {
+    suspend fun probeSources(url: String, timeoutMs: Int = 10_000): String? = coroutineScope {
         SOURCE_PREFIXES
             .map { prefix ->
                 async(Dispatchers.IO) {
@@ -53,10 +57,14 @@ object ApkInstaller {
                         val conn = URL(prefix + url).openConnection() as HttpURLConnection
                         conn.connectTimeout = timeoutMs
                         conn.readTimeout = timeoutMs
-                        conn.setRequestProperty("Range", "bytes=0-0")
+                        val t0 = System.currentTimeMillis()
                         try {
-                            val code = conn.responseCode
-                            if (code == 200 || code == 206) prefix + url else null
+                            conn.connect()
+                            Log.i(TAG, "probe OK ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms")
+                            prefix + url
+                        } catch (e: Exception) {
+                            Log.i(TAG, "probe FAIL ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms: ${e.message}")
+                            throw e
                         } finally {
                             conn.disconnect()
                         }
@@ -64,6 +72,9 @@ object ApkInstaller {
                 }
             }
             .awaitAll()
+            .also { results ->
+                Log.i(TAG, "probe done: ${results.filterNotNull().size}/${results.size} 通")
+            }
             .firstOrNull { it != null }
     }
 
@@ -78,6 +89,7 @@ object ApkInstaller {
             conn.instanceFollowRedirects = false
             try {
                 val code = conn.responseCode
+                Log.i(TAG, "download $code $u")
                 if (code in 300..399) {
                     if (++redirects > 5) error("重定向次数过多")
                     val loc = conn.getHeaderField("Location") ?: error("重定向缺 Location")
@@ -86,6 +98,7 @@ object ApkInstaller {
                 }
                 require(code == 200) { "HTTP $code" }
                 val total = conn.contentLengthLong
+                Log.i(TAG, "download body total=$total")
                 dest.parentFile?.mkdirs()
                 var done = 0L
                 conn.inputStream.use { input ->
