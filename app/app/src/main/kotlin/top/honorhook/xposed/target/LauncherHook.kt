@@ -9,15 +9,17 @@ import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
 
 /**
- * 荣耀桌面 `com.hihonor.android.launcher`：卡片标题隐藏（L1）+ 文件夹返回保持打开（L2a/L2b/L3）。
+ * 荣耀桌面 `com.hihonor.android.launcher`：卡片标题隐藏（L1）+ 文件夹返回保持打开（L2a/L2b/L3/L4）。
  *
  * 挂载点本体在数据表 [LAUNCHER_POINTS_18_0_0_234]，按 kind 分派的 intercept 在 [mountOne]。
  * 版本分发走 [HostVersion]（空集合 = 默认套，覆盖基线 18.0.0.234）。
  *
- * L2 依据：关文件夹由 `Launcher.mNeedCloseFolderOnSaveState` 单旗门控，但**多条路径读取方式不同**——
- * ① `Launcher.onStop()` 直接读字段（L2b 清字段）；② 返回动画等 5 处走 `getNeedCloseFloderOnSaveState()`
- * （L2a 恒 false）；③ **现症根因**：按 Home 返回桌面走 `onNewIntent → doMainActionIntent → doShowWorkspaceAnim
- * → closeFolder(folder, z)`，该链不看任何关闭旗（L3 把 folder 实参置 null）。
+ * 关文件夹有四条互不相干的链，逐条堵：
+ * ① 返回动画等 5 处读 `getNeedCloseFloderOnSaveState()` —— L2a 恒 false；
+ * ② `Launcher.onStop()` 直读 `mNeedCloseFolderOnSaveState` 字段 —— L2b 命中时清字段；
+ * ③ 三键 Home 回桌面走 `onNewIntent → doMainActionIntent → doShowWorkspaceAnim → closeFolder` —— L3 置空 folder 实参；
+ * ④ **手势上滑从应用回桌面**在 `onGestureStarted` 现场被 quickstep 的例行重置关闭
+ *    （`closeOverlay()` 与 `processStateForOverView()` 两条，均不看关闭旗）—— L4 在返回手势链上短路该调用。
  * 详见 `docs/reverse/launcher-folder-keepopen.md`。
  */
 object LauncherHook : TargetHook {
@@ -73,8 +75,53 @@ object LauncherHook : TargetHook {
                     @Suppress("UNCHECKED_CAST")
                     chain.proceed(argv as Array<Any>)
                 }
+                // L4 手势返回：从应用侧上滑回桌面时的 overlay/背景状态重置不再关文件夹，直接短路。
+                MountKind.KEEP_FOLDER_ON_RETURN_GESTURE -> {
+                    if (fromAppReturnGesture()) {
+                        engine.judge(module, task, JUDGE_PREFIX, "从应用返回手势的例行重置短路，文件夹保持打开")
+                        null
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                // 诊断：只打「谁调的 closeFolder」一行（调用栈已三次误判，留作常备取证），随后放行。
+                MountKind.TRACE_FOLDER_CLOSE -> {
+                    module.log(Log.WARN, MountEngine.TAG, "FOLDER-CLOSE 触发方: ${nearestCaller()}")
+                    engine.judge(module, task, JUDGE_PREFIX)
+                    chain.proceed()
+                }
             }
         }
+
+    /**
+     * 本次 `Launcher.closeFolder(boolean)` 是否属于「从应用侧返回桌面」的例行重置（L4 判定）。
+     *
+     * 要求栈上**同时**出现两类帧：
+     * ① [OTHER_ACTIVITY_CONSUMER] —— quickstep 在**别的应用处于前台**时接管手势的消费者。
+     *    它的存在把场景锁死为"从应用滑回桌面"，桌面内切 Recents（HomeInputConsumer 等）不满足，
+     *    故"点外部关文件夹 / 桌面内上滑"等原有行为不受影响。
+     * ② [RESET_CALLERS] 之一 —— 离开桌面时才跑的 overlay/状态重置入口，其中的 `closeFolder(false)`
+     *    **不看任何关闭旗**，是 L2a/L2b/L3 之外的两条真实关闭链（真机调用栈实证）。
+     */
+    private fun fromAppReturnGesture(): Boolean {
+        var fromApp = false
+        var reset = false
+        // 两帧顺序不定（消费者在重置入口**下方**，不能提前 return），故整栈扫完再判。
+        for (frame in Thread.currentThread().stackTrace) {
+            if (frame.className == OTHER_ACTIVITY_CONSUMER) fromApp = true
+            else if (RESET_CALLERS[frame.className] == frame.methodName) reset = true
+        }
+        return fromApp && reset
+    }
+
+    /** 最近一个非 hook 胶水/非合成分身的调用方，形如 `类简名.方法(文件:行)`。 */
+    private fun nearestCaller(): String =
+        Thread.currentThread().stackTrace
+            .filter { it.className.startsWith("com.hihonor.") || it.className.startsWith("com.android.") }
+            .dropWhile { it.methodName == "closeFolder" }
+            .firstOrNull()
+            ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})" }
+            ?: "未知"
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "launcher-hook"
@@ -85,13 +132,25 @@ object LauncherHook : TargetHook {
     /** L3 目标实参位：`doMainActionIntent(Intent, Folder, ManualStackExpandGroup)` 的 folder。 */
     private const val FOLDER_ARG_INDEX = 1
 
+    /** L4 判定：quickstep「别的应用在前台」时的手势消费者（其在场即"从应用返回桌面"）。 */
+    private const val OTHER_ACTIVITY_CONSUMER = "com.android.quickstep.inputconsumers.OtherActivityInputConsumer"
+
+    /** L4 判定：离开桌面时的例行重置入口（类名 → 方法名）。两者都在 launcher 未回前台时执行。 */
+    private val RESET_CALLERS = mapOf(
+        // ① 手势开始现场重置 overlay：AbsSwipeUpHandler.onGestureStarted → closeOverlay()
+        "com.android.quickstep.LauncherActivityInterface" to "closeOverlay",
+        // ② launcher 被拉起铺 Recents 背景：prepareRecentsUI → initBackgroundStateUI
+        //    → goToState(BACKGROUND_APP) → 本入口（仅 BACKGROUND_APP / QUICK_SWITCH_FROM_HOME 分支关）
+        "com.hihonor.android.launcher.extension.quickstep.views.HnRecentsViewStateController" to "processStateForOverView",
+    )
+
     /** hook 编写时的宿主版本基线（dumpsys package 实证）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
     private const val HOST_VERSION_BASELINE = "18.0.0.234"
 
     // ---------------- 挂载任务定义（与 ThemeStore/Installer 同构） ----------------
 
-    /** 挂载任务类型：CONST 常量短路；KEEP_FOLDER_ON_STOP 命中清字段后放行；DROP_FOLDER_ON_HOME 命中置空 folder 实参后放行。 */
-    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP, DROP_FOLDER_ON_HOME }
+    /** 挂载任务类型：CONST 常量短路；KEEP_FOLDER_ON_STOP 命中清字段后放行；DROP_FOLDER_ON_HOME 命中置空 folder 实参后放行；KEEP_FOLDER_ON_RETURN_GESTURE 判定为从应用返回桌面时直接短路；TRACE_FOLDER_CLOSE 仅打调用方诊断。 */
+    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP, DROP_FOLDER_ON_HOME, KEEP_FOLDER_ON_RETURN_GESTURE, TRACE_FOLDER_CLOSE }
 
     private class MountTask(
         val kind: MountKind,
@@ -102,6 +161,7 @@ object LauncherHook : TargetHook {
         val value: Any?,
         override val id: String,
         override val description: String,
+        override val dex: MountEngine.DexHint? = null,
     ) : MountEngine.Task
 
     /** 数据表挂载点 → 运行时任务（声明式字段落到具体类型）。 */
@@ -114,5 +174,7 @@ object LauncherHook : TargetHook {
         value = value,
         id = id,
         description = description,
+        // 同名重载消歧（如 Launcher.closeFolder 的 (Folder)V 与 (Z)V 同为 1 参 void）靠参数类型锚点。
+        dex = dexParamTypes?.let { MountEngine.DexHint(paramTypes = it) },
     )
 }
