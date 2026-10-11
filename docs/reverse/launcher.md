@@ -1,6 +1,6 @@
 # 系统桌面 `com.hihonor.android.launcher` — 逆向分析与实现
 
-> 本文件 = 该 app 的逆向分析记录（卡片标题渲染链 + 隐藏判定链 + `LauncherCardTitleHook` 落地）。索引见 [`README.md`](README.md)。
+> 本文件 = 该 app 的逆向分析记录（卡片标题渲染链 + 隐藏判定链 + `LauncherHook` 落地）。索引见 [`README.md`](README.md)。
 
 > 真机实证：AAK-AN00 / MagicOS 11.0.0 / `ro.build.magic_api_level=43` / launcher `18.0.0.234`（2026-10-10）。
 > 静态基线：`YOYOCardStackPlugin.apk` + `HnLauncher6.apk`（原拉取于 `.buildtmp/launcher/`，该临时目录 2026-10-10 已清理，需要时从设备重拉）。
@@ -15,7 +15,7 @@
 | 谁渲染它 | `com.hihonor.android.launcher.cardstack.view.HnIndicator2X4StackView`（当前屏上的时钟+天气 4x2 卡片堆叠） |
 | 官方有没有开关 | **有**：桌面设置「隐藏应用名称」（pref key `launcher_hide_title`，SP `launcher_icon_title_hidden`） |
 | 开关的代价 | 会**同时**隐藏桌面全部应用图标名称（支付宝/淘宝…），不能只关卡片标题 |
-| 只隐藏卡片标题 | **已实现**（`LauncherCardTitleHook`：挂 `ThemeUtilImpl.isHiddenTitle()` → true，见 §八） |
+| 只隐藏卡片标题 | **已实现**（`LauncherHook`：挂 `ThemeUtilImpl.isHiddenTitle()` → true，见 §八） |
 
 ---
 
@@ -195,23 +195,24 @@ if (child instanceof IStackView)           ((IStackView) child).setTitleVisibili
 
 ## 八、实现落地与真机验证（HonorHook）
 
-**采用路线 ①（单点，base CL，已实现）**：新目标 `LauncherCardTitleHook`
-（`app/app/src/main/kotlin/top/honorhook/xposed/target/LauncherCardTitleHook.kt`）只挂
-`com.hihonor.android.plugin.service.theme.ThemeUtilImpl#isHiddenTitle()Z` → 恒 `true`。
+**采用路线 ①（数据表单点，base CL，已实现）**：新目标 `LauncherHook`
+（`app/app/src/main/kotlin/top/honorhook/xposed/target/LauncherHook.kt`，挂载点表 `LauncherMap_18_0_0_234.kt`）
+挂两个 CONST 点 —— L1 `ThemeUtilImpl#isHiddenTitle()Z` → 恒 `true`；
+L2 `Launcher#getNeedCloseFloderOnSaveState()Z` → 恒 `false`（文件夹返回保持打开，见 `launcher-folder-keepopen.md`）。
 
 - **为何不挂插件类**：真机探针实证 `HnIndicator2X4StackView` 在 `defaultClassLoader` / 线程 contextCL /
   Application.loader **三个 loader 上 `loadClass` 全部未命中**（LSPosed 日志 `probe: [...] => 未命中`）
   ⇒ 插件类不可经 base CL 解析；而 `ThemeUtilImpl` 在 base APK `classes3.dex`，直连反射即命中，
   **免去插件 ClassLoader 捕获/重试基建**。旧版按插件 `cardstack` 的 `setTitle` 实现真机为 `installed 0/2`（同日志），已废弃。
 - **不碰 SP**：只改 ITheme 出口返回值；`HiddenTitleManager`（图标名读链，见 §五）不受影响 ⇒ 桌面图标名保留。
-- **注册**：`TargetRegistry.register(LauncherCardTitleHook)`；作用域 `com.hihonor.android.launcher` 已在 `scope.list`。
+- **注册**：`TargetRegistry.register(LauncherHook)`；作用域 `com.hihonor.android.launcher` 已在 `scope.list`。
   TEMP 诊断探针 `LauncherProbeHook` 已删除。`dev.sh deploy-release` 一键部署（release 427KB）。
 
 **真机判据（AAK-AN00 / 2026-10-10 18:28）**：
 
 ```
-LauncherCardTitleHook: installed 1/1
-LauncherCardTitleHook 宿主版本与 hook 基线一致: 18.0.0.234
+LauncherHook: installed 2/2
+LauncherHook 宿主版本与 hook 基线一致: 18.0.0.234
 launcher-hook 生效: launcher:themeUtil.isHiddenTitle — L1 卡片标题隐藏（…）
 ```
 
