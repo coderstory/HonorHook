@@ -1,13 +1,37 @@
 # 挂载点台账与审计决策
 
 > **本文件只记代码里读不到的**：口径、已决的删除决策与理由、**勿删观察项**、真机回归教训。
-> **逐点清单不在这里** —— 权威来源 = 各 `*Hook.kt` / `themestore/Collectors*.kt` 内的挂载表（代码），
+> **逐点清单不在这里** —— 权威来源 = 数据表 `<Target>Map_<版本>.kt`（theme）与各 `*Hook.kt` 内挂载表（代码），
 > 逐点逆向依据 = [`reverse/`](reverse/) 下对应 app 的记录，设计理由 = [`theme-store.md`](theme-store.md)。
 > 复核点数（**全命名空间**，勿再漏 `cloud:` / `adsource:` / `btn-hide:` / `ad-request:` / `ad-source:` / `ab-request:`）：
 > `grep -rhoE '"[a-zA-Z0-9-]+:[A-Za-z0-9_.$]+"' app/app/src/main/kotlin/top/honorhook/xposed/target/ | sort -u | wc -l`
-> 当前结果：合计 **67**（theme 43 / installer 11 / exam8 10 / settings 1 / systemui 1 / launcher 1）。
+> 当前结果：合计 **68**（theme 43 / installer 11 / exam8 10 / settings 1 / systemui 2 / launcher 1）。
 
 ## 一、口径与当前基线
+
+### 版本对照（**别搞反**：代码基线是 hook 编写时反编译的那版，设备实际是跑在真机上的那版）
+
+| 目标 | 代码基线（`HOST_VERSION_BASELINE`） | 设备实际（2026-10-11 实测） | 关系 |
+|---|---|---|---|
+| 主题商店 | `20.1.63.305` | `20.0.11.327` | 设备**更旧** |
+| 包管理器 | `14.0.37.301` | `14.0.22.326` | 设备**更旧** |
+| 设置 | `14.0.0.210` | `14.0.0.210` | 一致 |
+| 系统桌面 | `18.0.0.234` | `18.0.0.234` | 一致 |
+| 成考题库 | `5.9.0.0-release` | `5.9.0.0-release` | 一致 |
+| SystemUI | `17.0.0.1` | `17.0.0.1` | 一致 |
+
+两个失效目标（theme `4/43`、installer `0/11`）都是**代码基线比设备实际新**——不是用户 OTA 升级导致，
+而是本模块的挂载点当初是照更新的版本写的。适配方向 = **补一套"旧版"映射**，不是"追新版"。
+查设备版本：`tools/dev.sh exec adb shell dumpsys package <pkg> | grep versionName`。
+
+- **版本适配决策（2026-10-11）**：**不做旧版映射**。设备侧把宿主升级到代码基线版本即全量生效
+  （theme 43/43、installer 11/11）。HostVersion 选表框架保留：未来适配其他版本 =
+  反编译 → 手写 `<Target>Map_<版本>.kt` → 注册 `versionTables` 精确套。
+- **theme 4/43 的成功点构成（反编译 20.0.11.327 对照查实）**：T1
+  `IncentiveData.getThemeDetailButtonType` 真命中；A11×3（`BaseResItemBean` 三读点）是
+  **DexKit 兜底误打误撞**——基线统一基类在旧版不存在（旧版为 GetThemeRspBean$ThemeBean 等
+  每资源独立 bean），直连失败后按"包名+方法名+返回类型"兜底 firstOrNull 命中其中一个 bean。
+  命中哪个 bean 顺序不保证 ⇒ **不可依赖**，升级宿主后即恢复直连精确命中。
 
 - **唯一权威 = 真机 `installed N/M` 的 M**（落 LSPosed 框架日志）。**口径已于 2026-10-11 对齐**：此前记录的"文档 40/43/39 与代码 37 不一致"是**复核命令写错**造成的假漂移——旧命令的正则只含 6 个命名空间，漏了 `cloud:` / `adsource:` / `btn-hide:` 等，报出的 theme 37 / installer 8 并非真实点数。用上方的全命名空间命令复查，代码计数与 README 完全一致（theme 43 / installer 11）。
 - 2026-10-10 晚真机基线：主题商店 `installed 43/43`、包管理器 `11/11`、设置 `1/1`。SystemUI / 桌面 / exam8 各 1 / 1 / 10。

@@ -5,7 +5,7 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
-import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
@@ -18,35 +18,23 @@ object ThemeStoreHook : TargetHook {
     /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。 */
     private val engine = MountEngine("ThemeStoreHook", packageName)
 
+    /** 版本选表：默认套 = 基线点（行为与迁移前一致）；适配其他宿主版本时在其上追加精确套。 */
+    private val versionTables = listOf(
+        HostVersion.Table(versions = emptySet()) { THEME_POINTS_20_1_63_305 },
+    )
+
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 挂载表 43 项（F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 3
-        // + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2）；
-        // 逐点清点口径与 README/台账一致，**仍以真机 `installed N/M` 的 M 为准。**
-        val pending = mutableListOf<MountTask>()
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_VIP)) {
-            collectVipHooks(pending)             // F1 B1/B2 + VipState getter 短路
-            collectRetentionDialogHooks(pending) // F1 挽留弹窗双保险
-        }
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_FREE)) {
-            collectFreeJudgmentHooks(pending)   // F2 A1-A4 + A11 + T1 + btn-hide:buy
-            collectPriceZeroHooks(pending)      // F2 A5
-            collectBeanSourceZeroHooks(pending) // F2 A11
-            collectRealChainHooks(pending)      // F2 T1（按钮组类型兜底）
-            collectDownloadChainHooks(pending)  // F2 H1/H2b + W1
-        }
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_TRIAL)) {
-            collectTrialHooks(pending)          // F3 C1/C5/C6 + F4 C4 + 保守归 F2 C2
-            collectApplyStateHooks(pending)     // F4 C7 + F3 C9
-        }
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_THEME_AD_OFF)) {
-            collectCloudSwitchHooks(pending)    // 云控统一读点（表驱动：CloudSwitchTable）
-            collectAdSlotPruneHooks(pending)    // 美豆服务端槽位源头裁剪（表驱动：AdSlotFilter）
-            collectBottomTabPruneHooks(pending) // 底部 tab 源头裁剪（表驱动：BottomTabFilter）
-        }
+        // + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2），
+        // 数据表 ThemeStoreMap_20_1_63_305.kt 生成；逐点清点口径**仍以真机 `installed N/M` 的 M 为准。**
+        val pick = HostVersion.pick(versionTables, HostVersion.resolve(param.applicationInfo?.sourceDir))
+        val pending = pick.tasks
+            .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
+            .map { it.toMountTask() }
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }

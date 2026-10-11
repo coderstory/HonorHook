@@ -7,10 +7,11 @@ import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 
 /**
- * 主题商店 hook 的**共享部件**：目标类名常量、挂载任务类型、任务构建器与跨文件运行时工具。
- * 各功能组的挂载表构建（collect*）在 `Collectors*.kt`，装配与 kind 分派在 [ThemeStoreHook]。
+ * 主题商店 hook 的**共享部件**：目标类名常量、挂载任务类型、数据表→任务映射与运行时工具。
+ * 挂载点本体在数据表 `ThemeStoreMap_*.kt`（tools/gen_hook_map.py 生成），装配与 kind 分派在 [ThemeStoreHook]。
  * 设计依据归档于 `docs/theme-store.md`；删除历史见 `docs/hook-inventory-audit.md` §五。
  */
+import top.honorhook.xposed.data.HookPoint
 /** 全模块统一日志 TAG（与 MountEngine.TAG 同值；包级常量供同包文件免导入使用）。 */
 internal const val TAG = "HonorHook"
 
@@ -97,43 +98,33 @@ internal class MountTask(
     override val dex: DexHint? = null,
 ) : MountEngine.Task
 
-internal fun addConst(
-    pending: MutableList<MountTask>,
-    className: String,
-    methodName: String,
-    paramCount: Int,
-    returnType: String,
-    value: Any?,
-    id: String,
-    description: String,
-    dex: DexHint? = null,
-) {
-    pending += MountTask(
-        kind = MountKind.CONST, className = className, methodName = methodName, paramCount = paramCount,
-        returnType = returnType, value = value, id = id, description = description,
-        dex = dex,
-    )
-}
+/** 数据表挂载点 → 运行时任务（HookPoint 的声明式字段在此落到具体类型）。 */
+internal fun HookPoint.toMountTask(): MountTask = MountTask(
+    kind = MountKind.valueOf(kind),
+    className = className,
+    methodName = methodName,
+    paramCount = paramCount,
+    returnType = returnType,
+    value = value,
+    id = id,
+    description = description,
+    resolveValue = enumRef?.let { ref ->
+        { loader: ClassLoader ->
+            runCatching {
+                loader.loadClass(ref.substringBeforeLast('.')).enumConstants
+                    ?.firstOrNull { (it as? Enum<*>)?.name == ref.substringAfterLast('.') }
+            }.getOrNull()
+        }
+    },
+    uriEmptyRoute = uriEmptyRoute,
+    uriOwner = UriOwner.valueOf(uriOwner),
+    forceArgIndex = forceArgIndex,
+    dex = toDexHint(),
+)
 
-internal fun addForceArg(
-    pending: MutableList<MountTask>,
-    className: String,
-    methodName: String,
-    paramCount: Int,
-    returnType: String,
-    forcedArg: Any?,
-    id: String,
-    description: String,
-    /** 强制哪个参数（0 起）。默认 0 = 既有 setter 首参语义不变。 */
-    forceArgIndex: Int = 0,
-    dex: DexHint? = null,
-) {
-    pending += MountTask(
-        kind = MountKind.FORCE_ARG, className = className, methodName = methodName, paramCount = paramCount,
-        returnType = returnType, value = forcedArg, id = id, description = description,
-        forceArgIndex = forceArgIndex, dex = dex,
-    )
-}
+private fun HookPoint.toDexHint(): DexHint? =
+    if (dexStrings == null && dexParamTypes == null && dexClassStrings == null && dexClassFieldTypes == null) null
+    else DexHint(dexStrings, dexParamTypes, dexClassStrings, dexClassFieldTypes)
 
 // ---------------- 跨文件运行时工具（路由判定 / 反射缓存 / 判据日志） ----------------
 

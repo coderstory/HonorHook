@@ -46,6 +46,8 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     /** hook 编写时的宿主版本基线（[begin] 期写入；非空则首轮挂载前做一次版本自检）。 */
     private var expectedHostVersion: String? = null
     private var hostVersionChecked = false
+    /** 实测宿主版本（延后自检拿到；汇总行用它标注，一眼看出版本错位）。 */
+    private var actualVersion: String? = null
 
     /** install() 时调用：写入 APK 路径与版本基线并重置计数（防同进程重复 install 计数累积）。 */
     fun begin(apkPath: String?, expectedHostVersion: String? = null) {
@@ -134,10 +136,11 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     /** 挂载汇总始终输出，不受 [DEBUG_LOGGING] 门控（Rain "installed N/M" 汇总行模式，真机判据）。 */
     fun logSummary(module: XposedModule) {
         val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
+        val hostPart = actualVersion?.let { "（宿主 $it）" } ?: ""
         module.log(
             if (failedIds.isEmpty()) Log.INFO else Log.WARN,
             TAG,
-            "$hookName: installed $okCount/$totalCount$failurePart",
+            "$hookName: installed $okCount/$totalCount$hostPart$failurePart",
         )
     }
 
@@ -194,6 +197,7 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
                 ?: return
             val actual = app.packageManager.getPackageInfo(hostPackage, 0)?.versionName ?: return
             hostVersionChecked = true
+            actualVersion = actual
             when {
                 actual == expectedHostVersion ->
                     module.log(Log.INFO, TAG, "$hookName 宿主版本与 hook 基线一致: $actual")

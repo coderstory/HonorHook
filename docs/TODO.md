@@ -12,39 +12,39 @@
 
 ## P2 · 通用 hook 版本机制框架
 
-- **背景（实证）**：目标 app OTA 即失效——包管理器宿主从基线 `14.0.37.301`
-  变成设备实际 `14.0.22.326`，11 个挂载点全废（`InstallerHook: installed 0/11`）。
+- **背景（实证，方向别搞反）**：挂点是照**更新**的版本写的，设备跑的是**更旧**的版本——
+  包管理器代码基线 `14.0.37.301` vs 设备 `14.0.22.326`（`InstallerHook: installed 0/11`）；
+  主题商店代码基线 `20.1.63.305` vs 设备 `20.0.11.327`（`ThemeStoreHook: installed 4/43`）。
+  适配 = 补一套**旧版**映射，不是追新版。完整版本对照见 `docs/hook-inventory-audit.md` §一。
   现状只有一个 `HOST_VERSION_BASELINE` 常量 + `MountEngine.checkHostVersionOnce`
   打 WARN，**没有任何分发能力**。
 - **立场（用户方法论，CLAUDE.md「跨版本兼容」节）**：版本分发是**最后手段**，
   优先序 = 没混淆的目标 > 通用 hook 手法 > DexKit 内容锚点 > 才轮到版本分发。
   框架设计必须服务这个层级，不能让人觉得「先分版本再说」。
-- **待定决策**：
-  1. 匹配单位：精确 versionName 串相等，还是语义段（major.minor）范围？
-  2. 分发粒度：`MountTask` 带版本条件（per-task），还是 hook 级声明多套挂载表？
-  3. 宿主版本不匹配任何一套时的行为：整 hook 跳过（明确 NOT_RESOLVED）
-     还是挑最近的一套硬挂？
-  4. 汇总判据行 `installed N/M` 在按版本分发后如何保持可读（按版本分组输出？）。
-- **下一步**：先出一版框架设计（小改可聊天说清），再动 `MountEngine`。
+- **落地记录（2026-10-11，主题商店全量 43 点已迁入数据表）**：
+  1. 匹配单位 → **精确 versionName 集合**（`HostVersion.Table.versions`；空集合 = 默认兜底套）。
+  2. 分发粒度 → **hook 级多套挂载表**（每版一个 `<Target>Map_<版本>.kt` 数据文件），
+     per-task 版本条件不做（噪声大、可读性差）。
+  3. 不匹配行为 → 当前默认套 = 基线点（行为与迁移前一致）；一旦某版本出现专用表，
+     未命中的版本仍落默认套——后续如需「无表即诚实跳过」，把默认套摘掉即可（一处改动）。
+  4. 汇总行 → `installed N/M（宿主 <versionName>）`，版本错位一眼可见。
+- **已交付件**：`xposed/data/HookMap.kt`（HookPoint 数据形态）、`xposed/core/HostVersion.kt`
+  （resolve + pick）、`ThemeStoreMap_20_1_63_305.kt`（43 点基线表）、
+  `ThemeStoreHook` 读表接入（feature 过滤 + `toMountTask` 桥）。
+  迁移保真由一次性等价性单测逐字段验证后，collect* 源与测试一同删除。
+  表生成器 `gen_hook_map.py` 已随 collect 源删除——**数据表即唯一事实源，直接手改表**。
+- **真机回归（已完成）**：`installed 4/43（宿主 20.0.11.327）`，选表器 WARN / 失败分级 /
+  重试 2 轮 / 汇总行全部按设计输出；4 成功点构成已查实（T1 真命中 + A11×3 DexKit 兜底
+  误打误撞，见 `docs/hook-inventory-audit.md` §一）。
+- **决策（2026-10-11）**：**不做旧版适配**。设备侧升级主题商店至基线 `20.1.63.305` 即全量生效；
+  P3 包管理器旧版映射同批废弃。框架保留（HostVersion 选表 + 数据表），未来若要适配其他
+  版本 = 反编译 → 手写 `<Target>Map_<版本>.kt` → 注册 `versionTables` 精确套。
 
-## P3 · 包管理器 hook 版本机制（2 个版本）
+## P3 · 包管理器 hook 版本机制（2 个版本）——已废弃结案（2026-10-11）
 
-- **背景**：InstallerHook 实测 11 挂载点全废，根因 = 宿主 OTA
-  （基线 `14.0.37.301` → 设备 `14.0.22.326`）。
-  已知旧版结构：4 个可读点（`CommonConfigManager`、`AdRespV4.getAdAppList` 等）
-  + 6 个混淆点（`lt1.b` / `sx1.Q` / `n12.f` / `r12.j` / `r12.s` / `ly1.h`）。
-- **前置工作**（P2 框架定型后再做）：
-  1. 反编译 `system-files/PackageInstaller-14.0.22.326.apk`（已 pull，未反编译）；
-  2. 验证 `com.hihonor.packageinstaller` 前缀是否仍在（`PKG_HN` 写死的原因）；
-  3. 4 个可读点在新版的真实包路径；
-  4. 6 个混淆点的内容锚点字符串是否随版变化（不变 → 走 DexKit 锚点，
-     根本不需要版本分发——先验证这个，可能直接省掉 P3 的一半）。
-- **坑（已实证）**：
-  - `tools/adapt_new_version.py` 的挂载点提取覆盖不全（只 glob `target/*Hook.kt`
-    非递归、只认 3 种书写格式），**别拿它的 N/M 当覆盖度结论**，
-    以 `docs/hook-inventory-audit.md` 台账为准；
-  - `tools/` 下 apktool/jadx 曾被磁盘清理删过，反编译前先 `tools/dev.sh env` 自检；
-  - `system-files/` 下 jadx 产物（systemui-jadx 等）已被删，需要时重新生成。
+决策同 P2：不做旧版适配，设备升级宿主至基线 `14.0.37.301`。此前反编译/锚点验证的
+前置工作不再执行。若未来重启：`tools/adapt_new_version.py <新版APK>` 可一键校验
+挂载点存活（提取器已支持数据表 HookPoint 与全部源码格式，68 点全绿）。
 
 ## P4 · 设置页「强制重启所有作用域目标 app」——已落地（2026-10-11）
 

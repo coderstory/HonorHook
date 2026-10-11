@@ -14,15 +14,15 @@ HonorHook 版本适配检查脚本 —— 「一键检测新版本 APK 的 hook 
 （findMethod 按 名 + 参数数 匹配），用 jadx 反编译产物做方法声明级比对更准确。
 
 挂载点清单提取方式（重要同步规则）：
-  清单**不是硬编码**的，每次运行自动从 Hook 源码解析，解析器只认两种既有书写格式：
-    1) 位置式：addConst(pending, CLS_X, "方法名", 参数数, "返回类型", ...)
-              addForceArg(pending, CLS_X, "方法名", 参数数, "返回类型", ...)
-    2) 具名式：pending += MountTask(kind = MountKind.X, className = CLS_Y, methodName = "方法名",
-                                    paramCount = 参数数, ...)
+  清单**不是硬编码**的，每次运行自动从 Hook 源码解析，只认两种既有书写格式：
+    1) 数据表（<Target>Map_<版本>.kt，唯一事实源）：HookPoint(id = "...", className = CLS_X,
+       methodName = "方法名", paramCount = 参数数, ...)
+    2) 源码直挂（Installer/SystemUi/Exam8/LauncherCard/Settings，未迁表）：MountTask(kind = MountKind.X,
+       className = CLS_Y, methodName = "方法名", paramCount = 参数数, ...)
   类名来源：CLS_* 常量定义（private const val CLS_X = "...") 或 className 位置的字符串字面量
-  （如 "java.net.Socket"）。$PKG 模板与 \\$ 转义会自动解析。
-  → 之后新增/删除 hook 点只需照既有格式改 Hook.kt，本脚本自动纳入比对，无需同步任何清单。
-  类名常量值里的 `$PKG` 是 Kotlin 字符串模板（展开为 PKG 包名）；`\\$` 是转义（内部类分隔符）。
+  （如 "java.net.Socket"）。$PKG 模板与反斜杠转义会自动解析。
+  → 之后新增/删除 hook 点只需照既有格式改数据表或 Hook.kt，本脚本自动纳入比对，无需同步任何清单。
+  类名常量值里的 `$PKG` 是 Kotlin 字符串模板（展开为 PKG 包名）；反斜杠转义用于内部类分隔符。
 
 用法：
   python tools/adapt_new_version.py <新版本目标 APK 路径> [选项]
@@ -79,25 +79,25 @@ class MountPoint:
     mount_id: str        # 幂等 ID（如 theme:ItemInfo.isNeedPayItem），报告追溯用
 
 CLS_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+(CLS_\w+)\s*=\s*"((?:[^"\\]|\\.)*)"')
+# methodName/paramCount 允许引用全大写蛇形常量（如 SystemUiHook 的 METHOD_BIND / BIND_PARAM_COUNT）
+CONST_STR_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+([A-Z][A-Z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"')
+CONST_INT_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+([A-Z][A-Z0-9_]*)\s*=\s*(\d+)')
 PKG_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG\s*=\s*"((?:[^"\\]|\\.)*)"')
 PKG_HN_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG_HN\s*=\s*"((?:[^"\\]|\\.)*)"')
+# add* 位置式封装（Exam8 addConst/addConditional、Installer addBlock…）：第一参 pending，前 5 参同构
 POS_MOUNT_RE = re.compile(
-    r'\b(?:addConst|addForceArg)\(\s*pending\s*,\s*'
+    r'\badd[A-Z]\w*\(\s*pending\s*,\s*'
     r'(CLS_[A-Z0-9_]+|"(?:[^"\\]|\\.)*")\s*,\s*'
     r'"((?:[^"\\]|\\.)*)"\s*,\s*(\d+)\s*,\s*'
     r'"((?:[^"\\]|\\.)*)"')
+# 不锚定开括号：HookPoint 的 id/kind/feature 在 className 之前，MountTask 具名式 kind 在前亦可；
+# 桥接/类定义处（className = className / val className: String）右值非 CLS_|字面量，天然不匹配。
+# methodName/paramCount 右值兼容字符串字面量与全大写常量引用。
 NAMED_MOUNT_RE = re.compile(
-    r'MountTask\(\s*(?:kind\s*=\s*MountKind\.\w+\s*,\s*)?'
     r'className\s*=\s*(CLS_[A-Z0-9_]+|"(?:[^"\\]|\\.)*")\s*,\s*'
-    r'methodName\s*=\s*"((?:[^"\\]|\\.)*)"\s*,\s*'
-    r'paramCount\s*=\s*(\d+)',
+    r'methodName\s*=\s*("(?:[^"\\]|\\.)*"|[A-Z][A-Z0-9_]*)\s*,\s*'
+    r'paramCount\s*=\s*(\d+|[A-Z][A-Z0-9_]*)',
     re.DOTALL)
-POS_MOUNT_TASK_RE = re.compile(
-    r'MountTask\(\s*MountKind\.\w+\s*,\s*'
-    r'(CLS_[A-Z0-9_]+|"(?:[^"\\]|\\.)*")\s*,\s*'
-    r'"((?:[^"\\]|\\.)*)"\s*,\s*'
-    r'(\d+)\s*,\s*'
-    r'"((?:[^"\\]|\\.)*)"')
 
 def unescape_kotlin_str(raw: str) -> str:
     """Kotlin 字符串字面量 → 实际值（本项目只出现 \\$ 转义；通用处理 \\x）。"""
@@ -130,6 +130,8 @@ def extract_mounts() -> list:
         raise SystemExit(f'未在 {TARGET_DIR} 找到 Hook 源码文件')
     # 全局常量表（跨文件引用支持）
     global_clss: dict = {}
+    global_str_consts: dict = {}   # 全大写字符串常量（methodName 引用，如 METHOD_BIND）
+    global_int_consts: dict = {}   # 全大写整型常量（paramCount 引用，如 BIND_PARAM_COUNT）
     global_pkg: str = ''  # 全局 PKG（从 ThemeStoreParts.kt 继承）
     global_pkg_hn: str = ''  # 全局 PKG_HN（从 InstallerHook.kt 继承）
     for hf in hook_files:
@@ -152,6 +154,10 @@ def extract_mounts() -> list:
                 val = val.replace('$PKG', global_pkg)      # Kotlin 字符串模板展开
             if name not in global_clss:
                 global_clss[name] = val
+        for name, raw in CONST_STR_RE.findall(src):
+            global_str_consts.setdefault(name, unescape_kotlin_str(raw))
+        for name, raw in CONST_INT_RE.findall(src):
+            global_int_consts.setdefault(name, int(raw))
     for hf in hook_files:
         src = hf.read_text(encoding='utf-8', errors='replace')
         pkg = global_pkg
@@ -159,23 +165,31 @@ def extract_mounts() -> list:
         clss = dict(global_clss)  # 从全局常量表继承（已应用模板替换）
         seen = set()
         for m in NAMED_MOUNT_RE.finditer(src):
-            cls_ref, method, pcount = m.group(1), m.group(2), int(m.group(3))
-            block = extract_call_block(src, m.start())
+            cls_ref, method_ref, pcount_ref = m.group(1), m.group(2), m.group(3)
+            method = unescape_kotlin_str(method_ref[1:-1]) if method_ref.startswith('"') \
+                else global_str_consts.get(method_ref)
+            pcount = int(pcount_ref) if pcount_ref.isdigit() else global_int_consts.get(pcount_ref)
+            if method is None or pcount is None:
+                print(f'[警告] {hf.name}: 方法名/参数数常量引用未解析 '
+                      f'({method_ref} / {pcount_ref})，跳过', file=sys.stderr)
+                continue
+            # 匹配起点在 className，块提取须回退到调用开括号（HookPoint/MountTask）
+            block = extract_call_block(src, src.rfind('(', 0, m.start()))
             rt_m = re.search(r'returnType\s*=\s*("(?:[^"\\]|\\.)*"|CLS_[A-Z0-9_]+)', block)
             ret = resolve_class_name(rt_m.group(1).strip('"'), clss, pkg) if rt_m else ''
+            # 数据表 HookPoint 有 id 字段；源码直挂 MountTask 无 id，回退按项目 id 约定（小写前缀:名称）搜块内字符串
             id_m = re.search(r'\bid\s*=\s*"([^"]+)"', block)
+            mid = id_m.group(1) if id_m else ''
+            if not mid:
+                id_m2 = re.search(r'"[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[^"]+"', block)
+                mid = id_m2.group(0).strip('"') if id_m2 else ''
             _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
-                 method, pcount, ret, id_m.group(1) if id_m else '')
-        for m in POS_MOUNT_TASK_RE.finditer(src):
-            cls_ref, method, pcount, ret = (m.group(1), m.group(2), int(m.group(3)), m.group(4))
-            block = extract_call_block(src, m.start())
-            id_m = re.search(r'"(?:theme|honorhook):[^"]+"', block)
-            _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
-                 method, pcount, unescape_kotlin_str(ret), id_m.group(0).strip('"') if id_m else '')
+                 method, pcount, ret, mid)
         for m in POS_MOUNT_RE.finditer(src):
+            # add* 位置式封装（Exam8 addConst/addConditional、Installer addBlock…）
             cls_ref, method, pcount, ret = (m.group(1), m.group(2), int(m.group(3)), m.group(4))
             block = extract_call_block(src, m.start())
-            id_m = re.search(r'"(?:theme|honorhook):[^"]+"', block)
+            id_m = re.search(r'"[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[^"]+"', block)
             _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
                  method, pcount, unescape_kotlin_str(ret), id_m.group(0).strip('"') if id_m else '')
     if not mounts:
