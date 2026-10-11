@@ -28,9 +28,19 @@
 - 🚫 不在用户主力机实测未验证 hook 的破坏性效果。AI 交付 = 代码 + 构建通过 + **用户自执行**的验证清单
 - 只真机直连；`reference/` 只读
 
+## 工具清单（tools/，详情 `tools/README.md`）
+
+自写脚本：`dev.sh`（构建/安装/日志/UI 自动化/反编译统一入口）、`adapt_new_version.py`
+（宿主新版本适配校验：从 hook 源码+数据表提取全部挂载点，现 68 点，对反编译产物核对类/方法存活）、
+`rain-decrypt.py`（Rain 参考模块字符串解密，逆向期）。
+下载件：`apktool.jar`（APK→smali，需 JDK 21）、`android-sdk/`（gradle 构建 + aapt2）、
+`bin/apktool`、`bin/jadx`（PATH 垫片）。
+
 ## 环境坑
 
 - 工具链由 `dev.sh` 自解析（项目内优先 → brew/PATH）；**JDK 21 需含 jlink**
+- 手动跑 apktool/gradle 必须 `JAVA_HOME=/opt/homebrew/Cellar/openjdk@21/*/libexec/openjdk.jdk/Contents/Home`
+  （裸 `java` 不在 PATH）；SDK 路径由 `app/local.properties` 指向 `tools/android-sdk`
 - 脚本一律 LF（CRLF 在 bash 3.2 直接报错）
 - bash 3.2：`$VAR` 后紧跟中文必须写 `${VAR}`，否则 unbound variable 退出
 - 代理已配：`http.https://github.com.proxy = socks5://127.0.0.1:7897`
@@ -61,12 +71,20 @@
 包管理器 11 点曾因宿主 14.0.37.301 → 14.0.22.326 全线 `installed 0/N`——混淆点锚点不足，
 可读点又把 `com.hihonor.packageinstaller` 前缀写死（「优先未混淆目标」本可避免）。
 
+版本分发机制已建成（2026-10-11）：`HookPoint` 数据表（唯一事实源，勿手生成）+
+`HostVersion` 选表器（`versionTables`，精确套优先默认套）+ `adapt_new_version.py` 校验。
+**策略 = 只维护基线表，不做旧版映射**（设备升宿主至基线 20.1.63.305 / 14.0.37.301）；
+新宿主版本 = 反编译逐点核对 → 手写新表注册 `versionTables`。
+主题商店 43 点已入表；其余 5 目标仍源码 `MountTask` 式，渐进迁移。
+
 ## 哲学
 
 **在精确的边界内，找最稳的锚点，最小侵入完成重定向，随时准备优雅失败。** 七条原则与审计应用见 `docs/hook-philosophy-manifesto.md`。
 
 ## 未解决
 
+- 设备宿主待升级至基线：theme 20.0.11.327 → 20.1.63.305、installer 14.0.22.326 → 14.0.37.301；
+  升级前判据维持 `installed 4/43` / `0/11`，升级后应全绿（真机回归一次）
 - 主题商店搜索页「免费领」是本地硬编码 tab，云控与槽位裁剪都管不到 → `docs/theme-store.md` §七·2
 - ~~挂载点口径漂移~~ **已排查为假问题（2026-10-11）**：`docs/hook-inventory-audit.md` 的复核 grep 正则漏了 6 个命名空间，
   误报 theme 37 / installer 8；用全命名空间命令复查后代码计数（theme 43 / installer 11）与 README 一致。
