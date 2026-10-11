@@ -98,7 +98,7 @@ object FeatureCatalog {
                     "拦截荣耀广告 SDK（com.hihonor.adsdk）渲染：日历/天气/浏览器/游戏中心/视频的信息流·横幅·开屏·插屏·激励广告内容清空并折叠占位",
                 ),
                 Feature(
-                    KEY_TRACK_BLOCK, "埋点拦截·通杀",
+                    KEY_TRACK_BLOCK, "去除跟踪",
                     "拦截荣耀埋点 SDK（com.hihonor.hianalytics）上报：日历/天气/浏览器/游戏中心/视频/云音乐的事件·会话·点击·曝光埋点与 OAID 标识注入全部短路，数据不落库不出网",
                 ),
             ),
