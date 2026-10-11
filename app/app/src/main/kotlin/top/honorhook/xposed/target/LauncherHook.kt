@@ -2,7 +2,6 @@ package top.honorhook.xposed.target
 
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -29,8 +28,10 @@ import top.honorhook.xposed.data.RemoteConfig
  *    或 `LevelAnimationMgr` 的窗口模糊场景 `1=folder`（动态模糊机型，由 SF 合成）。
  *    返回桌面时的状态转场会把它清掉（`Workspace.doAnimatorListenerEndWork` / `LauncherStateTransitionAnimation`
  *    的 `setBlurEffect(null, false)`，以及 app 模糊退场 `changeScene(2, 0, false, …)`），这些调用**都不看文件夹开关**，
- *    故 L4 保住文件夹后遮罩仍丢。对策：L3/L4 命中时开一个「遮罩保持窗口」，窗口内
- *    ① `DragLayer.setBlur(null, …)` 直接短路（不清）；② 记录 `LevelAnimationMgr.changeScene` 场景轨迹备查。
+ *    故 L4 保住文件夹后遮罩仍丢。对策：把返回转场里的 app 模糊退场改写成文件夹模糊进场。
+ *
+ * **L5 的唯一闸门是 [folderIsOpen]**（`Workspace.getOpenFolder() != null`）。曾按「返回转场时间窗」判定，
+ * 结果普通 app 返回桌面也会被改写成文件夹模糊，整屏多出一层只属于文件夹的罩子。
  * 详见 `docs/reverse/launcher-folder-keepopen.md`。
  */
 object LauncherHook : TargetHook {
@@ -47,6 +48,7 @@ object LauncherHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
+        hostLoader = loader
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
 
         // 数据表 LAUNCHER_POINTS_18_0_0_234.kt；逐点清点口径以真机 `installed N/M` 的 M 为准。
@@ -82,7 +84,6 @@ object LauncherHook : TargetHook {
                 MountKind.DROP_FOLDER_ON_HOME -> {
                     val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
                     argv[FOLDER_ARG_INDEX] = null
-                    openBackdropHoldWindow()
                     engine.judge(module, task, JUDGE_PREFIX)
                     @Suppress("UNCHECKED_CAST")
                     chain.proceed(argv as Array<Any>)
@@ -90,16 +91,15 @@ object LauncherHook : TargetHook {
                 // L4 手势返回：从应用侧上滑回桌面时的 overlay/背景状态重置不再关文件夹，直接短路。
                 MountKind.KEEP_FOLDER_ON_RETURN_GESTURE -> {
                     if (fromAppReturnGesture()) {
-                        openBackdropHoldWindow()
                         engine.judge(module, task, JUDGE_PREFIX, "从应用返回手势的例行重置短路，文件夹保持打开")
                         null
                     } else {
                         chain.proceed()
                     }
                 }
-                // L5 背景遮罩：返回转场里的 setBlur(null) 是"撤遮罩"，窗口内命中即短路（不清 = 遮罩留住）。
+                // L5 背景遮罩（静态模糊分支机型）：确有文件夹打开时，返回转场里的 setBlur(null) 不执行（不清 = 遮罩留住）。
                 MountKind.BLOCK_BLUR_CLEAR -> {
-                    if (chain.getArg(0) == null && inBackdropHoldWindow()) {
+                    if (chain.getArg(0) == null && folderIsOpen() == true) {
                         module.log(Log.WARN, MountEngine.TAG, "BACKDROP 拦截清空: DragLayer.setBlur(null) ← ${nearestCaller("setBlur")}")
                         engine.judge(module, task, JUDGE_PREFIX, "返回转场不再撤掉文件夹背景遮罩")
                         null
@@ -107,29 +107,37 @@ object LauncherHook : TargetHook {
                         chain.proceed()
                     }
                 }
-                // L5 动态模糊分支：真机实证该机遮罩走窗口模糊（`isDynamicBlurFolder` = 空间层级动画 ∧ 窗口模糊
-                // ∧ 非编辑模式，本机成立），清遮罩的那步是「退出应用模糊」`changeScene(2, 0, false, …)`。
-                // 返回转场里把它改写成「进文件夹模糊」——文件夹还开着，背景本就该停在文件夹模糊上。
+                // L5 动态模糊分支（真机实证本机走这条路）：本机 `useSpaceHierarchyAnim` 为真
+                // （`HnLauncherSwipeHandlerV2:1867` 只有它为真才发 `changeScene(2, 0, false, …)`，日志实证出现）
+                // + `ro.surface_flinger.supports_background_blur=1` ⇒ `isDynamicBlurFolder` 成立 ⇒ 文件夹遮罩走
+                // **窗口模糊**（`LevelAnimationMgr`，0=recents / 1=folder / 2=application），不经 `DragLayer.setBlur`。
+                // 返回转场把背景从「应用模糊」退到无模糊；文件夹被 L4 留住时把这次退场改写成「进文件夹模糊」。
                 MountKind.RESTORE_FOLDER_BLUR -> {
                     val scene = chain.getArg(0) as? Int ?: -1
                     val enter = chain.getArg(2) as? Boolean ?: false
-                    if (!inBackdropHoldWindow()) {
+                    val folderOpen = folderIsOpen()
+                    if (scene != APP_BLUR_SCENE || enter) {
                         chain.proceed()
-                    } else if (scene == APP_BLUR_SCENE && !enter) {
-                        val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
-                        argv[0] = FOLDER_BLUR_SCENE
-                        argv[2] = true
-                        module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 改写: app 退场 → folder 进场 ← ${nearestCaller("changeScene")}")
-                        engine.judge(module, task, JUDGE_PREFIX, "返回转场背景回到文件夹模糊")
-                        @Suppress("UNCHECKED_CAST")
-                        chain.proceed(argv as Array<Any>)
-                        reassertFolderBlur(chain.thisObject, module)
-                    } else {
-                        module.log(
-                            Log.WARN, MountEngine.TAG,
-                            "BLUR-SCENE scene=$scene enter=$enter dur=${chain.getArg(3)} ← ${nearestCaller("changeScene")}",
-                        )
-                        chain.proceed()
+                    } else when (folderOpen) {
+                        true -> {
+                            val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
+                            argv[0] = FOLDER_BLUR_SCENE
+                            argv[2] = true
+                            module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 改写: app 退场 → folder 进场（文件夹打开中）")
+                            engine.judge(module, task, JUDGE_PREFIX, "返回转场背景回到文件夹模糊")
+                            @Suppress("UNCHECKED_CAST")
+                            chain.proceed(argv as Array<Any>)
+                            reassertFolderBlur(chain.thisObject, module)
+                        }
+                        // 没有打开的文件夹：这次退场属于普通 app 返回桌面，folder 模糊不该出现，原样放行。
+                        false -> {
+                            module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 放行: app 退场（当前无打开的文件夹）")
+                            chain.proceed()
+                        }
+                        null -> {
+                            module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 状态查询失败，按无文件夹放行")
+                            chain.proceed()
+                        }
                     }
                 }
                 // 诊断：只打「谁调的 closeFolder」一行（调用栈已三次误判，留作常备取证），随后放行。
@@ -172,17 +180,20 @@ object LauncherHook : TargetHook {
             ?: "未知"
 
     /**
-     * 开启「背景遮罩保持窗口」。
+     * 当前是否有文件夹处于打开态（`Launcher.getWorkspace().getOpenFolder() != null`）。
      *
-     * L3/L4 决定让文件夹留在打开态的同一时刻起，返回转场会陆续清掉那层模糊/压暗；
-     * 窗口内的 `DragLayer.setBlur(null, …)`（撤遮罩）需要拦下。窗口只覆盖这一次返回转场，
-     * 之后用户主动关文件夹（点外部空白等）时的清空照常放行。
+     * L5 的唯一闸门。文件夹模糊是「文件夹打开」这一状态的一部分，只有文件夹确实还开着时才该
+     * 把返回转场改写成文件夹模糊；否则普通 app 返回桌面也会顶上一层只属于文件夹的罩子。
+     * 反射访问（宿主类不在模块编译期），返回 `null` = 查不出来（按「没开」处理并记一行）。
      */
-    private fun openBackdropHoldWindow() {
-        holdBackdropUntil = SystemClock.uptimeMillis() + BACKDROP_HOLD_MS
-    }
-
-    private fun inBackdropHoldWindow(): Boolean = SystemClock.uptimeMillis() < holdBackdropUntil
+    private fun folderIsOpen(): Boolean? = runCatching {
+        val loader = hostLoader ?: return@runCatching null
+        val launcher = Class.forName(LAUNCHER_CLASS, false, loader).getMethod("getLauncher").invoke(null)
+            ?: return@runCatching false
+        val workspace = launcher.javaClass.getMethod("getWorkspace").invoke(launcher)
+            ?: return@runCatching false
+        workspace.javaClass.getMethod("getOpenFolder").invoke(workspace) != null
+    }.getOrNull()
 
     /**
      * 转场收尾后重申「文件夹模糊」。
@@ -190,10 +201,12 @@ object LauncherHook : TargetHook {
      * 真机轨迹显示：app 模糊退场之后紧跟 `HnLauncherRecentsView.clearWindowBlurAndScale` 的
      * `changeScene(0, 0, false, 0, true)`（约 +600ms），会把背景打回无模糊——这一步同样不看文件夹开关。
      * 故在窗口尾部补一次「进文件夹模糊」；`changeScene(1, 0, true, 0)` 幂等，落在已进场景上无副作用。
+     * 补正前**再确认一次**文件夹还开着：这 800ms 内用户可能已把它关掉，否则会留下无主的文件夹模糊。
      */
     private fun reassertFolderBlur(instance: Any?, module: XposedModule) {
         val looper = Looper.getMainLooper() ?: return
         Handler(looper).postDelayed({
+            if (folderIsOpen() != true) return@postDelayed
             runCatching {
                 instance?.javaClass?.getMethod(
                     "changeScene",
@@ -207,9 +220,9 @@ object LauncherHook : TargetHook {
         }, BACKDROP_REASSERT_DELAY_MS)
     }
 
-    /** 遮罩保持窗口截止时刻（uptimeMillis）；0 = 未开启。 */
+    /** 宿主类加载器（挂载时捕获），供 [folderIsOpen] 反射查宿主类。 */
     @Volatile
-    private var holdBackdropUntil = 0L
+    private var hostLoader: ClassLoader? = null
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "launcher-hook"
@@ -235,8 +248,8 @@ object LauncherHook : TargetHook {
     /** hook 编写时的宿主版本基线（dumpsys package 实证）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
     private const val HOST_VERSION_BASELINE = "18.0.0.234"
 
-    /** 背景遮罩保持窗口时长：覆盖一次「返回桌面」转场（含 app 模糊退场与工作区状态动画）。 */
-    private const val BACKDROP_HOLD_MS = 2500L
+    /** [folderIsOpen] 的入口类（宿主 base 包 classes2.dex，defaultClassLoader 可见）。 */
+    private const val LAUNCHER_CLASS = "com.hihonor.android.launcher.Launcher"
 
     /** 补正「进文件夹模糊」的延时：压在返回转场尾部（`clearWindowBlurAndScale` 的 scene=0 之后）。 */
     private const val BACKDROP_REASSERT_DELAY_MS = 800L
