@@ -101,22 +101,23 @@ object MergedSignalHook {
      */
     private val states = java.util.WeakHashMap<View, DualState>()
 
-    /** subId → 数据卡标记（由 [CLS_MOBILE_DATA_CONTROLLER] 的订阅信息判定，用于定主副）。 */
-    private val dataSimBySub = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
 
     /** 挂载入口（通过 MountEngine 路由，获得标准判据覆盖）。 */
     fun install(module: XposedModule, loader: ClassLoader, apkPath: String?) {
         val engine = MountEngine(TAG, "com.android.systemui")
-        engine.begin(apkPath, "17.0.0.1")
+        engine.begin(apkPath, HOST_VERSION_BASELINE)
         val pending = mutableListOf<MountTask>()
-        // 视图创建点：constructAndBind（static，返回 ModernStatusBarMobileView）
+        // 视图创建点：constructAndBind（static，**4 参**，返回 ModernStatusBarMobileView）
+        //   真实签名（jadx 实证 ModernStatusBarMobileView.java:36）：
+        //   (Context, MobileViewLogger, String, LocationBasedMobileViewModel)
+        //   paramCount 写 0 会 filter 空 ⇒ 视图永远建不出来。
         pending += MountTask(
             className = CLS_MODERN_MOBILE_VIEW,
             methodName = METHOD_CONSTRUCT_AND_BIND,
-            paramCount = 0,
+            paramCount = CONSTRUCT_AND_BIND_PARAM_COUNT,
             returnType = CLS_MODERN_MOBILE_VIEW,
             id = "merged:constructAndBind",
-            description = "双卡合并信号视图创建（返回值自带 public subId 字段）",
+            description = "双卡合并信号视图创建（4 参 static，返回值自带 public subId 字段）",
         )
         // 信号数据轨：setIconForView（void，资源 id → 档位解析）
         pending += MountTask(
@@ -126,13 +127,15 @@ object MergedSignalHook {
             returnType = "void",
             id = "merged:setIconForView",
             description = "双卡合并信号数据采集（信号格资源 id → 档位 0~5）",
-            dex = MountEngine.DexHint(
-                strings = listOf("mobile_signal", "stat_sys_signal"),
-                paramTypes = listOf("android.widget.ImageView", "int"),
-            ),
         )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
+
+    /** [CLS_MODERN_MOBILE_VIEW] 的方法参数个数（jadx 实证，见 [install]）。 */
+    private const val CONSTRUCT_AND_BIND_PARAM_COUNT = 4
+
+    /** hook 编写时的宿主版本基线（与 SystemUiHook 同源）。 */
+    private const val HOST_VERSION_BASELINE = "17.0.0.1"
 
     /** MountEngine 挂载回调：解析类/方法并 hook，返回结果分级。 */
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
@@ -140,7 +143,7 @@ object MergedSignalHook {
             module.log(Log.WARN, MountEngine.TAG, "$TAG: ${task.className} 不可见（${it.message}）")
             return MountEngine.Result.NOT_RESOLVED
         }
-        val hit = cls.methods.filter { it.name == task.methodName && it.paramCount == task.paramCount }
+        val hit = cls.methods.filter { it.name == task.methodName && it.parameterCount == task.paramCount }
         if (hit.isEmpty()) {
             module.log(Log.WARN, MountEngine.TAG, "$TAG: ${task.className} 上无 ${task.paramCount} 参 ${task.methodName}")
             return MountEngine.Result.NOT_RESOLVED
@@ -270,7 +273,7 @@ object MergedSignalHook {
         val bottom = state.bottom ?: return
         if (state.hiddenWholeView) return
         // 卡数不足则恢复原生显示（宿主自己管）
-        if (activeCardCount(root) < 2) {
+        if (activeCardCount() < 2) {
             syncNative(root, state, native = true)
             return
         }
@@ -287,13 +290,19 @@ object MergedSignalHook {
     }
 
     /**
-     * 两卡档位按「数据卡优先 → 卡槽序」排序，与 HyperCeiler 的 `getSignalLevelsForRender` 同语义。
-     * 数据卡放上排（iOS 的阅读习惯：主号在上）。
+     * 两卡档位按「数据卡优先 → 卡槽序」排序，数据卡放上排（iOS 阅读习惯：主号在上）。
+     *
+     * 2026-10-11 修正：原实现按 `dataSimBySub[k]` 排，但该 map 全文没有任何地方写入 ⇒
+     * 排序退化成纯按 subId，**数据卡不一定在上排**。改用系统公开 API 实时取默认数据订阅，
+     * 不维护容易漏写的缓存。
      */
     private fun orderedLevels(): Pair<Int, Int> {
+        val dataSub = runCatching {
+            android.telephony.SubscriptionManager.getDefaultDataSubscriptionId()
+        }.getOrNull() ?: -1
         val entries = levelBySub.entries.sortedWith(
             compareBy(
-                { (k, _) -> if (dataSimBySub[k] == true) 0 else 1 },
+                { (k, _) -> if (k == dataSub) 0 else 1 },
                 { (k, _) -> slotBySub[k] ?: Int.MAX_VALUE },
                 { (k, _) -> k },
             ),
@@ -303,9 +312,15 @@ object MergedSignalHook {
         return first to second
     }
 
-    /** 本进程内已建根视图数（卡数代理）。 */
-    private fun activeCardCount(root: View): Int =
-        states.values.count { it.installed && !it.hiddenWholeView && it.container?.isAttachedToWindow == true }
+    /**
+     * 当前在网的卡数：以**收到过信号档位的不同 subId 数**为准。
+     *
+     * 2026-10-11 修正：原实现数 `states` 里未整组隐藏的视图数，但 slot>0 的卡已被我们主动
+     * GONE（`hiddenWholeView`）⇒ 恒只数到 slot0 一张 ⇒ `activeCardCount < 2` 恒真 ⇒
+     * 双排永远走「恢复原生」，功能完全不生效。
+     * 改数 `levelBySub`（数据轨真实采到的卡）才与「双卡」语义对应。
+     */
+    private fun activeCardCount(): Int = levelBySub.size
 
     /**
      * subId → 卡槽号。用系统公开 API `SubscriptionManager.getSlotIndex(subId)`，

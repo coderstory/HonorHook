@@ -45,7 +45,11 @@ miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur", version.ref
 # MaterialKolor：种子色 → M3 色板（主题页的动态取色）
 material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 
+# 液态玻璃真·背景模糊（Kyant0 AndroidLiquidGlass，对齐 HyperChanger 2.0.0）
+backdrop = { group = "io.github.kyant0", name = "backdrop", version = "2.0.0" }
+
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
