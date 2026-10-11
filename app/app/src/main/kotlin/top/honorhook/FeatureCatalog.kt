@@ -80,7 +80,7 @@ object FeatureCatalog {
             "com.hihonor.android.launcher", "系统桌面",
             listOf(
                 Feature(KEY_LAUNCHER_HIDE_TITLE, "隐藏卡片标题", "隐藏桌面卡片堆栈标题（如「YOYO 建议 · 明日天气预报」），不影响图标名"),
-                Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, "文件夹保持打开", "返回桌面时文件夹不自动收起，点击外部/Home 仍正常关闭"),
+                Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, "文件夹保持打开", "从文件夹里打开应用后，返回桌面时文件夹自动重新打开（走系统原生动画，含背景模糊）；点击外部/Home 仍正常关闭"),
             ),
         ),
         Target(

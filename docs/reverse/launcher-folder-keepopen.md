@@ -21,7 +21,11 @@
 | 回桌面的两条路各有独立关闭链     | ① **三键 Home**：`onNewIntent(ACTION_MAIN)` → `doMainActionIntent` → `doShowWorkspaceAnim` → `closeFolder`；② **手势上滑**：`onGestureStarted` 现场的 quickstep 例行重置（两条，见 §3.4） |
 | 这些链是否受旗控制          | **都不受**——既不读 `mNeedCloseFolderOnSaveState`，也不经 `getNeedCloseFloderOnSaveState()`                                                                                    |
 | 确实受旗控制（但本场景早已不是真凶） | 5 处返回动画消费点读 `getNeedCloseFloderOnSaveState()` 后 `closeFolder()`；`Launcher.onStop()` 直读字段关闭                                                                          |
-| 修复                 | **L4（手势）**：`Launcher.closeFolder(boolean)` 命中「从应用返回手势」时短路；**L3（三键 Home）**：置空 `doMainActionIntent` 的 folder 实参；L2a/L2b 保留作旗路径防御                                      |
+| **最终修复（2026-10-12，路线已更换）** | **不在关闭链上做任何拦截**：应用切换全程交给系统（图标回收动画/背景模糊原生完成），回到桌面后（`Launcher.onResume`）用系统自身的开文件夹路径 `FolderManager.openFolder(FolderIcon)` 把 R1 记下的文件夹重开。见 §七 |
+
+> ⚠️ §三~§六记载的 L2/L3/L4/L5 各版拦截方案**均已废弃**（代码已移除），保留作取证与教训记录：
+> 它们能各自解释一次症状，但合在一起与「非线性应用关闭动画」互相踩，实测「有时不生效 / 有时只剩一层模糊遮罩」。
+> **结论：这类"拦住不让关"的思路在此场景结构性不可靠。**
 
 **关键教训（三次误判）**：
 
@@ -134,7 +138,9 @@ smali 双证（`HnLauncher6.apktool`, 行号与运行时栈一致）：
 （`BACKGROUND_APP`），其间两处「例行重置」无条件关掉文件夹。二者都不看 §3.3 的任何旗 ⇒ L2a/L2b 拦不住；  
 又不经 `onNewIntent` ⇒ L3 也拦不住。**这也是前三次静态推断反复落空的根因：能读到"存在哪些链"，读不出"这次是哪条"。**
 
-## 四、实现（已落地，2026-10-11）
+## 四、实现（已废弃，2026-10-11 的拦截方案 —— 见 §七 现行方案）
+
+> 本节及 §五/§六描述的是**已移除**的拦截实现（L2a/L2b/L3/L4/L5a/L5b/DX），保留用于复盘取证过程。
 
 并入桌面目标 `LauncherHook`（数据表模式，与主题商店/包管理器同构）：
 
@@ -220,8 +226,63 @@ scene=0 enter=false dur=0   ← 同上（约 +600ms）
 
 ---
 
-*状态：L1~L5 已实现，待真机验证（`LauncherHook` + `LauncherMap_18_0_0_234.kt`，2026-10-11/12）。本文含对前三版误判
-（首版「onStop 死分支」、二版「onStop 主路径 + getter」、三版「onNewIntent 即真凶」）的修正：真凶是**手势返回**触发的
-quickstep 例行重置（`closeOverlay` + `processStateForOverView` 两条链），定性靠调用栈，静态读码做不到。
-L4 修好"保持打开"后暴露出配套的遮罩问题（§六），同一教训再次成立：**先上调用栈/轨迹诊断，再做静态推断**。*
+## 七、路线更换：从「拦住不让关」到「返回后重开」（2026-10-12，现行方案）
+
+### 7.1 为什么放弃拦截
+
+拦截方案（§四）跑起来后真机症状是**不稳定**：上滑返回桌面"有时不生效、有时只剩一层模糊遮罩"。
+根因不在某一条链没堵住，而在思路本身：
+
+- **覆盖必然不全**：`Launcher` 的 `closeFolder` 有四个重载，最终都汇入 `FolderManager.closeFolder(Folder,Z)`，
+  但调用方各走各的（`HnLauncherSwipeHandlerV2` / `HnRecentsViewStateController.processStateForOverView` /
+  `DragLayer.closeFolderIfNeeded` / 返回动画消费点 …）。日志实证：L4 在 `(Z)V` 上命中了短路，
+  紧接着仍有一条关闭从 `processStateForOverView` 走到 `FolderManager.closeFolder`。
+- **遮罩与文件夹状态会脱钩**：L5 只要"认为文件夹该开着"就补模糊，一旦那次关闭实际成功，就剩下"只有遮罩、没有文件夹"。
+- **根本冲突**：**非线性应用关闭动画会把应用图标收回文件夹所在的位置**，此时文件夹同时处于打开态
+  是自相矛盾的状态 —— 两边互相踩。这不是补钩子能消除的。
+
+⇒ 教训：**当"不让系统做某件事"需要同时在 N 条链上打补丁时，说明该状态本就不该由模块维持。**
+
+### 7.2 现行方案（R1 + R2）
+
+顺着系统状态机走，应用切换全程零干预：
+
+| 点 | kind | 目标 | 作用 |
+|----|------|------|------|
+| L1 | `CONST` | `ThemeUtilImpl.isHiddenTitle → true` | 卡片标题隐藏（同目标，无关文件夹） |
+| **R1** | `ARM_FOLDER_REOPEN` | **`Folder.startActivityByClickIcon(View, ShortcutInfo)`（private，1091 行）** | **记下"用户从哪个文件夹里点了应用"**（此刻文件夹必然还开着，是唯一无歧义的时刻；`onPause`/`onStop` 时可能已被关掉） |
+| **R2** | `REOPEN_FOLDER_ON_RESUME` | **`Launcher.onResume()`** | **回到桌面后，按系统自身路径重开该文件夹** |
+
+- 重开调用：`FolderManager.getInstance().openFolder(FolderIcon)`（与手点文件夹图标同一条路，
+  `FolderIcon` 由 `Folder.getFolderIcon()` 取，取不到再退到 `FolderInfo.getFolderIcon()`）。
+  ⇒ 展开动画、窗口模糊（`animateIn` → `changeScene(1,0,true,350L)`）、`FolderInfo.isOpened` 全由系统负责，
+  模块**不碰任何视觉状态**。
+- 时机：`postDelayed(320ms)`（应用关闭动画约 300~500ms，太早会被 `FolderManager.canOpenFolder` 的动画互斥挡掉），
+  失败重试一次；动手前先查 `Workspace.getOpenFolder()`，已有文件夹开着就不动（不顶掉用户当下状态）。
+- 代价：返回桌面时多一次文件夹展开动画。两端都是原生动画，衔接自然。
+- 判据：`LauncherHook: installed 3/3`；日志 `FOLDER-REOPEN 已按系统路径重开文件夹`。
+  若失败会打 `FOLDER-REOPEN 重开失败: <原因>`（无 ClassLoader / 拿不到 FolderIcon / 异常）。
+
+### 7.3 已验证的宿主 API（smali 核对）
+
 ```
+Folder.startActivityByClickIcon(Landroid/view/View;Lcom/hihonor/android/launcher/ShortcutInfo;)V   private
+Folder.getFolderIcon()Lcom/hihonor/android/launcher/FolderIcon;                                    public
+Folder.getInfo()Lcom/hihonor/android/launcher/FolderInfo;                                          public
+FolderManager.getInstance()Lcom/hihonor/android/launcher/folder/FolderManager;                     public static
+FolderManager.openFolder(Lcom/hihonor/android/launcher/FolderIcon;)V                               public
+Launcher.onResume()V                                                                              public
+Launcher.getLauncher()Lcom/hihonor/android/launcher/Launcher;                                      public static
+Launcher.getWorkspace()Lcom/hihonor/android/launcher/Workspace;                                    public
+Workspace.getOpenFolder()Lcom/hihonor/android/launcher/Folder;                                     public（DragLayer 里 isOpened 的 Folder）
+```
+
+---
+
+*状态：§三~§六的拦截方案（L2a/L2b/L3/L4/L5a/L5b）已废弃并从代码移除，保留作取证与教训记录；
+现行实现为 §七（R1 记录 + R2 重开），2026-10-12。*
+
+*本文的四次误判——首版「onStop 死分支」、二版「onStop 主路径 + getter」、三版「onNewIntent 即真凶」、
+五版「L5 按时间窗补遮罩」——都是同一件事：**用间接信号（关闭旗 / getter / 调用栈 / 时间窗）代替目标状态本身**。
+可复用的两条：① 调用栈能定性"这一次是谁"，静态读码不能；② 闸门要读宿主状态，不要读"离上次事件多久"。*
+

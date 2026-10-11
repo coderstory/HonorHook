@@ -11,27 +11,19 @@ import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
 
 /**
- * 荣耀桌面 `com.hihonor.android.launcher`：卡片标题隐藏（L1）+ 文件夹返回保持打开（L2a/L2b/L3/L4）。
+ * 荣耀桌面 `com.hihonor.android.launcher`：卡片标题隐藏（L1）+ 文件夹「返回后自动重开」（R1/R2）。
  *
  * 挂载点本体在数据表 [LAUNCHER_POINTS_18_0_0_234]，按 kind 分派的 intercept 在 [mountOne]。
- * 版本分发走 [HostVersion]（空集合 = 默认套，覆盖基线 18.0.0.234）。
  *
- * 关文件夹有四条互不相干的链，逐条堵：
- * ① 返回动画等 5 处读 `getNeedCloseFloderOnSaveState()` —— L2a 恒 false；
- * ② `Launcher.onStop()` 直读 `mNeedCloseFolderOnSaveState` 字段 —— L2b 命中时清字段；
- * ③ 三键 Home 回桌面走 `onNewIntent → doMainActionIntent → doShowWorkspaceAnim → closeFolder` —— L3 置空 folder 实参；
- * ④ **手势上滑从应用回桌面**在 `onGestureStarted` 现场被 quickstep 的例行重置关闭
- *    （`closeOverlay()` 与 `processStateForOverView()` 两条，均不看关闭旗）—— L4 在返回手势链上短路该调用。
+ * **为什么是「重开」而不是「拦住不让关」**：关文件夹由 quickstep 的应用切换转场驱动，
+ * 路径有四条（`closeOverlay` / `processStateForOverView` / `onStop` / `closeFolder` 的四个重载），
+ * 而且**非线性应用关闭动画**会把应用图标收回到文件夹所在的位置——此时让文件夹同时停在打开态
+ * 是自相矛盾的状态，两者互相踩，表现就是「有时不生效 / 有时只剩一层模糊遮罩」。
+ * 逐条补钩子只能减轻症状。故改为**顺着系统状态机走**：应用切换全程不干预
+ * （图标回收动画、背景模糊都由系统原生完成），回到桌面后再用系统自身的开文件夹路径把它打开
+ * （`FolderManager.openFolder(FolderIcon)`，与手点文件夹图标同一条路 ⇒ 展开动画与遮罩天然完整）。
  *
- * ⑤ 文件夹背景遮罩（L5）：文件夹打开时那层压暗/模糊**不是 Folder 画的**，是桌面全局的
- *    「背景模糊」——`DragLayer.mBlurEffect`（`DragLayer.setBlur(Drawable, boolean)`，非动态模糊机型）
- *    或 `LevelAnimationMgr` 的窗口模糊场景 `1=folder`（动态模糊机型，由 SF 合成）。
- *    返回桌面时的状态转场会把它清掉（`Workspace.doAnimatorListenerEndWork` / `LauncherStateTransitionAnimation`
- *    的 `setBlurEffect(null, false)`，以及 app 模糊退场 `changeScene(2, 0, false, …)`），这些调用**都不看文件夹开关**，
- *    故 L4 保住文件夹后遮罩仍丢。对策：把返回转场里的 app 模糊退场改写成文件夹模糊进场。
- *
- * **L5 的唯一闸门是 [folderIsOpen]**（`Workspace.getOpenFolder() != null`）。曾按「返回转场时间窗」判定，
- * 结果普通 app 返回桌面也会被改写成文件夹模糊，整屏多出一层只属于文件夹的罩子。
+ * 代价：返回桌面时会多一次文件夹展开动画（两端都是原生动画，衔接自然）。
  * 详见 `docs/reverse/launcher-folder-keepopen.md`。
  */
 object LauncherHook : TargetHook {
@@ -69,122 +61,79 @@ object LauncherHook : TargetHook {
                     engine.judge(module, task, JUDGE_PREFIX)
                     task.value
                 }
-                // onStop 直读字段（不经 getter）：命中先把 mNeedCloseFolderOnSaveState 置 false 再放行，
-                // 使 `if (mNeedCloseFolderOnSaveState && ...) closeFolder(false)` 短路。isCaller=launcher 进程本身。
-                MountKind.KEEP_FOLDER_ON_STOP -> {
-                    val self = chain.thisObject
-                    if (self != null) {
-                        runCatching { self.javaClass.getField(CLOSE_FLAG_FIELD).setBoolean(self, false) }
-                            .onFailure { module.log(Log.WARN, MountEngine.TAG, "onStop 置位 $CLOSE_FLAG_FIELD 失败: ${it.message}") }
-                    }
-                    engine.judge(module, task, JUDGE_PREFIX)
+                // R1 记录目标：用户在打开的文件夹里点了应用。此刻文件夹必然还开着，把它的视图记下来。
+                MountKind.ARM_FOLDER_REOPEN -> {
+                    chain.thisObject?.let { reopenTarget = it }
+                    engine.judge(module, task, JUDGE_PREFIX, "已记下文件夹，返回桌面后重开")
                     chain.proceed()
                 }
-                // 按 Home 返回桌面：把 folder 实参换成 null 再放行，令下游 doShowWorkspaceAnim 跳过 closeFolder。
-                MountKind.DROP_FOLDER_ON_HOME -> {
-                    val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
-                    argv[FOLDER_ARG_INDEX] = null
-                    engine.judge(module, task, JUDGE_PREFIX)
-                    @Suppress("UNCHECKED_CAST")
-                    chain.proceed(argv as Array<Any>)
-                }
-                // L4 手势返回：从应用侧上滑回桌面时的 overlay/背景状态重置不再关文件夹，直接短路。
-                MountKind.KEEP_FOLDER_ON_RETURN_GESTURE -> {
-                    if (fromAppReturnGesture()) {
-                        engine.judge(module, task, JUDGE_PREFIX, "从应用返回手势的例行重置短路，文件夹保持打开")
-                        null
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // L5 背景遮罩（静态模糊分支机型）：确有文件夹打开时，返回转场里的 setBlur(null) 不执行（不清 = 遮罩留住）。
-                MountKind.BLOCK_BLUR_CLEAR -> {
-                    if (chain.getArg(0) == null && folderIsOpen() == true) {
-                        module.log(Log.WARN, MountEngine.TAG, "BACKDROP 拦截清空: DragLayer.setBlur(null) ← ${nearestCaller("setBlur")}")
-                        engine.judge(module, task, JUDGE_PREFIX, "返回转场不再撤掉文件夹背景遮罩")
-                        null
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // L5 动态模糊分支（真机实证本机走这条路）：本机 `useSpaceHierarchyAnim` 为真
-                // （`HnLauncherSwipeHandlerV2:1867` 只有它为真才发 `changeScene(2, 0, false, …)`，日志实证出现）
-                // + `ro.surface_flinger.supports_background_blur=1` ⇒ `isDynamicBlurFolder` 成立 ⇒ 文件夹遮罩走
-                // **窗口模糊**（`LevelAnimationMgr`，0=recents / 1=folder / 2=application），不经 `DragLayer.setBlur`。
-                // 返回转场把背景从「应用模糊」退到无模糊；文件夹被 L4 留住时把这次退场改写成「进文件夹模糊」。
-                MountKind.RESTORE_FOLDER_BLUR -> {
-                    val scene = chain.getArg(0) as? Int ?: -1
-                    val enter = chain.getArg(2) as? Boolean ?: false
-                    val folderOpen = folderIsOpen()
-                    if (scene != APP_BLUR_SCENE || enter) {
-                        chain.proceed()
-                    } else when (folderOpen) {
-                        true -> {
-                            val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
-                            argv[0] = FOLDER_BLUR_SCENE
-                            argv[2] = true
-                            module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 改写: app 退场 → folder 进场（文件夹打开中）")
-                            engine.judge(module, task, JUDGE_PREFIX, "返回转场背景回到文件夹模糊")
-                            @Suppress("UNCHECKED_CAST")
-                            chain.proceed(argv as Array<Any>)
-                            reassertFolderBlur(chain.thisObject, module)
-                        }
-                        // 没有打开的文件夹：这次退场属于普通 app 返回桌面，folder 模糊不该出现，原样放行。
-                        false -> {
-                            module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 放行: app 退场（当前无打开的文件夹）")
-                            chain.proceed()
-                        }
-                        null -> {
-                            module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 状态查询失败，按无文件夹放行")
-                            chain.proceed()
-                        }
-                    }
-                }
-                // 诊断：只打「谁调的 closeFolder」一行（调用栈已三次误判，留作常备取证），随后放行。
-                MountKind.TRACE_FOLDER_CLOSE -> {
-                    module.log(Log.WARN, MountEngine.TAG, "FOLDER-CLOSE 触发方: ${nearestCaller("closeFolder")}")
-                    engine.judge(module, task, JUDGE_PREFIX)
+                // R2 重开：`Launcher.onResume` = 回到桌面。先让宿主自己的 onResume 跑完，再延迟重开。
+                MountKind.REOPEN_FOLDER_ON_RESUME -> {
+                    val target = reopenTarget
+                    reopenTarget = null
                     chain.proceed()
+                    if (target != null) postReopen(target, module, attempt = 1)
                 }
             }
         }
 
     /**
-     * 本次 `Launcher.closeFolder(boolean)` 是否属于「从应用侧返回桌面」的例行重置（L4 判定）。
+     * 延迟重开文件夹。
      *
-     * 要求栈上**同时**出现两类帧：
-     * ① [OTHER_ACTIVITY_CONSUMER] —— quickstep 在**别的应用处于前台**时接管手势的消费者。
-     *    它的存在把场景锁死为"从应用滑回桌面"，桌面内切 Recents（HomeInputConsumer 等）不满足，
-     *    故"点外部关文件夹 / 桌面内上滑"等原有行为不受影响。
-     * ② [RESET_CALLERS] 之一 —— 离开桌面时才跑的 overlay/状态重置入口，其中的 `closeFolder(false)`
-     *    **不看任何关闭旗**，是 L2a/L2b/L3 之外的两条真实关闭链（真机调用栈实证）。
+     * 应用关闭动画约 300~500ms，太早调用会被 `FolderManager.canOpenFolder`（动画互斥）挡掉，
+     * 故首轮等 [REOPEN_DELAY_MS]，未成功再试一次（共 [REOPEN_MAX_ATTEMPTS] 次）。
+     * 每次动手前先确认当前没有别的文件夹开着——有就不动，避免顶掉用户当下的状态
+     * （例如返回桌面后立刻又点开了另一个文件夹）。
      */
-    private fun fromAppReturnGesture(): Boolean {
-        var fromApp = false
-        var reset = false
-        // 两帧顺序不定（消费者在重置入口**下方**，不能提前 return），故整栈扫完再判。
-        for (frame in Thread.currentThread().stackTrace) {
-            if (frame.className == OTHER_ACTIVITY_CONSUMER) fromApp = true
-            else if (RESET_CALLERS[frame.className] == frame.methodName) reset = true
-        }
-        return fromApp && reset
+    private fun postReopen(folder: Any, module: XposedModule, attempt: Int) {
+        val looper = Looper.getMainLooper() ?: return
+        Handler(looper).postDelayed({
+            if (folderIsOpen() == true) {
+                module.log(Log.INFO, MountEngine.TAG, "FOLDER-REOPEN 已有文件夹打开，跳过重开")
+                return@postDelayed
+            }
+            val ok = openFolderViaSystem(folder) { reason ->
+                module.log(Log.WARN, MountEngine.TAG, "FOLDER-REOPEN 重开失败: $reason")
+            }
+            if (ok) {
+                module.log(Log.INFO, MountEngine.TAG, "FOLDER-REOPEN 已按系统路径重开文件夹（第 $attempt 次）")
+            } else if (attempt < REOPEN_MAX_ATTEMPTS) {
+                postReopen(folder, module, attempt + 1)
+            } else {
+                module.log(Log.WARN, MountEngine.TAG, "FOLDER-REOPEN 重试 $attempt 次仍未成功，放弃")
+            }
+        }, REOPEN_DELAY_MS)
     }
 
-    /** 最近一个非 hook 胶水/非合成分身的调用方，形如 `类简名.方法(文件:行)`；[skip] 用于跳过被 hook 的方法自身帧。 */
-    private fun nearestCaller(skip: String): String =
-        Thread.currentThread().stackTrace
-            .filter { it.className.startsWith("com.hihonor.") || it.className.startsWith("com.android.") }
-            .dropWhile { it.methodName == skip }
-            .firstOrNull()
-            ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})" }
-            ?: "未知"
+    /**
+     * 用系统自身的路径重开文件夹：`FolderManager.getInstance().openFolder(FolderIcon)`。
+     *
+     * 与用户手点文件夹图标是同一条路（`FolderIcon` → `FolderManager.openFolder`），
+     * 展开动画、窗口模糊、`FolderInfo.isOpened` 状态全部由系统负责，模块不碰任何视觉状态。
+     * 返回 `false` 时通过 [onFail] 报出原因（挂载日志里可查）。
+     */
+    private fun openFolderViaSystem(folder: Any, onFail: (String) -> Unit): Boolean = runCatching {
+        val loader = hostLoader ?: return@runCatching false.also { onFail("无宿主 ClassLoader") }
+        val icon = folder.javaClass.getMethod("getFolderIcon").invoke(folder)
+            ?: folder.javaClass.getMethod("getInfo").invoke(folder)
+                ?.let { it.javaClass.getMethod("getFolderIcon").invoke(it) }
+            ?: return@runCatching false.also { onFail("拿不到 FolderIcon") }
+        val managerCls = Class.forName(FOLDER_MANAGER_CLASS, false, loader)
+        val manager = managerCls.getMethod("getInstance").invoke(null)
+            ?: return@runCatching false.also { onFail("FolderManager 实例为 null") }
+        managerCls.getMethod("openFolder", Class.forName(FOLDER_ICON_CLASS, false, loader))
+            .invoke(manager, icon)
+        true
+    }.getOrElse {
+        onFail("异常 ${it.javaClass.simpleName}: ${it.message}")
+        false
+    }
 
     /**
      * 当前是否有文件夹处于打开态（`Launcher.getWorkspace().getOpenFolder() != null`）。
      *
-     * L5 的唯一闸门。文件夹模糊是「文件夹打开」这一状态的一部分，只有文件夹确实还开着时才该
-     * 把返回转场改写成文件夹模糊；否则普通 app 返回桌面也会顶上一层只属于文件夹的罩子。
-     * 反射访问（宿主类不在模块编译期），返回 `null` = 查不出来（按「没开」处理并记一行）。
+     * 只用于「重开前先看看是不是已经有文件夹开着」，不参与任何拦截。
+     * 反射访问（宿主类不在模块编译期），返回 `null` = 查不出来（按「没开」处理）。
      */
     private fun folderIsOpen(): Boolean? = runCatching {
         val loader = hostLoader ?: return@runCatching null
@@ -195,73 +144,35 @@ object LauncherHook : TargetHook {
         workspace.javaClass.getMethod("getOpenFolder").invoke(workspace) != null
     }.getOrNull()
 
-    /**
-     * 转场收尾后重申「文件夹模糊」。
-     *
-     * 真机轨迹显示：app 模糊退场之后紧跟 `HnLauncherRecentsView.clearWindowBlurAndScale` 的
-     * `changeScene(0, 0, false, 0, true)`（约 +600ms），会把背景打回无模糊——这一步同样不看文件夹开关。
-     * 故在窗口尾部补一次「进文件夹模糊」；`changeScene(1, 0, true, 0)` 幂等，落在已进场景上无副作用。
-     * 补正前**再确认一次**文件夹还开着：这 800ms 内用户可能已把它关掉，否则会留下无主的文件夹模糊。
-     */
-    private fun reassertFolderBlur(instance: Any?, module: XposedModule) {
-        val looper = Looper.getMainLooper() ?: return
-        Handler(looper).postDelayed({
-            if (folderIsOpen() != true) return@postDelayed
-            runCatching {
-                instance?.javaClass?.getMethod(
-                    "changeScene",
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                    Boolean::class.javaPrimitiveType,
-                    Long::class.javaPrimitiveType,
-                    Boolean::class.javaPrimitiveType,
-                )?.invoke(instance, FOLDER_BLUR_SCENE, 0, true, 0L, false)
-            }.onFailure { module.log(Log.WARN, MountEngine.TAG, "重申文件夹模糊失败: ${it.message}") }
-        }, BACKDROP_REASSERT_DELAY_MS)
-    }
-
-    /** 宿主类加载器（挂载时捕获），供 [folderIsOpen] 反射查宿主类。 */
+    /** 宿主类加载器（挂载时捕获），供反射查宿主类。 */
     @Volatile
     private var hostLoader: ClassLoader? = null
+
+    /** 「从文件夹里打开了应用」时记下的文件夹视图；在下一次回到桌面时消费（消费即清空）。 */
+    @Volatile
+    private var reopenTarget: Any? = null
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "launcher-hook"
 
-    /** L2b 目标字段：`Launcher` 的 public 关文件夹旗（onStop 直读；名字含拼写 Floder 的 getter 读同一字段）。 */
-    private const val CLOSE_FLAG_FIELD = "mNeedCloseFolderOnSaveState"
-
-    /** L3 目标实参位：`doMainActionIntent(Intent, Folder, ManualStackExpandGroup)` 的 folder。 */
-    private const val FOLDER_ARG_INDEX = 1
-
-    /** L4 判定：quickstep「别的应用在前台」时的手势消费者（其在场即"从应用返回桌面"）。 */
-    private const val OTHER_ACTIVITY_CONSUMER = "com.android.quickstep.inputconsumers.OtherActivityInputConsumer"
-
-    /** L4 判定：离开桌面时的例行重置入口（类名 → 方法名）。两者都在 launcher 未回前台时执行。 */
-    private val RESET_CALLERS = mapOf(
-        // ① 手势开始现场重置 overlay：AbsSwipeUpHandler.onGestureStarted → closeOverlay()
-        "com.android.quickstep.LauncherActivityInterface" to "closeOverlay",
-        // ② launcher 被拉起铺 Recents 背景：prepareRecentsUI → initBackgroundStateUI
-        //    → goToState(BACKGROUND_APP) → 本入口（仅 BACKGROUND_APP / QUICK_SWITCH_FROM_HOME 分支关）
-        "com.hihonor.android.launcher.extension.quickstep.views.HnRecentsViewStateController" to "processStateForOverView",
-    )
-
     /** hook 编写时的宿主版本基线（dumpsys package 实证）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
     private const val HOST_VERSION_BASELINE = "18.0.0.234"
 
-    /** [folderIsOpen] 的入口类（宿主 base 包 classes2.dex，defaultClassLoader 可见）。 */
+    /** 反射入口类名。 */
     private const val LAUNCHER_CLASS = "com.hihonor.android.launcher.Launcher"
+    private const val FOLDER_MANAGER_CLASS = "com.hihonor.android.launcher.folder.FolderManager"
+    private const val FOLDER_ICON_CLASS = "com.hihonor.android.launcher.FolderIcon"
 
-    /** 补正「进文件夹模糊」的延时：压在返回转场尾部（`clearWindowBlurAndScale` 的 scene=0 之后）。 */
-    private const val BACKDROP_REASSERT_DELAY_MS = 800L
+    /** 重开延时：等应用关闭动画走完（`canOpenFolder` 与动画互斥，太早会被挡掉）。 */
+    private const val REOPEN_DELAY_MS = 320L
 
-    /** `LevelAnimationMgr` 场景号：0=recents / 1=folder / 2=application。 */
-    private const val FOLDER_BLUR_SCENE = 1
-    private const val APP_BLUR_SCENE = 2
+    /** 重开尝试次数上限（首轮 + 重试）。 */
+    private const val REOPEN_MAX_ATTEMPTS = 2
 
     // ---------------- 挂载任务定义（与 ThemeStore/Installer 同构） ----------------
 
-    /** 挂载任务类型：CONST 常量短路；KEEP_FOLDER_ON_STOP 清字段后放行；DROP_FOLDER_ON_HOME 置空 folder 实参；KEEP_FOLDER_ON_RETURN_GESTURE 返回手势链短路；BLOCK_BLUR_CLEAR 遮罩窗口内不清背景模糊；RESTORE_FOLDER_BLUR 返回转场改写为进文件夹模糊；TRACE_FOLDER_CLOSE 仅诊断。 */
-    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP, DROP_FOLDER_ON_HOME, KEEP_FOLDER_ON_RETURN_GESTURE, BLOCK_BLUR_CLEAR, RESTORE_FOLDER_BLUR, TRACE_FOLDER_CLOSE }
+    /** 挂载任务类型：CONST 常量短路；ARM_FOLDER_REOPEN 记下打开的文件夹；REOPEN_FOLDER_ON_RESUME 回到桌面时重开。 */
+    private enum class MountKind { CONST, ARM_FOLDER_REOPEN, REOPEN_FOLDER_ON_RESUME }
 
     private class MountTask(
         val kind: MountKind,
