@@ -1,18 +1,19 @@
 package top.honorhook.xposed.target
 
 import top.honorhook.xposed.target.ads.HonorAdsHook
+import top.honorhook.xposed.target.ads.HonorOpsAdHook
 import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 import top.honorhook.xposed.target.tracking.HonorTrackingHook
 
 /**
  * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；`.claude/skills/lsposed-hook-expert/references/rain-dexkit-and-mount-patterns.md`）。
- * [find] 按包名查表；[installed] 是完成首次 install 的**目标对象**集合——对象级判定：
- * 同一对象注册多个包名键时共享安装状态，防别名包共享进程双装。
+ * 同包可注册多个 TargetHook（如日历的 ads/ops/tracking 三路）；[installed] 是完成首次 install 的
+ * **目标对象**集合——对象级判定：同一对象多包键共享安装状态，防别名包共享进程双装。
  */
 object TargetRegistry {
 
-    private val targets = mutableMapOf<String, TargetHook>()
+    private val targets = mutableMapOf<String, MutableList<TargetHook>>()
     private val installed = mutableSetOf<TargetHook>()
 
     init {
@@ -30,6 +31,8 @@ object TargetRegistry {
         register(HonorAdsHook("com.honor.browser"))
         register(HonorAdsHook("com.hihonor.quickgame"))
         register(HonorAdsHook("com.hihonor.youku.video"))
+        // 日历专属运营推荐位（com.hihonor.osoperationsdk，仅日历内置 228 类）：adsdk 渲染层之外的第二条广告通路。
+        register(HonorOpsAdHook("com.hihonor.calendar"))
         // 荣耀埋点 SDK（com.hihonor.hianalytics）通杀拦截：同上，按包分别注册（多云音乐，无广告 SDK 但埋点全量）。
         register(HonorTrackingHook("com.hihonor.calendar"))
         register(HonorTrackingHook("com.hihonor.android.totemweather"))
@@ -39,13 +42,13 @@ object TargetRegistry {
         register(HonorTrackingHook("com.hihonor.cloudmusic"))
     }
 
-    /** 注册目标（同包重复注册以最后一次为准；仅 [init] 期静态注册使用）。 */
+    /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */
     private fun register(target: TargetHook) {
-        targets[target.packageName] = target
+        targets.getOrPut(target.packageName) { mutableListOf() }.add(target)
     }
 
-    /** 按包名查目标（未注册返回 null：被注入但无适配器时静默，照 Rain 同情形）。 */
-    fun find(packageName: String): TargetHook? = targets[packageName]
+    /** 按包名查全部目标（未注册返回空：被注入但无适配器时静默，照 Rain 同情形）。 */
+    fun find(packageName: String): List<TargetHook> = targets[packageName].orEmpty()
 
     /**
      * 目标对象是否已装（对象级防重装门控）：多键共享安装状态，别名包共享进程时防 double mount。

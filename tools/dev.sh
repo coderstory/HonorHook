@@ -110,6 +110,7 @@ HonorHook 开发工具
   diag-capture     收集 [diag] 取证日志并按 tag 分组
   wait-hook        清空日志后轮询等待 installed 判据（最长 3 分钟）
   hook-test        清日志 → 强停并拉起主题商店 → 抓挂载判据
+  relaunch <pkg>   强停指定包并冷启动，随后抓 installed 判据（验证指定宿主的挂载）
   logcat           原始全量 logcat dump（最近缓冲）
   clear-log        清空设备 logcat 缓冲
   log-file         拉取 hook 侧判据日志文件 honorhook.log
@@ -239,6 +240,18 @@ EOF
     "$ADB" shell su -c "grep -h 'HonorHook' /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -25" 2>&1 | tr -d '\r'
     ;;
 
+  relaunch)
+    require "$ADB"
+    [ -n "$2" ] || die "用法：tools/dev.sh relaunch <包名>"
+    pkg="$2"
+    info "① 强停 ${pkg} 并冷启动（触发 hook 挂载）"
+    "$ADB" shell am force-stop "$pkg" 2>/dev/null || true
+    "$ADB" shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+    sleep 8
+    info "② 挂载判据（LSPosed 框架日志，过滤 ${pkg}）："
+    "$ADB" shell su -c "grep -h 'HonorHook' /data/adb/lspd/log/modules_*.log 2>/dev/null | grep \"$pkg\" | tail -30" 2>&1 | tr -d '\r'
+    ;;
+
   size)
     for apk in "$APK_DEBUG" "$APK_RELEASE"; do
       [ -f "$apk" ] || continue
@@ -273,7 +286,10 @@ EOF
     require "$ADB"; require "$APK_RELEASE"
     info "先卸载旧包（用户约定：每次安装前必须卸载）"
     "$ADB" uninstall top.honorhook 2>&1 | tr -d '\r' || true
-    "$ADB" install "$APK_RELEASE" | tr -d '\r'
+    # -g：设备侧确认弹窗会以 INSTALL_FAILED_ABORTED 打断纯 adb install（2026-10-11 实证）
+    "$ADB" install -g "$APK_RELEASE" | tr -d '\r'
+    info "校验已安装包版本："
+    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
     ;;
 
   enable-module)

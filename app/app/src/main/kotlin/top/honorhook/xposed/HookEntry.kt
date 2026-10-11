@@ -20,14 +20,14 @@ class HookEntry : XposedModule() {
         // 远端 prefs 缓存注入（一次 Binder 读取；读失败回 null = 全功能默认开）。
         RemoteConfig.attach(runCatching { getRemotePreferences(FeatureCatalog.REMOTE_GROUP) }.getOrNull())
 
-        // 防重装靠 TargetRegistry 对象级判定（多键目标共享进程时不重复挂载）。
+        // 防重装靠 TargetRegistry 对象级判定（多键目标共享进程时不重复挂载）；同包多 hook 依次装。
         // 任何异常只记日志：hook 挂载绝不能炸宿主进程（CLAUDE.md §九 防御性编程）。
         runCatching {
-            val target = TargetRegistry.find(param.packageName)
-            if (target != null && !TargetRegistry.isInstalled(target)) {
+            val fresh = TargetRegistry.find(param.packageName).filterNot { TargetRegistry.isInstalled(it) }
+            fresh.forEach { target ->
                 target.install(this, param)
                 TargetRegistry.markInstalled(target)
-                log(Log.INFO, TAG, "target installed: ${target.packageName}")
+                log(Log.INFO, TAG, "target installed: ${target.packageName}/${target.javaClass.simpleName}")
             }
         }.onFailure { error ->
             log(Log.ERROR, TAG, "target install failed for ${param.packageName}", error)
