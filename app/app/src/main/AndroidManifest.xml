@@ -13,6 +13,10 @@
          图标会退化成首字母色块。QUERY_ALL_PACKAGES 是 LSPosed 类模块读取宿主应用的标准做法。 -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- 在线更新：app 内下载 release APK 后交给系统安装器（REQUEST_INSTALL_PACKAGES
+         只是声明权，安装前还有「允许安装未知应用」的用户授权页，见 ApkInstaller.install）。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。
 
@@ -42,6 +46,17 @@
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
+
+        <!-- 下载的更新 APK 经 FileProvider 交给系统安装器（cacheDir/update/） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <!-- 宿主设置界面：三 Tab（首页/功能/设置），Miuix Compose 实现 -->
         <activity

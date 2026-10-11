@@ -50,9 +50,10 @@ jobs:
           path: app/app/build/outputs/apk/debug/app-debug.apk
 
       # master 分支：编译 release 并发 GitHub Release
+      # -PbuildNum：run_number 注入 BuildConfig.BUILD_NUM，与 tag v<version>.r<N> 对齐供在线更新对比
       - name: Build release (master)
         if: github.ref_name == 'master'
-        run: ./app/gradlew -p app assembleRelease --no-daemon --stacktrace
+        run: ./app/gradlew -p app assembleRelease -PbuildNum=${{ github.run_number }} --no-daemon --stacktrace
 
       - name: Publish release (master)
         if: github.ref_name == 'master'

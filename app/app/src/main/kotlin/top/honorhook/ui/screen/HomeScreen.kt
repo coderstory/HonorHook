@@ -209,8 +209,8 @@ private fun StatusCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp, 14.dp),
-                contentAlignment = Alignment.TopStart,
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                contentAlignment = Alignment.CenterStart,
             ) {
                 Column {
                     Text(

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.SystemUpdateAlt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -41,6 +42,10 @@ import kotlinx.coroutines.withContext
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
 import top.honorhook.ui.scope.ScopeRestarter
+import top.honorhook.BuildConfig
+import top.honorhook.ui.update.UpdateChecker
+import top.honorhook.ui.update.UpdateDialog
+import top.honorhook.ui.update.UpdateState
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -94,6 +99,17 @@ private fun SettingsMain(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     var showRestart by remember { mutableStateOf(false) }
+    var showUpdate by remember { mutableStateOf(false) }
+    val updateSummary = run {
+        val latest = UpdateState.latest
+        when {
+            UpdateState.checking -> "检查中…"
+            latest != null && UpdateChecker.isNewer(latest, BuildConfig.VERSION_NAME, BuildConfig.BUILD_NUM) ->
+                "发现新版本 ${latest.tag}"
+            latest != null -> "已是最新（构建 ${BuildConfig.BUILD_NUM}）"
+            else -> "当前 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_NUM}）"
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -169,6 +185,19 @@ private fun SettingsMain(
                             .fillMaxWidth(),
                     ) {
                         ArrowPreference(
+                            title = "检查更新",
+                            summary = updateSummary,
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.SystemUpdateAlt,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "检查更新",
+                                    tint = colorScheme.onBackground,
+                                )
+                            },
+                            onClick = { showUpdate = true },
+                        )
+                        ArrowPreference(
                             title = "关于",
                             startAction = {
                                 Icon(
@@ -196,6 +225,10 @@ private fun SettingsMain(
     if (showRestart) {
         RestartScopeDialog(onDismiss = { showRestart = false })
     }
+
+    if (showUpdate) {
+        UpdateDialog(onDismiss = { showUpdate = false })
+    }
 }
 
 @Composable
@@ -209,7 +242,7 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
     WindowDialog(
         show = true,
         title = "强制重启作用域应用",
-        summary = if (report == null) "强停被勾选的目标进程" else null,
+        summary = null,
         onDismissRequest = { if (!running) onDismiss() },
     ) {
         val result = report
@@ -302,7 +335,6 @@ private fun RestartResult(
         if (result.failed.isNotEmpty()) {
             Text(text = "执行失败：${result.failed.joinToString()}")
         }
-        Text(text = "开关改动在目标进程下次注入时生效")
         Row(modifier = Modifier.padding(top = 8.dp)) {
             TextButton(text = "关闭", onClick = onDismiss, modifier = Modifier.weight(1f))
         }
@@ -310,7 +342,7 @@ private fun RestartResult(
 }
 
 private fun failureText(failure: ScopeRestarter.Failure): String = when (failure) {
-    ScopeRestarter.Failure.NO_SU -> "未找到可用的 su：设备没有 root，或 su 不在已知路径"
+    ScopeRestarter.Failure.NO_SU -> "未能获取 Root 授权"
     ScopeRestarter.Failure.NOT_GRANTED -> "root 未授权本应用：请在 KernelSU 管理器中允许 top.honorhook 后重试"
     ScopeRestarter.Failure.TIMEOUT -> "命令执行超时（5 秒），请重试"
 }
@@ -373,7 +405,7 @@ private fun AboutPage(
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         AboutRow("Re:荣耀", "版本 ${appVersionLabel()}")
-                        AboutRow("出品", "©${java.time.Year.now().value} CoderStory 出品")
+                        AboutRow("作者", "©${java.time.Year.now().value} CoderStory")
                         AboutRow("第三方库", "LSPosed API · Compose · Miuix · DexKit")
                     }
                 }

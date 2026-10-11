@@ -70,16 +70,16 @@ UI `SettingsScreen.RestartScopeDialog`（Miuix `WindowDialog` 三态：勾选 �
 - **交互**：确认弹窗内 6 个目标可勾选（默认全选），launcher / systemui 带副作用说明
   （桌面重建、状态栏重建）；结果在弹窗原地呈现，含「开关改动在下次注入时生效」。
 
-## P5 · 在线更新（检测 GitHub 最新 release）
+## P5 · 在线更新（检测 GitHub 最新 release）——已落地（2026-10-11）
 
-- **目标**：模块内检测 GitHub 最新 release，引导更新。
-- **用户已定的关键点**：**必须把 release 版本号写进 app 的版本号，否则无法对比**
-  ⇒ 需要定 `versionName`/`versionCode` 与 GitHub release tag 的映射规则
-  （如 tag `v1.2.3` ↔ versionName `1.2.3`，或 versionCode 对齐 release 序号）。
-  发布流程也要对齐：CI（`.github/workflows/ci.yml`）master push 自动发 Release。
-- **待定决策**：
-  1. 仓库地址（需要确认真实 repo URL，勿猜）；
-  2. 网络层：项目现有依赖能否直接用（避免引新库）；
-  3. UI 落点：SettingsScreen 一行（当前版本 / 最新版本 / 下载入口）；
-  4. 下载后安装：`REQUEST_INSTALL_PACKAGES` 权限 + FileProvider 的接线；
-  5. 检查时机：进设置页时拉一次？频率限制？
+- **版本对比契约（关键）**：CI tag_name = `v<versionName>.r<run_number>`，run_number 经
+  `-PbuildNum=${{ github.run_number }}` 注入 `BuildConfig.BUILD_NUM`（本地构建 = 0）。
+  对比规则 = semver 三段逐段比，相等再比构建号（`UpdateChecker.isNewer`）。
+- **决策落定**：仓库 `coderstory/HonorHook`；网络层零依赖（`HttpURLConnection`，不引 OkHttp）；
+  检查时机 = MainActivity 打开时静默查一次（失败无感）+ 设置页手动触发。
+- **代码**：`ui/update/UpdateChecker.kt`（解析/对比/API/状态）、`ui/update/ApkInstaller.kt`
+  （流式下载 + FileProvider + 系统安装器跳转 + 未知应用授权引导）、`ui/update/UpdateDialog.kt`
+  （确认 → 下载进度 → 安装/失败四态）；设置页第三组 Card「检查更新」行实时反映远端状态。
+- **权限**：manifest 补 `REQUEST_INSTALL_PACKAGES` + FileProvider（`@xml/file_paths` 仅暴露
+  `cacheDir/update/`）。
+- **回归**：`UpdateCheckerTest`（parseTag 契约 + isNewer 表驱动）。

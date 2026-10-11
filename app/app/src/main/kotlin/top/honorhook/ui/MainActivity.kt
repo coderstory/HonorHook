@@ -38,6 +38,7 @@ import top.honorhook.ui.component.HonorHookTheme
 import top.honorhook.ui.screen.FeaturesScreen
 import top.honorhook.ui.screen.HomeScreen
 import top.honorhook.ui.screen.SettingsScreen
+import top.honorhook.ui.update.UpdateState
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
@@ -63,6 +64,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // 打开即静默查一次更新（失败无感，结果进设置页「检查更新」行）
+        UpdateState.checkAsync()
         setContent {
             HonorHookTheme { AppRoot() }
         }

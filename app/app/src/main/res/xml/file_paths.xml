@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 暴露范围：仅在线更新的下载目录（ApkInstaller.download 的落点） -->
+<paths>
+    <cache-path
+        name="update"
+        path="update/" />
+</paths>

@@ -43,3 +43,4 @@ app/app/src/main/cpp/
 # Python 字节码缓存（skill 脚本本地运行产物）
 __pycache__/
 *.pyc
+.workbuddy/

@@ -15,6 +15,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
+        // CI 构建 run_number（ci.yml 传 -PbuildNum）；对比 GitHub release tag v<version>.r<build> 用
+        buildConfigField("int", "BUILD_NUM", providers.gradleProperty("buildNum").orElse("0").get())
+
         // 只保留真机 arm64：x86/x86_64（模拟器）与 armeabi-v7a（32 位）的 libdexkit.so 全部裁掉，
         // 项目只做真机直连验证（CLAUDE.md），无用架构 so 约 1.07MB。
         ndk {
@@ -40,6 +43,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     kotlin {
