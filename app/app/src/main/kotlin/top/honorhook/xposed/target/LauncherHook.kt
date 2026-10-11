@@ -1,5 +1,8 @@
 package top.honorhook.xposed.target
 
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -20,6 +23,14 @@ import top.honorhook.xposed.data.RemoteConfig
  * ③ 三键 Home 回桌面走 `onNewIntent → doMainActionIntent → doShowWorkspaceAnim → closeFolder` —— L3 置空 folder 实参；
  * ④ **手势上滑从应用回桌面**在 `onGestureStarted` 现场被 quickstep 的例行重置关闭
  *    （`closeOverlay()` 与 `processStateForOverView()` 两条，均不看关闭旗）—— L4 在返回手势链上短路该调用。
+ *
+ * ⑤ 文件夹背景遮罩（L5）：文件夹打开时那层压暗/模糊**不是 Folder 画的**，是桌面全局的
+ *    「背景模糊」——`DragLayer.mBlurEffect`（`DragLayer.setBlur(Drawable, boolean)`，非动态模糊机型）
+ *    或 `LevelAnimationMgr` 的窗口模糊场景 `1=folder`（动态模糊机型，由 SF 合成）。
+ *    返回桌面时的状态转场会把它清掉（`Workspace.doAnimatorListenerEndWork` / `LauncherStateTransitionAnimation`
+ *    的 `setBlurEffect(null, false)`，以及 app 模糊退场 `changeScene(2, 0, false, …)`），这些调用**都不看文件夹开关**，
+ *    故 L4 保住文件夹后遮罩仍丢。对策：L3/L4 命中时开一个「遮罩保持窗口」，窗口内
+ *    ① `DragLayer.setBlur(null, …)` 直接短路（不清）；② 记录 `LevelAnimationMgr.changeScene` 场景轨迹备查。
  * 详见 `docs/reverse/launcher-folder-keepopen.md`。
  */
 object LauncherHook : TargetHook {
@@ -71,6 +82,7 @@ object LauncherHook : TargetHook {
                 MountKind.DROP_FOLDER_ON_HOME -> {
                     val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
                     argv[FOLDER_ARG_INDEX] = null
+                    openBackdropHoldWindow()
                     engine.judge(module, task, JUDGE_PREFIX)
                     @Suppress("UNCHECKED_CAST")
                     chain.proceed(argv as Array<Any>)
@@ -78,15 +90,51 @@ object LauncherHook : TargetHook {
                 // L4 手势返回：从应用侧上滑回桌面时的 overlay/背景状态重置不再关文件夹，直接短路。
                 MountKind.KEEP_FOLDER_ON_RETURN_GESTURE -> {
                     if (fromAppReturnGesture()) {
+                        openBackdropHoldWindow()
                         engine.judge(module, task, JUDGE_PREFIX, "从应用返回手势的例行重置短路，文件夹保持打开")
                         null
                     } else {
                         chain.proceed()
                     }
                 }
+                // L5 背景遮罩：返回转场里的 setBlur(null) 是"撤遮罩"，窗口内命中即短路（不清 = 遮罩留住）。
+                MountKind.BLOCK_BLUR_CLEAR -> {
+                    if (chain.getArg(0) == null && inBackdropHoldWindow()) {
+                        module.log(Log.WARN, MountEngine.TAG, "BACKDROP 拦截清空: DragLayer.setBlur(null) ← ${nearestCaller("setBlur")}")
+                        engine.judge(module, task, JUDGE_PREFIX, "返回转场不再撤掉文件夹背景遮罩")
+                        null
+                    } else {
+                        chain.proceed()
+                    }
+                }
+                // L5 动态模糊分支：真机实证该机遮罩走窗口模糊（`isDynamicBlurFolder` = 空间层级动画 ∧ 窗口模糊
+                // ∧ 非编辑模式，本机成立），清遮罩的那步是「退出应用模糊」`changeScene(2, 0, false, …)`。
+                // 返回转场里把它改写成「进文件夹模糊」——文件夹还开着，背景本就该停在文件夹模糊上。
+                MountKind.RESTORE_FOLDER_BLUR -> {
+                    val scene = chain.getArg(0) as? Int ?: -1
+                    val enter = chain.getArg(2) as? Boolean ?: false
+                    if (!inBackdropHoldWindow()) {
+                        chain.proceed()
+                    } else if (scene == APP_BLUR_SCENE && !enter) {
+                        val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
+                        argv[0] = FOLDER_BLUR_SCENE
+                        argv[2] = true
+                        module.log(Log.WARN, MountEngine.TAG, "BLUR-SCENE 改写: app 退场 → folder 进场 ← ${nearestCaller("changeScene")}")
+                        engine.judge(module, task, JUDGE_PREFIX, "返回转场背景回到文件夹模糊")
+                        @Suppress("UNCHECKED_CAST")
+                        chain.proceed(argv as Array<Any>)
+                        reassertFolderBlur(chain.thisObject, module)
+                    } else {
+                        module.log(
+                            Log.WARN, MountEngine.TAG,
+                            "BLUR-SCENE scene=$scene enter=$enter dur=${chain.getArg(3)} ← ${nearestCaller("changeScene")}",
+                        )
+                        chain.proceed()
+                    }
+                }
                 // 诊断：只打「谁调的 closeFolder」一行（调用栈已三次误判，留作常备取证），随后放行。
                 MountKind.TRACE_FOLDER_CLOSE -> {
-                    module.log(Log.WARN, MountEngine.TAG, "FOLDER-CLOSE 触发方: ${nearestCaller()}")
+                    module.log(Log.WARN, MountEngine.TAG, "FOLDER-CLOSE 触发方: ${nearestCaller("closeFolder")}")
                     engine.judge(module, task, JUDGE_PREFIX)
                     chain.proceed()
                 }
@@ -114,14 +162,54 @@ object LauncherHook : TargetHook {
         return fromApp && reset
     }
 
-    /** 最近一个非 hook 胶水/非合成分身的调用方，形如 `类简名.方法(文件:行)`。 */
-    private fun nearestCaller(): String =
+    /** 最近一个非 hook 胶水/非合成分身的调用方，形如 `类简名.方法(文件:行)`；[skip] 用于跳过被 hook 的方法自身帧。 */
+    private fun nearestCaller(skip: String): String =
         Thread.currentThread().stackTrace
             .filter { it.className.startsWith("com.hihonor.") || it.className.startsWith("com.android.") }
-            .dropWhile { it.methodName == "closeFolder" }
+            .dropWhile { it.methodName == skip }
             .firstOrNull()
             ?.let { "${it.className.substringAfterLast('.')}.${it.methodName}(${it.fileName}:${it.lineNumber})" }
             ?: "未知"
+
+    /**
+     * 开启「背景遮罩保持窗口」。
+     *
+     * L3/L4 决定让文件夹留在打开态的同一时刻起，返回转场会陆续清掉那层模糊/压暗；
+     * 窗口内的 `DragLayer.setBlur(null, …)`（撤遮罩）需要拦下。窗口只覆盖这一次返回转场，
+     * 之后用户主动关文件夹（点外部空白等）时的清空照常放行。
+     */
+    private fun openBackdropHoldWindow() {
+        holdBackdropUntil = SystemClock.uptimeMillis() + BACKDROP_HOLD_MS
+    }
+
+    private fun inBackdropHoldWindow(): Boolean = SystemClock.uptimeMillis() < holdBackdropUntil
+
+    /**
+     * 转场收尾后重申「文件夹模糊」。
+     *
+     * 真机轨迹显示：app 模糊退场之后紧跟 `HnLauncherRecentsView.clearWindowBlurAndScale` 的
+     * `changeScene(0, 0, false, 0, true)`（约 +600ms），会把背景打回无模糊——这一步同样不看文件夹开关。
+     * 故在窗口尾部补一次「进文件夹模糊」；`changeScene(1, 0, true, 0)` 幂等，落在已进场景上无副作用。
+     */
+    private fun reassertFolderBlur(instance: Any?, module: XposedModule) {
+        val looper = Looper.getMainLooper() ?: return
+        Handler(looper).postDelayed({
+            runCatching {
+                instance?.javaClass?.getMethod(
+                    "changeScene",
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                    Long::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                )?.invoke(instance, FOLDER_BLUR_SCENE, 0, true, 0L, false)
+            }.onFailure { module.log(Log.WARN, MountEngine.TAG, "重申文件夹模糊失败: ${it.message}") }
+        }, BACKDROP_REASSERT_DELAY_MS)
+    }
+
+    /** 遮罩保持窗口截止时刻（uptimeMillis）；0 = 未开启。 */
+    @Volatile
+    private var holdBackdropUntil = 0L
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "launcher-hook"
@@ -147,10 +235,20 @@ object LauncherHook : TargetHook {
     /** hook 编写时的宿主版本基线（dumpsys package 实证）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
     private const val HOST_VERSION_BASELINE = "18.0.0.234"
 
+    /** 背景遮罩保持窗口时长：覆盖一次「返回桌面」转场（含 app 模糊退场与工作区状态动画）。 */
+    private const val BACKDROP_HOLD_MS = 2500L
+
+    /** 补正「进文件夹模糊」的延时：压在返回转场尾部（`clearWindowBlurAndScale` 的 scene=0 之后）。 */
+    private const val BACKDROP_REASSERT_DELAY_MS = 800L
+
+    /** `LevelAnimationMgr` 场景号：0=recents / 1=folder / 2=application。 */
+    private const val FOLDER_BLUR_SCENE = 1
+    private const val APP_BLUR_SCENE = 2
+
     // ---------------- 挂载任务定义（与 ThemeStore/Installer 同构） ----------------
 
-    /** 挂载任务类型：CONST 常量短路；KEEP_FOLDER_ON_STOP 命中清字段后放行；DROP_FOLDER_ON_HOME 命中置空 folder 实参后放行；KEEP_FOLDER_ON_RETURN_GESTURE 判定为从应用返回桌面时直接短路；TRACE_FOLDER_CLOSE 仅打调用方诊断。 */
-    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP, DROP_FOLDER_ON_HOME, KEEP_FOLDER_ON_RETURN_GESTURE, TRACE_FOLDER_CLOSE }
+    /** 挂载任务类型：CONST 常量短路；KEEP_FOLDER_ON_STOP 清字段后放行；DROP_FOLDER_ON_HOME 置空 folder 实参；KEEP_FOLDER_ON_RETURN_GESTURE 返回手势链短路；BLOCK_BLUR_CLEAR 遮罩窗口内不清背景模糊；RESTORE_FOLDER_BLUR 返回转场改写为进文件夹模糊；TRACE_FOLDER_CLOSE 仅诊断。 */
+    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP, DROP_FOLDER_ON_HOME, KEEP_FOLDER_ON_RETURN_GESTURE, BLOCK_BLUR_CLEAR, RESTORE_FOLDER_BLUR, TRACE_FOLDER_CLOSE }
 
     private class MountTask(
         val kind: MountKind,

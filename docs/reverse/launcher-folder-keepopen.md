@@ -138,7 +138,7 @@ smali 双证（`HnLauncher6.apktool`, 行号与运行时栈一致）：
 并入桌面目标 `LauncherHook`（数据表模式，与主题商店/包管理器同构）：
 
 1. `FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN`（默认开启），登记于 `launcher` Target。
-2. 挂载点写入 `LauncherMap_18_0_0_234.kt`（**6 点**，L2a/L2b/L3/L4/DX 同属该 feature）：
+2. 挂载点写入 `LauncherMap_18_0_0_234.kt`（**8 点**，L2a/L2b/L3/L4/L5/DX 同属该 feature）：
 
 | 点 | kind | 目标 | 作用 |
 |----|------|------|------|
@@ -146,7 +146,9 @@ smali 双证（`HnLauncher6.apktool`, 行号与运行时栈一致）：
 | L2a | `CONST` | `Launcher.getNeedCloseFloderOnSaveState → false` | 5 处返回动画消费点不再关（旗路径） |
 | L2b | `KEEP_FOLDER_ON_STOP` | `Launcher.onStop`，命中反射置 `mNeedCloseFolderOnSaveState=false` 后放行 | 拦 `onStop` 直读字段（旗路径） |
 | L3 | `DROP_FOLDER_ON_HOME` | `Launcher.doMainActionIntent`，命中把第 2 个实参（folder）置 `null` 后 `proceed(argv)` | 三键 Home 回桌面不再收起 |
-| **L4** | `KEEP_FOLDER_ON_RETURN_GESTURE` | **`Launcher.closeFolder(boolean)`，命中「从应用返回手势」时直接返回不执行** | **手势上滑回桌面不再收起（现症主修复）** |
+| **L4** | `KEEP_FOLDER_ON_RETURN_GESTURE` | **`Launcher.closeFolder(boolean)`，命中「从应用返回手势」时直接返回不执行** | **手势上滑回桌面不再收起（文件夹主修复）** |
+| L5a | `BLOCK_BLUR_CLEAR` | `DragLayer.setBlur(Drawable, boolean)`，返回转场窗口内 `drawable == null` 时不执行 | 静态模糊分支的遮罩保持（本机不适用，见 §六） |
+| **L5b** | `RESTORE_FOLDER_BLUR` | **`LevelAnimationMgr.changeScene(int,int,boolean,long,boolean)`，窗口内把 app 模糊退场改写成文件夹模糊进场 + 尾部补正** | **返回桌面背景维持文件夹模糊（本机主修复，见 §六）** |
 | DX | `TRACE_FOLDER_CLOSE` | `FolderManager.closeFolder(Folder, Z)` | 只打「谁调的」一行，常备取证 |
 
 3. `LauncherHook.mountOne` 按 `kind` 分派；`DROP_FOLDER_ON_HOME` 用 `Chain.proceed(Object[])` 改写实参
@@ -170,11 +172,50 @@ smali 双证（`HnLauncher6.apktool`, 行号与运行时栈一致）：
   为「文件夹不该关」预留的早退（注释 "folder no need to close when share…"），语义一致。
 - **验证**：`tools/dev.sh deploy-release`（`install-release` 已改 `adb install -g`；需屏亮且解锁）
   → 强停桌面 → 打开文件夹 → 点应用 → **手势上滑回桌面** → 文件夹仍展开；点外部空白仍需正常关。
-  - 判据：`LauncherHook: installed 6/6`；命中行 `launcher-hook 生效: launcher:Launcher.closeFolder（从应用返回手势的例行重置短路…）`。
+  - 判据：`LauncherHook: installed 8/8`；命中行 `launcher-hook 生效: launcher:Launcher.closeFolder（从应用返回手势的例行重置短路…）`。
   - 真机旁证：同场景 `FOLDER-CLOSE 触发方:` 应为 **0 行**（修复前每次返回 1~2 行）。
+
+## 六、背景遮罩丢失（L5，L4 的配套修复）
+
+L4 生效后文件夹确实留住了，但**返回桌面的同一时刻背景遮罩（压暗/模糊）没了**。
+
+- 那层遮罩不是 `Folder` 自己画的，是桌面**全局背景模糊**，两条实现分支（`Utilities.isDynamicBlurFolder`）：
+  - **静态支**：`Folder.getBackgroundDrawable()` → `FolderAnimationHelper.onAnimationStart` →
+    `DragLayer.setBlurEffect(drawable, …)` → `DragLayer.setBlur`，落在 `DragLayer.mBlurEffect`，
+    由 `DragLayer.drawBlurEffect(canvas)` 绘制。清空 = `setBlurEffect(null, false)`。
+  - **动态支**（`getUseSpaceHierarchyAnim() && isEnableWindowBlur() && !isInEditMode`）：
+    改用 `LevelAnimationMgr` 的窗口模糊场景（`0=recents / 1=folder / 2=application`，SF 合成），
+    `onAnimationStart` 会**跳过** `setBlurEffect`，关文件夹时 `changeScene(1, 0, false, …)`。
+- 返回桌面的**状态转场**会撤掉遮罩，且这些调用**都不看文件夹开关**（这正是 L4 保住文件夹后遮罩仍丢的原因）：
+  - `Workspace.doAnimatorListenerEndWork()` → `getDragLayer().setBlurEffect(null, false)` + `switchBlurBackgroundType(STATIC_BG)`；
+  - `LauncherStateTransitionAnimation` 的 `setBlurEffect(null, false)`（3 处，`onAnimationCancel` 等）；
+  - `Workspace` 状态动画 `onAnimationCancel` → `setBlurEffect(null, false)`。
+- **本机走哪一支（真机实证，2026-10-12）**：
+  - `HnLauncherSwipeHandlerV2:1876` 只在 `useSpaceHierarchyAnim` 为真时才发 `changeScene(2, 0, false, …)`
+    —— 该调用在真机被 L5b 轨迹点抓到（`scene=2 enter=false dur=222`）⇒ **空间层级动画为真**；
+  - `ro.surface_flinger.supports_background_blur = 1` ⇒ `WINDOW_BLUR_SUPPORTED = true` ⇒ `isEnableWindowBlur()` 真；
+  - ⇒ `Utilities.isDynamicBlurFolder()` 成立 ⇒ **遮罩走窗口模糊（动态支），`DragLayer.setBlur` 不参与**。
+    首版 L5a 因此完全无效（实测）。
+- 真机场景轨迹（`RESTORE_FOLDER_BLUR` 点，返回转场窗口内）：
+  ```
+  scene=2 enter=false dur=222 ← HnLauncherSwipeHandlerV2…lambda(HnLauncherSwipeHandlerV2.java:1867)   # app 模糊退场
+  scene=0 enter=false dur=0   ← HnLauncherRecentsView.clearWindowBlurAndScale(HnLauncherRecentsView.java:569)
+  scene=0 enter=false dur=0   ← 同上（约 +600ms）
+  ```
+  没有 `scene=1` —— 文件夹模糊在打开应用时被 `scene=2`（app 模糊）顶掉，返回时只退了 `scene=2`、没人再进 `scene=1`。
+- **对策**：
+  - **L5b（主）**：窗口内把 `changeScene(2, 0, false, j)` 改写成 `changeScene(1, 0, true, j)`（`Chain.proceed(Object[])` 换参）
+    —— 文件夹还开着，背景本就该停在文件夹模糊上；改写后转场直接落到文件夹模糊。
+  - **尾部补正**：改写后 `postDelayed(800ms)` 再发一次 `changeScene(1, 0, true, 0, false)`，压住随后
+    `clearWindowBlurAndScale` 打回的 `scene=0`。该调用幂等，落在已进场景上无副作用。
+  - **L5a（次）**：窗口内拦住 `DragLayer.setBlur(null, …)`，留给静态模糊分支的机型（本机不生效，但零成本）。
+- 侧滑返回应用（back 手势）时同样是 `changeScene(2, 0, false, 100L)`
+  （`LauncherBackAnimationControllerEx.createLauncherAnimForCancelled`，其实现在
+  `createLauncherAnimForStarted` 先 `changeScene(2, 0, true, 100L)`）⇒ L5b 的改写同样覆盖这条路。
 
 ---
 
-*状态：已实现，待真机验证（`LauncherHook` + `LauncherMap_18_0_0_234.kt`，2026-10-11）。本文含对前三版误判
+*状态：L1~L5 已实现，待真机验证（`LauncherHook` + `LauncherMap_18_0_0_234.kt`，2026-10-11/12）。本文含对前三版误判
 （首版「onStop 死分支」、二版「onStop 主路径 + getter」、三版「onNewIntent 即真凶」）的修正：真凶是**手势返回**触发的
-quickstep 例行重置（`closeOverlay` + `processStateForOverView` 两条链），定性靠调用栈，静态读码做不到。*
+quickstep 例行重置（`closeOverlay` + `processStateForOverView` 两条链），定性靠调用栈，静态读码做不到。
+L4 修好"保持打开"后暴露出配套的遮罩问题（§六），同一教训再次成立：**先上调用栈/轨迹诊断，再做静态推断**。*

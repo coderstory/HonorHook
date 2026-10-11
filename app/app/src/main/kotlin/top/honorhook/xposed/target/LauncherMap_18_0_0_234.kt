@@ -85,6 +85,40 @@ val LAUNCHER_POINTS_18_0_0_234 = listOf(
         feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
         description = "L4 从应用上滑回桌面不再收起文件夹（返回手势重置链上的 Launcher.closeFolder 短路）",
     ),
+    // L5 背景遮罩：文件夹打开时那层压暗/模糊存在 `DragLayer.mBlurEffect` 里
+    // （`setBlurEffect(Drawable,Z)` → `setBlur(Drawable,Z)`，见 DragLayer:2385-2400），
+    // 由 `Workspace.doAnimatorListenerEndWork()` / `LauncherStateTransitionAnimation` 等**状态转场**在
+    // 返回桌面时 `setBlur(null, false)` 撤掉——这些调用不看文件夹开关，故 L4 保住文件夹后遮罩仍丢。
+    // 对策：返回转场窗口内（L3/L4 命中时开启）拦截 `drawable == null` 的那次调用，不执行 = 遮罩留住。
+    HookPoint(
+        id = "launcher:DragLayer.setBlur",
+        kind = "BLOCK_BLUR_CLEAR",
+        className = "com.hihonor.android.launcher.DragLayer",
+        methodName = "setBlur",
+        paramCount = 2,
+        returnType = "void",
+        dexParamTypes = listOf("android.graphics.drawable.Drawable", "boolean"),
+        feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
+        description = "L5 返回桌面时不再撤掉文件夹背景遮罩（返回转场窗口内的 DragLayer.setBlur(null) 短路）",
+    ),
+    // L5 主修复（真机实证本机走这条路）：本机 `useSpaceHierarchyAnim` 为真（`HnLauncherSwipeHandlerV2:1876`
+    // 只有它为真才发 `changeScene(2, 0, false, …)`，日志实证该行出现）+ `ro.surface_flinger.supports_background_blur=1`
+    // ⇒ `Utilities.isDynamicBlurFolder` 成立 ⇒ 文件夹遮罩走**窗口模糊**（`LevelAnimationMgr`，
+    // scene 0=recents / 1=folder / 2=application，SF 合成），**不经** `DragLayer.setBlur`。
+    // 返回转场把背景从「应用模糊」退到无模糊，文件夹虽被 L4 留住、遮罩却没了。对策：窗口内把
+    // `changeScene(2, 0, false, …)` 改写成「进文件夹模糊」`changeScene(1, 0, true, …)`，转场尾部再补正一次。
+    HookPoint(
+        id = "launcher:LevelAnimationMgr.changeScene",
+        kind = "RESTORE_FOLDER_BLUR",
+        className = "com.hihonor.android.launcher.anim.LevelAnimationMgr",
+        methodName = "changeScene",
+        paramCount = 5,
+        returnType = "void",
+        // 同名重载：另有 changeScene(int,int,boolean,long) 四参版，必须锁参数序列。
+        dexParamTypes = listOf("int", "int", "boolean", "long", "boolean"),
+        feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
+        description = "L5 返回桌面时背景维持文件夹模糊（返回转场内的 app 模糊退场改写为文件夹模糊进场 + 尾部补正）",
+    ),
     // DX 诊断：FolderManager.closeFolder(Folder, Z) 是唯一汇聚点（IAction.onCloseFolder 回调在此）。
     // 命中即打最近调用方一行 + 放行——「谁关了文件夹」这一问已三次误判，留作常备取证。
     HookPoint(
