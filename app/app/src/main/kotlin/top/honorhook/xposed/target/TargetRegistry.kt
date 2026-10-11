@@ -1,7 +1,9 @@
 package top.honorhook.xposed.target
 
+import top.honorhook.xposed.target.ads.HonorAdsHook
 import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
+import top.honorhook.xposed.target.tracking.HonorTrackingHook
 
 /**
  * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；`.claude/skills/lsposed-hook-expert/references/rain-dexkit-and-mount-patterns.md`）。
@@ -20,8 +22,21 @@ object TargetRegistry {
         register(InstallerHook)
         register(SettingsHook)
         register(Exam8Hook)
-        register(LauncherCardTitleHook)
+        register(LauncherHook)
         register(SystemUiHook)
+        // 荣耀系统广告 SDK（com.hihonor.adsdk）通杀净化：同一 SDK 库，按包分别注册挂载。
+        register(HonorAdsHook("com.hihonor.calendar"))
+        register(HonorAdsHook("com.hihonor.android.totemweather"))
+        register(HonorAdsHook("com.honor.browser"))
+        register(HonorAdsHook("com.hihonor.quickgame"))
+        register(HonorAdsHook("com.hihonor.youku.video"))
+        // 荣耀埋点 SDK（com.hihonor.hianalytics）通杀拦截：同上，按包分别注册（多云音乐，无广告 SDK 但埋点全量）。
+        register(HonorTrackingHook("com.hihonor.calendar"))
+        register(HonorTrackingHook("com.hihonor.android.totemweather"))
+        register(HonorTrackingHook("com.honor.browser"))
+        register(HonorTrackingHook("com.hihonor.quickgame"))
+        register(HonorTrackingHook("com.hihonor.youku.video"))
+        register(HonorTrackingHook("com.hihonor.cloudmusic"))
     }
 
     /** 注册目标（同包重复注册以最后一次为准；仅 [init] 期静态注册使用）。 */

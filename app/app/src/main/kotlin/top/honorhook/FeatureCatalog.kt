@@ -28,9 +28,13 @@ object FeatureCatalog {
     const val KEY_EXAM8_BURN = "exam8.burn_reading"
 
     const val KEY_LAUNCHER_HIDE_TITLE = "launcher.hide_card_title"
+    const val KEY_LAUNCHER_KEEP_FOLDER_OPEN = "launcher.keep_folder_open"
 
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
+
+    const val KEY_ADS_BLOCK = "ads.block"
+    const val KEY_TRACK_BLOCK = "tracking.block"
 
     data class Feature(val key: String, val title: String, val description: String)
 
@@ -72,6 +76,7 @@ object FeatureCatalog {
             "com.hihonor.android.launcher", "系统桌面",
             listOf(
                 Feature(KEY_LAUNCHER_HIDE_TITLE, "隐藏卡片标题", "隐藏桌面卡片堆栈标题（如「YOYO 建议 · 明日天气预报」），不影响图标名"),
+                Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, "文件夹保持打开", "返回桌面时文件夹不自动收起，点击外部/Home 仍正常关闭"),
             ),
         ),
         Target(
@@ -79,6 +84,19 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, "隐藏副卡图标", "隐藏副卡(SIM2)状态栏信号图标，双卡时只显示主卡"),
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
+            ),
+        ),
+        Target(
+            "com.hihonor.android.totemweather", "荣耀系统净化",
+            listOf(
+                Feature(
+                    KEY_ADS_BLOCK, "广告净化·通杀",
+                    "拦截荣耀广告 SDK（com.hihonor.adsdk）渲染：日历/天气/浏览器/游戏中心/视频的信息流·横幅·开屏·插屏·激励广告内容清空并折叠占位",
+                ),
+                Feature(
+                    KEY_TRACK_BLOCK, "埋点拦截·通杀",
+                    "拦截荣耀埋点 SDK（com.hihonor.hianalytics）上报：日历/天气/浏览器/游戏中心/视频/云音乐的事件·会话·点击·曝光埋点与 OAID 标识注入全部短路，数据不落库不出网",
+                ),
             ),
         ),
     )
