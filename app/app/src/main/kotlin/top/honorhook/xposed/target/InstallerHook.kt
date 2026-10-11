@@ -4,8 +4,10 @@ import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.InstallerConfigTable
 import top.honorhook.xposed.data.RemoteConfig
 
@@ -42,9 +44,29 @@ object InstallerHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底需要 APK 磁盘路径（MethodResolver）
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        val apkPath = param.applicationInfo?.sourceDir
+        engine.begin(apkPath, HOST_VERSION_BASELINE)
 
-        // 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。**
+        // 旧版宿主结构漂移 → 专用表优先；未命中任何表 = 基线源码路径（行为与表迁移前一致）
+        val pick = HostVersion.pick(installerTables, HostVersion.resolve(apkPath))
+        val pending: List<MountTask> = if (pick.matched) {
+            pick.tasks
+                .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
+                .map { it.toInstallerTask() }
+        } else {
+            buildSourcePending()
+        }
+
+        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+    }
+
+    /** 版本表注册：精确套（旧版）；无默认套——基线走 [buildSourcePending]。 */
+    private val installerTables = listOf(
+        HostVersion.Table(setOf("14.0.22.326")) { INSTALLER_POINTS_14_0_22_326 },
+    )
+
+    /** 基线 14.0.37.301 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。** */
+    private fun buildSourcePending(): List<MountTask> {
         val pending = mutableListOf<MountTask>()
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_INSTALLER_AD)) {
             collectAdRequestHooks(pending)      // R4 不请求广告 + R1 不展示安装页广告
@@ -61,9 +83,28 @@ object InstallerHook : TargetHook {
             collectSecurityCheckHooks(pending)  // R6 跳过联网安全检测（分发器层，双管线一并短路）
             collectFingerprintBypassHooks(pending) // R6 安装指纹校验直接通过（风险链兜底）
         }
-
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        return pending
     }
+
+    /** 数据表挂载点 → 本目标挂载任务（kind 字符串映射；DexHint 四维按非空聚合）。 */
+    private fun HookPoint.toInstallerTask(): MountTask = MountTask(
+        kind = MountKind.valueOf(kind),
+        className = className,
+        methodName = methodName,
+        paramCount = paramCount,
+        returnType = returnType,
+        value = value,
+        id = id,
+        description = description,
+        dex = DexHint(
+            strings = dexStrings,
+            paramTypes = dexParamTypes,
+            classStrings = dexClassStrings,
+            classFieldTypes = dexClassFieldTypes,
+        ).takeIf {
+            dexStrings != null || dexParamTypes != null || dexClassStrings != null || dexClassFieldTypes != null
+        },
+    )
 
     /** hook 编写时的宿主版本基线（aapt2 实证）；OTA 超出此版本时 MountEngine 首轮挂载打 WARN。 */
     private const val HOST_VERSION_BASELINE = "14.0.37.301"
@@ -272,9 +313,10 @@ object InstallerHook : TargetHook {
      * 挂载任务类型：[CONST] 常量短路（命中即返回强制值，不调原方法）；
      * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，`.cursor/skills/libxposed-api/SKILL.md` 实证）；
      * [CHECK_BYPASS] 安全检测分发器短路（自构造"通过"结果回调宿主，失败放行原方法）；
+     * [CHECK_BYPASS_RET] 检测直通·返回式（旧版：不调原方法，静态工厂 a(isHn) 的返回值直接作为方法结果，失败放行）；
      * [FINGERPRINT_BYPASS] 指纹校验直接通过（回调 c()+a(true)，失败放行原方法）。
      */
-    private enum class MountKind { CONST, BLOCK, CHECK_BYPASS, FINGERPRINT_BYPASS }
+    private enum class MountKind { CONST, BLOCK, CHECK_BYPASS, CHECK_BYPASS_RET, FINGERPRINT_BYPASS }
 
     private class MountTask(
         val kind: MountKind,
@@ -368,6 +410,22 @@ object InstallerHook : TargetHook {
                         chain.proceed()
                     }
                 }
+                // 检测直通·返回式（旧版 br0.b）：不调原方法，arg0(isHn) 经静态工厂 a(Z) 构造通过结果直接返回；失败放行
+                MountKind.CHECK_BYPASS_RET -> {
+                    val pass = runCatching {
+                        val isHn = chain.args?.getOrNull(0) as? Boolean ?: return@runCatching null
+                        loader.loadClass(task.className)
+                            .getDeclaredMethod("a", Boolean::class.javaPrimitiveType)
+                            .apply { isAccessible = true }
+                            .invoke(null, isHn)
+                    }.getOrNull()
+                    if (pass != null) {
+                        engine.judge(module, task, JUDGE_PREFIX)
+                        pass
+                    } else {
+                        chain.proceed()
+                    }
+                }
                 // 指纹校验直接通过：回调 c()（清待决弹窗）+ a(true)（判定通过），不调原方法；失败放行
                 MountKind.FINGERPRINT_BYPASS -> {
                     val ok = runCatching {
@@ -396,6 +454,7 @@ object InstallerHook : TargetHook {
                 MountKind.CONST -> "常返"
                 MountKind.BLOCK -> "空实现阻断"
                 MountKind.CHECK_BYPASS -> "检测短路直通"
+                MountKind.CHECK_BYPASS_RET -> "检测直通(返回式)"
                 MountKind.FINGERPRINT_BYPASS -> "指纹直通"
             }
             module.log(Log.INFO, MountEngine.TAG, "hook 已挂载: ${task.description} → $verb ${task.value ?: "null"}")

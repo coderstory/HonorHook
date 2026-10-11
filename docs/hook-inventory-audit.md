@@ -5,7 +5,7 @@
 > 逐点逆向依据 = [`reverse/`](reverse/) 下对应 app 的记录，设计理由 = [`theme-store.md`](theme-store.md)。
 > 复核点数（**全命名空间**，勿再漏 `cloud:` / `adsource:` / `btn-hide:` / `ad-request:` / `ad-source:` / `ab-request:`）：
 > `grep -rhoE '"[a-zA-Z0-9-]+:[A-Za-z0-9_.$]+"' app/app/src/main/kotlin/top/honorhook/xposed/target/ | sort -u | wc -l`
-> 当前结果：合计 **68**（theme 43 / installer 11 / exam8 10 / settings 1 / systemui 2 / launcher 1）。
+> 当前结果：合计 **76**（theme 43 / installer 11+8旧版表 / exam8 10 / settings 1 / systemui 2 / launcher 1）。
 
 ## 一、口径与当前基线
 
@@ -24,9 +24,10 @@
 而是本模块的挂载点当初是照更新的版本写的。适配方向 = **补一套"旧版"映射**，不是"追新版"。
 查设备版本：`tools/dev.sh exec adb shell dumpsys package <pkg> | grep versionName`。
 
-- **版本适配决策（2026-10-11）**：**不做旧版映射**。设备侧把宿主升级到代码基线版本即全量生效
-  （theme 43/43、installer 11/11）。HostVersion 选表框架保留：未来适配其他版本 =
-  反编译 → 手写 `<Target>Map_<版本>.kt` → 注册 `versionTables` 精确套。
+- **版本适配决策（2026-10-11）**：theme 维持"不做旧版映射"（设备升级宿主到 `20.1.63.305` 即 43/43）；
+  installer 因**设备无升级途径**恢复旧版适配——`InstallerMap_14_0_22_326.kt`（8 点）已建并接入
+  `HostVersion.pick` 精确套，逐点漂移明细见该表头注；云控 3 点旧版无对应物（诚实跳过）。
+  HostVersion 选表框架：未来适配其他版本 = 反编译 → 手写 `<Target>Map_<版本>.kt` → 注册精确套。
 - **theme 4/43 的成功点构成（反编译 20.0.11.327 对照查实）**：T1
   `IncentiveData.getThemeDetailButtonType` 真命中；A11×3（`BaseResItemBean` 三读点）是
   **DexKit 兜底误打误撞**——基线统一基类在旧版不存在（旧版为 GetThemeRspBean$ThemeBean 等
