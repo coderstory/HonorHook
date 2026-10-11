@@ -26,6 +26,11 @@ jobs:
       # GitHub 托管镜像已预装 Android SDK（/usr/local/lib/android/sdk，许可证已预授权），
       # 缺失的 platform/build-tools 由 AGP 在构建时自动补齐，无需 setup-android action。
 
+      # Gradle 缓存层：GRADLE_USER_HOME（依赖包 + wrapper 发行版）跨 run 复用；
+      # 缓存 key 随 *.gradle* / gradle-wrapper.properties / libs.versions.toml 变化自动滚动。
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Extract version
         id: ver
         run: |
