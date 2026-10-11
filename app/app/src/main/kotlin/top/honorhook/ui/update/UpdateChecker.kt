@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import top.honorhook.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -80,18 +81,53 @@ object UpdateState {
     var checking by mutableStateOf(false)
         private set
 
+    /** 发现新版 → 全局弹窗（手动/静默检查都触发）。 */
+    var showDialog by mutableStateOf(false)
+        private set
+
+    /** 一次性 Toast 文案（手动检查无新版 / 失败），UI 消费后调 [clearNotice]。 */
+    var notice by mutableStateOf<String?>(null)
+        private set
+
+    /** 并行探测出的可用下载源（完整 URL）；null = 未完成或全挂（点下载走逐源兜底链）。 */
+    var probedUrl by mutableStateOf<String?>(null)
+        private set
+
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    /** 静默检查：失败不置空已有结果，不打扰 UI。 */
-    fun checkAsync() {
+    /** manual = 用户点了「检查更新」，必须有反馈（弹窗/Toast）；false = 启动静默检查。 */
+    fun checkAsync(manual: Boolean = false) {
         if (checking) return
         checking = true
         scope.launch {
-            val r = runCatching { UpdateChecker.fetchLatest() }.getOrNull()
-            withContext(Dispatchers.Main) {
-                if (r != null) latest = r
-                checking = false
-            }
+            runCatching { UpdateChecker.fetchLatest() }
+                .onSuccess { r ->
+                    withContext(Dispatchers.Main) {
+                        latest = r
+                        if (UpdateChecker.isNewer(r, BuildConfig.VERSION_NAME, BuildConfig.BUILD_NUM)) {
+                            showDialog = true
+                            // 弹窗弹出即并行探测全部下载源，用户点下载时直接用可用源（零等待）
+                            probedUrl = null
+                            launch { probedUrl = ApkInstaller.probeSources(r.apkUrl) }
+                        } else if (manual) {
+                            notice = "已是最新版本 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_NUM}）"
+                        }
+                    }
+                }
+                .onFailure { e ->
+                    withContext(Dispatchers.Main) {
+                        if (manual) notice = "检查失败：${e.message ?: "网络错误"}"
+                    }
+                }
+            withContext(Dispatchers.Main) { checking = false }
         }
+    }
+
+    fun dismissDialog() {
+        showDialog = false
+    }
+
+    fun clearNotice() {
+        notice = null
     }
 }

@@ -11,6 +11,7 @@
          系统应用（settings / systemui / launcher / thememanager / packageinstaller）默认可见，
          但**用户安装的应用**（如 com.exam8.chengrenGK）在未声明时 getApplicationInfo() 直接返回 null，
          图标会退化成首字母色块。QUERY_ALL_PACKAGES 是 LSPosed 类模块读取宿主应用的标准做法。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!-- 在线更新：app 内下载 release APK 后交给系统安装器（REQUEST_INSTALL_PACKAGES

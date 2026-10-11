@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.BuildConfig
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -46,7 +47,13 @@ fun UpdateDialog(onDismiss: () -> Unit) {
             try {
                 val dest = File(context.cacheDir, "update/app-release.apk")
                 withContext(Dispatchers.IO) {
-                    ApkInstaller.download(release.apkUrl, dest) { p -> phase = Phase.Downloading(p) }
+                    val probed = UpdateState.probedUrl
+                    if (probed != null) {
+                        // 弹窗期已并行探明的可用源，直下零等待
+                        ApkInstaller.downloadFrom(probed, dest) { p -> phase = Phase.Downloading(p) }
+                    } else {
+                        ApkInstaller.download(release.apkUrl, dest) { p -> phase = Phase.Downloading(p) }
+                    }
                 }
                 phase = Phase.Ready(dest)
             } catch (e: Exception) {
@@ -76,7 +83,18 @@ fun UpdateDialog(onDismiss: () -> Unit) {
                 )
             }
 
-            is Phase.Downloading -> Text(text = "下载中… ${p.progress}%")
+            is Phase.Downloading -> Column {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    progress = p.progress / 100f,
+                )
+                Text(
+                    text = "下载中… ${p.progress}%",
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
 
             is Phase.Ready -> {
                 // install 返回 false = 已跳「安装未知应用」授权页，授权后回来再点一次
@@ -96,6 +114,13 @@ fun UpdateDialog(onDismiss: () -> Unit) {
                 Actions(
                     left = "关闭" to onDismiss,
                     right = "重试" to { startDownload() },
+                )
+                TextButton(
+                    text = "用浏览器下载",
+                    onClick = { ApkInstaller.openInBrowser(context, release.apkUrl) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
                 )
             }
         }

@@ -44,7 +44,6 @@ import top.honorhook.ui.FeatureStore
 import top.honorhook.ui.scope.ScopeRestarter
 import top.honorhook.BuildConfig
 import top.honorhook.ui.update.UpdateChecker
-import top.honorhook.ui.update.UpdateDialog
 import top.honorhook.ui.update.UpdateState
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
@@ -99,7 +98,6 @@ private fun SettingsMain(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     var showRestart by remember { mutableStateOf(false) }
-    var showUpdate by remember { mutableStateOf(false) }
     val updateSummary = run {
         val latest = UpdateState.latest
         when {
@@ -195,7 +193,8 @@ private fun SettingsMain(
                                     tint = colorScheme.onBackground,
                                 )
                             },
-                            onClick = { showUpdate = true },
+                            // 手动检查：有新版 → 全局弹窗；无新版/失败 → Toast（UpdateState.notice）
+                            onClick = { UpdateState.checkAsync(manual = true) },
                         )
                         ArrowPreference(
                             title = "关于",
@@ -224,10 +223,6 @@ private fun SettingsMain(
 
     if (showRestart) {
         RestartScopeDialog(onDismiss = { showRestart = false })
-    }
-
-    if (showUpdate) {
-        UpdateDialog(onDismiss = { showUpdate = false })
     }
 }
 

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Cottage
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
@@ -30,14 +31,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
 import top.honorhook.ui.component.HonorHookTheme
 import top.honorhook.ui.screen.FeaturesScreen
 import top.honorhook.ui.screen.HomeScreen
 import top.honorhook.ui.screen.SettingsScreen
+import top.honorhook.ui.update.UpdateDialog
 import top.honorhook.ui.update.UpdateState
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.NavigationBar
@@ -103,6 +107,18 @@ private fun AppRoot() {
             drawRect(rootColor)
             drawContent()
         }
+    }
+
+    // 更新弹窗全局挂载（静默/手动检查发现新版都弹）；Toast 消费一次性通知。
+    val context = LocalContext.current
+    LaunchedEffect(UpdateState.notice) {
+        UpdateState.notice?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            UpdateState.clearNotice()
+        }
+    }
+    if (UpdateState.showDialog) {
+        UpdateDialog(onDismiss = { UpdateState.dismissDialog() })
     }
 
     val items = remember {
