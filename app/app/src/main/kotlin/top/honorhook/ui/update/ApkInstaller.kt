@@ -8,9 +8,10 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -46,36 +47,46 @@ object ApkInstaller {
     }
 
     /**
-     * 并行探测所有源，返回第一个可用源的完整 URL；全挂返回 null。
-     * 判定标准 = TCP+TLS 握手成功（connect()），不等 TTFB——慢镜像首包经常 >6s 但链路可用。
+     * 并行探测所有源，赛马返回最先握手成功者；全挂返回 null。
+     * 判定 = TCP+TLS 握手成功（connect()）；select 首个成功即返回并 cancel 其余，
+     * 单源 4s 超时封顶——awaitAll 旧版曾被死镜像拖满 10s，用户点下载干等。
      */
-    suspend fun probeSources(url: String, timeoutMs: Int = 10_000): String? = coroutineScope {
-        SOURCE_PREFIXES
-            .map { prefix ->
-                async(Dispatchers.IO) {
-                    runCatching {
-                        val conn = URL(prefix + url).openConnection() as HttpURLConnection
-                        conn.connectTimeout = timeoutMs
-                        conn.readTimeout = timeoutMs
-                        val t0 = System.currentTimeMillis()
-                        try {
-                            conn.connect()
-                            Log.i(TAG, "probe OK ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms")
-                            prefix + url
-                        } catch (e: Exception) {
-                            Log.i(TAG, "probe FAIL ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms: ${e.message}")
-                            throw e
-                        } finally {
-                            conn.disconnect()
-                        }
-                    }.getOrNull()
-                }
+    suspend fun probeSources(url: String, timeoutMs: Int = 4_000): String? = coroutineScope {
+        val jobs = SOURCE_PREFIXES.map { prefix ->
+            prefix to async(Dispatchers.IO) { probeOne(prefix, url, timeoutMs) }
+        }
+        var pending = jobs
+        while (pending.isNotEmpty()) {
+            val (donePrefix, ok) = select<Pair<String, String?>> {
+                pending.forEach { (prefix, job) -> job.onAwait { res -> prefix to res } }
             }
-            .awaitAll()
-            .also { results ->
-                Log.i(TAG, "probe done: ${results.filterNotNull().size}/${results.size} 通")
+            pending = pending.filter { it.first != donePrefix }
+            if (ok != null) {
+                pending.forEach { (_, job) -> job.cancel() }
+                Log.i(TAG, "probe winner ${donePrefix.ifEmpty { "direct" }}")
+                return@coroutineScope ok
             }
-            .firstOrNull { it != null }
+        }
+        Log.i(TAG, "probe done: 0/${SOURCE_PREFIXES.size} 通")
+        null
+    }
+
+    /** 单源探测：握手成功返回完整 URL，失败返回 null（日志含耗时与原因）。 */
+    private fun probeOne(prefix: String, url: String, timeoutMs: Int): String? {
+        val conn = URL(prefix + url).openConnection() as HttpURLConnection
+        conn.connectTimeout = timeoutMs
+        conn.readTimeout = timeoutMs
+        val t0 = System.currentTimeMillis()
+        return try {
+            conn.connect()
+            Log.i(TAG, "probe OK ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms")
+            prefix + url
+        } catch (e: Exception) {
+            Log.i(TAG, "probe FAIL ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms: ${e.message}")
+            null
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /** 单 URL 下载；手动跟随 302（browser_download_url 会跳 objects.githubusercontent.com）。 */
@@ -84,7 +95,7 @@ object ApkInstaller {
         var redirects = 0
         while (true) {
             val conn = URL(u).openConnection() as HttpURLConnection
-            conn.connectTimeout = 10_000
+            conn.connectTimeout = 5_000
             conn.readTimeout = 30_000
             conn.instanceFollowRedirects = false
             try {
@@ -101,6 +112,7 @@ object ApkInstaller {
                 Log.i(TAG, "download body total=$total")
                 dest.parentFile?.mkdirs()
                 var done = 0L
+                var nextLog = if (total > 0) total / 4 else 0L   // 25% 步进打点，诊断慢速段
                 conn.inputStream.use { input ->
                     dest.outputStream().use { out ->
                         val buf = ByteArray(64 * 1024)
@@ -109,10 +121,17 @@ object ApkInstaller {
                             if (n < 0) break
                             out.write(buf, 0, n)
                             done += n
-                            if (total > 0) onProgress((done * 100 / total).toInt())
+                            if (total > 0) {
+                                onProgress((done * 100 / total).toInt())
+                                if (done >= nextLog) {
+                                    Log.i(TAG, "download body ${done * 100 / total}% (${done}/$total)")
+                                    nextLog += total / 4
+                                }
+                            }
                         }
                     }
                 }
+                Log.i(TAG, "download done $done bytes")
                 return
             } finally {
                 conn.disconnect()

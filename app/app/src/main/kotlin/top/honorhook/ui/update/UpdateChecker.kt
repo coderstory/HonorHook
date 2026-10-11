@@ -133,8 +133,8 @@ object UpdateState {
         }
     }
 
-    /** 点下载时调用：探测进行中先等它出结果（比老链直连卡 10s 快），完成立即返回。 */
-    suspend fun awaitProbe(timeoutMs: Long = 12_000): String? {
+    /** 点下载时调用：探测进行中先等它出结果（赛马 4s 封顶），完成立即返回。 */
+    suspend fun awaitProbe(timeoutMs: Long = 6_000): String? {
         val job = probeJob
         if (job != null && job.isActive) {
             kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { job.join() }
