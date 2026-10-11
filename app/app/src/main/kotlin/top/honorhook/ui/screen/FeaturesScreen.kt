@@ -405,21 +405,23 @@ private fun AppHeaderCard(
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // 包名 / 版本 / UID 各占一行，字号统一 11sp 压紧
-                val meta = listOfNotNull(
-                    target.packageName,
-                    versionText?.let { "版本 $it" },
-                    uid?.let { "UID $it" },
-                )
-                meta.forEach { line ->
-                    Text(
-                        text = line,
-                        fontSize = 11.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
+                // 虚拟目标（iconKey 非空）不透出宿主 app 元信息：包名/版本/UID 对跨 app 开关无意义
+                if (target.iconKey == null) {
+                    val meta = listOfNotNull(
+                        target.packageName,
+                        versionText?.let { "版本 $it" },
+                        uid?.let { "UID $it" },
                     )
+                    meta.forEach { line ->
+                        Text(
+                            text = line,
+                            fontSize = 11.sp,
+                            color = colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
                 Text(
                     text = "已启用 $enabledCount/${target.features.size} 项功能",
