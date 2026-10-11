@@ -9,15 +9,15 @@ import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
 
 /**
- * 荣耀桌面 `com.hihonor.android.launcher`：卡片标题隐藏（L1）+ 文件夹返回保持打开（L2a/L2b）。
+ * 荣耀桌面 `com.hihonor.android.launcher`：卡片标题隐藏（L1）+ 文件夹返回保持打开（L2a/L2b/L3）。
  *
  * 挂载点本体在数据表 [LAUNCHER_POINTS_18_0_0_234]，按 kind 分派的 intercept 在 [mountOne]。
  * 版本分发走 [HostVersion]（空集合 = 默认套，覆盖基线 18.0.0.234）。
  *
- * L2 依据：关文件夹由 `Launcher.mNeedCloseFolderOnSaveState` 单旗门控，但**两条路径读取方式不同**——
- * ① 主关闭路径 `Launcher.onStop()` 里**直接读字段**（launcher 退后台即触发，点开文件夹内应用令其
- * 退后台，故「返回时已关」）；② 5 处返回动画消费点走 `getNeedCloseFloderOnSaveState()`。
- * 故 getter 恒 false（L2a）只覆盖 ②，onStop 命中时清字段（L2b）覆盖 ①——两点缺一不可。
+ * L2 依据：关文件夹由 `Launcher.mNeedCloseFolderOnSaveState` 单旗门控，但**多条路径读取方式不同**——
+ * ① `Launcher.onStop()` 直接读字段（L2b 清字段）；② 返回动画等 5 处走 `getNeedCloseFloderOnSaveState()`
+ * （L2a 恒 false）；③ **现症根因**：按 Home 返回桌面走 `onNewIntent → doMainActionIntent → doShowWorkspaceAnim
+ * → closeFolder(folder, z)`，该链不看任何关闭旗（L3 把 folder 实参置 null）。
  * 详见 `docs/reverse/launcher-folder-keepopen.md`。
  */
 object LauncherHook : TargetHook {
@@ -65,6 +65,14 @@ object LauncherHook : TargetHook {
                     engine.judge(module, task, JUDGE_PREFIX)
                     chain.proceed()
                 }
+                // 按 Home 返回桌面：把 folder 实参换成 null 再放行，令下游 doShowWorkspaceAnim 跳过 closeFolder。
+                MountKind.DROP_FOLDER_ON_HOME -> {
+                    val argv: Array<Any?> = Array(task.paramCount) { chain.getArg(it) }
+                    argv[FOLDER_ARG_INDEX] = null
+                    engine.judge(module, task, JUDGE_PREFIX)
+                    @Suppress("UNCHECKED_CAST")
+                    chain.proceed(argv as Array<Any>)
+                }
             }
         }
 
@@ -74,13 +82,16 @@ object LauncherHook : TargetHook {
     /** L2b 目标字段：`Launcher` 的 public 关文件夹旗（onStop 直读；名字含拼写 Floder 的 getter 读同一字段）。 */
     private const val CLOSE_FLAG_FIELD = "mNeedCloseFolderOnSaveState"
 
+    /** L3 目标实参位：`doMainActionIntent(Intent, Folder, ManualStackExpandGroup)` 的 folder。 */
+    private const val FOLDER_ARG_INDEX = 1
+
     /** hook 编写时的宿主版本基线（dumpsys package 实证）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
     private const val HOST_VERSION_BASELINE = "18.0.0.234"
 
     // ---------------- 挂载任务定义（与 ThemeStore/Installer 同构） ----------------
 
-    /** 挂载任务类型：[CONST] 常量短路；[KEEP_FOLDER_ON_STOP] 命中清字段后放行。 */
-    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP }
+    /** 挂载任务类型：CONST 常量短路；KEEP_FOLDER_ON_STOP 命中清字段后放行；DROP_FOLDER_ON_HOME 命中置空 folder 实参后放行。 */
+    private enum class MountKind { CONST, KEEP_FOLDER_ON_STOP, DROP_FOLDER_ON_HOME }
 
     private class MountTask(
         val kind: MountKind,

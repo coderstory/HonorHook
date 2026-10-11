@@ -51,4 +51,18 @@ val LAUNCHER_POINTS_18_0_0_234 = listOf(
         feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
         description = "L2b onStop 不再关文件夹（置 mNeedCloseFolderOnSaveState=false 后放行，跳过 closeFolder(false)）",
     ),
+    // L3 现症根因：按 Home 返回桌面时 `onNewIntent`（action=MAIN）→ `doMainActionIntent(intent, openFolder, …)`
+    // → `doShowWorkspaceAnim(z, folder, …)` → `closeFolder(folder, z)`。此链**不经任何关闭旗**，
+    // 故 L2a/L2b 都拦不住（真机日志：onNewIntent 后 3ms 即 onCloseFolder）。对策：命中时把 folder 实参置 null
+    // 再放行——只跳过关文件夹，工作区动画等其余逻辑不变。
+    HookPoint(
+        id = "launcher:Launcher.doMainActionIntent",
+        kind = "DROP_FOLDER_ON_HOME",
+        className = "com.hihonor.android.launcher.Launcher",
+        methodName = "doMainActionIntent",
+        paramCount = 3,
+        returnType = "void",
+        feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
+        description = "L3 按 Home 返回桌面不再收起文件夹（doMainActionIntent 的 folder 实参置 null，跳过 closeFolder）",
+    ),
 )
