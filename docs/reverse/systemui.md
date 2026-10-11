@@ -194,3 +194,30 @@ imageView.setImageDrawable(new ResScalingDrawableWrapper(drawable2, i, getScaleF
 
 **未验证**：U3 仍**零真机验证**。新架构只做了编译与单测（档位解析 10 例）。
 验证判据 = 日志 `HonorHookMerged` 前缀。验证前须在模块 UI **关闭 U1「隐藏副卡图标」**。
+
+### 7.9 U3 双卡合并：结案废弃（2026-10-11）
+
+真机五轮迭代后**彻底删除代码**（`MergedSignalHook.kt`、`SignalLevelParseTest.kt`、
+`FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL`、`SystemUiHook` 的 U3 分派）。本节留档防重踩。
+
+**最终根因链**（全部真机实证，按踩坑顺序）：
+
+1. **`mobile_combo` 不是 `ModernStatusBarMobileView`**：这版宿主（17.0.0.1）状态栏
+   `signal_cluster_container` 里的卡根是 **LinearLayout**，读不到 `public int subId` 字段
+   ⇒ 一切按 subId 排序/主副判定的设计全部落空。
+2. **`setIconForView` 拦截器必须 `chain.proceed()`**：不 proceed ⇒ 宿主原方法不执行
+   ⇒ `TintImageView` 上的信号图标永远画不出来（现象：SIM 框架在、信号全空）。
+   这是最隐蔽的一条：hook「生效」着，只是把宿主的绘制吞了。
+3. **卡锚点没有 `mobile_combo_card`**：inner 布局 `<merge>` 直挂，`mobile_signal`
+   的祖先链是 `mobile_combo < FrameLayout < signal_cluster_container`。
+4. **`constructAndBind` 在显示路径上零触发**：双排只能由 `setIconForView` 驱动。
+5. **宿主视图重建 churn**：2 张卡在状态栏注册出 4~5 个根（旧根 detach 后靠 GC 回收），
+   主卡选择必须按 cluster 分组 + `isAttachedToWindow` 过滤 + 容器内 child index 排序，
+   任何基于全局列表/subId 的排序都会随机选主（WeakHashMap 迭代序）。
+6. **档位采集拿不到真实值**：`setIconForView` 的前若干次调用都是
+   `stat_sys_signal_null` / `icon=0` / `mobile_inout` 的 `single_stat_sys_signal_connected`，
+   真实档位图标被 6 条日志上限挤掉，无法确认采集口径。
+
+**教训**：LSPosed 拦截器的默认姿势是「先 `proceed()` 放行宿主，再做旁路采集」；
+拿不到可靠锚点（subId/卡序/档位）时，双排这种**强视图操作**不可做——
+应改用 §7.3 的数据源轨（`getPrimaryLevel()` StateFlow）重做，而不是继续在渲染点硬刚。

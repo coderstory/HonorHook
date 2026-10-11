@@ -23,6 +23,7 @@
 
 | 文件 | 内容 |
 |---|---|
+| **待办任务收件箱**（版本机制框架 / 包管理器双版本 / 强制重启 / 在线更新） | [`TODO.md`](TODO.md) |
 | [`ui-miuix-overview.md`](ui-miuix-overview.md) | 宿主 UI（Miuix Compose）结构与开关下发通道 |
 | [`hook-philosophy-manifesto.md`](hook-philosophy-manifesto.md) | hook 设计哲学（哲学表述版 + 工程条款版，七条原则与审计应用） |
 

@@ -15,30 +15,44 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import top.honorhook.FeatureCatalog
+import top.honorhook.ui.FeatureStore
+import top.honorhook.ui.scope.ScopeRestarter
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
@@ -79,6 +93,7 @@ private fun SettingsMain(
     onOpenAbout: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
+    var showRestart by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -103,7 +118,28 @@ private fun SettingsMain(
                 overscrollEffect = null,
             ) {
                 item {
-                    // 第一组：外观
+                    // 第一组：作用域进程
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth(),
+                    ) {
+                        ArrowPreference(
+                            title = "强制重启作用域应用",
+                            summary = "强停目标进程，让开关改动生效",
+                            startAction = {
+                                Icon(
+                                    Icons.Rounded.RestartAlt,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                    contentDescription = "强制重启作用域应用",
+                                    tint = colorScheme.onBackground,
+                                )
+                            },
+                            onClick = { showRestart = true },
+                        )
+                    }
+
+                    // 第二组：外观
                     Card(
                         modifier = Modifier
                             .padding(top = 12.dp)
@@ -124,7 +160,7 @@ private fun SettingsMain(
                         )
                     }
 
-                    // 第二组：关于
+                    // 第三组：关于
                     // 原「运行日志」项 onClick 为空实现却带右箭头（点进去什么都没有），已移除。
                     // 判据日志的真入口是 `tools/dev.sh modlog` / `wait-hook`（LSPosed 框架日志）。
                     Card(
@@ -156,6 +192,127 @@ private fun SettingsMain(
             }
         }
     }
+
+    if (showRestart) {
+        RestartScopeDialog(onDismiss = { showRestart = false })
+    }
+}
+
+@Composable
+private fun RestartScopeDialog(onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var selected by remember { mutableStateOf(FeatureCatalog.targets.map { it.packageName }.toSet()) }
+    var running by remember { mutableStateOf(false) }
+    var report by remember { mutableStateOf<ScopeRestarter.Report?>(null) }
+    var push by remember { mutableStateOf<FeatureStore.PushResult?>(null) }
+
+    WindowDialog(
+        show = true,
+        title = "强制重启作用域应用",
+        summary = if (report == null) "强停被勾选的目标进程" else null,
+        onDismissRequest = { if (!running) onDismiss() },
+    ) {
+        val result = report
+        when {
+            result != null -> RestartResult(result, push, onDismiss)
+            running -> Text("正在执行…")
+            else -> RestartPicker(
+                selected = selected,
+                onToggle = { pkg, on -> selected = if (on) selected + pkg else selected - pkg },
+                onConfirm = {
+                    val snapshot = selected.toList()
+                    running = true
+                    scope.launch {
+                        // 必须先下发再强停，否则下次注入读到的还是旧远端值
+                        val pushed = withContext(Dispatchers.IO) { FeatureStore.pushAllToRemote() }
+                        val outcome = withContext(Dispatchers.IO) { ScopeRestarter.restart(snapshot) }
+                        push = pushed
+                        report = outcome
+                        running = false
+                    }
+                },
+                onCancel = onDismiss,
+            )
+        }
+    }
+}
+
+private val RESTART_SIDE_EFFECT = mapOf(
+    "com.hihonor.android.launcher" to "桌面会重建：图标与小部件重载、回到主屏",
+    "com.android.systemui" to "状态栏与导航栏会重建：短暂闪一下",
+)
+
+@Composable
+private fun RestartPicker(
+    selected: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column {
+        FeatureCatalog.targets.forEach { target ->
+            CheckboxPreference(
+                title = target.name,
+                summary = RESTART_SIDE_EFFECT[target.packageName] ?: target.packageName,
+                checked = target.packageName in selected,
+                onCheckedChange = { onToggle(target.packageName, it) },
+            )
+        }
+        Row(
+            modifier = Modifier.padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                text = "取消",
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            TextButton(
+                text = "执行",
+                onClick = onConfirm,
+                enabled = selected.isNotEmpty(),
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RestartResult(
+    result: ScopeRestarter.Report,
+    push: FeatureStore.PushResult?,
+    onDismiss: () -> Unit,
+) {
+    Column {
+        Text(text = "已停止 ${result.stopped.size} / 在跑 ${result.runningCount}")
+        push?.let {
+            Text(
+                text = if (!it.connected) {
+                    "⚠️ LSPosed 未连接：开关未下发，hook 侧仍按上次远端值运行"
+                } else {
+                    "开关已下发 ${it.sent}/${it.total}"
+                },
+            )
+        }
+        result.failure?.let { Text(text = failureText(it)) }
+        if (result.notRunning.isNotEmpty()) {
+            Text(text = "未运行（无需处理）：${result.notRunning.joinToString()}")
+        }
+        if (result.failed.isNotEmpty()) {
+            Text(text = "执行失败：${result.failed.joinToString()}")
+        }
+        Text(text = "开关改动在目标进程下次注入时生效")
+        Row(modifier = Modifier.padding(top = 8.dp)) {
+            TextButton(text = "关闭", onClick = onDismiss, modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+private fun failureText(failure: ScopeRestarter.Failure): String = when (failure) {
+    ScopeRestarter.Failure.NO_SU -> "未找到可用的 su：设备没有 root，或 su 不在已知路径"
+    ScopeRestarter.Failure.NOT_GRANTED -> "root 未授权本应用：请在 KernelSU 管理器中允许 top.honorhook 后重试"
+    ScopeRestarter.Failure.TIMEOUT -> "命令执行超时（5 秒），请重试"
 }
 
 /**

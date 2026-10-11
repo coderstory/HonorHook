@@ -96,16 +96,8 @@ object SystemUiHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_5G, "SystemUiHook")
         }
 
-        if (pending.isEmpty() && !RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL)) return
+        if (pending.isEmpty()) return
         engine.begin(apkPath, HOST_VERSION_BASELINE)
-
-        // U3 双排合并：独立引擎（自绘视图生命周期独立于宿主 bind 链），故单独挂。
-        // 2026-10-11：崩溃根因已定位并修复（addSignalView 误返回 null），恢复启用。
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL)) {
-            MergedSignalHook.install(module, loader, apkPath)
-        } else {
-            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_MERGE_SIGNAL, "SystemUiHook")
-        }
 
         if (pending.isNotEmpty()) {
             engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }

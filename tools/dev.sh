@@ -18,7 +18,21 @@ elif [ -x /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/jlink 
 else
   export JAVA_HOME="$ROOT/tools/jdk-21"   # 均缺失：保留原路径，由 require 报出明确错误
 fi
-export ANDROID_HOME="$ROOT/tools/android-sdk"
+# ---- Android SDK：项目内便携版优先 → brew 前缀 → 本机安装兜底（2026-10-11 加回退）----
+# 背景：e76e045 磁盘清理移除了 tools/android-sdk/（1.85GB 回收），原硬编码路径失效。
+# 与上面 JDK 的三级回退同构：任一路径存在即用，全缺失时保留原路径由 require 报明确错误。
+if [ -d "$ROOT/tools/android-sdk/platforms" ]; then
+  ANDROID_SDK_LOCAL="$ROOT/tools/android-sdk"
+elif [ -d /opt/homebrew/share/android-sdk/platforms ]; then
+  ANDROID_SDK_LOCAL=/opt/homebrew/share/android-sdk
+elif [ -d /usr/local/share/android-sdk/platforms ]; then
+  ANDROID_SDK_LOCAL=/usr/local/share/android-sdk
+elif [ -d "$HOME/Library/Android/sdk/platforms" ]; then
+  ANDROID_SDK_LOCAL="$HOME/Library/Android/sdk"
+else
+  ANDROID_SDK_LOCAL="$ROOT/tools/android-sdk"   # 均缺失：保留原路径，后续 require/die 报出
+fi
+export ANDROID_HOME="$ANDROID_SDK_LOCAL"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 if [ -x "$ROOT/tools/platform-tools/adb" ]; then
   ADB="$ROOT/tools/platform-tools/adb"

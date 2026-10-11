@@ -49,6 +49,31 @@ object FeatureStore {
      * @return 远端下发是否成功。`false` 表示框架未连接或写入抛异常 —— 此时 hook 侧读不到，
      *   仍按默认全开运行，UI 必须如实告知用户（不能只改本地就当生效了）。
      */
+    data class PushResult(val sent: Int, val total: Int, val connected: Boolean)
+
+    /**
+     * 强停前调用：远端 prefs 不随模块卸载清除，重装后本地被清空而远端残留旧值，
+     * 会出现"界面显示开、hook 读到关"（SystemUI 曾因此静默失效）。
+     */
+    fun pushAllToRemote(): PushResult {
+        val all = FeatureCatalog.targets.flatMap { it.features }
+        val service = FrameworkState.current()
+            ?: return PushResult(0, all.size, false)
+        return runCatching {
+            val editor = service.getRemotePreferences(FeatureCatalog.REMOTE_GROUP).edit()
+            var sent = 0
+            all.forEach { feature ->
+                editor.putBoolean(feature.key, isEnabled(feature.key))
+                sent++
+            }
+            editor.apply()
+            PushResult(sent, all.size, true)
+        }.getOrElse { t ->
+            Log.w(TAG, "远端 prefs 批量下发失败（hook 侧仍按上次远端值运行）", t)
+            PushResult(0, all.size, true)
+        }
+    }
+
     fun setEnabled(key: String, enabled: Boolean): Boolean {
         states[key] = enabled
         prefs?.edit()?.putBoolean(key, enabled)?.apply()

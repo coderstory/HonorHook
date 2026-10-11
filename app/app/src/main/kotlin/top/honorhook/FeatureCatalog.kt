@@ -31,7 +31,6 @@ object FeatureCatalog {
 
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
-    const val KEY_SYSTEMUI_MERGE_SIGNAL = "systemui.merge_signal"
 
     data class Feature(val key: String, val title: String, val description: String)
 
@@ -80,7 +79,6 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, "隐藏副卡图标", "隐藏副卡(SIM2)状态栏信号图标，双卡时只显示主卡"),
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
-                Feature(KEY_SYSTEMUI_MERGE_SIGNAL, "双卡信号合并显示", "双卡时把两张卡的信号格合并为一个图标，上排主卡下排副卡"),
             ),
         ),
     )
