@@ -51,7 +51,7 @@ tools/dev.sh test            # JVM 单元测试（表驱动决策回归）
 3. 勾选作用域：主题商店 + 包管理器 + 设置 + 成人高考题库 + 系统桌面 + SystemUI；
 4. 强停目标应用后重开；
 5. 判据日志：`ThemeStoreHook: installed 43/43`、`InstallerHook: installed 11/11`、
-   `SettingsHook: installed 1/1`、`Exam8Hook: installed 10/10`、`LauncherHook: installed 3/3`、
+   `SettingsHook: installed 1/1`、`Exam8Hook: installed 10/10`、`LauncherHook: installed 4/4`、
    `SystemUiHook: installed 2/2`。
 
 ### 一键部署（本仓库开发流程）
