@@ -4,6 +4,8 @@ import top.honorhook.xposed.target.ads.HonorAdsHook
 import top.honorhook.xposed.target.ads.HonorOpsAdHook
 import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.ime.ImeHook
+import top.honorhook.xposed.target.jd.JdHook
+import top.honorhook.xposed.target.mfauth.MfaAuthHook
 import top.honorhook.xposed.target.mms.MmsHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 import top.honorhook.xposed.target.tracking.HonorTrackingHook
@@ -49,6 +51,10 @@ object TargetRegistry {
         register(HonorTrackingHook("com.hihonor.quickgame"))
         register(HonorTrackingHook("com.hihonor.youku.video"))
         register(HonorTrackingHook("com.hihonor.cloudmusic"))
+        // 京东开屏（第 9 目标）：hookBefore JDHomeManager.a 短路 = SplashFragment 永不挂载。
+        register(JdHook)
+        // MFA身份验证器开屏（第 10 目标）：360 加固，框架 Activity.onCreate 收口 + 类名门控跳页。
+        register(MfaAuthHook)
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */

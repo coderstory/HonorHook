@@ -17,6 +17,8 @@
 | 系统更新 | `com.hihonor.ouc` + `com.hihonor.android.upgradeguide` | 18.0.3.206 / 16.0.0.005 | 主代码 R8 深混淆，但 **manifest 组件名未混淆**（锚点全选组件 framework 回调，零 DexKit）；手动检查路径与自动链分离须保留 | [`ouc.md`](ouc.md) |
 | 成人高考题库 | `com.exam8.chengrenGK` | 5.9.0.0-release | **未混淆**（bean 稳定）；但**服务端按订单态下发正文** ⇒ 能力边界见下 | [`exam8.md`](exam8.md) |
 | 荣耀短信+智能信息 | `com.hihonor.mms` + `com.hihonor.intelligentmessage` | 19.0.9.304 / 10.0.41.308 | 引擎以插件载入 mms 进程；`ted.sms` 半可读、广告管线在 `defpackage`；mms 侧桥接 `com.smartsms.proxy.hw.*` **未混淆** | [`sms-ads.md`](sms-ads.md) |
+| 京东 | `com.jingdong.app.mall` | 16.0.70 (102834) | 半可读：业务类名大量保留（SplashFragment/JDHomeManager），方法名 R8 单字母；开屏自研（无第三方广告 SDK） | [`jd.md`](jd.md) |
+| MFA身份验证器 | `com.aimazhishi.mfa.authenticator` | 1.0.5 (5) | **360 加固**（StubApp/libjiagu）：业务代码静态不可读，hook 走 manifest 类名 + classloader 捕获；广告 = 穿山甲开屏 | [`mfa-authenticator.md`](mfa-authenticator.md) |
 
 > 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` §八 未解决项与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。
 

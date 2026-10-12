@@ -19,6 +19,8 @@
     <string name="target_name_mms">短信</string>
     <string name="target_name_ime">搜狗键盘</string>
     <string name="target_name_purify">荣耀系统净化</string>
+    <string name="target_name_jd">京东</string>
+    <string name="target_name_mfa">MFA身份验证器</string>
 
     <!-- ===== 功能名与说明（FeatureCatalog.Feature.titleRes/descRes）=====
          命名约定：feature_<key 中 . 换 _>_title / _desc；ota.block 双目标共用 key，
@@ -50,6 +52,12 @@
     <string name="feature_exam8_super_vip_desc">解锁会员专属题库和功能</string>
     <string name="feature_exam8_burn_reading_title">阅后即焚解锁</string>
     <string name="feature_exam8_burn_reading_desc">题目和答案可以完整查看，不再被遮盖</string>
+
+    <string name="feature_jd_splash_title">屏蔽开屏广告</string>
+    <string name="feature_jd_splash_desc">冷启动直接进首页，不再展示开屏广告页（含启动图联动入口）；广告数据请求不受影响，下次注入生效</string>
+
+    <string name="feature_mfa_splash_title">屏蔽开屏广告</string>
+    <string name="feature_mfa_splash_desc">冷启动直接进主界面，跳过全屏开屏广告页；验证码生成/备份/设置等其余功能不受影响</string>
 
     <string name="feature_launcher_hide_card_title_title">隐藏卡片标题</string>
     <string name="feature_launcher_hide_card_title_desc">隐藏桌面卡片上的标题文字（如「YOYO 建议」），不影响应用图标</string>

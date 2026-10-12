@@ -44,6 +44,9 @@ object FeatureCatalog {
 
     const val KEY_MMS_AD_OFF = "mms.ad_off"
 
+    const val KEY_JD_SPLASH = "jd.splash"
+    const val KEY_MFA_SPLASH = "mfa.splash"
+
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
     const val KEY_ADS_BLOCK = "ads.block"
@@ -175,6 +178,20 @@ object FeatureCatalog {
                 Feature(KEY_TRACK_BLOCK, R.string.feature_tracking_block_title, R.string.feature_tracking_block_desc),
             ),
             iconKey = "shield",
+        ),
+        Target(
+            "com.jingdong.app.mall", R.string.target_name_jd,
+            listOf(
+                Feature(KEY_JD_SPLASH, R.string.feature_jd_splash_title, R.string.feature_jd_splash_desc),
+            ),
+            baselineVersion = "16.0.70",  // dumpsys 实证 2026-10-12（docs/reverse/jd.md）
+        ),
+        Target(
+            "com.aimazhishi.mfa.authenticator", R.string.target_name_mfa,
+            listOf(
+                Feature(KEY_MFA_SPLASH, R.string.feature_mfa_splash_title, R.string.feature_mfa_splash_desc),
+            ),
+            baselineVersion = "1.0.5",  // dumpsys 实证 2026-10-12（docs/reverse/mfa-authenticator.md）
         ),
     )
 
