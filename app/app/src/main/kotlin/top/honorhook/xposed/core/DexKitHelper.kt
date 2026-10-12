@@ -65,8 +65,9 @@ object DexKitHelper {
 
     /** 取（或创建）DexKitBridge：命中已缓存 apkPath 直复用；未命中在 synchronized + @Volatile 双重检查下创建并缓存（并发首次只 create 一次）。 */
     private fun bridgeFor(apkPath: String): DexKitBridge? {
-        if (cachedBridgeApkPath == apkPath) cachedBridge?.let { return it }
         synchronized(this) {
+            // 快路径判定收进 synchronized：cachedBridge/cachedBridgeApkPath 双字段非原子，锁外读可能
+            // 撞上"桥已换、路径未写"的中间态而复用错桥（评审 P4；同 apk 命中本就几乎必然持锁方刚写过）。
             if (cachedBridgeApkPath == apkPath) return cachedBridge
             val bridge = try {
                 // HC 实码（dexkit 2.2.0）：DexKitBridge.create(sourceDir)；Rain 旧版用的是 new DexKitBridge(...)
@@ -133,11 +134,10 @@ object DexKitHelper {
                     Log.w(TAG, "DexKit 命中反射解析失败（跳过该条）", t)
                     return@mapNotNull null
                 }
-            // 过滤（照 Rain v00.java:40-64）：非接口/非抽象/非 native/非 static
+            // 过滤（照 Rain v00.java:40-64）：非抽象/非 native/非 static
+            // （原样照抄的 Modifier.isInterface 已删：method modifiers 不含 interface 位，恒 false 死过滤，评审 P4）
             val mod = method.modifiers
-            if (Modifier.isInterface(mod) || Modifier.isAbstract(mod) ||
-                Modifier.isNative(mod) || Modifier.isStatic(mod)
-            ) {
+            if (Modifier.isAbstract(mod) || Modifier.isNative(mod) || Modifier.isStatic(mod)) {
                 return@mapNotNull null
             }
             // 签名串去重（照 Rain v00.d）

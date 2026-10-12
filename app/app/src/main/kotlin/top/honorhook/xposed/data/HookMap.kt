@@ -24,6 +24,8 @@ data class HookPoint(
     val forceArgIndex: Int = 0,
     /** 所属功能开关 key（FeatureCatalog）；空 = 常挂，不受开关控制。 */
     val feature: String = "",
+    /** 功能点 id（通路汇总用，与 MountEngine.Task.group 契约对齐，如 "A1"）；空 = 探针/载体类，不参与汇总。 */
+    val group: String = "",
     val uriEmptyRoute: Boolean = false,
     /** 下载链取值路径：THIS / GET_DOWNLOAD_INFO（目标侧映射成自己的枚举）。 */
     val uriOwner: String = "THIS",

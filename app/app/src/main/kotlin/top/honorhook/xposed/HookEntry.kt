@@ -25,9 +25,15 @@ class HookEntry : XposedModule() {
         runCatching {
             val fresh = TargetRegistry.find(param.packageName).filterNot { TargetRegistry.isInstalled(it) }
             fresh.forEach { target ->
-                target.install(this, param)
-                TargetRegistry.markInstalled(target)
-                log(Log.INFO, TAG, "target installed: ${target.packageName}/${target.javaClass.simpleName}")
+                // per-target 隔离：单 target install 抛异常不阻断同包其余 TargetHook
+                // （同进程注册多个 TargetHook 的目标，如日历进程 3 个——第一个炸不能拖死其余）
+                runCatching {
+                    target.install(this, param)
+                    TargetRegistry.markInstalled(target)
+                    log(Log.INFO, TAG, "target installed: ${target.packageName}/${target.javaClass.simpleName}")
+                }.onFailure { error ->
+                    log(Log.ERROR, TAG, "target install failed: ${target.packageName}/${target.javaClass.simpleName}", error)
+                }
             }
         }.onFailure { error ->
             log(Log.ERROR, TAG, "target install failed for ${param.packageName}", error)
