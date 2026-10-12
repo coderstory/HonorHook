@@ -57,3 +57,6 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+# Kotlin 唯一版本源（此前 settings.gradle.kts pluginManagement 里嵌 2.4.21 与这里 2.3.21 双源漂移，
+# 统一为 toml 实际生效者；顶层 build.gradle.kts 经此别名引用）
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

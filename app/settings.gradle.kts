@@ -17,9 +17,8 @@ pluginManagement {
             mavenCentral()
         }
     }
-    plugins {
-        kotlin("jvm") version "2.4.21"
-    }
+    // Kotlin 插件版本不再在此声明（原嵌入 kotlin("jvm") 2.4.21 与 toml 的 2.3.21 双源漂移）——
+    // 唯一版本源 = gradle/libs.versions.toml 的 kotlin，顶层 build.gradle.kts 经 alias 引用。
 }
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
