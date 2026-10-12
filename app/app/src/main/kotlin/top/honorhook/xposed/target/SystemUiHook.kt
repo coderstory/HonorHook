@@ -56,6 +56,11 @@ object SystemUiHook : TargetHook {
     private const val CLS_HW_NOTIFICATION_FILTER =
         "com.android.systemui.statusbar.notification.HwNotificationFilterImpl"
 
+    /** U4b：通知中心（荣耀自建 dynamicserver 管线）真正的 shade 仲裁——isDisableShownInShade 即宿主
+     *  自带 hw_disable_ntf_show_in_shade 标志的读口；2026-10-12 真机实证只挂 U4 判据命中但通知中心仍渲染。 */
+    private const val CLS_HW_NOTIFICATION_FEATURE =
+        "com.android.systemui.statusbar.notification.HwNotificationFeatureImpl"
+
     /** U5：手电筒低电量门宿主类（canOpenFlashLight 覆写所在；基类 StatusBar 同名方法是恒 true 的 stub，无需另挂）。 */
     private const val CLS_HW_PHONE_STATUSBAR = "com.android.systemui.statusbar.phone.HwPhoneStatusBar"
 
@@ -130,6 +135,14 @@ object SystemUiHook : TargetHook {
                 id = ID_FILTER_NOTIF,
                 description = "U4 系统通知隐藏（充电/热点/USB 调试，身份匹配见 matchesHiddenNotif）",
             )
+            pending += MountTask(
+                className = CLS_HW_NOTIFICATION_FEATURE,
+                methodName = "isDisableShownInShade",
+                paramCount = 1,
+                returnType = "boolean",
+                id = ID_SHADE_HIDE,
+                description = "U4b 通知中心隐藏（荣耀自建 dynamicserver 管线 shade 仲裁：isDisableShownInShade 命中返 true，同宿主自带隐藏标志语义）",
+            )
         } else {
             notifKeys.forEach { logDisabled(module, it, "SystemUiHook") }
         }
@@ -172,6 +185,7 @@ object SystemUiHook : TargetHook {
     /** 挂载点 id（mountOne 按 id 分派）。 */
     private const val ID_HIDE_5G = "systemui:signalIconBinder.bind"
     private const val ID_FILTER_NOTIF = "systemui:hwNotificationFilterImpl.shouldFilterOut"
+    private const val ID_SHADE_HIDE = "systemui:hwNotificationFeatureImpl.isDisableShownInShade"
     private const val ID_FLASHLIGHT_LOW_BATT = "systemui:hwPhoneStatusBar.canOpenFlashLight"
 
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
@@ -181,6 +195,7 @@ object SystemUiHook : TargetHook {
         when (task.id) {
             ID_HIDE_5G -> mountHide5G(task, module, loader)
             ID_FILTER_NOTIF -> mountHideSystemNotifs(task, module, loader)
+            ID_SHADE_HIDE -> mountHideInNotificationCenter(task, module, loader)
             ID_FLASHLIGHT_LOW_BATT -> mountFlashlightLowBatt(task, module, loader)
             else -> mountHideSim2(task, module, loader)
         }
@@ -308,6 +323,29 @@ object SystemUiHook : TargetHook {
      */
     private fun mountHideSystemNotifs(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
+            // 入参是 NotificationEntry，抽 public 字段 mSbn（U4b 的入参直接就是 sbn）
+            val hit = runCatching {
+                chain.getArg(0)?.javaClass?.getField("mSbn")?.get(chain.getArg(0))
+                    ?.let { matchesHiddenNotif(it, module) }
+            }.getOrNull()
+            val hostResult = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
+            if (hit != null) engine.judge(module, task, JUDGE_PREFIX, "隐藏$hit")
+            hostResult || hit != null
+        }
+
+    /**
+     * U4b 通知中心隐藏：荣耀自建「通知中心」管线（com.hihonor.systemui.dynamicserver）的 shade 仲裁。
+     *
+     * 本方法是宿主自带隐藏标志（extras `hw_disable_ntf_show_in_shade`）的唯一读口
+     * （HwNotificationFeatureImpl.java:644），消费方 4+：
+     *   NotificationCenterCoordinator.onNotificationCardUpdated:142（true = 不进通知中心）
+     *   NotificationCenterCardManager:422/:460（shade 与 AOD/锁屏分支）
+     *   HwNotificationFilterImpl:76（U4 管线的 shade 分支也汇到这）
+     * 命中返 true 与宿主官方隐藏机制同语义（上游一致性）；恒 proceed 放行宿主逻辑后 OR。
+     * 2026-10-12 真机实证：只挂 U4 管线过滤点，判据命中但通知中心仍渲染——本点才是渲染仲裁。
+     */
+    private fun mountHideInNotificationCenter(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
             val hit = runCatching { matchesHiddenNotif(chain.getArg(0), module) }.getOrNull()
             val hostResult = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
             if (hit != null) engine.judge(module, task, JUDGE_PREFIX, "隐藏$hit")
@@ -322,9 +360,7 @@ object SystemUiHook : TargetHook {
      *   热点    pkg==android && group=="TetheredNotification"（AOSP framework 硬编码 group 串，最稳锚点）
      *   USB调试 pkg==android && channelId 含 "adb"（静态推断的宽匹配，探针拿到真实渠道 id 后收紧）
      */
-    private fun matchesHiddenNotif(entry: Any?, module: XposedModule): String? {
-        if (entry == null) return null
-        val sbn = runCatching { entry.javaClass.getField("mSbn").get(entry) }.getOrNull() ?: return null
+    private fun matchesHiddenNotif(sbn: Any, module: XposedModule): String? {
         probeNotifIdentity(module, sbn)
         val pkg = sbn.callOrNull("getPackageName") as? String ?: return null
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_CHARGE_NOTIF) &&
