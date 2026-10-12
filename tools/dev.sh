@@ -733,7 +733,10 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
     apk="$2"; name="${3:-$(basename "$apk" .apk)}"
     out="$ROOT/system-files/$name-jadx"
     info "jadx（--show-bad-code）→ $out"
-    JAVA_OPTS="${JAVA_OPTS:-}" "$JADX" --show-bad-code -d "$out" "$apk"
+    # JADX_ARGS = 透传给 jadx CLI 的参数（如 "-j 4 -r --no-res"）。
+    # 注意：shim 把 JAVA_OPTS/JADX_OPTS 都喂给 JVM（bin/jadx 注释自证），CLI 参数只能走这里。
+    # shellcheck disable=SC2086
+    JAVA_OPTS="${JAVA_OPTS:-}" "$JADX" --show-bad-code ${JADX_ARGS:-} -d "$out" "$apk"
     ;;
 
   aapt2)
