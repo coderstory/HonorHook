@@ -1002,7 +1002,30 @@ a71/f71 的成功路径一致：`productSendFinish` 校验 secretKeySaveResult�
   `startItemDownload(1)`（OnlineFontPreviewActivity.java:865）→ 同一分派点。路由修复后付费字体
   必进 f71；若仍 0% 或弹「下载失败」= 服务端对 resType=4 拒发试用授权（sendProduct resultCode
   可查），届时需换 4 审计通道或放弃该类。判据：logcat 过 `DownloadItemIfVip|OrderManagerImpl|DownloadHandler`。
-- **动态壁纸/息屏「应用没反应」**：下载属壁纸族（g.java:525），isLiveWallpaper 单列（d.java:194）；
-  应用链是壁纸专用 apply（非 ThemeApplyState C7 那条），待复现时抓 apply 侧日志定位。
-- **下载记录缺付费主题**：记录页 = NewLocalThemeActivity（my_downloads，:315，extends CountActivity），
-  列表来源待查（本地 provider 行 or 服务端已购列表）；疑点：f71 下载项是否写 provider。
+- **动态壁纸/息屏「应用没反应」（2026-10-12 链路实证，OnlineWallpaperPreviewLowActivity.java:617）**：
+  ```
+  apply() :617
+    ├ checkResBeforeApply(VipCheckData{resTypeToUser, payedInfo=isNeedPayItem()}) :619
+    │    ThemeSourceManager.checkResBeforeApply :500 —— VIP 类资源过
+    │    登录/网络/AgreeRepo.isSupportVip/VipManager.isVipUser 检查，失败**弹 dialog**（非静默）
+    ├ bz2.createApplyWallPaper(mInfo) :625
+    └ isLiveWallpaper → applyLiveWallpaperPrepare() :638
+         ├ ecotaIgnoreApplyToast(5)（po.java:205，CustomizedUtils.getForbidWpApply 运营商定制开关）→ toast+跳过
+         ├ mInfo.packagePath 文件不存在 → reportApplyFailedEvent("402") + **静默 return** ←「没反应」最像这里
+         └ home/unlock → progress dialog + ServiceHandler msg6 安装；其它 → createDialog(1, …)
+  ```
+  静默点只有 file-missing(402) 与 ecota 定制跳过两个；静态定不了是哪个，复现时
+  `tools/dev.sh grep-log 'applyLiveWallpaper|OnlineWallpaperPreviewLowActivity|ThemeSourceManager'`
+  一眼分案（"applyLiveWallpaper start" 后有无 402 上报即分界）。
+- **下载记录缺付费主题（2026-10-12 链路实证）**：记录页 ≠ 下载表。主题 tab =
+  `MyDownloadSource.loadLocalThemeData(1)` → `ThemeInfo.getThemeInstallInfo`（ThemeInfo.java:4552）
+  查 **themeInfo provider**（apply 成功时 `saveThemeInfo` 写入，ThemeInfo.java:3876；非下载即写），
+  selection `spare_two='0' OR spare_two IS NULL`（= subType 0；AOD=3/图标=91/小部件=90 各走各查询），
+  widget/icon 变体还剔 `packagePath` 含 `TRIAL_PATH` 的行（ThemeInfo.java:382/:745）。⇒ 付费主题不在
+  记录 = **apply 没成功（行没写）** 或行被 subType/TRIAL_PATH 过滤——与「应用没反应」大概率同根。
+  分诊命令（provider 权威值，无需猜）：
+  ```
+  adb shell content query --uri content://com.hihonor.android.thememanager.ContentProvider/themeInfo --where "title LIKE '%<主题名>%'"
+  adb shell content query --uri content://com.hihonor.android.thememanager.ContentProvider/theme --where "title LIKE '%<主题名>%'"
+  ```
+  （前者无行 = apply 未写库；有行看 spare_two/file_path 是否踩过滤条件。）
