@@ -1,4 +1,6 @@
 // HonorHook app 模块 —— hook + Miuix(Compose) UI
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -12,8 +14,22 @@ android {
         applicationId = "top.honorhook"
         minSdk = 26
         targetSdk = 34
-        versionCode = 100
-        versionName = "1.0.0"
+
+        // 本地构建自增版本：计数器落 app/app/version.properties（gitignored，各 checkout 独立）。
+        // dev.sh 每次构建传 -PhhLocalBuild=1 → 计数 +1：versionCode = 计数×100（100 的整数倍）；
+        // versionName = 1.<中段>.<尾段>，尾段 0-9 循环、满 9 进中段（1.0.0 → 1.0.1 → … → 1.0.9 → 1.1.0）。
+        // 并行构建可能同计数，可接受。
+        // CI 不传该属性：版本保持计数器基准（100 / 1.0.0），发布区分走 BUILD_NUM（buildNum）。
+        val versionProps = Properties()
+        val versionPropsFile = file("version.properties")
+        if (versionPropsFile.isFile) versionPropsFile.inputStream().use { versionProps.load(it) }
+        val buildCounter = versionProps.getProperty("counter")?.toIntOrNull() ?: 1
+        if (providers.gradleProperty("hhLocalBuild").orElse("").get() == "1") {
+            versionProps.setProperty("counter", (buildCounter + 1).toString())
+            versionPropsFile.outputStream().use { versionProps.store(it, null) }
+        }
+        versionCode = buildCounter * 100
+        versionName = "1.${(buildCounter - 1) / 10}.${(buildCounter - 1) % 10}"
 
         // CI 构建 run_number（ci.yml 传 -PbuildNum）；对比 GitHub release tag v<version>.r<build> 用
         buildConfigField("int", "BUILD_NUM", providers.gradleProperty("buildNum").orElse("0").get())

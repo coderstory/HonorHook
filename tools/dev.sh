@@ -144,7 +144,7 @@ EOF
     # 不 require jlink：debug 编译不需要，缺 jlink 的 JDK 也应能编 debug（release 才要）
     require "$GRADLEW"
     info "编译 debug APK（JAVA_HOME=${JAVA_HOME}）"
-    (cd "$ROOT/app" && "$GRADLEW" :app:assembleDebug --console=plain)
+    (cd "$ROOT/app" && "$GRADLEW" -PhhLocalBuild=1 :app:assembleDebug --console=plain)
     ls -lh "$APK_DEBUG"
     ;;
 
@@ -264,7 +264,7 @@ EOF
 
   build-release)
     require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
-    (cd "$ROOT/app" && "$GRADLEW" :app:assembleRelease --console=plain)
+    (cd "$ROOT/app" && "$GRADLEW" -PhhLocalBuild=1 :app:assembleRelease --console=plain)
     ls -lh "$APK_RELEASE"
     ;;
 
