@@ -51,4 +51,43 @@ val LAUNCHER_POINTS_18_0_0_234 = listOf(
         feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
         description = "R2 回到桌面后自动重开该文件夹（走系统自身开文件夹路径，动画与遮罩完整）",
     ),
+    // K1 垃圾桶捕获：ClearAllButton onClick → RecentsView.dismissAllTasks(View)（RecentsView.java:3717，
+    // 全工程唯一调用方）——垃圾桶清后台的专属入口，进 hook 时 recents 里还留着清后台前的全部任务。
+    // 逆向依据 docs/reverse/launcher-recents-keepcurrent.md §一/§二。
+    HookPoint(
+        id = "launcher:RecentsView.dismissAllTasks",
+        kind = "ARM_KEEP_CURRENT",
+        className = "com.android.quickstep.views.RecentsView",
+        methodName = "dismissAllTasks",
+        paramCount = 1,
+        returnType = "void",
+        feature = FeatureCatalog.KEY_LAUNCHER_RECENTS_KEEP_CURRENT,
+        description = "K1 垃圾桶入口捕获：记下前台任务（保留集）与其余任务（移除集），供 K2/K3 消费",
+    ),
+    // K2 全杀收口替换：动画 onEnd → ActivityManagerWrapperEx.removeAllRecentTasks()（:3634，
+    // UI_HELPER_EXECUTOR 线程）。最终 binder ActivityTaskManager.removeAllVisibleRecentTasks() 无排除参数
+    // ⇒ 只能在调用侧替换：flag 有效时改为逐个 removeTask(id)（与单卡划走同 API，:87），不 proceed。
+    HookPoint(
+        id = "launcher:ActivityManagerWrapperEx.removeAllRecentTasks",
+        kind = "REMOVE_ALL_KEEP_CURRENT",
+        className = "com.hihonor.android.systemuisharedlib.systemui.shared.system.ActivityManagerWrapperEx",
+        methodName = "removeAllRecentTasks",
+        paramCount = 0,
+        returnType = "void",
+        feature = FeatureCatalog.KEY_LAUNCHER_RECENTS_KEEP_CURRENT,
+        description = "K2 全杀收口替换：flag 有效时逐个 removeTask（保住保留集），无效透传原生全杀",
+    ),
+    // K3 回桌面步替换：RecentsView.startHome() 无参（:2696）。注意它还有别的调用方
+    // （点 overview 空白回桌面 :1674/:1676）⇒ 必须 flag 门控，只在垃圾桶 flow 置位后替换为
+    // startActivityFromRecents(保留id, null)（recents 点卡片回 app 同一条路）。
+    HookPoint(
+        id = "launcher:RecentsView.startHome",
+        kind = "START_TASK_INSTEAD_HOME",
+        className = "com.android.quickstep.views.RecentsView",
+        methodName = "startHome",
+        paramCount = 0,
+        returnType = "void",
+        feature = FeatureCatalog.KEY_LAUNCHER_RECENTS_KEEP_CURRENT,
+        description = "K3 回桌面步替换：flag 有效时热回保留任务，失败/无效透传原生回桌面",
+    ),
 )

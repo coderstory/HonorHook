@@ -2,6 +2,7 @@ package top.honorhook.xposed.target
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -75,6 +76,77 @@ object LauncherHook : TargetHook {
                     chain.proceed()
                     if (target != null) postReopen(target, module, attempt = 1)
                 }
+                // K1 垃圾桶捕获：`dismissAllTasks` 是垃圾桶清后台的专属入口（RecentsView.java:3717，
+                // 全工程唯一调用方），此刻 recents 里还留着全部任务。反射取 getRunningTaskView()
+                // 的 getTaskIds()（quickstep 原生维护的"进 overview 前的前台任务"）= 保留集；
+                // 其余卡片 = 移除集。任何一步失败或保留集为空（罕见：running task 已不在列表）= 存 null，
+                // 本次清后台全程走原生行为。
+                MountKind.ARM_KEEP_CURRENT -> {
+                    val captured = captureKeepSets(chain.thisObject)
+                    keepTaskIds = captured?.first
+                    killTaskIds = captured?.second
+                    keepCapturedAtMs = if (captured != null) SystemClock.elapsedRealtime() else 0L
+                    if (captured != null) {
+                        engine.judge(
+                            module, task, JUDGE_PREFIX,
+                            "捕获: 保留 ${captured.first.size} 任务(id=${captured.first.joinToString(",")})，移除 ${captured.second.size} 个",
+                        )
+                    }
+                    chain.proceed()
+                }
+                // K2 全杀收口替换：`removeAllRecentTasks`（:3634）无排除参数（最终 binder
+                // removeAllVisibleRecentTasks 无参），只能整条替换。flag 消费即清——
+                // 反射失败也消费后透传原生全杀（fail-safe：宁可杀掉保留任务，不留脏标记）。
+                MountKind.REMOVE_ALL_KEEP_CURRENT -> {
+                    val keep = keepTaskIds
+                    val kill = killTaskIds
+                    if (keep == null || kill == null || keepFlagStale()) {
+                        // 未捕获/已超时/已消费：垃圾桶 flow 之外的任何 removeAllRecentTasks 调用方
+                        // 一律透传，绝不拦截。
+                        chain.proceed()
+                    } else {
+                        keepTaskIds = null
+                        killTaskIds = null
+                        keepCapturedAtMs = 0L
+                        if (removeTasksIndividually(kill) { reason ->
+                                module.log(Log.WARN, MountEngine.TAG, "RECENTS-KEEP 逐个移除失败: $reason")
+                            }
+                        ) {
+                            engine.judge(module, task, JUDGE_PREFIX, "已保留 ${keep.size} 任务，逐个移除 ${kill.size} 个")
+                        } else {
+                            // 已动手才失败 ⇒ 透传原生全杀兜底（部分任务可能已被移除，原生全杀收尾幂等）。
+                            chain.proceed()
+                        }
+                    }
+                }
+                // K3 回桌面步替换：startHome（:2696）另有点 overview 空白回桌面等调用方
+                // （:1674/:1676）⇒ flag 有效才替换，否则一律透传。成功热回保留任务并拦掉回桌面；
+                // 失败记 WARN 后透传原生回桌面（回落路径：保留 id 已死/分身异常 → 静默降级）。
+                MountKind.START_TASK_INSTEAD_HOME -> {
+                    val keep = keepTaskIds
+                    if (keep == null || keep.isEmpty() || keepFlagStale()) {
+                        chain.proceed()
+                    } else {
+                        keepTaskIds = null
+                        killTaskIds = null
+                        keepCapturedAtMs = 0L
+                        var started: Int? = null
+                        for (id in keep) {
+                            if (startTaskFromRecents(id) { reason ->
+                                    module.log(Log.WARN, MountEngine.TAG, "RECENTS-KEEP 热回任务 $id 失败: $reason")
+                                }
+                            ) {
+                                started = id
+                                break
+                            }
+                        }
+                        if (started != null) {
+                            engine.judge(module, task, JUDGE_PREFIX, "已回到保留任务 id=$started")
+                        } else {
+                            chain.proceed()
+                        }
+                    }
+                }
             }
         }
 
@@ -145,6 +217,82 @@ object LauncherHook : TargetHook {
         workspace.javaClass.getMethod("getOpenFolder").invoke(workspace) != null
     }.getOrNull()
 
+    /**
+     * K1 捕获：在 `RecentsView.dismissAllTasks` 入口收集保留集与移除集。
+     *
+     * 保留集 = `getRunningTaskView().getTaskIds()`（:2779，public；quickstep 原生维护的
+     * "进 overview 前的前台任务"，语义正好是需求里的"当前 app"）；移除集 = 其余全部卡片
+     * 的 `getTaskIds()`（`getTaskViewCount`/`requireTaskViewAt`，:2233/:3896，全 public，零字段反射）。
+     * 全部 public API 直连反射，不碰混淆面。返回 `null` = 任一环节失败或保留集为空
+     * （running task 已不在列表的罕见态）⇒ 本次清后台对原生行为零干预。
+     */
+    private fun captureKeepSets(recentsView: Any?): Pair<IntArray, IntArray>? = runCatching {
+        if (recentsView == null) return@runCatching null
+        val running = recentsView.javaClass.getMethod("getRunningTaskView").invoke(recentsView)
+            ?: return@runCatching null
+        val keep = (running.javaClass.getMethod("getTaskIds").invoke(running) as IntArray)
+            .filter { it >= 0 }   // getTaskIds 可能含 -1（TaskView.java:575），过滤后再判空
+        if (keep.isEmpty()) return@runCatching null
+        val keepSet = keep.toHashSet()
+        val count = recentsView.javaClass.getMethod("getTaskViewCount").invoke(recentsView) as Int
+        val requireTaskViewAt = recentsView.javaClass
+            .getMethod("requireTaskViewAt", Int::class.javaPrimitiveType)
+        val kill = (0 until count).flatMap { i ->
+            val view = requireTaskViewAt.invoke(recentsView, i) ?: return@flatMap emptyList<Int>()
+            (view.javaClass.getMethod("getTaskIds").invoke(view) as IntArray)
+                .filter { it >= 0 && it !in keepSet }
+        }.toIntArray()
+        keep.toIntArray() to kill
+    }.getOrNull()
+
+    /**
+     * flag 是否已超时。垃圾桶 flow 若被中断（动画异常、进程切换）残留脏标记，10s 内必失效，
+     * 防止污染之后的任何 `removeAllRecentTasks`/`startHome` 调用方。
+     */
+    private fun keepFlagStale(): Boolean =
+        keepCapturedAtMs <= 0L || SystemClock.elapsedRealtime() - keepCapturedAtMs > KEEP_FLAG_TIMEOUT_MS
+
+    /**
+     * K2 逐个移除：`ActivityManagerWrapperEx.getInstance().removeTask(int)`（shlib :87，
+     * 与单卡划走同 API）。单 id 失败不中断循环；实例/方法反射失败整体返回 `false`
+     * ⇒ 调用侧透传原生全杀（fail-safe）。
+     */
+    private fun removeTasksIndividually(taskIds: IntArray, onFail: (String) -> Unit): Boolean = runCatching {
+        val loader = hostLoader ?: return@runCatching false.also { onFail("无宿主 ClassLoader") }
+        val cls = Class.forName(WRAPPER_EX_CLASS, false, loader)
+        val wrapper = cls.getMethod("getInstance").invoke(null)
+            ?: return@runCatching false.also { onFail("ActivityManagerWrapperEx 实例为 null") }
+        val removeTask = cls.getMethod("removeTask", Int::class.javaPrimitiveType)
+        taskIds.forEach { id ->
+            runCatching { removeTask.invoke(wrapper, id) }
+                .onFailure { onFail("removeTask($id) 异常 ${it.javaClass.simpleName}: ${it.message}") }
+        }
+        true
+    }.getOrElse {
+        onFail("异常 ${it.javaClass.simpleName}: ${it.message}")
+        false
+    }
+
+    /**
+     * K3 热回保留任务：`ActivityManagerWrapperEx.startActivityFromRecents(int, ActivityOptions)`
+     * （基类 `ActivityManagerWrapper` :142 对 null options 有处理），与 recents 点卡片回 app 同一条
+     * binder（ATMS.startActivityFromRecents）⇒ launcher 进程有权限、热启动不冷启。
+     * 只把「抛异常」判为失败；wrapper 内部吞掉的 RemoteException（若有）无法在此感知。
+     */
+    private fun startTaskFromRecents(taskId: Int, onFail: (String) -> Unit): Boolean = runCatching {
+        val loader = hostLoader ?: return@runCatching false.also { onFail("无宿主 ClassLoader") }
+        val cls = Class.forName(WRAPPER_EX_CLASS, false, loader)
+        val wrapper = cls.getMethod("getInstance").invoke(null)
+            ?: return@runCatching false.also { onFail("ActivityManagerWrapperEx 实例为 null") }
+        val optionsCls = Class.forName("android.app.ActivityOptions")
+        cls.getMethod("startActivityFromRecents", Int::class.javaPrimitiveType, optionsCls)
+            .invoke(wrapper, taskId, null)
+        true
+    }.getOrElse {
+        onFail("异常 ${it.javaClass.simpleName}: ${it.message}")
+        false
+    }
+
     /** 宿主类加载器（挂载时捕获），供反射查宿主类。 */
     @Volatile
     private var hostLoader: ClassLoader? = null
@@ -152,6 +300,26 @@ object LauncherHook : TargetHook {
     /** 「从文件夹里打开了应用」时记下的文件夹视图；在下一次回到桌面时消费（消费即清空）。 */
     @Volatile
     private var reopenTarget: Any? = null
+
+    /**
+     * 垃圾桶 flow 的一组临时标记（K1 捕获 → K2/K3 消费即清 → 超时兜底清，三段都清空归零）。
+     *
+     * **为什么需要门控**：`RecentsView.startHome()`（:2696）另有点 overview 空白回桌面等
+     * 常规调用方（:1674/:1676），`removeAllRecentTasks` 收口无排除参数只能整条替换——
+     * 不门控就会把「点空白回桌面」「其他全杀入口」一并改掉。两组 id 一起置位/消费，
+     * 保证 K2（杀谁）与 K3（回谁）来自同一次垃圾桶点击，单边失效时另一边整体透传原生。
+     */
+    /** K1 捕获的保留集（清后台时的前台任务 id，getTaskIds 过滤 -1 后）。 */
+    @Volatile
+    private var keepTaskIds: IntArray? = null
+
+    /** K1 捕获的移除集（保留集之外的全部任务 id）。 */
+    @Volatile
+    private var killTaskIds: IntArray? = null
+
+    /** K1 捕获时刻（elapsedRealtime ms），0 = 无效；[KEEP_FLAG_TIMEOUT_MS] 超时兜底。 */
+    @Volatile
+    private var keepCapturedAtMs: Long = 0L
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "launcher-hook"
@@ -167,10 +335,24 @@ object LauncherHook : TargetHook {
     /** 重开尝试次数上限（首轮 + 重试）。 */
     private const val REOPEN_MAX_ATTEMPTS = 2
 
+    /** shlib `ActivityManagerWrapperEx`（/system/framework/HnSystemUISharedLib.jar，与 launcher 同 classloader 链）。 */
+    private const val WRAPPER_EX_CLASS =
+        "com.hihonor.android.systemuisharedlib.systemui.shared.system.ActivityManagerWrapperEx"
+
+    /** 垃圾桶 flow flag 超时：动画 300ms + 收口/回桌连续执行远小于此；中断残留 10s 内必失效。 */
+    private const val KEEP_FLAG_TIMEOUT_MS = 10_000L
+
     // ---------------- 挂载任务定义（与 ThemeStore/Installer 同构） ----------------
 
-    /** 挂载任务类型：CONST 常量短路；ARM_FOLDER_REOPEN 记下打开的文件夹；REOPEN_FOLDER_ON_RESUME 回到桌面时重开。 */
-    private enum class MountKind { CONST, ARM_FOLDER_REOPEN, REOPEN_FOLDER_ON_RESUME }
+    /**
+     * 挂载任务类型：CONST 常量短路；ARM_FOLDER_REOPEN 记下打开的文件夹；REOPEN_FOLDER_ON_RESUME 回到桌面时重开；
+     * ARM_KEEP_CURRENT / REMOVE_ALL_KEEP_CURRENT / START_TASK_INSTEAD_HOME = 清后台保留当前应用三步
+     * （垃圾桶入口捕获 → 全杀收口替换 → 回桌面步替换，docs/reverse/launcher-recents-keepcurrent.md）。
+     */
+    private enum class MountKind {
+        CONST, ARM_FOLDER_REOPEN, REOPEN_FOLDER_ON_RESUME,
+        ARM_KEEP_CURRENT, REMOVE_ALL_KEEP_CURRENT, START_TASK_INSTEAD_HOME,
+    }
 
     private class MountTask(
         val kind: MountKind,

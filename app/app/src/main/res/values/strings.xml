@@ -63,6 +63,8 @@
     <string name="feature_launcher_hide_card_title_desc">隐藏桌面卡片上的标题文字（如「YOYO 建议」），不影响应用图标</string>
     <string name="feature_launcher_keep_folder_open_title">文件夹保持打开</string>
     <string name="feature_launcher_keep_folder_open_desc">从文件夹打开应用后返回桌面，文件夹保持打开状态；点空白处或回主屏仍会正常关闭</string>
+    <string name="feature_launcher_recents_keep_current_title">清后台保留当前应用</string>
+    <string name="feature_launcher_recents_keep_current_desc">最近任务点垃圾桶清后台时，保留清后台前的前台应用并自动回到它；仅垃圾桶按钮生效，逐卡划走与点空白回桌面不受影响</string>
 
     <string name="feature_systemui_hide_sim2_title">隐藏副卡图标</string>
     <string name="feature_systemui_hide_sim2_desc">双卡时状态栏只显示主卡的信号图标，隐藏副卡（SIM2）</string>

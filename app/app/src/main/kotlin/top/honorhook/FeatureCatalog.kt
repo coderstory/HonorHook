@@ -33,6 +33,7 @@ object FeatureCatalog {
 
     const val KEY_LAUNCHER_HIDE_TITLE = "launcher.hide_card_title"
     const val KEY_LAUNCHER_KEEP_FOLDER_OPEN = "launcher.keep_folder_open"
+    const val KEY_LAUNCHER_RECENTS_KEEP_CURRENT = "launcher.recents_keep_current"
 
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
@@ -124,6 +125,7 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_LAUNCHER_HIDE_TITLE, R.string.feature_launcher_hide_card_title_title, R.string.feature_launcher_hide_card_title_desc),
                 Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, R.string.feature_launcher_keep_folder_open_title, R.string.feature_launcher_keep_folder_open_desc),
+                Feature(KEY_LAUNCHER_RECENTS_KEEP_CURRENT, R.string.feature_launcher_recents_keep_current_title, R.string.feature_launcher_recents_keep_current_desc),
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
         ),
