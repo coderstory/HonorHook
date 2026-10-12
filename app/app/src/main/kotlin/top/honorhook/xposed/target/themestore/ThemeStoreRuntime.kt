@@ -104,27 +104,66 @@ internal fun pruneBottomTabPayload(orig: Any?, module: XposedModule): List<*>? {
 }
 
 /**
- * W2 付费壁纸密文强制解密（2026-10-12，第二处 A1 撕裂）：
+ * W2 付费壁纸密文强制解密（2026-10-12，第二处 A1 撕裂；同日晚风牵手真机分诊后 v2）：
  * `bz2.createApplyWallPaper`（defpackage/bz2.java:256）以 `isNeedPayItem()` 门控解密——F2 A1 把它
  * 强 false ⇒ 付费壁纸**跳过 getDecryptWallpaperFile**，`.payed` 密文直达动态壁纸引擎 → 解不出 →
  * `reportApplyFailedEvent("403")` 纯埋点 →「点击应用没反应」。
- * 修：入口前置——packagePath 含 `.payed` 即按付费路径强制解密（判文件位置，不依赖被 A1 改写的判定）；
- * 复用宿主 `gl5.getDecryptWallpaperFile(serviceId, file)`（有解密缓存则复用；gl5 类名混淆，
- * DexKit 锚点 = 解密工具日志串）。
+ * v1 真机分诊（2026-10-12 晚风牵手 type=5 voiceVideo）：W2 零日志——A1 撕裂不只强 false
+ * isNeedPayItem，还让 updateStatus():2660 重算的 packagePath 丢 `.payed` 子目录 ⇒ v1 的
+ * `contains(".payed")` 门在真实撕裂路径上不成立，密文明明在却静默 return。v2 三改：
+ *   ① 免费项（price 字段直读 ≤0）维持零干预静默；付费项 packagePath 不可用时调宿主
+ *     `WallPaperInfo.getAbsolutExistFilePath()`（jadx WallPaperInfo:680，按 price 字段探测
+ *     inner/outer × `.payed`/normal 四处，不受 hook 影响）找回密文并回写 packagePath
+ *     （回写同时喂饱 prepare :644 的 isFileExists 检查）。
+ *   ② 先删同名解密缓存再解密（对齐宿主 deleteAllCacheWallpaper():270「每次付费应用新解」语义，
+ *     防半截/陈旧解密产物复用——getDecryptWallpaperFile 见缓存即复用）。
+ *   ③ 付费项每个出口都有判据日志（v1 静默 return 让三分支无法分诊）。
+ * 解密复用宿主 `gl5.getDecryptWallpaperFile(serviceId, file)`（gl5 类名混淆，DexKit 锚点 = 解密工具日志串）。
  */
 internal fun decryptPaidWallpaper(chain: XposedInterface.Chain, module: XposedModule, loader: ClassLoader) {
     runCatching {
         val info = chain.getArg(0) ?: return
+        val price = (info.javaClass.getField("price").get(info) as? Double) ?: 0.0
+        if (price <= 0.0) return   // 免费项：路径本就明文可用（撕裂兜底归 W1）→ 零干预静默
         val pathField = info.javaClass.getField("packagePath")
         val cur = pathField.get(info) as? String
-        if (cur.isNullOrEmpty() || !cur.contains(".payed")) return   // 免费/已解密路径 → 零干预
-        val file = java.io.File(cur)
-        if (!file.exists()) return
-        val serviceId = info.javaClass.getField("serviceId").get(info).toString()
-        val gl5 = runCatching { loader.loadClass("gl5") }.getOrElse {
-            module.log(Log.WARN, TAG, "壁纸解密工具类漂移（gl5），放行原逻辑")
+        var cipher: java.io.File? = null
+        if (!cur.isNullOrEmpty() && cur.contains(".payed")) {
+            val f = java.io.File(cur)
+            if (f.exists()) cipher = f
+        }
+        if (cipher == null) {
+            // A1 撕裂：重算路径丢 `.payed` 子目录（或为空）→ 按宿主探测找回真实密文
+            val real = runCatching {
+                info.javaClass.getMethod("getAbsolutExistFilePath").invoke(info) as? String
+            }.getOrNull()
+            if (!real.isNullOrEmpty() && java.io.File(real).exists()) {
+                cipher = java.io.File(real)
+                if (real != cur) {
+                    pathField.set(info, cipher.canonicalPath)
+                    module.log(Log.INFO, TAG, "W2 packagePath 撕裂已回写: $cur → ${cipher.canonicalPath}")
+                }
+                if (!real.contains(".payed")) {
+                    module.log(Log.WARN, TAG, "W2 找回路径非密文（.payed 缺失）: $real → 跳过解密放行原逻辑")
+                    return
+                }
+            }
+        }
+        val file = cipher ?: run {
+            module.log(Log.WARN, TAG, "W2 密文不可寻（packagePath=$cur，宿主探测未命中）→ 放行原逻辑")
             return
         }
+        val serviceId = info.javaClass.getField("serviceId").get(info).toString()
+        val gl5 = runCatching { loader.loadClass("gl5") }.getOrElse {
+            module.log(Log.WARN, TAG, "W2 壁纸解密工具类漂移（gl5），放行原逻辑")
+            return
+        }
+        // ② 新解：先删同名解密缓存（cache/decryWallpaper/<文件名>，宿主 getDecryWallpaperPath 拼法），
+        // 否则 getDecryptWallpaperFile 见缓存即复用，半截产物无法自愈
+        runCatching {
+            loader.loadClass("bz2").getDeclaredMethod("getDecryWallpaperPath", String::class.java)
+                .invoke(null, file.name) as? String
+        }.getOrNull()?.let { java.io.File(it).delete() }
         val decrypted = gl5.getDeclaredMethod("getDecryptWallpaperFile", String::class.java, java.io.File::class.java)
             .invoke(null, serviceId, file) as? java.io.File
         if (decrypted != null && decrypted.exists()) {
@@ -138,10 +177,22 @@ internal fun decryptPaidWallpaper(chain: XposedInterface.Chain, module: XposedMo
     }
 }
 
-internal fun fixWallpaperPackagePath(chain: XposedInterface.Chain, module: XposedModule) {    runCatching {
+internal fun fixWallpaperPackagePath(chain: XposedInterface.Chain, module: XposedModule) {
+    runCatching {
         val activity = chain.thisObject ?: return
-        val info = activity.javaClass.getDeclaredField("mInfo").apply { isAccessible = true }.get(activity)
-            ?: return
+        // mInfo 声明在 OnlineWallpaperPreviewLowActivity（jadx :214 protected WallPaperInfo mInfo），
+        // 真机详情页是子类 OnlineWallpaperPreviewActivity ⇒ getDeclaredField 不走父类必
+        // NoSuchFieldException（2026-10-12 真机判据行实证），沿继承链找
+        val mInfoField = run {
+            var cls: Class<*>? = activity.javaClass
+            var found: java.lang.reflect.Field? = null
+            while (cls != null && found == null) {
+                found = runCatching { cls.getDeclaredField("mInfo") }.getOrNull()
+                cls = cls.superclass
+            }
+            found
+        } ?: return
+        val info = mInfoField.apply { isAccessible = true }.get(activity) ?: return
         val pathField = info.javaClass.getField("packagePath")
         val cur = pathField.get(info) as? String
         if (!cur.isNullOrEmpty() && java.io.File(cur).exists()) return  // 路径本就正确（免费项常态）→ 零干预
