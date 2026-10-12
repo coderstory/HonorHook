@@ -72,11 +72,11 @@ object MmsHook : TargetHook {
     private const val CLS_SIMPLE_ACTION_LAYOUT = "com.ted.sms.feature.ui.action.SimpleActionLayout"
 
     /**
-     * 验证码卡片 code（引擎自身门禁，SimpleActionLayout.b 开头与 doBindTextAction 同款判断）：
-     * 该卡的动作区由 `c()` 从 `tedCard.subTitle` 本地合成「复制验证码」按钮（T4/R3 面），
-     * **不是广告**——T3 清 json 时跳过此卡，避免 KEY_MMS_AD_OFF 误伤 KEY_MMS_CODE_FREE 的地盘
-     * （两开关独立，SPEC.md 拍板）。清空 json 对验证码卡会因 `menus` 空提前 return 而杀掉 c() 合成链，
-     * 故必须放行原 json。
+     * 验证码卡片 code（引擎门禁常量，SimpleActionLayout.b 开头与 doBindTextAction 同款判断）。
+     * 第四版定稿后**不再作 hook 例外**，仅留作数据链注释锚点：该卡左 `left_button`=「复制验证码」
+     * 由 `c()` 从 `tedCard.subTitle` 本地合成（T4/R3 面）；json 置空后 c() 仍会跑（见
+     * [simpleActionTask] intercept 注释），复制按钮存活；云端 menus（「打开国家政务」「应用推荐」
+     * 等跳市场按钮）不再被解析，全部消灭。
      */
     private const val VERIFY_CARD_CODE = "0EFF76FF"
 
@@ -254,11 +254,13 @@ object MmsHook : TargetHook {
      *   流量提醒正文 R4 保留）。
      * - 不 hook `TedMessage.getAction()`：TedMessageDao_Impl 落库直接读 getter（`statement.k(12,..)`），
      *   全局返 null 会把 action 列洗成 NULL = 持久数据突变，开关关不掉回来（违反 T2 边界"落库照旧"）。
-     * - 验证码卡（code==[VERIFY_CARD_CODE]）放行原 json：动作区由 `c()` 本地合成复制按钮，属 T4 面。
+     * - 验证码卡无例外（用户 2026-10-12 第四版定稿）：json 置空后 c() 本地合成的复制按钮仍存活
+     *   （默认 JSON 的 menus:[] 数组值使 optString 返回 "[]"，空 menus 提前 return 不触发），
+     *   云端下发的跳市场按钮（打开国家政务/应用推荐）不再被解析，全灭。
      *
-     * 覆盖面：left_button/right_button（1元30G/抢100G）与「查看应用」推广卡若同为 SimpleActionLayout
-     * 渲染（UI dump 同 id 实证）则一并消失；若推广卡实为 AIM 模板（bindAimCard 链）则本点管不到，
-     * 真机如实报告。
+     * 覆盖面：left_button/right_button（1元30G/抢100G/打开国家政务/应用推荐）与「查看应用」推广卡
+     * 若同为 SimpleActionLayout 渲染（UI dump 同 id 实证）则一并消失；若推广卡实为 AIM 模板
+     * （bindAimCard 链）则本点管不到，真机如实报告。
      */
     private fun installCardKill(module: XposedModule, processor: Any, hostLoader: ClassLoader) {
         if (!cardKillTried.compareAndSet(false, true)) return
@@ -281,20 +283,16 @@ object MmsHook : TargetHook {
                 .intercept { chain ->
                     val args = chain.args?.toTypedArray()
                         ?: return@intercept chain.proceed()  // 取不到参数骨架：原样放行，宁漏杀不误杀
-                    // json 置空的唯一例外：验证码卡（tedCard.code == 0EFF76FF，字段 public final，jadx 实证）
-                    val tedCard = args.getOrNull(3)
-                    val verifyCard = runCatching {
-                        tedCard != null && VERIFY_CARD_CODE == tedCard.javaClass.getField("code").get(tedCard) as? String
-                    }.getOrDefault(false)
-                    if (!verifyCard) {
-                        args[1] = ""
-                        engine.judge(module, simpleActionTask, JUDGE_PREFIX, "json 已置空（card=${tedCard?.javaClass?.simpleName ?: "null"}）")
-                        chain.proceedWith(chain.thisObject, args)
-                    } else {
-                        chain.proceed()
-                    }
+                    // 全卡统一（用户 2026-10-12 第四版定稿）：json 一律置空，无任何例外。
+                    // 「打开 xxx」「应用推荐」类按钮不论是否带包名全部消灭。
+                    // 验证码卡（0EFF76FF）的「复制验证码」不受影响：json 置空后 b() 走引擎默认 JSON
+                    // （menus:[] 数组值，optString → "[]" 非空 → 不触发空 menus 提前 return），
+                    // c() 从 tedCard.subTitle 本地合成复制按钮——引擎原生路径，实测见验证记录。
+                    args[1] = ""
+                    engine.judge(module, simpleActionTask, JUDGE_PREFIX, "json 已置空（card=${args.getOrNull(3)?.javaClass?.simpleName ?: "null"}）")
+                    chain.proceedWith(chain.thisObject, args)
                 }
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.b → 非验证码卡 json 置空")
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.b → 全卡 json 置空")
         }.onFailure { t ->
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨挂载异常（卡片按钮原样显示，不 crash）: ${t.message}", t)
         }

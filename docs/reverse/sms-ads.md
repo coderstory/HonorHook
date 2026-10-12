@@ -47,6 +47,8 @@ init(ctx, threadId, iccid, editToMenu, editRoot, menuGroup, params)
 | `TedMenuProcessor.findMenus`（private static，经捕获的插件 CL 解析）→ 返空 JSONArray | 数据源：menuJson 空 → init -201 干净退出 | **实测生效**：底部菜单消失、正文保留、无 crash |
 | `SimpleActionLayout.b(msgId, json, smsNumber, tedCard)`（插件侧，全类唯一 4 参 b） | 参数：json 置空串 → 引擎空数据路径 `setVisibility(GONE)` | **实测生效**（T3）：卡片按钮/文本动作消息全灭，双态比对无回归 |
 
+**全卡统一、无例外（用户 2026-10-12 终版拍板）**：验证码卡（0EFF76FF）不豁免——「打开 xxx」「应用推荐」等跳市场按钮全部消失；复制按钮存活有代码依据：json 置空后引擎默认 JSON 的 `menus:[]` 是数组值，`optString` 得 `"[]"`（长度 2）不触发 b() 提前 return，`c()` 照常从 `tedCard.subTitle` 本地合成「复制验证码」（用户真机两次点验 ok）。honormarket 兜底 hook 不加（按钮全灭后成死代码）。
+
 修正（实测推翻调研期判断）：
 - `HwMenuProcessorProxy` 桥接是**死代码**——`SmartSmsSwitcher.isHihonorSmartSms()` 见插件包已装即走 Honor 分支，Hw* 从不实例化（第一版载体 installed 2/2 但零触发，换载体后全链生效）
 - DexKit 兜底对插件类不适用：engine 只扫 mms apk；插件类名跨 APK 反射留名，直连即中
