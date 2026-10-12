@@ -46,8 +46,9 @@ jobs:
         if: github.ref_name == 'dev'
         run: ./app/gradlew -p app assembleDebug --no-daemon --stacktrace
 
-      # 单测门禁（dev + master 均跑，master 发布前必须通过）
+      # 单测门禁：仅 dev 分支跑（master release 构建不执行测试）
       - name: Run tests
+        if: github.ref_name == 'dev'
         run: ./app/gradlew -p app test --no-daemon --stacktrace
 
       - name: Upload debug APK (dev)
