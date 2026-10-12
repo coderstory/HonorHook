@@ -1,7 +1,7 @@
 # HonorHook
 
 基于 **LSPosed（libxposed API 102）** 的定制模块，覆盖荣耀（Honor / MagicOS）系统应用与指定第三方应用。
-一个 APK 两个运行面：**hook 侧**注入 16 个作用域目标进程（功能默认全开，行为只改内存态，运行期输出日志判据）+ **UI 侧** Miuix Compose 配置面板（单 Activity 三 Tab，经 `libxposed service` 远端 prefs 下发开关）。
+一个 APK 两个运行面：**hook 侧**注入 18 个作用域目标进程（功能默认全开，行为只改内存态，运行期输出日志判据）+ **UI 侧** Miuix Compose 配置面板（单 Activity 三 Tab，经 `libxposed service` 远端 prefs 下发开关）。
 
 > 文档入口：全部文档索引见 [`docs/README.md`](docs/README.md)；全部挂载点台账见 [`docs/hook-inventory-audit.md`](docs/hook-inventory-audit.md)。
 
@@ -28,6 +28,11 @@
 **指定应用会员态**
 
 - 成人高考题库 `com.exam8.chengrenGK`（基线 5.9.0.0-release）：会员档位 / 有效期 / 特权等级伪造为超级会员，「阅后即焚」特权 UI 门放行（正文由服务端按订单下发，hook 取不到）。
+
+**指定第三方应用开屏**
+
+- 京东 `com.jingdong.app.mall`（基线 16.1.0）：开屏广告跳过（`SplashFragment` 永不挂载）。
+- MFA 身份验证器 `com.aimazhishi.mfa.authenticator`（基线 1.0.5）：开屏广告短路（360 加固，框架 `Activity.onCreate` 收口）。
 
 ## 免责声明
 

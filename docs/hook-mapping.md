@@ -57,7 +57,7 @@ HookPoint(
 ## 四、落地顺序
 
 1. 框架：`HookPoint` / `HostVersion.resolve` + `pick`（✅ `xposed/data/HookMap.kt`、`xposed/core/HostVersion.kt`）
-2. 抽取：`tools/gen_hook_map.py` 从 collect 源码生成主题商店基线表 43 点（✅；
+2. 抽取：主题商店基线表为手维护（历史上曾记为「`tools/gen_hook_map.py` 生成 43 点」，该脚本实际不存在于仓库——评审 #14 澄清；现表 46 点，核对走 `tools/adapt_new_version.py`（✅；
    等价性单测逐字段验证后，collect* 源与测试已删除——表是唯一事实源）
 3. 接入：`ThemeStoreHook` 读表 → `toMountTask()` 桥 → `attemptMount`（✅；按 feature 过滤保开关语义）
 4. 验证：真机回归 `installed 4/43（宿主 20.0.11.327）` 与迁移前持平（✅ 2026-10-11，
