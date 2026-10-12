@@ -237,10 +237,12 @@ private fun SettingsMain(
 // 关键是 push + restart 必须跑完。
 private val restartExecutor = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+// 进程级可观察执行态（审计 2026-10-12 minor：旋屏后弹窗重开如实显示执行中，禁二次并发确认）
+private var restartRunning by mutableStateOf(false)
+
 @Composable
 private fun RestartScopeDialog(onDismiss: () -> Unit) {
     var selected by remember { mutableStateOf(FeatureCatalog.targets.map { it.packageName }.toSet()) }
-    var running by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf<ScopeRestarter.Report?>(null) }
     var push by remember { mutableStateOf<FeatureStore.PushResult?>(null) }
 
@@ -248,25 +250,25 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
         show = true,
         title = "重启目标应用",
         summary = null,
-        onDismissRequest = { if (!running) onDismiss() },
+        onDismissRequest = { if (!restartRunning) onDismiss() },
     ) {
         val result = report
         when {
             result != null -> RestartResult(result, push, onDismiss)
-            running -> Text("正在执行…")
+            restartRunning -> Text("正在执行…")
             else -> RestartPicker(
                 selected = selected,
                 onToggle = { pkg, on -> selected = if (on) selected + pkg else selected - pkg },
                 onConfirm = {
                     val snapshot = selected.toList()
-                    running = true
+                    restartRunning = true
                     restartExecutor.launch {
                         // 必须先下发再强停，否则下次注入读到的还是旧远端值
                         val pushed = withContext(Dispatchers.IO) { FeatureStore.pushAllToRemote() }
                         val outcome = withContext(Dispatchers.IO) { ScopeRestarter.restart(snapshot) }
                         push = pushed
                         report = outcome
-                        running = false
+                        restartRunning = false
                     }
                 },
                 onCancel = onDismiss,
