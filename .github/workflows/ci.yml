@@ -53,6 +53,8 @@ jobs:
         with:
           name: app-debug-${{ github.run_number }}
           path: app/app/build/outputs/apk/debug/app-debug.apk
+          # 免费档 Actions 存储仅 0.5GB：debug 产物只供装机自测，3 天过期防积压
+          retention-days: 3
 
       # master 分支：编译 release 并发 GitHub Release
       # -PbuildNum：run_number 注入 BuildConfig.BUILD_NUM，与 tag v<version>.r<N> 对齐供在线更新对比
