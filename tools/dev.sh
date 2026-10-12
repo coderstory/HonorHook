@@ -429,6 +429,41 @@ PYEOF
     "$ADB" devices -l | tr -d '\r'
     ;;
 
+  # root 直装（su 0 pm install -r）+ 自动点 ROM 安装确认弹窗（荣耀安装器两段式：继续安装 → 确认）。
+  # ROM 对 adb/su 安装都弹确认（纯净模式/USB 安装管控），本命令轮询 UI 找确认按钮代点，最多 ~20s。
+  install-root)
+    require "$ADB"
+    APK="app/app/build/outputs/apk/release/app-release.apk"
+    [ -f "$APK" ] || die "release APK 不存在，先 build-release"
+    "$ADB" push "$APK" /data/local/tmp/honorhook-install.apk >/dev/null 2>&1 || die "push 失败"
+    "$ADB" shell "nohup su 0 sh -c 'pm install -r /data/local/tmp/honorhook-install.apk' >/dev/null 2>&1 &"
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+      sleep 1
+      XY=$("$ADB" exec-out uiautomator dump /dev/tty 2>/dev/null | tr -d '\r' | python3 -c '
+import sys, re
+xml = sys.stdin.read()
+for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", xml):
+    t = m.group(1)
+    if t in ("继续", "继续安装", "仍要安装", "确定", "安装", "允许"):
+        x1, y1, x2, y2 = (int(m.group(i)) for i in range(2, 6))
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        break')
+      if [ -n "$XY" ]; then
+        info "点安装确认: $XY（第 $i 轮）"
+        "$ADB" shell input tap $XY >/dev/null 2>&1
+      fi
+    done
+    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 lastUpdateTime || echo "  未安装"
+    "$ADB" shell rm -f /data/local/tmp/honorhook-install.apk >/dev/null 2>&1
+    ;;
+
+  # 判据金标准：直接 grep LSPosed 框架日志文件（modlog 的 60 行窗口会漏早期判据行，2026-10-12 教训）
+  modlog-f)
+    TAG="${1:-HonorHook}"
+    require "$ADB"
+    "$ADB" shell "su 0 sh -c 'grep -h \"$TAG\" /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30'" 2>&1 | tr -d '\r'
+    ;;
+
   # LSPosed 官方 CLI 启用/查询模块（替代 enable-module 的 UI 自动化——后者会扰动通知栏/热点开关）。
   # 依赖设备端 /data/adb/modules/zygisk_lsposed/lspctl（LSPosed 2.2+ 自带）。scope 是 static（随 APK
   # scope.list 自动生效），无需手动同步；重装（install -r）不清启用态，只有卸载重装才需要本命令。

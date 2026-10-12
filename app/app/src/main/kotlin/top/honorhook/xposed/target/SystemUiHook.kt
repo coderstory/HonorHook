@@ -142,6 +142,15 @@ object SystemUiHook : TargetHook {
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
     private val unreadableWarned = AtomicBoolean(false)
 
+    /** [diag] 回调首杀一次性标志：三处回调入口共用，验证 hook 回调是否真的被调用。 */
+    private val diagFirstCallback = AtomicBoolean(false)
+
+    private fun diagCallback(module: XposedModule, taskId: String) {
+        if (diagFirstCallback.compareAndSet(false, true)) {
+            module.log(Log.INFO, MountEngine.TAG, "systemui-hook [diag] 回调首次命中: $taskId")
+        }
+    }
+
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
             ID_HIDE_5G -> mountHide5G(task, module, loader)
@@ -152,6 +161,7 @@ object SystemUiHook : TargetHook {
     /** U1 副卡隐藏：updateSubs 入参剔除 slotId==1（数据层，宿主重建时自然用改过的数据）。 */
     private fun mountHideSim2(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
+            diagCallback(module, task.id)
             // ⚠️ updateSubs 是 void 方法：hook 回调**必须返回 null**。
             // 2026-10-11 真机崩溃实证：lambda 隐式返回了最后一行 proceedWith(...) 的 Object，
             // libxposed 抛 `ClassCastException: Return value's type from hook callback does not
@@ -192,6 +202,7 @@ object SystemUiHook : TargetHook {
      */
     private fun mountHide5G(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
+            diagCallback(module, task.id)
             // SignalIconBinder.bind 是 void 方法：回调必须返回 null（见 mountHideSim2 的崩溃实证注释）
             val cardView = runCatching { chain.getArg(1) as? android.view.View }.getOrNull()
             if (cardView != null) {
@@ -216,6 +227,7 @@ object SystemUiHook : TargetHook {
      */
     private fun mountTypeIconSink(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
+            diagCallback(module, task.id)
             // void 方法：回调必须显式返回 null（见 mountHideSim2 的崩溃实证注释）
             val iconView = runCatching { chain.getArg(0) as? android.widget.ImageView }.getOrNull()
             if (iconView != null && isTypeIconView(iconView)) {
