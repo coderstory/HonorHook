@@ -73,6 +73,8 @@ LOG_OUT="$ROOT/.buildtmp"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
+# warn 走 stderr 不退出：诊断类子命令「查无结果」属正常分支，不能像 die 一样杀脚本
+warn() { echo "WARN: $*" >&2; }
 # 落盘文件名统一：类型_YYYYMMDD-HHMMSS，便于按时间与类型辨识归档
 stamp() { date +%Y%m%d-%H%M%S; }
 
@@ -154,14 +156,14 @@ EOF
     "$ADB" shell su -c "ls -la /data/adb/lspd/log/ 2>/dev/null | head -10" 2>&1 | tr -d '\r'
     info "最近日志内容（含 HonorHook / error / module 关键字优先）"
     "$ADB" shell su -c "tail -n 200 /data/adb/lspd/log/*.log 2>/dev/null" 2>&1 | tr -d '\r' \
-      | grep -iE "honorhook|error|fail|module|scope|init" | tail -30
+      | grep -iE "honorhook|error|fail|module|scope|init" | tail -30 || true
     ;;
 
   log-grep)
     require "$ADB"
     info "全量缓冲中按内容匹配 HonorHook / lspd / LSPosed（无视 tag）"
     "$ADB" logcat -d -v brief 2>/dev/null | tr -d '\r' \
-      | grep -iE "honorhook|lspd|lsposed" | grep -viE "com\.hihonor" | tail -40
+      | grep -iE "honorhook|lspd|lsposed" | grep -viE "com\.hihonor" | tail -40 || true
     ;;
 
   log-tag)
@@ -181,7 +183,7 @@ EOF
     "$ADB" shell su -c "ls /data/adb/lspd/config 2>/dev/null; echo '--- modules ---'; ls /data/adb/lspd/modules 2>/dev/null" 2>&1 | tr -d '\r' | head -12
     info "④ 全量日志中含 xposed/lsposed/HonorHook 的行（不按 tag 过滤，按内容匹配）"
     "$ADB" logcat -d -v brief 2>/dev/null | tr -d '\r' \
-      | grep -iE "honorhook|lsposed|lspd|xposed" | grep -viE "com\.hihonor|HwTheme|honor\.android" | tail -25
+      | grep -iE "honorhook|lsposed|lspd|xposed" | grep -viE "com\.hihonor|HwTheme|honor\.android" | tail -25 || true
     ;;
 
   wait-hook)
@@ -212,14 +214,18 @@ EOF
     "$ADB" shell su -c "grep -h '\[diag\]' /data/adb/lspd/log/modules_*.log 2>/dev/null" 2>&1 | tr -d '\r' > "$out"
     info "共 $(wc -l < "$out") 行"
     info "按 tag 分组："
-    grep -oE "\[diag\]\[[a-z-]+\]" "$out" | sort | uniq -c | sort -rn | head
+    grep -oE "\[diag\]\[[a-z-]+\]" "$out" | sort | uniq -c | sort -rn | head || true
     ;;
 
   dexstat)
     require "$APK_RELEASE"
     mkdir -p "$LOG_OUT/dex"
     unzip -o -q "$APK_RELEASE" classes.dex -d "$LOG_OUT/dex"
-    DEXDUMP="$(ls "$ANDROID_HOME"/build-tools/*/dexdump* 2>/dev/null | head -1)"
+    DEXDUMP=""
+    # 与 aapt2 同式：遍历 glob 取版本最高一份（ls | head -1 会取到最低版本，d9）
+    for c in "$ANDROID_HOME"/build-tools/*/dexdump "$ANDROID_HOME"/build-tools/*/dexdump.exe; do
+      if [ -x "$c" ]; then DEXDUMP="$c"; fi
+    done
     [ -n "$DEXDUMP" ] || die "未找到 dexdump（build-tools 未安装？）"
     info "release classes.dex 内各类按顶层包统计："
     "$DEXDUMP" "$LOG_OUT/dex/classes.dex" 2>/dev/null \
@@ -371,7 +377,7 @@ PYEOF
     for y in $BANDS; do
       "$ADB" shell "input tap $((W / 2)) $y" 2>/dev/null
       sleep 3
-      FOCUS=$("$ADB" shell "dumpsys window | grep mCurrentFocus" 2>/dev/null | tr -d '\r')
+      FOCUS=$("$ADB" shell "dumpsys window | grep mCurrentFocus" 2>/dev/null | tr -d '\r' || true)
       case "$FOCUS" in
         *"$LSP_FOCUS"*) ;;
         *NotificationShade*) "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 1; continue ;;
@@ -394,13 +400,14 @@ PYEOF
     [ "$done_flag" = 1 ] || die "未能进入模块页完成启用（通知可能失效，重跑 install-release 再试）"
     "$ADB" shell "cmd statusbar collapse" >/dev/null 2>&1
     # 作用域进程**全部**强停（hook 必须强停重启才生效），下次拉起即带 hook。
-    # 必须与 META-INF/xposed/scope.list 的 6 个包一一对应，漏一个就会出现
-    # "部署报成功但该目标 hook 没生效"的假成功。
-    for pkg in com.hihonor.android.thememanager com.android.packageinstaller com.android.settings \
-               com.android.systemui com.hihonor.android.launcher com.exam8.chengrenGK; do
+    # 包名清单直接读 scope.list（单一事实源，跳过空行/注释行）——此前硬编码 6 包而
+    # scope.list 已扩到 18，漏强停的宿主会出现"部署报成功但该目标 hook 没生效"的假成功。
+    SCOPE_PKGS="$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | grep -vE '^[[:space:]]*(#|$)' || true)"
+    [ -n "$SCOPE_PKGS" ] || die "scope.list 读取为空（$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list）"
+    for pkg in $SCOPE_PKGS; do
       "$ADB" shell "am force-stop $pkg" >/dev/null 2>&1
     done
-    info "作用域进程已强停（scope.list 全部 6 个包）"
+    info "作用域进程已强停（scope.list 全部 $(printf '%s\n' $SCOPE_PKGS | wc -l | tr -d ' ') 个包）"
     ;;
 
   deploy-release)
@@ -435,13 +442,24 @@ PYEOF
     require "$ADB"
     APK="app/app/build/outputs/apk/release/app-release.apk"
     [ -f "$APK" ] || die "release APK 不存在，先 build-release"
+    # 弹窗按钮解析用解释器：与 enable-module 同款探测链（d5，原裸 python3 在无 python3 PATH 的机器上挂）
+    pick_python() {
+      local c
+      if [ -n "${HONORHOOK_PYTHON:-}" ] && [ -x "${HONORHOOK_PYTHON}" ]; then printf '%s\n' "$HONORHOOK_PYTHON"; return 0; fi
+      for c in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" \
+               "$(command -v python3 || true)" "$(command -v python || true)"; do
+        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s\n' "$c"; return 0; fi
+      done
+      return 1
+    }
+    PARSER="$(pick_python)" || die "缺少 python3（install-root 安装弹窗解析需要，同 enable-module 的 Pillow 链）"
     "$ADB" push "$APK" /data/local/tmp/honorhook-install.apk >/dev/null 2>&1 || die "push 失败"
     "$ADB" shell "nohup su 0 sh -c 'pm install -r /data/local/tmp/honorhook-install.apk' >/dev/null 2>&1 &"
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
       sleep 1
       # uiautomator dump 走文件再 cat（/dev/tty 直排在安装弹窗上常返回空，2026-10-12 实证）
       "$ADB" shell uiautomator dump /sdcard/hh_dlg.xml >/dev/null 2>&1
-      XY=$("$ADB" shell cat /sdcard/hh_dlg.xml 2>/dev/null | tr -d '\r' | python3 -c '
+      XY=$("$ADB" shell cat /sdcard/hh_dlg.xml 2>/dev/null | tr -d '\r' | "$PARSER" -c '
 import sys, re
 xml = sys.stdin.read()
 for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", xml):
@@ -464,11 +482,16 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
   # 进程被 kill 后由系统自动拉起（persistent）。禁用 am crash（用户 2026-10-12 永久禁令）。
   restart-scope)
     require "$ADB"
-    pkgs="${*:-$(tr -d '\r' < app/app/src/main/resources/META-INF/xposed/scope.list | tr '\n' ' ')}"
+    pkgs="${*:-$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | tr '\n' ' ')}"
     for p in $pkgs; do
-      pid=$("$ADB" shell "su 0 pidof $p" 2>/dev/null | tr -d '\r' | tr ' ' '\n' | head -1)
-      if [ -n "$pid" ]; then
-        "$ADB" shell "su 0 kill $pid" >/dev/null 2>&1 && info "$p (pid $pid) 已 TERM，等系统拉起"
+      # pidof 无匹配时设备侧 exit 1 → 管道非零：|| true 防 pipefail 杀脚本
+      pids=$("$ADB" shell "su 0 pidof $p" 2>/dev/null | tr -d '\r' | tr ' ' '\n' || true)
+      if [ -n "$pids" ]; then
+        # pidof 可能返回多个 pid（多进程宿主）——全部杀，只杀首个杀不干净
+        for pid in $pids; do
+          "$ADB" shell "su 0 kill $pid" >/dev/null 2>&1 || true
+        done
+        info "$p (pid $(echo "$pids" | tr '\n' ' ')) 已 TERM，等系统拉起"
       else
         info "$p 未在运行"
       fi
@@ -478,6 +501,8 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
   # 判据金标准：直接 grep LSPosed 框架日志文件（modlog 的 60 行窗口会漏早期判据行，2026-10-12 教训）
   modlog-f)
     TAG="${1:-HonorHook}"
+    # tag 进 su -c 双引号内层 grep：先校验字符集，杜绝引号/分号注入碎 shell（d3）
+    [[ "$TAG" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "tag 仅限字母/数字/._:-（防注入碎 shell）"
     require "$ADB"
     "$ADB" shell "su 0 sh -c 'grep -h \"$TAG\" /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30'" 2>&1 | tr -d '\r'
     ;;
@@ -552,7 +577,7 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
     info "④ 本次启动日志（崩溃/异常优先）"
     "$ADB" logcat -d -v threadtime 2>/dev/null | tr -d '\r' \
       | grep -E "FATAL|AndroidRuntime|io\.github\.coderstory\.honorhook|Exception|Error caused|am_proc_died|ActivityManager: (Force|Process)" \
-      | tail -50
+      | tail -50 || true
     ;;
 
   logcat)
@@ -633,6 +658,10 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
   text)
     require "$ADB"
     [ $# -ge 2 ] || die "用法: dev.sh text <要输入的文本>"
+    # adb input text 不支持空格（需 %s）与非 ASCII（中文进不去）——提示后仍原样执行（d6）
+    if [[ "$2" == *" "* ]] || printf '%s' "$2" | LC_ALL=C grep -q '[^ -~]'; then
+      info "input text 不支持空格/中文，空格用 %s"
+    fi
     "$ADB" shell input text "$2"
     info "已输入: $2"
     ;;
@@ -647,21 +676,23 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
   modlog)
     require "$ADB"
     pat="${2:-HonorHook}"
+    # pat 进 su -c 单引号内层 grep：先校验字符集，杜绝引号注入碎 shell（d3）
+    [[ "$pat" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "tag 仅限字母/数字/._:-（防注入碎 shell）"
     lines="${3:-60}"
     info "LSPosed 框架日志（模块 log 输出落点）中匹配 $pat 的最后 $lines 行"
-    "$ADB" shell su -c "grep -h '$pat' /data/adb/lspd/log/modules_*.log 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$lines"
+    "$ADB" shell su -c "grep -h '$pat' /data/adb/lspd/log/modules_*.log 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$lines" || true
     ;;
 
   grep-log)
     require "$ADB"
     [ $# -ge 2 ] || die "用法: dev.sh grep-log <正则>（在当前 logcat 缓冲里按 tag/内容匹配）"
-    "$ADB" logcat -d -v brief 2>/dev/null | tr -d '\r' | grep -E "$2" | tail -40
+    "$ADB" logcat -d -v brief 2>/dev/null | tr -d '\r' | grep -E "$2" | tail -40 || true
     ;;
 
   grep-logd)
     require "$ADB"
     [ $# -ge 2 ] || die "用法: dev.sh grep-logd <正则>（全 buffer dump 后匹配，含 -b all 缓冲）"
-    "$ADB" logcat -d -b all -v brief 2>/dev/null | tr -d '\r' | grep -E "$2" | tail -60
+    "$ADB" logcat -d -b all -v brief 2>/dev/null | tr -d '\r' | grep -E "$2" | tail -60 || true
     ;;
 
   log-file)
@@ -680,7 +711,7 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
 
   targets)
     grep -rn "register(" "$ROOT/app/app/src/main/kotlin/top/honorhook/xposed/target/TargetRegistry.kt" \
-      | grep -v "fun register"
+      | grep -v "fun register" || true
     ;;
 
   verify)
