@@ -455,7 +455,7 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
         "$ADB" shell input tap $XY >/dev/null 2>&1
       fi
     done
-    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 lastUpdateTime || echo "  未安装"
+    "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m1 lastUpdateTime || echo "  未安装"
     "$ADB" shell rm -f /data/local/tmp/honorhook-install.apk >/dev/null 2>&1
     ;;
 
@@ -488,16 +488,16 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
   enable-cli)
     LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
     require "$ADB"
-    "$ADB" shell "su 0 $LSPCTL module enable --user=0 top.honorhook" 2>&1 | tr -d '\r'
-    "$ADB" shell "su 0 $LSPCTL module show top.honorhook" 2>&1 | tr -d '\r' | grep -E 'User'
+    "$ADB" shell "su 0 $LSPCTL module enable --user=0 io.github.coderstory.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL module show io.github.coderstory.honorhook" 2>&1 | tr -d '\r' | grep -E 'User'
     ;;
 
   # LSPosed CLI 查询：模块启用态与作用域（只读）
   modctl)
     LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
     require "$ADB"
-    "$ADB" shell "su 0 $LSPCTL module show top.honorhook" 2>&1 | tr -d '\r'
-    "$ADB" shell "su 0 $LSPCTL scope list top.honorhook" 2>&1 | tr -d '\r' | head -20
+    "$ADB" shell "su 0 $LSPCTL module show io.github.coderstory.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL scope list io.github.coderstory.honorhook" 2>&1 | tr -d '\r' | head -20
     ;;
 
   launch)
