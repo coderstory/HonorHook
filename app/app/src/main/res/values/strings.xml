@@ -63,6 +63,15 @@
     <string name="feature_systemui_dual_signal_title">双排信号</string>
     <string name="feature_systemui_dual_signal_desc">状态栏信号分上下两排显示（上排主卡、下排副卡）；与其他双排信号类插件二选一，不要同时开启</string>
 
+    <string name="feature_systemui_hide_charge_notif_title">隐藏充电通知</string>
+    <string name="feature_systemui_hide_charge_notif_desc">隐藏系统管家充电通知（「正在充电/极速充电」），插拔充电器不再弹横幅或进下拉列表</string>
+    <string name="feature_systemui_hide_hotspot_notif_title">隐藏热点通知</string>
+    <string name="feature_systemui_hide_hotspot_notif_desc">隐藏热点共享进行中通知（android 系统 · 已连接设备数 · 已共享流量）</string>
+    <string name="feature_systemui_hide_adb_notif_title">隐藏 USB 调试通知</string>
+    <string name="feature_systemui_hide_adb_notif_desc">隐藏「USB 调试已连接」系统通知</string>
+    <string name="feature_systemui_flashlight_ignore_low_batt_title">手电筒忽略低电量</string>
+    <string name="feature_systemui_flashlight_ignore_low_batt_desc">电量低于 5% 时仍可从下拉瓷贴/桌面小部件打开手电筒。注意：绕过的是厂商电池保护阈值，可一直用到深度放电自动关机</string>
+
     <string name="feature_mms_ad_off_title">广告净化</string>
     <string name="feature_mms_ad_off_desc">去除短信里的营销内容：会话底部的充值菜单、推广按钮和应用推广卡片（如 10010 发的流量套餐入口）</string>
 

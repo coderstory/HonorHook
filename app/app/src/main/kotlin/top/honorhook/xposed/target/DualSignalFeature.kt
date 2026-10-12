@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 /**
- * U4 状态栏双排信号（渲染方案移植自 com.mod.dualsignal 3.3，用户要求整合，私用）。
+ * U6 状态栏双排信号（渲染方案移植自 com.mod.dualsignal 3.3，用户要求整合，私用）。
  *
  * 移植源：system-files/DualSignal-jadx/…/DualSignalHook.java（872 行 jadx 实证读毕）。取舍：
  * - 保留：onAttachedToWindow（after）找 cluster root → 遍历找 mobile_combo 组 → 隐藏原生组 +
@@ -53,9 +53,9 @@ object DualSignalFeature {
     private const val HOST_PACKAGE = "com.android.systemui"
 
     /** 引擎名与判据前缀都含 "SystemUiHook"：modlog-f 'SystemUiHook' 可一并过滤到汇总行与判据行。 */
-    private const val JUDGE_PREFIX = "SystemUiHook·U4"
+    private const val JUDGE_PREFIX = "SystemUiHook·U6"
 
-    private val engine = MountEngine("SystemUiHook·U4", HOST_PACKAGE)
+    private val engine = MountEngine("SystemUiHook·U6", HOST_PACKAGE)
 
     // ---- 挂载点（jadx 实证均未混淆；onAttachedToWindow 均为类自声明覆写，declaredMethods 直连可解析）----
 
@@ -132,7 +132,7 @@ object DualSignalFeature {
 
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL)) {
-            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook·U4")
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook·U6")
             return
         }
         val loader = param.defaultClassLoader
@@ -155,7 +155,7 @@ object DualSignalFeature {
         override val returnType = "void"
         override val id = "systemui:dualSignal.${className.substringAfterLast('.')}"
         override val description =
-            "U4 双排信号·attach 入口（${className.substringAfterLast('.')}，" +
+            "U6 双排信号·attach 入口（${className.substringAfterLast('.')}，" +
                 (if (isClusterRoot) "cluster root 直取" else "上溯找 cluster root") + "）"
         override val dex: MountEngine.DexHint? = null
     }
@@ -371,7 +371,7 @@ object DualSignalFeature {
         module.log(
             Log.WARN, MountEngine.TAG,
             "$JUDGE_PREFIX 检测到 DualSignal 插件容器（tag $FOREIGN_CONTAINER_TAG），" +
-                "本 host 退避不注入（先到先得；停用插件并重启 SystemUI 后 U4 生效）",
+                "本 host 退避不注入（先到先得；停用插件并重启 SystemUI 后 U6 生效）",
         )
     }
 
@@ -385,7 +385,7 @@ object DualSignalFeature {
         module.log(
             Log.INFO, MountEngine.TAG,
             if (installed) {
-                "$JUDGE_PREFIX DualSignal 插件包已安装（$DUAL_SIGNAL_PACKAGE）——其启用时 U4 按 host 退避，二选一"
+                "$JUDGE_PREFIX DualSignal 插件包已安装（$DUAL_SIGNAL_PACKAGE）——其启用时 U6 按 host 退避，二选一"
             } else {
                 "$JUDGE_PREFIX DualSignal 插件包未安装，无冲突"
             },
