@@ -13,7 +13,7 @@
 | 包管理器 | `com.android.packageinstaller` | 14.0.37.301 | 半混淆；**无布尔开关表**（云控 = `CommonConfig` configVO→JSON + AB 实验）；广告是内容下发型（无总开关） | [`installer.md`](installer.md) |
 | 设置 | `com.android.settings` | 14.0.0.210 | 类名可读，方法名 R8 单字母混淆（需 DexKit 锚点兜底）；**执行层受 system_server 保护**（已放弃守卫方案） | [`settings.md`](settings.md) |
 | 系统桌面 | `com.hihonor.android.launcher` | 18.0.0.234 | 目标文本在 **`YOYOCardStackPlugin.apk` 独立 ClassLoader**（插件类不可经 base CL 解析 ⇒ 只能挂 base 包等价判定） | [`launcher.md`](launcher.md) |
-| SystemUI | `com.android.systemui` | 17.0.0.1 | 目标类有 2 个 1 参 void 重载（直连轨须按参数类型消歧）；重载消歧坑 | [`systemui.md`](systemui.md) |
+| SystemUI | `com.android.systemui` | 17.0.0.1 | 目标类有 2 个 1 参 void 重载（直连轨须按参数类型消歧）；重载消歧坑；U4 通知身份锚点（dumpsys 渠道打码 → group/id/探针） | [`systemui.md`](systemui.md) |
 | 成人高考题库 | `com.exam8.chengrenGK` | 5.9.0.0-release | **未混淆**（bean 稳定）；但**服务端按订单态下发正文** ⇒ 能力边界见下 | [`exam8.md`](exam8.md) |
 
 > 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` §八 未解决项与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。

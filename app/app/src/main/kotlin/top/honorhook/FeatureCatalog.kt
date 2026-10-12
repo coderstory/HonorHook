@@ -32,6 +32,10 @@ object FeatureCatalog {
 
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
+    const val KEY_SYSTEMUI_HIDE_CHARGE_NOTIF = "systemui.hide_charge_notif"
+    const val KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF = "systemui.hide_hotspot_notif"
+    const val KEY_SYSTEMUI_HIDE_ADB_NOTIF = "systemui.hide_adb_notif"
+    const val KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT = "systemui.flashlight_ignore_low_batt"
 
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
@@ -119,6 +123,10 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, "隐藏副卡图标", "隐藏副卡(SIM2)状态栏信号图标，双卡时只显示主卡"),
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
+                Feature(KEY_SYSTEMUI_HIDE_CHARGE_NOTIF, "隐藏充电通知", "隐藏系统管家充电通知（「正在充电/极速充电」），插拔充电器不再弹横幅或进下拉列表"),
+                Feature(KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF, "隐藏热点通知", "隐藏热点共享进行中通知（android 系统 · 已连接设备数 · 已共享流量）"),
+                Feature(KEY_SYSTEMUI_HIDE_ADB_NOTIF, "隐藏 USB 调试通知", "隐藏「USB 调试已连接」系统通知"),
+                Feature(KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT, "手电筒忽略低电量", "电量低于 5% 时仍可从下拉瓷贴/桌面小部件打开手电筒。注意：绕过的是厂商电池保护阈值，可一直用到深度放电自动关机"),
             ),
             baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
         ),
