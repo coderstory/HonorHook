@@ -34,7 +34,6 @@ object FeatureCatalog {
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
 
     const val KEY_MMS_AD_OFF = "mms.ad_off"
-    const val KEY_MMS_CODE_FREE = "mms.code_free"
 
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
@@ -102,7 +101,6 @@ object FeatureCatalog {
                     KEY_MMS_AD_OFF, "广告净化",
                     "去除智能信息营销内容——10010 会话底部自定义菜单（流量充值/1元30G/百元回馈）、卡片按钮（1元30G/抢100G）、应用推广卡（查看应用跳应用市场）",
                 ),
-                Feature(KEY_MMS_CODE_FREE, "验证码免服务", "验证码本地复制，无需开启智能信息服务，全程不联网"),
             ),
         ),
         Target(

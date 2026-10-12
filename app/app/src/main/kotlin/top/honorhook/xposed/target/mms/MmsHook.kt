@@ -19,11 +19,9 @@ import top.honorhook.xposed.target.logDisabled
  * 白名单走宿主）映射进 mms 进程。**插件类（com.ted.sms.*）不在宿主 dex**，`defaultClassLoader`
  * 拿不到——挂载策略见 [mountMenuFactory] 注释。
  *
- * 功能与开关（各自独立）：
+ * 功能与开关：
  * - [FeatureCatalog.KEY_MMS_AD_OFF] 广告净化（T2 底部自定义菜单 + T3 卡片按钮/应用推广卡，全部经
- *   同一载体事件驱动挂载，见 [mountMenuFactory]）
- * - [FeatureCatalog.KEY_MMS_CODE_FREE] 验证码免服务（T4 接；**禁止伪装服务已开启**——用户拒绝
- *   智能信息服务的联网/隐私条款，实现方向是本地复制不依赖服务，见 FeatureCatalog 描述）
+ *   同一载体事件驱动挂载，见 [mountMenuFactory]）。验证码功能归 ime 目标（ImeHook），mms 侧无挂载点。
  *
  * 判据：真机冷启短信 → `MmsHook: installed N/M`；广告净化另有两条主轨生效行
  * （`mms-hook 生效: mms:TedMenuProcessor.findMenus` / `mms:SimpleActionLayout.b`——两轨同为
@@ -84,13 +82,10 @@ object MmsHook : TargetHook {
     private const val FIELD_PROCESSOR = "processor"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
-        // 双开关独立判定（任一关 → logDisabled 留痕；双关 → 整目标跳过不打 installed 行，
-        // 「用户全关」与「模块没注入」的区分由 logDisabled 留痕负责）。
-        val adOff = RemoteConfig.isEnabled(FeatureCatalog.KEY_MMS_AD_OFF)
-        val codeFree = RemoteConfig.isEnabled(FeatureCatalog.KEY_MMS_CODE_FREE)
-        if (!adOff) logDisabled(module, FeatureCatalog.KEY_MMS_AD_OFF, "MmsHook")
-        if (!codeFree) logDisabled(module, FeatureCatalog.KEY_MMS_CODE_FREE, "MmsHook")
-        if (!adOff && !codeFree) return
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_MMS_AD_OFF)) {
+            logDisabled(module, FeatureCatalog.KEY_MMS_AD_OFF, "MmsHook")
+            return
+        }
 
         val loader = param.defaultClassLoader
         engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
@@ -105,16 +100,14 @@ object MmsHook : TargetHook {
             id = "mms:SmartSmsUtilControl.getIntelligentIpMessageEnable",
             description = "T1 骨架探针：智能信息插件环境存活检查（proceed 后原值返回，零行为改动）",
         )
-        if (adOff) {
-            pending += MountTask(
-                className = CLS_MENU_FACTORY,
-                methodName = "getMenuProcessor",
-                paramCount = 0,  // 签名实证：static Optional getMenuProcessor()——SmartSmsProcessorFactory.java
-                returnType = "java.util.Optional",
-                id = ID_MENU_FACTORY,
-                description = "T2 菜单全杀载体：proceed 后从返回的菜单处理器对象捕获插件 ClassLoader 并挂主轨 findMenus，本身放行不改行为",
-            )
-        }
+        pending += MountTask(
+            className = CLS_MENU_FACTORY,
+            methodName = "getMenuProcessor",
+            paramCount = 0,  // 签名实证：static Optional getMenuProcessor()——SmartSmsProcessorFactory.java
+            returnType = "java.util.Optional",
+            id = ID_MENU_FACTORY,
+            description = "T2 菜单全杀载体：proceed 后从返回的菜单处理器对象捕获插件 ClassLoader 并挂主轨 findMenus，本身放行不改行为",
+        )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
