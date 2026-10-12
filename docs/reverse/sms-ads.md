@@ -39,12 +39,17 @@ init(ctx, threadId, iccid, editToMenu, editRoot, menuGroup, params)
 
 **三个 surface 疑似同源**：「查看应用」的 resource-id 也是 `left_button`，推广卡大概率同样由 menuJson 驱动（`callChannelAction` 在 TedMenuProcessor 里是空实现，AM_SDK 触发点在混淆层，待二次实证）。若确认：**清空 menuJson 一个挂载点全杀**。
 
-## 四、候选挂载点（按 repo 哲学排序，未实现）
+## 四、挂载点（T2 已实现并真机验收，2026-10-12）
 
-1. **数据源**：`findMenus` 返回空数组 / `VO.e` 查询结果置空 → `init` 走 -201 退出，最接近「改数据不改逻辑」；类名可读但引擎代码随版本变，需配 DexKit 锚点（`"TedMenu"` tag 字符串、`bindMenuData menuJsonArray len:` 日志串）
-2. **桥接层**：`HwMenuProcessorProxy`（mms 侧、未混淆、跨版本最稳）拦 `init` 直接返 -201
-3. 点击分发拦 `honormarket://`（备选，可能误伤手动分享）
-4. View 隐藏（下策）
+| 点 | 层 | 状态 |
+|---|---|---|
+| `SmartSmsProcessorFactory.getMenuProcessor`（static 0 参返 Optional，未混淆） | 载体：proceed 后从返回的 TedMenuProcessor 对象**捕获插件 ClassLoader** | **实测生效**（installed 2/2，载体命中日志） |
+| `TedMenuProcessor.findMenus`（private static，经捕获的插件 CL 解析）→ 返空 JSONArray | 数据源：menuJson 空 → init -201 干净退出 | **实测生效**：底部菜单消失、正文保留、无 crash |
+
+修正（实测推翻调研期判断）：
+- `HwMenuProcessorProxy` 桥接是**死代码**——`SmartSmsSwitcher.isHihonorSmartSms()` 见插件包已装即走 Honor 分支，Hw* 从不实例化（第一版载体 installed 2/2 但零触发，换载体后全链生效）
+- DexKit 兜底对插件类不适用：engine 只扫 mms apk；插件类名跨 APK 反射留名，直连即中
+- **卡片按钮（left_button/right_button）与 menuJson 无关**（T2 后真机 dump 仍在）——数据链待 T3 定位；「查看应用」推广卡同归 T3
 
 ## 五、待二次实证（grilling 后定）
 
