@@ -53,6 +53,14 @@ object SystemUiHook : TargetHook {
     private const val CLS_SIGNAL_UTILS = "com.android.systemui.utils.HnSignalUtils"
     private const val METHOD_SET_ICON_FOR_VIEW = "setIconForView"
 
+    /**
+     * 类型标收口点（U2c，2026-10-12 真机补）：网络类型图标有两条渲染路——Icon.Resource 走
+     * setIconForView（U2b 已收），Icon.Loaded 走 IconViewBinder.bind → setImageDrawable **直接绕过
+     * setIconForView**（SignalIconBinder C01821 case 1 双分支实证）⇒ U2b 单点不够。挂
+     * IconViewBinder.bind（named 类，common/ui/binder）一并覆盖 Resource/Loaded 两路。
+     */
+    private const val CLS_ICON_VIEW_BINDER = "com.android.systemui.common.ui.binder.IconViewBinder"
+
     /** 副卡 = 卡槽 2（SubscriptionModel.slotId 0-based；SimData slotId=1/subId=2 真机实证）。 */
     private const val HIDDEN_SLOT_ID = 1
 
@@ -110,6 +118,15 @@ object SystemUiHook : TargetHook {
                 description = "U2b 5G/4G 类型标收口（setIconForView 命中 mobile_type/mobile_signal_type 置 GONE 并短路，覆盖 StateFlow 重显路径）",
                 dex = DexHint(strings = listOf("setIconForView:imageView is null, return")),
             )
+            // U2c：Icon.Loaded 路收口（IconViewBinder.bind 同时覆盖 Resource/Loaded 两分支）
+            pending += MountTask(
+                className = CLS_ICON_VIEW_BINDER,
+                methodName = METHOD_BIND,
+                paramCount = 2,
+                returnType = "void",
+                id = ID_ICON_BINDER,
+                description = "U2c 5G/4G 类型标收口·Icon.Loaded 路（IconViewBinder.bind 命中类型标 view 置 GONE 并短路）",
+            )
         } else {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_5G, "SystemUiHook")
         }
@@ -138,6 +155,7 @@ object SystemUiHook : TargetHook {
     /** 挂载点 id（mountOne 按 id 分派）。 */
     private const val ID_HIDE_5G = "systemui:signalIconBinder.bind"
     private const val ID_SET_ICON_FOR_VIEW = "systemui:hnSignalUtils.setIconForView"
+    private const val ID_ICON_BINDER = "systemui:iconViewBinder.bind"
 
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
     private val unreadableWarned = AtomicBoolean(false)
@@ -155,6 +173,7 @@ object SystemUiHook : TargetHook {
         when (task.id) {
             ID_HIDE_5G -> mountHide5G(task, module, loader)
             ID_SET_ICON_FOR_VIEW -> mountTypeIconSink(task, module, loader)
+            ID_ICON_BINDER -> mountTypeIconSink(task, module, loader)
             else -> mountHideSim2(task, module, loader)
         }
 
@@ -222,15 +241,19 @@ object SystemUiHook : TargetHook {
     private val TYPE_VIEW_NAMES = setOf("mobile_type", "mobile_signal_type")
 
     /**
-     * U2b 收口：setIconForView(ImageView, int) 是所有图标 drawable 设置的必经点（信号格/漫游/箭头/类型标
-     * 全走它，HnSignalUtils.java:28）。命中类型标 view → GONE + 短路；其余一律放行（信号格等不受影响）。
+     * U2b/U2c 共用收口：setIconForView(ImageView, int) 与 IconViewBinder.bind(Icon, ImageView)
+     * 两路必经点。扫描前两参找 ImageView：命中类型标 view → GONE + 短路；其余一律放行
+     * （信号格/漫游/箭头不受影响）。
      */
     private fun mountTypeIconSink(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // void 方法：回调必须显式返回 null（见 mountHideSim2 的崩溃实证注释）
-            val iconView = runCatching { chain.getArg(0) as? android.widget.ImageView }.getOrNull()
-            if (iconView != null && isTypeIconView(iconView)) {
+            val iconView = (0..1).firstNotNullOfOrNull { i ->
+                runCatching { chain.getArg(i) as? android.widget.ImageView }.getOrNull()
+                    ?.takeIf { isTypeIconView(it) }
+            }
+            if (iconView != null) {
                 runCatching { iconView.visibility = android.view.View.GONE }
                 engine.judge(module, task, JUDGE_PREFIX, "类型标收口命中，已 GONE")
                 null   // 短路：drawable 不设置；外层随后的 setVisibility(0) 只作用于空 view

@@ -439,7 +439,9 @@ PYEOF
     "$ADB" shell "nohup su 0 sh -c 'pm install -r /data/local/tmp/honorhook-install.apk' >/dev/null 2>&1 &"
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
       sleep 1
-      XY=$("$ADB" exec-out uiautomator dump /dev/tty 2>/dev/null | tr -d '\r' | python3 -c '
+      # uiautomator dump 走文件再 cat（/dev/tty 直排在安装弹窗上常返回空，2026-10-12 实证）
+      "$ADB" shell uiautomator dump /sdcard/hh_dlg.xml >/dev/null 2>&1
+      XY=$("$ADB" shell cat /sdcard/hh_dlg.xml 2>/dev/null | tr -d '\r' | python3 -c '
 import sys, re
 xml = sys.stdin.read()
 for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", xml):
