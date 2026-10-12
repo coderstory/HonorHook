@@ -184,7 +184,7 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_JD_SPLASH, R.string.feature_jd_splash_title, R.string.feature_jd_splash_desc),
             ),
-            baselineVersion = "16.0.70",  // dumpsys 实证 2026-10-12（docs/reverse/jd.md）
+            baselineVersion = "16.1.0",  // dumpsys 实证 2026-10-12（dex 级锚点核对见 docs/reverse/jd.md §二·2）
         ),
         Target(
             "com.aimazhishi.mfa.authenticator", R.string.target_name_mfa,

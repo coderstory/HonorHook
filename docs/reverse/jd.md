@@ -1,8 +1,9 @@
 # 京东 `com.jingdong.app.mall` — 屏蔽开屏广告逆向
 
-> 基线 **16.0.70（versionCode 102834）**（2026-10-12 真机 `dumpsys`/`pm path` 实证，设备 AAK-AN00）。
-> 反编译产物：`system-files/JD-16.0.70-jadx/`（jadx `-j 4 -r --no-res --show-bad-code`，35276 类，exit 1 + 77 errors 属正常）。
-> 状态：**调研期**——只有逆向实证，无任何 hook 代码。
+> 基线 **16.0.70（versionCode 102834）**（2026-10-12 真机 `dumpsys`/`pm path` 实证，设备 AAK-AN00）；
+> **2026-10-12 当天宿主升 16.1.0（102883）**，锚点 dex 级核对通过后基线上移（见 §二·2）。
+> 反编译产物：`system-files/JD-16.0.70-jadx/`（jadx `-j 4 -r --no-res --show-bad-code`，35276 类，exit 1 + 77 errors 属正常）；16.1.0 未做全量 jadx，只拉包 `system-files/JD-16.1.0.apk` 做锚点核对。
+> 状态：hook 已落码真机验收（本文 §二 链路实证基于 16.0.70 jadx）。
 
 ## 一、结论（TL;DR）
 
@@ -27,6 +28,18 @@ launchable-activity: com.jingdong.app.mall.MainFrameActivity   (aapt2 badging)
 
 - `onCreateViews`（:112）→ `V0()`（:27）**二次判同一数据源** `rv.f.n().k()`：null 或 `g.f89712n`（adImageObject）空 ⇒ 走 `Y0(false)` 完整原生无广告路径（fragment 自移除，返回 null 视图）。
 - 有广告 ⇒ `BaseSplashView.C(thisActivity, adObj, 0)`（:42）创建渲染视图（ImageSplashView/VideoSplashView/ThreeDSplashView），`f0()` 启动，`onFinish` 回调（:49）→ `Y0` → `b1()` 自移除。
+
+## 二·2、16.1.0 适配核对（2026-10-12，宿主当天自动升级）
+
+基线上移 16.0.70 → 16.1.0（versionCode 102834 → 102883），核对手段 = dex 字节级（`.claude/skills/apk-reverse/scripts/dexutil.py`），未做全量 jadx：
+
+| 检查项 | 结果 |
+|---|---|
+| `Lcom/jingdong/app/mall/home/JDHomeManager;.a(Lcom/jingdong/common/BaseActivity;I)V`（static，签名锚点本体） | **存活**（classes7.dex，method_idx=10447，指令流完整解码） |
+| `addSplashFragment` 埋点串（MainFrameActivity 调用侧锚） | **存活**（classes6.dex） |
+| `Lcom/jingdong/app/mall/SplashFragment;` 类 | **存活**（classes6/7.dex） |
+
+结论：签名锚点跨该版本成立，hook 无需改动；真机判据（installed 1/1 + 冷启动无开屏）随升级重跑一遍为准。
 
 ## 三、挂载点候选（按稳序）
 
