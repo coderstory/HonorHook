@@ -73,10 +73,17 @@ object ApkInstaller {
 
     /** 单源探测：握手成功返回完整 URL，失败返回 null（日志含耗时与原因）。 */
     private fun probeOne(prefix: String, url: String, timeoutMs: Int): String? {
-        val conn = URL(prefix + url).openConnection() as HttpURLConnection
+        val t0 = System.currentTimeMillis()
+        // URL 构造必须与 connect 同在失败语义内：空串/畸形 URL 抛 MalformedURLException
+        // 会直接炸调用方（probeSources/coroutineScope），与握手失败同语义返回 null
+        val conn = try {
+            URL(prefix + url).openConnection() as HttpURLConnection
+        } catch (e: Exception) {
+            Log.i(TAG, "probe FAIL ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms: ${e.message}")
+            return null
+        }
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
-        val t0 = System.currentTimeMillis()
         return try {
             conn.connect()
             Log.i(TAG, "probe OK ${prefix.ifEmpty { "direct" }} ${System.currentTimeMillis() - t0}ms")
@@ -131,6 +138,11 @@ object ApkInstaller {
                         }
                     }
                 }
+                // 提前断流时读到 EOF 也算"读完"，半截 APK 进系统安装器必失败；
+                // 抛错让 download() 的逐源循环换下一源（probed 直连路径则走调用方 catch → Error 态）
+                if (total > 0 && done != total) error("下载不完整: $done/$total")
+                // total 未知（无 Content-Length，P4）：读完流即成功，进度补 100%，别停在 0
+                if (total <= 0) onProgress(100)
                 Log.i(TAG, "download done $done bytes")
                 return
             } finally {

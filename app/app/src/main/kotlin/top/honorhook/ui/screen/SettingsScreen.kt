@@ -33,14 +33,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.FeatureCatalog
@@ -79,7 +81,7 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  */
 @Composable
 fun SettingsScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
-    var page by remember { mutableStateOf<Page?>(null) }
+    var page by rememberSaveable { mutableStateOf<Page?>(null) }
     BackHandler(enabled = page != null) { page = null }
     when (page) {
         Page.THEME -> ThemeSettingsPage(onBack = { page = null }, bottomInnerPadding = bottomInnerPadding)
@@ -101,7 +103,7 @@ private fun SettingsMain(
     onOpenAbout: () -> Unit,
 ) {
     val scrollBehavior = MiuixScrollBehavior()
-    var showRestart by remember { mutableStateOf(false) }
+    var showRestart by rememberSaveable { mutableStateOf(false) }
     val updateSummary = run {
         val latest = UpdateState.latest
         when {
@@ -230,9 +232,13 @@ private fun SettingsMain(
     }
 }
 
+// 进程级 scope：重启执行体不能跑在 rememberCoroutineScope 里——旋屏会取消该协程，
+// 远端开关已同步但目标进程一个没杀（假成功）。UI 态（running/report）旋屏丢失可接受，
+// 关键是 push + restart 必须跑完。
+private val restartExecutor = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
 @Composable
 private fun RestartScopeDialog(onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf(FeatureCatalog.targets.map { it.packageName }.toSet()) }
     var running by remember { mutableStateOf(false) }
     var report by remember { mutableStateOf<ScopeRestarter.Report?>(null) }
@@ -254,7 +260,7 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
                 onConfirm = {
                     val snapshot = selected.toList()
                     running = true
-                    scope.launch {
+                    restartExecutor.launch {
                         // 必须先下发再强停，否则下次注入读到的还是旧远端值
                         val pushed = withContext(Dispatchers.IO) { FeatureStore.pushAllToRemote() }
                         val outcome = withContext(Dispatchers.IO) { ScopeRestarter.restart(snapshot) }

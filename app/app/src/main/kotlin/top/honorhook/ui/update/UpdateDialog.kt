@@ -40,6 +40,9 @@ fun UpdateDialog(onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     val release = UpdateState.latest ?: return
     var phase by remember { mutableStateOf<Phase>(Phase.Confirm) }
+    // 授权提示独立于 Phase：install 跳授权页返回 false 时保持 Ready（覆写成 Error 会让
+    // 授权回来后找不到安装按钮，重试=全量重下）；再点安装时 install 内部会重查授权
+    var installHint by remember { mutableStateOf(false) }
 
     fun startDownload() {
         scope.launch {
@@ -97,13 +100,22 @@ fun UpdateDialog(onDismiss: () -> Unit) {
             }
 
             is Phase.Ready -> {
-                // install 返回 false = 已跳「安装未知应用」授权页，授权后回来再点一次
+                // install 返回 false = 已跳「安装未知应用」授权页：保持 Ready 只挂提示，
+                // 授权回来安装按钮还在，授权后点安装直达系统安装器
                 Text(text = "下载完成，点击安装")
+                if (installHint) {
+                    Text(
+                        text = "请先授权安装未知应用，授权后回到这里再点安装",
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
                 Actions(
                     left = "关闭" to onDismiss,
                     right = "安装" to {
-                        if (!ApkInstaller.install(context, p.apk)) {
-                            phase = Phase.Error("请先授权「安装未知应用」，再回到这里点安装")
+                        if (ApkInstaller.install(context, p.apk)) {
+                            installHint = false
+                        } else {
+                            installHint = true
                         }
                     },
                 )

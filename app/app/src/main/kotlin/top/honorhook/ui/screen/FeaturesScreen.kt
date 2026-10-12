@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -89,16 +90,18 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
  */
 @Composable
 fun FeaturesScreen(bottomInnerPadding: Dp = 0.dp) {
-    var selectedTarget by remember { mutableStateOf<FeatureCatalog.Target?>(null) }
-    val target = selectedTarget
-    BackHandler(enabled = target != null) { selectedTarget = null }
+    // Target 不是 Serializable 存不进 Bundle：rememberSaveable 只存选中索引（-1 = 未选中），
+    // 按FeatureCatalog.targets 的固定顺序还原，旋屏后停留在二级页
+    var selectedTargetIndex by rememberSaveable { mutableStateOf(-1) }
+    val target = selectedTargetIndex.takeIf { it >= 0 }?.let { FeatureCatalog.targets.getOrNull(it) }
+    BackHandler(enabled = target != null) { selectedTargetIndex = -1 }
     if (target == null) {
-        TargetListScreen(bottomInnerPadding) { selectedTarget = it }
+        TargetListScreen(bottomInnerPadding) { selectedTargetIndex = FeatureCatalog.targets.indexOf(it) }
     } else {
         // 二级页占满整个内容区，同样要避开悬浮底栏
         FeatureListScreen(
             target = target,
-            onBack = { selectedTarget = null },
+            onBack = { selectedTargetIndex = -1 },
             bottomInnerPadding = bottomInnerPadding,
         )
     }
@@ -111,13 +114,16 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
     val context = LocalContext.current
 
     // 只展示**本机确实装了**的目标应用：没装的功能列出来也没意义（点了必然无效果）。
-    // getApplicationInfo 依赖 QUERY_ALL_PACKAGES（已在 manifest 声明）。
-    // 走 IO 线程：6 次跨进程查询不该压在组合期主线程上；null = 尚未返回（加载态）。
+    // 例外（#8 净化入口方案 b）：iconKey 非空的虚拟目标（如「荣耀系统净化」，一个开关管
+    // calendar/weather/browser/quickgame/youku/cloudmusic 的埋点与广告 SDK）非真实 app，
+    // 跳过安装过滤恒显示。getApplicationInfo 依赖 QUERY_ALL_PACKAGES（已在 manifest 声明）。
+    // 走 IO 线程：逐包跨进程查询不该压在组合期主线程上；null = 尚未返回（加载态）。
     val installedTargets by produceState<List<FeatureCatalog.Target>?>(initialValue = null) {
         value = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             FeatureCatalog.targets.filter { target ->
-                runCatching { pm.getApplicationInfo(target.packageName, 0) }.isSuccess
+                target.iconKey != null ||
+                    runCatching { pm.getApplicationInfo(target.packageName, 0) }.isSuccess
             }
         }
     }
@@ -191,24 +197,31 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
 @Composable
 private fun rememberAppIcon(packageName: String): Painter? {
     val context = LocalContext.current
-    return remember(packageName) {
-        val pm = context.packageManager
-        val appInfo = runCatching {
-            pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
-        }.getOrNull() ?: return@remember null
+    // 图标加载挪出组合期：getApplicationInfo/loadIcon 是跨进程 Binder 调用，不得压主线程（P4）。
+    // 加载完成前返回 null，调用方显示首字母色块占位。
+    return produceState<Painter?>(initialValue = null, packageName) {
+        value = withContext(Dispatchers.IO) { loadAppIcon(context, packageName) }
+    }.value
+}
 
-        val raw = runCatching { appInfo.loadIcon(pm) }
-            .recoverCatching { pm.getApplicationIcon(packageName) }
-            .getOrNull() ?: return@remember null
+/** 图标加载本体（IO 线程跑；见 [rememberAppIcon] 的坑位注释）。 */
+private fun loadAppIcon(context: android.content.Context, packageName: String): Painter? {
+    val pm = context.packageManager
+    val appInfo = runCatching {
+        pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+    }.getOrNull() ?: return null
 
-        // 重建 + 固定尺寸 measure，抹掉 intrinsicWidth=-1 与未 measure 的状态
-        val drawable = runCatching {
-            (raw.constantState?.newDrawable(context.resources, context.theme) ?: raw)
-                .mutate()
-        }.getOrDefault(raw)
+    val raw = runCatching { appInfo.loadIcon(pm) }
+        .recoverCatching { pm.getApplicationIcon(packageName) }
+        .getOrNull() ?: return null
 
-        DrawablePainter(drawable)
-    }
+    // 重建 + 固定尺寸 measure，抹掉 intrinsicWidth=-1 与未 measure 的状态
+    val drawable = runCatching {
+        (raw.constantState?.newDrawable(context.resources, context.theme) ?: raw)
+            .mutate()
+    }.getOrDefault(raw)
+
+    return DrawablePainter(drawable)
 }
 
 /**
@@ -415,9 +428,15 @@ private fun AppHeaderCard(
                         target.packageName,
                         versionText?.let { "版本 $it" },
                         uid?.let { "UID $it" },
-                        // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）
+                        // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）。
+                        // R7 静态契约提示：宿主版本未收录时引擎按最新支持版本盲挂
+                        //（不查宿主实际版本——免 per-target pm 查询；错配红 tag 另行提示）。
                         supportedText?.let {
-                            if (versionMismatch) "已适配 $it（当前 $installedVersionName）" else "已适配 $it"
+                            if (versionMismatch) {
+                                "已适配 $it（当前 $installedVersionName；未适配按最新支持版本盲挂）"
+                            } else {
+                                "已适配 $it（宿主版本未适配时按最新支持版本盲挂）"
+                            }
                         },
                     )
                     meta.forEach { line ->

@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import top.honorhook.BuildConfig
+import top.honorhook.xposed.core.HostVersion
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -32,20 +33,9 @@ object UpdateChecker {
         return Release(v, apkUrl, tag)
     }
 
-    /**
-     * 远端是否比本地新：语义版本逐段比（'.' 分段、数字前缀、缺段按 0）。
-     * 与 HostVersion.compareVersionNames 同语义但不引用——后者尚未入库（另一工作流在改），
-     * 本文件须随本次 commit 自包含可编译；那边入库后可收敛回去。
-     */
-    fun isNewer(remote: Release, localVersionName: String): Boolean {
-        val ka = remote.version.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
-        val kb = localVersionName.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
-        for (i in 0 until maxOf(ka.size, kb.size)) {
-            val c = (ka.getOrElse(i) { 0 }).compareTo(kb.getOrElse(i) { 0 })
-            if (c != 0) return c > 0
-        }
-        return false
-    }
+    /** 远端是否比本地新：语义版本逐段比（复用宿主版本比较实现，消双处漂移）。 */
+    fun isNewer(remote: Release, localVersionName: String): Boolean =
+        HostVersion.compareVersionNames(remote.version, localVersionName) > 0
 
     /** 拉 releases/latest（IO）。失败抛异常，由调用方决定如何呈现。 */
     fun fetchLatest(): Release {
@@ -97,6 +87,8 @@ object UpdateState {
     var probedUrl by mutableStateOf<String?>(null)
         private set
 
+    // 跨线程读写（probe 启动在 Main、awaitProbe 可能从 IO 协程读）——加 @Volatile 保可见性（P4）
+    @Volatile
     private var probeJob: kotlinx.coroutines.Job? = null
     private var probedForApk: String? = null
 
@@ -119,7 +111,15 @@ object UpdateState {
                                 probedForApk = apk
                                 probedUrl = null
                                 probeJob?.cancel()
-                                probeJob = launch { probedUrl = ApkInstaller.probeSources(apk) }
+                                probeJob = launch {
+                                    // 探测异常不能崩整个 App：静默检查无 UI 兜底也不弹 toast，
+                                    // 失败只留日志，probedUrl 保持 null = 点下载走逐源兜底链
+                                    runCatching { ApkInstaller.probeSources(apk) }
+                                        .onSuccess { probedUrl = it }
+                                        .onFailure { e ->
+                                            android.util.Log.w("HonorHookUpdate", "probe 失败: ${e.message}")
+                                        }
+                                }
                             }
                         } else if (manual) {
                             notice = "已是最新版本 v${BuildConfig.VERSION_NAME}"
