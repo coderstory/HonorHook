@@ -20,12 +20,14 @@ import top.honorhook.xposed.target.logDisabled
  * 拿不到——挂载策略见 [mountMenuFactory] 注释。
  *
  * 功能与开关（各自独立）：
- * - [FeatureCatalog.KEY_MMS_AD_OFF] 广告净化（T2：底部自定义菜单/卡片按钮全杀；T3 推广卡待接）
+ * - [FeatureCatalog.KEY_MMS_AD_OFF] 广告净化（T2 底部自定义菜单 + T3 卡片按钮/应用推广卡，全部经
+ *   同一载体事件驱动挂载，见 [mountMenuFactory]）
  * - [FeatureCatalog.KEY_MMS_CODE_FREE] 验证码免服务（T4 接；**禁止伪装服务已开启**——用户拒绝
  *   智能信息服务的联网/隐私条款，实现方向是本地复制不依赖服务，见 FeatureCatalog 描述）
  *
- * 判据：真机冷启短信 → `MmsHook: installed N/M`；广告净化另有主轨生效行
- * （`mms-hook 生效: mms:TedMenuProcessor.findMenus`）。
+ * 判据：真机冷启短信 → `MmsHook: installed N/M`；广告净化另有两条主轨生效行
+ * （`mms-hook 生效: mms:TedMenuProcessor.findMenus` / `mms:SimpleActionLayout.b`——两轨同为
+ * 插件侧目标，宿主 CL 不可达，不进 pending 表，installed 的 M 只含宿主侧探针+载体）。
  */
 object MmsHook : TargetHook {
 
@@ -55,6 +57,28 @@ object MmsHook : TargetHook {
 
     /** T2 主轨目标：插件侧菜单数据源（类名/方法名可读，跨 APK 反射留名；jadx 实证 private static）。 */
     private const val CLS_TED_MENU_PROCESSOR = "com.ted.sms.plugin.TedMenuProcessor"
+
+    /**
+     * T3 主轨目标：卡片动作区渲染收口（类名/方法名可读，插件 dex；jadx 实证 public final）。
+     *
+     * 数据链（docs/reverse/sms-ads.md T3 补充，jadx 实证）：云端消息落地 `TedMessage.action`
+     * （JSON，`menus` 数组）→ `TedMsgItemProcessor.doBindCard`（`PC.i(msg)`=`getAction()` →
+     * `N5.a(str)`）或 `doBindTextAction`（`bindSimpleActionLayout(str)`）→ 全部 N5 卡片视图
+     * （SmsCard/SignCard/VerifyCard/TrainCard 布局内嵌的 `action` 子视图）与本布局统一收口到
+     * `b(msgId, json, smsNumber, tedCard)` → 解析 `menus` 渲染 leftButton/rightButton/textSlogan/banner。
+     * 真机 UI dump 的 `left_button`/`right_button`（1元30G/抢100G/查看应用）只可能是本布局
+     * （AimButtonLayout 无 `left_button` id，底部菜单项是另一 binding，T2 已杀）。
+     */
+    private const val CLS_SIMPLE_ACTION_LAYOUT = "com.ted.sms.feature.ui.action.SimpleActionLayout"
+
+    /**
+     * 验证码卡片 code（引擎自身门禁，SimpleActionLayout.b 开头与 doBindTextAction 同款判断）：
+     * 该卡的动作区由 `c()` 从 `tedCard.subTitle` 本地合成「复制验证码」按钮（T4/R3 面），
+     * **不是广告**——T3 清 json 时跳过此卡，避免 KEY_MMS_AD_OFF 误伤 KEY_MMS_CODE_FREE 的地盘
+     * （两开关独立，SPEC.md 拍板）。清空 json 对验证码卡会因 `menus` 空提前 return 而杀掉 c() 合成链，
+     * 故必须放行原 json。
+     */
+    private const val VERIFY_CARD_CODE = "0EFF76FF"
 
     /** TedMenuProcessor 桥接持有字段名（jadx 实证；仅 HW 分支形态用到，取不到按字段扫描兜底）。 */
     private const val FIELD_PROCESSOR = "processor"
@@ -162,11 +186,15 @@ object MmsHook : TargetHook {
             }
             engine.judge(module, task, JUDGE_PREFIX, "处理器=${processor.javaClass.name}")
             installMenuKill(module, processor, loader)
+            installCardKill(module, processor, loader)
             result
         }
 
     /** 主轨一次幂标志（载体每次会话页都触发，避免重复 hook）。 */
     private val menuKillTried = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** T3 主轨一次幂标志（与 T2 分开：各自独立重试/失败留痕，互不拖累）。 */
+    private val cardKillTried = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** 主轨任务描述（判据日志用；不进 pending 表，挂载由载体回调事件驱动）。 */
     private val findMenusTask = MountTask(
@@ -208,6 +236,70 @@ object MmsHook : TargetHook {
         }
     }
 
+    /** T3 任务描述（判据日志用；不进 pending 表，挂载由载体回调事件驱动，同 [findMenusTask]）。 */
+    private val simpleActionTask = MountTask(
+        className = CLS_SIMPLE_ACTION_LAYOUT,
+        methodName = "b",
+        paramCount = 4,  // 签名实证：public final void b(String msgId, String json, String smsNumber, TedCard)——SimpleActionLayout.java（全类唯一 4 参 b，无重载歧义）
+        returnType = "void",
+        id = ID_SIMPLE_ACTION,
+        description = "T3 主轨：卡片动作区数据源清空（json 参数置空 → 引擎自带 setVisibility(GONE) 路径）",
+    )
+
+    /**
+     * T3 卡片按钮/应用推广卡补杀——数据源选型（jadx 实证，见 [CLS_SIMPLE_ACTION_LAYOUT] 注释）：
+     * - 改参数 > 改返回值 > View 层 GONE：把 `b` 的第 2 参 json 置空串，引擎自己的空数据路径接管
+     *   （`str2.length()==0 && (tedCard==null || code!=验证码)` → `setVisibility(8)` 整块动作区隐藏，
+     *   按钮/标语/banner 全清，无白块）——不碰 View 层、不碰 card 正文（`n5.b(body,card)` 在另一方法，
+     *   流量提醒正文 R4 保留）。
+     * - 不 hook `TedMessage.getAction()`：TedMessageDao_Impl 落库直接读 getter（`statement.k(12,..)`），
+     *   全局返 null 会把 action 列洗成 NULL = 持久数据突变，开关关不掉回来（违反 T2 边界"落库照旧"）。
+     * - 验证码卡（code==[VERIFY_CARD_CODE]）放行原 json：动作区由 `c()` 本地合成复制按钮，属 T4 面。
+     *
+     * 覆盖面：left_button/right_button（1元30G/抢100G）与「查看应用」推广卡若同为 SimpleActionLayout
+     * 渲染（UI dump 同 id 实证）则一并消失；若推广卡实为 AIM 模板（bindAimCard 链）则本点管不到，
+     * 真机如实报告。
+     */
+    private fun installCardKill(module: XposedModule, processor: Any, hostLoader: ClassLoader) {
+        if (!cardKillTried.compareAndSet(false, true)) return
+        runCatching {
+            val pluginCl = pluginClassLoaderOf(processor, hostLoader)
+                ?: run {
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 未捕获插件 ClassLoader（处理器=${processor.javaClass.name}），卡片按钮原样显示")
+                    return
+                }
+            val method = MethodResolver.resolveMethod(
+                pluginCl, CLS_SIMPLE_ACTION_LAYOUT, "b",
+                paramCount = simpleActionTask.paramCount, returnType = simpleActionTask.returnType,
+            ) ?: run {
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨未解析（$CLS_SIMPLE_ACTION_LAYOUT#b(4参)，插件版本差异？），卡片按钮原样显示")
+                return
+            }
+            module.hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId(ID_SIMPLE_ACTION)
+                .intercept { chain ->
+                    val args = chain.args?.toTypedArray()
+                        ?: return@intercept chain.proceed()  // 取不到参数骨架：原样放行，宁漏杀不误杀
+                    // json 置空的唯一例外：验证码卡（tedCard.code == 0EFF76FF，字段 public final，jadx 实证）
+                    val tedCard = args.getOrNull(3)
+                    val verifyCard = runCatching {
+                        tedCard != null && VERIFY_CARD_CODE == tedCard.javaClass.getField("code").get(tedCard) as? String
+                    }.getOrDefault(false)
+                    if (!verifyCard) {
+                        args[1] = ""
+                        engine.judge(module, simpleActionTask, JUDGE_PREFIX, "json 已置空（card=${tedCard?.javaClass?.simpleName ?: "null"}）")
+                        chain.proceedWith(chain.thisObject, args)
+                    } else {
+                        chain.proceed()
+                    }
+                }
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.b → 非验证码卡 json 置空")
+        }.onFailure { t ->
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨挂载异常（卡片按钮原样显示，不 crash）: ${t.message}", t)
+        }
+    }
+
     /**
      * 从菜单处理器对象取插件 ClassLoader：Honor 分支返回值即 TedMenuProcessor（定义 CL 即插件
      * CL，≠ 宿主 CL）直取；HW 分支返回 HwMenuProcessorProxy——优先按 jadx 实证字段名
@@ -243,4 +335,7 @@ object MmsHook : TargetHook {
 
     /** 主轨任务 id（插件侧 findMenus）。 */
     private const val ID_FIND_MENUS = "mms:TedMenuProcessor.findMenus"
+
+    /** T3 主轨任务 id（插件侧 SimpleActionLayout.b）。 */
+    private const val ID_SIMPLE_ACTION = "mms:SimpleActionLayout.b"
 }
