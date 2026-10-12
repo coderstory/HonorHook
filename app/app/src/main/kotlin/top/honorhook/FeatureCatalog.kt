@@ -35,6 +35,7 @@ object FeatureCatalog {
 
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
+    const val KEY_OTA_BLOCK = "ota.block"
 
     data class Feature(val key: String, val title: String, val description: String)
 
@@ -121,6 +122,20 @@ object FeatureCatalog {
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
             ),
             baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
+        ),
+        Target(
+            "com.hihonor.ouc", "系统更新",
+            listOf(
+                Feature(KEY_OTA_BLOCK, "禁止自动检测与提示", "阻断 HnOUC 后台入口：周期自动检测、WiFi 自动下载、夜间安装、升级提醒通知、充电/激活/运营商触发（11 点，manifest 组件名锚点）；设置内手动检查不受影响"),
+            ),
+            baselineVersion = "18.0.3.206",  // aapt2 实证（HnOUC.apk 拉自真机 2026-10-12）
+        ),
+        Target(
+            "com.hihonor.android.upgradeguide", "升级引导",
+            listOf(
+                Feature(KEY_OTA_BLOCK, "屏蔽升级引导页", "解锁后全屏『发现新版本』升级引导页启动即退出"),
+            ),
+            baselineVersion = "16.0.0.005",  // aapt2 实证（HnUpgradeGuide.apk 拉自真机 2026-10-12）
         ),
         Target(
             "com.hihonor.android.totemweather", "荣耀系统净化",

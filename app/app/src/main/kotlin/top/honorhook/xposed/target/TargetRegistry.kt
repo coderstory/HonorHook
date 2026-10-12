@@ -25,6 +25,9 @@ object TargetRegistry {
         register(Exam8Hook)
         register(LauncherHook)
         register(SystemUiHook)
+        // 系统更新阻断（ota.block 一个开关管两个包，同 ads.block 跨包先例）
+        register(OucHook)
+        register(UpgradeGuideHook)
         // 荣耀系统广告 SDK（com.hihonor.adsdk）通杀净化：同一 SDK 库，按包分别注册挂载。
         register(HonorAdsHook("com.hihonor.calendar"))
         register(HonorAdsHook("com.hihonor.android.totemweather"))
