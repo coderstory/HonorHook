@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import top.honorhook.BuildConfig
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
 import top.honorhook.ui.component.HonorHookTheme
@@ -68,8 +69,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // 打开即静默查一次更新（失败无感，结果进设置页「检查更新」行）
-        UpdateState.checkAsync()
+        // 打开即静默查一次更新（失败无感，结果进设置页「检查更新」行）。
+        // debug 构建跳过：本地 debug 包 BUILD_NUM 恒 0（无 buildNum 属性），静默查必判「远端更新」弹窗，干扰自装调试；手动检查不受影响
+        if (!BuildConfig.DEBUG) UpdateState.checkAsync()
         setContent {
             HonorHookTheme { AppRoot() }
         }
