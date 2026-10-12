@@ -71,11 +71,12 @@ object ThemeStoreHook : TargetHook {
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-    ): MountEngine.Result = engine.mount(task, module, loader) { chain ->
-        // resolveValue 幂等（enumConstants 纯查找，无副作用），intercept 内二次取值仅为拿强制值；
-        // null 未就绪已被 engine.resolveTask 拦成 NOT_RESOLVED（能走到这里必非 null，?: 兜底取声明值）
+    ): MountEngine.Result {
+        // 挂载期一次求值（恢复旧实现口径，审计 nit：intercept 闭包内逐回调 invoke 纯浪费）；
+        // resolveValue 幂等（enumConstants 纯查找）；null 未就绪已被 engine.resolveTask 拦成 NOT_RESOLVED（?: 兜底取声明值）
         val value = task.resolveValue?.invoke(loader) ?: task.value
-        when (task.kind) {
+        return engine.mount(task, module, loader) { chain ->
+            when (task.kind) {
             // 常量短路：命中即返回强制值，不调原方法
             MountKind.CONST -> {
                 if (routeActive(chain, module, task)) value else chain.proceed()
@@ -210,6 +211,7 @@ object ThemeStoreHook : TargetHook {
             // 2026-10-10 真机回归后恢复——getter 短路覆盖不了 null 实例与类内字段直读（见 collectVipHooks 注释）
             MountKind.VIP_STATE_FIX -> {
                 fixVipState(chain, module, task)
+            }
             }
         }
     }

@@ -529,6 +529,8 @@ object DualSignalFeature {
         override fun doFrame(frameTimeNanos: Long) {
             // host 脱离窗口即停拍（不再 post 下一帧）——原插件每帧自续永不注销的泄漏在此收口；
             // 新 cluster/视图 attach 时 fixGroup 会挂新的 callback，生命周期随 host 走。
+            // 边界（审计 2026-10-12）：同一 host 对象 detach→reattach 后 callback 不重挂（fixGroup 仅
+            // firstTime），帧级取色跟随永久死亡——reattach 只重跑 maintain（档位刷新不受影响）。
             if (!host.isAttachedToWindow) return
             try {
                 val signal = findContainer(host)?.let { findSignal(it) } ?: return

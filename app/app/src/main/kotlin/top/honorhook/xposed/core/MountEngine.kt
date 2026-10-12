@@ -240,7 +240,7 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
             } catch (t: Throwable) {
                 val n = callbackWarnCount.merge(task.id, 1) { a, b -> a + b } ?: 1
                 if (n <= CALLBACK_WARN_PER_TASK) {
-                    module.log(Log.WARN, TAG, "$hookName 回调异常（框架将回退原调用）: ${task.id} — ${t.message}", t)
+                    module.log(Log.WARN, TAG, "$hookName 回调异常（框架按 PROTECTIVE 继续，本行仅模块侧留痕）: ${task.id} — ${t.message}", t)
                 }
                 throw t
             }
