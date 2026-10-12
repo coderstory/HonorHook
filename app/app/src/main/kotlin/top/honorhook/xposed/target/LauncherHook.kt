@@ -5,6 +5,7 @@ import android.os.Looper
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.data.HookPoint
@@ -41,7 +42,7 @@ object LauncherHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         hostLoader = loader
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 数据表 LAUNCHER_POINTS_18_0_0_234.kt；逐点清点口径以真机 `installed N/M` 的 M 为准。
         val pick = HostVersion.pick(versionTables, HostVersion.resolve(param.applicationInfo?.sourceDir))
@@ -154,9 +155,6 @@ object LauncherHook : TargetHook {
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "launcher-hook"
-
-    /** hook 编写时的宿主版本基线（dumpsys package 实证）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
-    private const val HOST_VERSION_BASELINE = "18.0.0.234"
 
     /** 反射入口类名。 */
     private const val LAUNCHER_CLASS = "com.hihonor.android.launcher.Launcher"

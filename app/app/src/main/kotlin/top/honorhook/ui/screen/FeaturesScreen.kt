@@ -371,6 +371,9 @@ private fun AppHeaderCard(
     versionText: String?,
     uid: Int?,
     enabledCount: Int,
+    versionMismatch: Boolean,
+    supportedText: String?,
+    installedVersionName: String?,
     modifier: Modifier = Modifier,
 ) {
     val isInDark = isInDarkTheme()
@@ -411,6 +414,10 @@ private fun AppHeaderCard(
                         target.packageName,
                         versionText?.let { "版本 $it" },
                         uid?.let { "UID $it" },
+                        // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）
+                        supportedText?.let {
+                            if (versionMismatch) "已适配 $it（当前 $installedVersionName）" else "已适配 $it"
+                        },
                     )
                     meta.forEach { line ->
                         Text(
@@ -433,13 +440,27 @@ private fun AppHeaderCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            StatusTag(
-                label = if (enabledCount > 0) "运行中" else "待启用",
-                backgroundColor = if (enabledCount > 0) activeBg else idleBg,
-                contentColor = if (enabledCount > 0) activeFg else idleFg,
-                // 头部卡空间有限，用 11sp（原 13sp 偏大）；一级列表仍用 9sp
-                fontSize = 11.sp,
-            )
+            // 右侧标签列：版本不适配时在状态 tag 上方多一行红 tag
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (versionMismatch) {
+                    StatusTag(
+                        label = "版本未适配",
+                        backgroundColor = VersionTagRed.copy(alpha = 0.15f),
+                        contentColor = VersionTagRed,
+                        fontSize = 11.sp,
+                    )
+                }
+                StatusTag(
+                    label = if (enabledCount > 0) "运行中" else "待启用",
+                    backgroundColor = if (enabledCount > 0) activeBg else idleBg,
+                    contentColor = if (enabledCount > 0) activeFg else idleFg,
+                    // 头部卡空间有限，用 11sp（原 13sp 偏大）；一级列表仍用 9sp
+                    fontSize = 11.sp,
+                )
+            }
         }
     }
 }
@@ -476,6 +497,16 @@ private fun FeatureListScreen(
         }.getOrNull()
     }
     val enabledCount = target.features.count { FeatureStore.isEnabled(it.key) }
+
+    // 宿主版本适配校验：baselineVersion 非 null = 按宿主版本卡；装机 versionName 不在受支持集合内时
+    // 头部卡加红 tag 并在「已适配」行内透出当前版本（versionName 拿不到时不误报）。
+    val hostVersioned = target.baselineVersion != null
+    val installedVersionName = pkgInfo?.versionName
+    val versionMismatch = hostVersioned && installedVersionName != null &&
+        installedVersionName !in target.supportedVersions
+    // 多版本适配集只在 meta 行透出一个（supportedVersions 已升序，last 即最新；旧版精确套属历史适配，
+    // 逐个列反而引导用户降级）
+    val supportedText = target.supportedVersions.lastOrNull()
 
     Scaffold(
         topBar = {
@@ -521,6 +552,10 @@ private fun FeatureListScreen(
                     versionText = versionText,
                     uid = uid,
                     enabledCount = enabledCount,
+                    versionMismatch = versionMismatch,
+                    // 非 hostVersioned（无 baselineVersion 的目标）不透出版本适配行
+                    supportedText = supportedText.takeIf { hostVersioned },
+                    installedVersionName = installedVersionName,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
@@ -648,6 +683,10 @@ private fun EmptyHint(text: String) {
  *
  * 色板取饱和度/亮度一致的一组，颜色之间跳变明显且在浅色/深色背景下都能看清。
  */
+
+/** 「版本未适配」tag 红色（accentPalette 首色同值；Miuix colorScheme 无 error 槽，审计要求固定值）。 */
+private val VersionTagRed = Color(0xFFEF5350)
+
 private val accentPalette = listOf(
     Color(0xFFEF5350), // 红
     Color(0xFFEC407A), // 粉

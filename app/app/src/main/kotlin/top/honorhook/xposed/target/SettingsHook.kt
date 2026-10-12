@@ -26,7 +26,7 @@ object SettingsHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SETTINGS_DISABLE_BTN, "SettingsHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 挂载表 1 项；**以真机 `installed N/M` 的 M 为准。**
         val pending = mutableListOf<MountTask>()
@@ -42,9 +42,6 @@ object SettingsHook : TargetHook {
         )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
-
-    /** hook 编写时的宿主版本基线（pm 实证）；OTA 超出此版本时 MountEngine 首轮挂载打 WARN。 */
-    private const val HOST_VERSION_BASELINE = "14.0.0.210"
 
     /** 停用按钮的视图 id（布局层级 header_view → control_buttons_panel → left_button；运行时 getIdentifier 取，抗资源漂移）。 */
     private const val ID_BUTTON_PANEL = "control_buttons_panel"

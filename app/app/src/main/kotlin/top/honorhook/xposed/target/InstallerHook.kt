@@ -45,7 +45,7 @@ object InstallerHook : TargetHook {
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底需要 APK 磁盘路径（MethodResolver）
         val apkPath = param.applicationInfo?.sourceDir
-        engine.begin(apkPath, HOST_VERSION_BASELINE)
+        engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
 
         // 旧版宿主结构漂移 → 专用表优先；未命中任何表 = 基线源码路径（行为与表迁移前一致）
         val pick = HostVersion.pick(installerTables, HostVersion.resolve(apkPath))
@@ -60,10 +60,14 @@ object InstallerHook : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    /** 版本表注册：精确套（旧版）；无默认套——基线走 [buildSourcePending]。 */
-    private val installerTables = listOf(
-        HostVersion.Table(setOf("14.0.22.326")) { INSTALLER_POINTS_14_0_22_326 },
-    )
+    /** 版本表注册：精确套（旧版）；无默认套——基线走 [buildSourcePending]。
+     *  版本集唯一来源是 FeatureCatalog（extraVersions），增删适配版本只改那里；挂载点表文件名仍按版本命名。
+     *  空集守卫：extraVersions 被清空时 Table(空集) 会翻成「默认套=任意版本兜底」（HostVersion.pick 语义），
+     *  旧版挂载点将打到所有宿主版本上——必须整条表剔除而非留空表。 */
+    private val installerTables =
+        FeatureCatalog.extraVersionsOf(packageName).takeIf { it.isNotEmpty() }
+            ?.let { listOf(HostVersion.Table(it) { INSTALLER_POINTS_14_0_22_326 }) }
+            ?: emptyList()
 
     /** 基线 14.0.37.301 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。** */
     private fun buildSourcePending(): List<MountTask> {
@@ -105,9 +109,6 @@ object InstallerHook : TargetHook {
             dexStrings != null || dexParamTypes != null || dexClassStrings != null || dexClassFieldTypes != null
         },
     )
-
-    /** hook 编写时的宿主版本基线（aapt2 实证）；OTA 超出此版本时 MountEngine 首轮挂载打 WARN。 */
-    private const val HOST_VERSION_BASELINE = "14.0.37.301"
 
     // ---------------- R4 不请求广告 + R1 不展示安装页广告 ----------------
 

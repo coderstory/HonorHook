@@ -5,6 +5,7 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.data.RemoteConfig
@@ -26,7 +27,7 @@ object ThemeStoreHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 挂载表 43 项（F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 3
         // + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2），
@@ -147,7 +148,4 @@ object ThemeStoreHook : TargetHook {
             },
         )
     }
-
-    /** hook 编写时的宿主版本基线（aapt2 实证；OTA 超出此版本时 MountEngine 首轮挂载打 WARN）。 */
-    private const val HOST_VERSION_BASELINE = "20.1.63.305"
 }

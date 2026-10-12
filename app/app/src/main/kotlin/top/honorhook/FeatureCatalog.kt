@@ -42,7 +42,32 @@ object FeatureCatalog {
      * [iconKey] 虚拟目标（非真实 app）的内置图标提示，UI 侧据此画 vector 而非 PackageManager 图标。
      * 真实 app 目标留 null。当前取值："shield"。
      */
-    data class Target(val packageName: String, val name: String, val features: List<Feature>, val iconKey: String? = null)
+    data class Target(
+        val packageName: String,
+        val name: String,
+        val features: List<Feature>,
+        val iconKey: String? = null,
+        /** 宿主挂载基线 versionName（反编译实证版本）；null = 不按宿主版本卡（SDK 通杀类/虚拟目标）。
+         *  单一事实源：各 hook 的 MountEngine.begin 版本自检读这里（原各文件私有 HOST_VERSION_BASELINE 已上提）；
+         *  新增目标必须在此登记，查落空 = 该目标版本自检静默关闭（baselineVersionOf 返回 null）。 */
+        val baselineVersion: String? = null,
+        /** 基线之外额外适配的精确套版本（如 installer 旧版 14.0.22.326，与 InstallerHook.installerTables 联动，勿单侧改）。 */
+        val extraVersions: Set<String> = emptySet(),
+    ) {
+        /** 全部受支持宿主版本（派生不落盘，UI「版本未适配」tag 用）。
+         *  已按数字段升序排序（"14.0.37.301" > "9.9.9.9"），末位恒为最新——UI meta 行取 last 即最新，
+         *  不依赖 targets 里的声明序；"-release" 等非数字尾缀截断后按 0 计。 */
+        val supportedVersions: List<String>
+            get() = (setOfNotNull(baselineVersion) + extraVersions).sortedWith { a, b ->
+                val ka = a.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+                val kb = b.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+                for (i in 0 until maxOf(ka.size, kb.size)) {
+                    val c = (ka.getOrElse(i) { 0 }).compareTo(kb.getOrElse(i) { 0 })
+                    if (c != 0) return@sortedWith c
+                }
+                0
+            }
+    }
 
     val targets: List<Target> = listOf(
         Target(
@@ -53,6 +78,7 @@ object FeatureCatalog {
                 Feature(KEY_THEME_TRIAL, "试用永不过期", "试用主题永久有效、无倒计时与「试用中」角标，应用后永不回退默认主题"),
                 Feature(KEY_THEME_AD_OFF, "广告净化", "关停云控广告/福利/会员精选入口，裁撤美豆槽位与底部 VIP/福利 tab"),
             ),
+            baselineVersion = "20.1.63.305",   // aapt2 实证（原 ThemeStoreHook 私有常量上提）
         ),
         Target(
             "com.android.packageinstaller", "包管理器",
@@ -62,12 +88,15 @@ object FeatureCatalog {
                 Feature(KEY_INSTALLER_NO_SAFE_PROMPT, "安全模式提示净化", "不弹「开启安全模式」引导弹窗与安装页提示卡"),
                 Feature(KEY_INSTALLER_SKIP_CHECK, "跳过安全检测", "跳过联网安全检测与安装指纹校验，直装不弹风险页/勾选框"),
             ),
+            baselineVersion = "14.0.37.301",  // aapt2 实证（原 InstallerHook 私有常量上提）
+            extraVersions = setOf("14.0.22.326"),
         ),
         Target(
             "com.android.settings", "系统设置",
             listOf(
                 Feature(KEY_SETTINGS_DISABLE_BTN, "停用按钮恒可点", "应用详情页「停用」按钮对任意应用（含系统应用）恒可点"),
             ),
+            baselineVersion = "14.0.0.210",   // pm 实证（原 SettingsHook 私有常量上提）
         ),
         Target(
             "com.exam8.chengrenGK", "成考题库",
@@ -75,6 +104,7 @@ object FeatureCatalog {
                 Feature(KEY_EXAM8_SUPER_VIP, "超级会员解锁", "本地伪造超级会员态，解锁会员专属题库与功能（客户端门）"),
                 Feature(KEY_EXAM8_BURN, "阅后即焚解锁", "解锁「阅后即焚」特权位，题目/答案可完整查看"),
             ),
+            baselineVersion = "5.9.0.0-release",  // dumpsys 实证（原 Exam8Hook 私有常量上提）
         ),
         Target(
             "com.hihonor.android.launcher", "系统桌面",
@@ -82,6 +112,7 @@ object FeatureCatalog {
                 Feature(KEY_LAUNCHER_HIDE_TITLE, "隐藏卡片标题", "隐藏桌面卡片堆栈标题（如「YOYO 建议 · 明日天气预报」），不影响图标名"),
                 Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, "文件夹保持打开", "从文件夹里打开应用后，返回桌面时文件夹自动重新打开（走系统原生动画，含背景模糊）；点击外部/Home 仍正常关闭"),
             ),
+            baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
         ),
         Target(
             "com.android.systemui", "SystemUI",
@@ -89,6 +120,7 @@ object FeatureCatalog {
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, "隐藏副卡图标", "隐藏副卡(SIM2)状态栏信号图标，双卡时只显示主卡"),
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
             ),
+            baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
         ),
         Target(
             "com.hihonor.android.totemweather", "荣耀系统净化",
@@ -105,4 +137,10 @@ object FeatureCatalog {
             iconKey = "shield",
         ),
     )
+
+    /** 查表：宿主挂载基线版本（未登记返回 null = 该目标版本自检静默关闭）。 */
+    fun baselineVersionOf(packageName: String): String? = targets.firstOrNull { it.packageName == packageName }?.baselineVersion
+
+    /** 查表：基线之外额外适配的精确套版本（未登记返回空集）。 */
+    fun extraVersionsOf(packageName: String): Set<String> = targets.firstOrNull { it.packageName == packageName }?.extraVersions ?: emptySet()
 }

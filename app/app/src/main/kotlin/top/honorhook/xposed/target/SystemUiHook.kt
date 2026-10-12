@@ -35,9 +35,6 @@ object SystemUiHook : TargetHook {
     /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
     private val engine = MountEngine("SystemUiHook", packageName)
 
-    /** hook 编写时的宿主版本基线（dumpsys package 实证 2026-10-10）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
-    private const val HOST_VERSION_BASELINE = "17.0.0.1"
-
     /** 未混淆实现类（Dagger 绑定，jadx classes.dex 实证）。 */
     private const val CLS_MOBILE_DATA_CONTROLLER = "com.android.systemui.plugins.signal.MobileDataControllerImpl"
 
@@ -97,7 +94,7 @@ object SystemUiHook : TargetHook {
         }
 
         if (pending.isEmpty()) return
-        engine.begin(apkPath, HOST_VERSION_BASELINE)
+        engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
 
         if (pending.isNotEmpty()) {
             engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }

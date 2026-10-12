@@ -51,7 +51,7 @@ object Exam8Hook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         val pending = mutableListOf<MountTask>()
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_EXAM8_SUPER_VIP)) {
@@ -64,9 +64,6 @@ object Exam8Hook : TargetHook {
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
-
-    /** hook 编写时的宿主版本基线（dumpsys 实证 5.9.0.0-release）；OTA 超出时 MountEngine 首轮挂载打 WARN。 */
-    private const val HOST_VERSION_BASELINE = "5.9.0.0-release"
 
     // ---------------- F1 VipUserStatus：中央会员态（驱动「我的/会员页」UI） ----------------
 
