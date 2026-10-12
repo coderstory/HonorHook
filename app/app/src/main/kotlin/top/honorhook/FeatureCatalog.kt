@@ -34,6 +34,10 @@ object FeatureCatalog {
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
 
+    const val KEY_MMS_AD_OFF = "mms.ad_off"
+
+    const val KEY_IME_CODE_FREE = "ime.code_free"
+
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
     const val KEY_OTA_BLOCK = "ota.block"
@@ -138,6 +142,24 @@ object FeatureCatalog {
                 Feature(KEY_OTA_BLOCK, "屏蔽升级引导页", "解锁后全屏『发现新版本』升级引导页启动即退出"),
             ),
             baselineVersion = "16.0.0.005",  // aapt2 实证（HnUpgradeGuide.apk 拉自真机 2026-10-12）
+        ),
+        Target(
+            "com.hihonor.mms", "短信",
+            listOf(
+                Feature(
+                    KEY_MMS_AD_OFF, "广告净化",
+                    "去除智能信息营销内容——10010 会话底部自定义菜单（流量充值/1元30G/百元回馈）、卡片按钮（1元30G/抢100G）、应用推广卡（查看应用跳应用市场）",
+                ),
+            ),
+        ),
+        Target(
+            "com.sohu.inputmethod.sogou.honor", "搜狗键盘",
+            listOf(
+                Feature(
+                    KEY_IME_CODE_FREE, "验证码候选免同意",
+                    "键盘候选区「短信验证码一键填充」不再要求同意搜狗联网服务——只解绑本功能的同意擦除（提码/正则全程本地），其余云功能同意门原样",
+                ),
+            ),
         ),
         Target(
             "com.hihonor.android.totemweather", "荣耀系统净化",
