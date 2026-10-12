@@ -29,7 +29,7 @@ object ThemeStoreHook : TargetHook {
         // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
-        // 挂载表 43 项（F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 3
+        // 挂载表 46 项（F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 5（H1/H2b'/W1/W2 + VIP fallback 2）
         // + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2），
         // 数据表 ThemeStoreMap_20_1_63_305.kt 生成；逐点清点口径**仍以真机 `installed N/M` 的 M 为准。**
         val pick = HostVersion.pick(versionTables, HostVersion.resolve(param.applicationInfo?.sourceDir))
@@ -105,6 +105,18 @@ object ThemeStoreHook : TargetHook {
                             engine.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
                             route
                         }
+                    }
+                }
+                // VIP 通道下载兜底（F-fallback，2026-10-12）：f71.downloadItem 布看门狗，
+                // f71.productSendFinish 失败/15s 无回调（过期 VIP 服务端挂死，真机实证）→ 已购通道兜底。
+                // 实现（看门狗/守卫/续流）在 ThemeStoreRuntime；此处只做 kind 分派。
+                MountKind.DOWNLOAD_FALLBACK -> builder.intercept { chain ->
+                    if (task.methodName == "downloadItem") {
+                        armVipFallbackWatchdog(chain, module, loader)
+                        chain.proceed()
+                    } else {
+                        chain.proceed()   // productSendFinish：after 语义，先让宿主失败路径跑完（toast/abort）
+                        onVipProductSendFinish(chain, module, loader)
                     }
                 }
                 // 参数强制（setter 写点 / 下载类型路由点）

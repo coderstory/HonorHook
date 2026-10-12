@@ -58,6 +58,9 @@ internal const val CLS_THEME_APPLY_STATE = "$PKG.theme.apply.ThemeApplyState"
 internal const val CLS_DOWNLOAD_INFO = "$PKG.common.DownloadInfo"
 // DownloadModel builder 产物（package 内混淆名）；DexKit 锚点 = 类字段类型 WeakReference + common.DownloadInfo。
 internal const val CLS_DOWNLOAD_MODEL = "$PKG.common.a"
+// f71 = DownloadItemIfVip（下载策略链 VIP 节点，默认包**混淆名**）；两个 DOWNLOAD_FALLBACK 挂载点
+// 各配类内容锚点（方法体日志串，混淆不改字符串）——见 ThemeStoreMap 表 F-fallback 两项。
+internal const val CLS_DOWNLOAD_ITEM_VIP = "f71"
 
 // 云控统一读点：SharepreferenceUtils（混淆名 u15，默认包）——全部云控布尔开关的唯一出口。
 // 强制项数据在 CloudSwitchTable（key 与逻辑分离），此处只挂读点、查表短路。
@@ -73,7 +76,7 @@ internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
 internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 
 /** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制； */
-internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE }
+internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE, DOWNLOAD_FALLBACK }
 
 /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
 internal enum class UriOwner { THIS, GET_DOWNLOAD_INFO }
@@ -135,7 +138,11 @@ private val routeLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>(
  * 路由激活判定：uriEmptyRoute=false 时恒激活；=true 时额外要求 DownloadInfo.uri 为空才激活
  * （非空放行；uri 读取失败按版本漂移放行，安全默认）。触发时输出 INFO 判据日志
  * （每 task 前 2 次，不受 DEBUG_LOGGING 门控 —— 与其余判据日志同一节流口径）。
+ * 探针（2026-10-12）：H1 真机不触发的分案证据 —— 每判定打前 3 次「进没进来 / blank 读成啥」，
+ * 无探针日志 = 拦截未命中（挂载/解析问题）；blank=false = uri 读判问题；blank=true = 路由应已生效。
  */
+private val routeProbeCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
 internal fun routeActive(
     chain: XposedInterface.Chain,
     module: XposedModule,
@@ -143,6 +150,11 @@ internal fun routeActive(
 ): Boolean {
     if (!task.uriEmptyRoute) return true
     val blank = isUriBlank(chain, task)
+    val p = routeProbeCount.merge(task.id, 1) { a, b -> a + b } ?: 1
+    if (p <= 3) {
+        val uri = runCatching { chain.thisObject?.javaClass?.getField("uri")?.get(chain.thisObject) }.getOrNull()
+        module.log(Log.INFO, MountEngine.TAG, "下载链路由判定: ${task.id} blank=$blank uri=$uri thisObject=${chain.thisObject?.javaClass?.name}")
+    }
     if (blank) {
         val n = routeLogCount.merge(task.id, 1) { a, b -> a + b } ?: 1
         if (n <= ROUTE_LOG_PER_TASK) {
@@ -172,6 +184,9 @@ internal fun isUriBlank(chain: XposedInterface.Chain, task: MountTask): Boolean 
     val owner = info ?: return true  // ① 实例为 null：视为空（原入口本就提前 return，路由无害）
     val uri = runCatching { owner.javaClass.getField("uri").get(owner) }
         .getOrElse { return false }  // ③ 反射异常（NoSuchField/版本漂移）→ 放行（安全默认）
+    if (uri == null) return true  // 字段值 null = 空 URL（2026-10-12 真机实证：已购项 ItemInfo.downloadUrl=null
+    //   → DownloadInfo.uri=null → H1 必须触发路由；此前 `as? String ?: return false` 把 null 误判成
+    //   版本漂移放行 → 免费分支拿 null URL → 0% 定格，isUriBlank 的口径注释与本实现不符）
     val s = uri as? String ?: return false  // 非 String 字段（版本漂移）→ 放行
     return s.isNullOrEmpty() || s == "null" || !s.contains("://")  // ② 空/占位/非 URL → 触发路由
 }
@@ -187,6 +202,7 @@ internal fun actionDesc(task: MountTask): String = when (task.kind) {
     MountKind.PRE_PROCESS -> "前置修正 this 数据后放行原方法"
     MountKind.VIP_STATE_FIX -> "VipState 实例字段改写（after，null 自建）"
     MountKind.DOWNLOAD_TYPE_ROUTE -> "downloadType 按 DownloadInfo 状态分派（空URL→3 / 免费加密→4 / 付费→3，见 theme-store.md §E）"
+    MountKind.DOWNLOAD_FALLBACK -> "VIP 通道失败/挂死 → 已购通道兜底（15s 看门狗 + 失败回调双触发，见 ThemeStoreRuntime vip-fallback 段）"
 }
 
 /** 反射方法缓存（`类名#方法名` → Method），避免在 getList 这类的取数路径上反复查找。 */
@@ -220,6 +236,16 @@ internal fun reflectFieldGet(o: Any, name: String): Any? =
             )
         }.orElse(null)?.get(o)
     }.getOrNull()
+
+/** public 字段直写（[Class.getField] 语义，复用 [reflFieldCache]；反射失败返回 false 由调用方记日志）。 */
+internal fun reflectFieldSet(o: Any, name: String, value: Any?): Boolean =
+    runCatching {
+        reflFieldCache.computeIfAbsent("${o.javaClass.name}#$name") { key ->
+            java.util.Optional.ofNullable(
+                runCatching { o.javaClass.getField(key.substringAfterLast('#')) }.getOrNull(),
+            )
+        }.orElse(null)?.set(o, value)
+    }.isSuccess
 
 /** 云控强制命中计数（key → 已打印次数）。读点高频（多处循环内读取），每 key 只打前 [CLOUD_LOG_PER_KEY] 次防刷屏。 */
 private val cloudHitLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()

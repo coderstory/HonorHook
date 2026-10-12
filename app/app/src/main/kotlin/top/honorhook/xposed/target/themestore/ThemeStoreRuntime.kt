@@ -3,6 +3,7 @@ package top.honorhook.xposed.target.themestore
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
+import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.data.AdSlotFilter
 import top.honorhook.xposed.data.BottomTabFilter
 
@@ -308,3 +309,141 @@ private fun invokeVipSetter(state: Any, name: String, paramType: Class<*>, value
     }.onFailure { t ->
         module.log(Log.WARN, TAG, "vip-state setter 缺失/失败（跳过）: $name — ${t.message}")
     }.isSuccess
+
+// ---------------- F-fallback：VIP 通道下载失败/挂死 → 已购通道兜底（2026-10-12） ----------------
+//
+// 真机实证（光影 serviceId=101040131，已购 + VIP 过期）：H2b' 路由 3 → f71（DownloadItemIfVip）→
+// sendProduct(trialFlag=1) + DRM 密钥双请求服务端不签发（过期 VIP 静默无回调）→ uri 永空 → UI 0% 定格
+// （下载表无记录、无失败 toast —— f71.java 全失败路径都有 toast，唯一静默路径 = 服务端挂死）。
+// 兜底 = 服务端语义上最稳的已购通道 themeServer/order/userProduct（NetHelper.getPayedList，
+// 按账号查已购、返回 BaseResItemBean.fileUrl；整条链 NetHelper/PayRequest/AccountManager 未混淆）。
+// 边界：只救 isSpecialEncrypt=false 项（加密付费项无 DRM 密钥，下载成功也会"文件损坏"，诚实失败）；
+// 每 serviceId 每进程最多兜底 1 次（防回填后再次失败→再兜底→循环）。
+
+/** 看门狗在挂状态（serviceId → armed）。productSendFinish 任意回调即除名；超时回调里除名并触发兜底。 */
+private val vipFallbackArmed = java.util.concurrent.ConcurrentHashMap<Int, Boolean>()
+
+/** 兜底已尝试计数（serviceId → 次数）。>0 即不再触发，防 fallback 自身失败被 f71 失败回调再触发成环。 */
+private val vipFallbackAttempted = java.util.concurrent.ConcurrentHashMap<Int, Int>()
+
+/** F 入口布看门狗：15s 内 productSendFinish 未回调（服务端挂死）→ 走已购通道兜底。
+ *  chain 只在本次拦截内消费：DownloadInfo/包装链节点在此**预解析**为普通对象，闭包不持 chain。 */
+internal fun armVipFallbackWatchdog(chain: XposedInterface.Chain, module: XposedModule, loader: ClassLoader) {
+    runCatching {
+        val owner = chain.thisObject ?: return
+        val info = runCatching { owner.javaClass.getMethod("getDownloadInfo").invoke(owner) }.getOrNull() ?: return
+        val node = wrappedZ61Node(owner) ?: return
+        val serviceId = reflectFieldGet(info, "serviceId") as? Int ?: return
+        if (serviceId <= 0) return
+        vipFallbackArmed[serviceId] = true
+        MountScheduler.postDelayed(15_000) {
+            if (vipFallbackArmed.remove(serviceId) == true) {
+                module.log(Log.INFO, TAG, "vip-fallback 看门狗触发: serviceId=$serviceId（productSendFinish 15s 无回调，服务端挂死）")
+                runVipFallback(module, loader, info, node, serviceId)
+            }
+        }
+    }
+}
+
+/** productSendFinish 回调出口（after 语义）：成功 = 除名看门狗零干预；失败 = 立即兜底（不等 15s）。 */
+internal fun onVipProductSendFinish(chain: XposedInterface.Chain, module: XposedModule, loader: ClassLoader) {
+    runCatching {
+        val args = chain.args ?: return
+        val serviceId = (args.getOrNull(0) as? Number)?.toInt() ?: return
+        val url = args.getOrNull(1) as? String
+        val keySaved = (args.getOrNull(3) as? kotlin.Pair<*, *>)?.second == true
+        val armed = vipFallbackArmed.remove(serviceId) != null
+        val ok = !url.isNullOrBlank() && keySaved
+        if (ok || !armed) return   // 成功：无需兜底；未布岗：看门狗已先触发过（兜底在途/已试），不重复
+        module.log(
+            Log.INFO, TAG,
+            "vip-fallback 触发: serviceId=$serviceId（productSendFinish 失败 urlEmpty=${url.isNullOrBlank()} keySave=$keySaved）",
+        )
+        val owner = chain.thisObject ?: return
+        val info = runCatching { owner.javaClass.getMethod("getDownloadInfo").invoke(owner) }.getOrNull()
+            ?: run { module.log(Log.WARN, TAG, "vip-fallback 放弃: DownloadInfo 不可达（版本漂移）"); return }
+        val node = wrappedZ61Node(owner)
+            ?: run { module.log(Log.WARN, TAG, "vip-fallback 放弃: 包装链内层 z61 节点不可达（版本漂移）"); return }
+        runVipFallback(module, loader, info, node, serviceId)
+    }
+}
+
+/** f71（i71 包装节点）→ 内层 z61：按字段类型扫描（类型名 z61，混淆不改类签名；rename 兼容）。 */
+private fun wrappedZ61Node(owner: Any): Any? = runCatching {
+    owner.javaClass.declaredFields
+        .firstOrNull { it.type.name == "z61" }
+        ?.apply { isAccessible = true }
+        ?.get(owner)
+}.getOrNull()
+
+private fun runVipFallback(module: XposedModule, loader: ClassLoader, info: Any, node: Any, serviceId: Int) {
+    if (vipFallbackAttempted.merge(serviceId, 1) { a, b -> a + b } != 1) return   // 每进程每项一次
+    val uri = reflectFieldGet(info, "uri") as? String
+    if (!uri.isNullOrBlank() && uri.contains("://")) return   // 已有可用直链，不干预
+    val encrypted = (reflectFieldGet(info, "isSpecialEncrypt") as? Boolean)
+        ?: ((reflectFieldGet(info, "isSpecialEncrypt") as? Number)?.toInt() ?: 0) != 0
+    if (encrypted) {
+        module.log(Log.INFO, TAG, "vip-fallback 跳过: serviceId=$serviceId 加密资源（无 DRM 密钥，直下会文件损坏，诚实失败）")
+        return
+    }
+    // 下载已被用户取消 → 不再续（isDownloading 覆盖 WAITING/STARTED/LOADING/FAILURE，CANCELLED 不在内）
+    if (reflectGet(info, "isDownloading") == false) {
+        module.log(Log.INFO, TAG, "vip-fallback 跳过: serviceId=$serviceId 下载已被取消")
+        return
+    }
+    val resType = reflectFieldGet(info, "onlineResType") as? Int ?: run {
+        module.log(Log.WARN, TAG, "vip-fallback 放弃: onlineResType 不可读（版本漂移）")
+        return
+    }
+    // 网络查询放后台线程（宿主 productSendFinish 回调在主线程；看门狗在挂载线程）
+    Thread({
+        val fileUrl = runCatching { queryPayedFileUrl(loader, resType, serviceId) }
+            .getOrElse { t ->
+                module.log(Log.WARN, TAG, "vip-fallback 已购列表查询异常: serviceId=$serviceId — ${t.message}")
+                null
+            }
+        if (fileUrl == null) {
+            module.log(Log.INFO, TAG, "vip-fallback 未命中: serviceId=$serviceId resType=$resType（已购列表无此项或无 fileUrl，保持宿主原失败路径）")
+            return@Thread
+        }
+        reflectFieldSet(info, "uri", fileUrl)
+        module.log(Log.INFO, TAG, "vip-fallback 命中: serviceId=$serviceId uri 已回填，走宿主 z61 续流（deleteData+落盘路径+resumeDownload）")
+        // node.downloadItem() = z61.downloadItemInfo()：删旧记录 + 生成落盘路径 + o52.resumeDownload + 起下载服务（宿主原生续流）
+        runCatching { node.javaClass.getMethod("downloadItem").invoke(node) }
+            .onFailure { t -> module.log(Log.WARN, TAG, "vip-fallback 续流失败: ${t.message}") }
+    }, "HonorHook-vipfb").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }.start()
+}
+
+/**
+ * 已购通道查询（全反射、全未混淆类）：PayRequest{resType,cursor=0,pageSize=MAX,userId} →
+ * NetHelper.INSTANCE.getPayedList(req, Const.Cache.NET) → ResBaseRspBean.getResourceList() →
+ * 按 hitopId/resId/productId 匹配 serviceId → fileUrl（须含 "://"）。
+ */
+private fun queryPayedFileUrl(loader: ClassLoader, resType: Int, serviceId: Int): String? {
+    val reqCls = loader.loadClass("$PKG.hitop.entity.pay.PayedBean\$PayRequest")
+    val req = reqCls.getDeclaredConstructor().newInstance()
+    reqCls.getMethod("setResType", Int::class.javaPrimitiveType).invoke(req, resType)
+    reqCls.getMethod("setCursor", Int::class.javaPrimitiveType).invoke(req, 0)
+    reqCls.getMethod("setPageSize", Int::class.javaPrimitiveType).invoke(req, Int.MAX_VALUE)
+    runCatching {   // userId best-effort：服务端按会话判权，取不到不影响请求形态
+        val amCls = loader.loadClass("$PKG.account.AccountManager")
+        val am = amCls.getField("INSTANCE").get(null)
+        reqCls.getMethod("setUserId", String::class.java).invoke(req, amCls.getMethod("getUserId").invoke(am))
+    }
+    val cacheCls = loader.loadClass("$PKG.common.Const\$Cache")
+    val net = cacheCls.enumConstants.first { (it as? Enum<*>)?.name == "NET" }
+    val nhCls = loader.loadClass("$PKG.hitop.NetHelper")
+    val nh = nhCls.getField("INSTANCE").get(null)
+    val rsp = nhCls.getMethod("getPayedList", reqCls, cacheCls).invoke(nh, req, net) ?: return null
+    val list = rsp.javaClass.getMethod("getResourceList").invoke(rsp) as? List<*> ?: return null
+    for (item in list) {
+        if (item == null) continue
+        val matched = listOf("hitopId", "resId", "productId").any { f ->
+            (reflectFieldGet(item, f) as? String)?.toLongOrNull() == serviceId.toLong()
+        }
+        if (!matched) continue
+        val url = (reflectFieldGet(item, "fileUrl") as? String)?.trim().orEmpty()
+        if (url.contains("://")) return url
+    }
+    return null
+}
