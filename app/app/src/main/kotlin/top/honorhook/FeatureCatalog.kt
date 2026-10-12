@@ -23,6 +23,7 @@ object FeatureCatalog {
     const val KEY_INSTALLER_SKIP_CHECK = "installer.skip_check"
 
     const val KEY_SETTINGS_DISABLE_BTN = "settings.disable_btn"
+    const val KEY_SETTINGS_HIDE_ACCOUNT_DOT = "settings.hide_account_dot"
 
     const val KEY_EXAM8_SUPER_VIP = "exam8.super_vip"
     const val KEY_EXAM8_BURN = "exam8.burn_reading"
@@ -96,6 +97,7 @@ object FeatureCatalog {
             "com.android.settings", "系统设置",
             listOf(
                 Feature(KEY_SETTINGS_DISABLE_BTN, "停用按钮恒可点", "应用详情页「停用」按钮对任意应用（含系统应用）恒可点"),
+                Feature(KEY_SETTINGS_HIDE_ACCOUNT_DOT, "隐藏账户小红点", "首页账户名（HONOR ID）后的消息红点常隐，云端下发也不显示"),
             ),
             baselineVersion = "14.0.0.210",   // pm 实证（原 SettingsHook 私有常量上提）
         ),
