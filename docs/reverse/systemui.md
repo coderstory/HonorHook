@@ -225,10 +225,21 @@ imageView.setImageDrawable(new ResScalingDrawableWrapper(drawable2, i, getScaleF
 
 ## 八、U4 系统通知隐藏（充电 / 热点共享 / USB 调试，2026-10-12）
 
-### 8.1 选点：通知管线收口
+### 8.1 选点：两个点，各管一层
 
-单挂载点 `com.android.systemui.statusbar.notification.HwNotificationFilterImpl#shouldFilterOut(NotificationEntry)Z`（未混淆、无重载；`HwDependencyFactory` DI 唯一绑定，全工程无第二子类）。
+**U4b（真仲裁，渲染层）**：`com.android.systemui.statusbar.notification.HwNotificationFeatureImpl#isDisableShownInShade(StatusBarNotification)Z`（未混淆、具名）。
 
+本方法是宿主自带隐藏标志（extras `hw_disable_ntf_show_in_shade`）的**唯一读口**
+（`HwNotificationFeatureImpl.java:644`），消费方 4+：
+
+- `NotificationCenterCoordinator.onNotificationCardUpdated:142`（true = **不进通知中心**——荣耀自建
+  `com.hihonor.systemui.dynamicserver` 管线才是下拉菜单的真渲染链）
+- `NotificationCenterCardManager:422 / :460`（shade 与 AOD/锁屏分支）
+- `HwNotificationFilterImpl:76`（U4 管线的 shade 分支也汇到这）
+
+命中返 true = 走宿主自己的「不进通知中心」分支，与官方隐藏机制同语义（上游一致性）。
+
+**U4（管线层，保留）**：`HwNotificationFilterImpl#shouldFilterOut(NotificationEntry)Z`。
 传播链（smali 复核，jadx 烂流会假报 return false）：
 
 ```
@@ -236,13 +247,16 @@ HnCoordinatorImpl.attach():325-327  addPreGroupFilter(mHnPreGroupNotifFilter) + 
   → HnCoordinatorImpl$4.smali:46-52  classId=1 分支调 mNotificationFilterEx.shouldFilterOut(entry)
       返回 true ⇒ :cond_4 ⇒ return true
   → ShadeListBuilder.applyFilters:285-301  命中即设 excludingFilter ⇒ entry 出渲染列表
-      ⇒ 下拉 / 锁屏 / 横幅 / 图标全无（entry 无 row 可绑定）
 HwNotificationListnerImpl.wakeScreenOn:444  同判 ⇒ 隐藏的不再点亮屏幕/AOD
 ```
 
-- pre-group 那路（classId=0）只调 `shouldFilterOutPreGroup`，**不经过本点**——finalize 一路已够。
-- 宿主方法本体是纯查询（keyguard / 媒体中心白名单），hook 恒 `proceed()` 后 OR 上匹配结果，
-  宿主原有过滤行为不受影响；返回类型 Z，回调必须返回 Boolean。
+⚠️ **2026-10-12 真机实证（门≠仲裁者的标准案例）**：首轮只挂 U4 管线点，判据两发命中
+（`隐藏热点通知(android/group=TetheredNotification)`）但**通知中心照常渲染**——
+AOSP NotifPipeline 过滤不是这版下拉菜单的渲染链，荣耀自建 dynamicserver 管线才是。
+U4 点保留的唯一实际职责 = wakeScreenOn 侧（屏灭时不为隐藏通知亮屏）。
+
+两点的 hook 策略一致：恒 `proceed()` 放行宿主逻辑、OR 上匹配结果；返回类型 Z，
+回调必须返回 Boolean。
 
 ### 8.2 身份匹配（dumpsys 实证 2026-10-12，设备在网）
 
@@ -290,9 +304,14 @@ tools/dev.sh deploy-release        # 编译+装包+自动重新启用+强停作�
 tools/dev.sh modlog SystemUiHook   # LSPosed 日志判据
 ```
 
-- `SystemUiHook: installed N/N`（U1/U2/U4/U5 全开时 N=5）
+- **SystemUI 是 persistent 应用**：`am force-stop` 无效（pid 不变），须 root kill
+  （`su -c 'killall com.android.systemui'`，2026-10-12 实证；`dev.sh enable-module` 的
+  force-stop 只对普通作用域包有效）。
+- `SystemUiHook: installed N/N`（U1/U2/U4/U4b/U5 全开时 N=5）
 - 通知探针行：插充电器 / 开热点 / 插 USB 线各触发一次，`systemui-hook 通知探针:` 行给出全量身份
-  （收紧 USB 调试渠道 id 与充电普通态 id 的依据）
+  （收紧 USB 调试渠道 id 与充电普通态 id 的依据；热点渠道已实证 = `sap_capsule_channel_id`）
 - 判据行：`隐藏充电通知(...)` / `隐藏热点通知(...)` / `隐藏USB调试通知(...)` / `电量 N% 放行手电筒`
-- 未验证（2026-10-12）：横幅/状态栏图标是否随列表剔除同步消失（理论同源，待真机观测）；
-  充电普通态 id 与 USB 调试渠道 id 未实证。
+- **已真机验证（2026-10-12）**：热点通知从下拉通知中心消失（U4b 命中即生效；状态栏「热点已开启」
+  chip 是状态图标非通知，保留属预期）。
+- 未验证：充电（系统管家）与 USB 调试条目的实际消失效果、充电普通态 id、USB 调试渠道 id、
+  手电筒低电量（须 `dumpsys battery set level 4` 模拟）。
