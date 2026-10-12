@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import top.honorhook.BuildConfig
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.isInDarkTheme
@@ -274,7 +275,7 @@ private fun InfoCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             InfoRow(Icons.Filled.Tag, "插件版本", appVersionLabel())
-            InfoRow(Icons.Filled.DeveloperBoard, "插件包名", "top.honorhook")
+            InfoRow(Icons.Filled.DeveloperBoard, "插件包名", BuildConfig.APPLICATION_ID)
             InfoRow(
                 Icons.Filled.Smartphone, "系统版本",
                 "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",

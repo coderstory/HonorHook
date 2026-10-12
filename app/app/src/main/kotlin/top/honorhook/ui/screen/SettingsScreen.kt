@@ -349,7 +349,7 @@ private fun RestartResult(
 
 private fun failureText(failure: ScopeRestarter.Failure): String = when (failure) {
     ScopeRestarter.Failure.NO_SU -> "未能获取 Root 授权"
-    ScopeRestarter.Failure.NOT_GRANTED -> "Root 未授权本应用：请在 Root 管理器中允许 top.honorhook 后重试"
+    ScopeRestarter.Failure.NOT_GRANTED -> "Root 未授权本应用：请在 Root 管理器中允许 ${BuildConfig.APPLICATION_ID} 后重试"
     ScopeRestarter.Failure.TIMEOUT -> "命令执行超时（5 秒），请重试"
 }
 
