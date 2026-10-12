@@ -429,6 +429,24 @@ PYEOF
     "$ADB" devices -l | tr -d '\r'
     ;;
 
+  # LSPosed 官方 CLI 启用/查询模块（替代 enable-module 的 UI 自动化——后者会扰动通知栏/热点开关）。
+  # 依赖设备端 /data/adb/modules/zygisk_lsposed/lspctl（LSPosed 2.2+ 自带）。scope 是 static（随 APK
+  # scope.list 自动生效），无需手动同步；重装（install -r）不清启用态，只有卸载重装才需要本命令。
+  enable-cli)
+    LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
+    require "$ADB"
+    "$ADB" shell "su 0 $LSPCTL module enable --user=0 top.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL module show top.honorhook" 2>&1 | tr -d '\r' | grep -E 'User'
+    ;;
+
+  # LSPosed CLI 查询：模块启用态与作用域（只读）
+  modctl)
+    LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
+    require "$ADB"
+    "$ADB" shell "su 0 $LSPCTL module show top.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL scope list top.honorhook" 2>&1 | tr -d '\r' | head -20
+    ;;
+
   launch)
     require "$ADB"
     info "冷启动 top.honorhook（明确 LAUNCHER intent，不用 monkey 避免干扰）"
