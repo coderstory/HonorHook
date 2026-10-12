@@ -73,16 +73,11 @@ object FeatureCatalog {
     ) {
         /** 全部受支持宿主版本（派生不落盘，UI「版本未适配」tag 用）。
          *  已按数字段升序排序（"14.0.37.301" > "9.9.9.9"），末位恒为最新——UI meta 行取 last 即最新，
-         *  不依赖 targets 里的声明序；"-release" 等非数字尾缀截断后按 0 计。 */
+         *  不依赖 targets 里的声明序；"-release" 等非数字尾缀截断后按 0 计。
+         *  比较器唯一实现在 HostVersion.compareVersionNames（HostVersion fallback 选表共用，消双处漂移）。 */
         val supportedVersions: List<String>
             get() = (setOfNotNull(baselineVersion) + extraVersions).sortedWith { a, b ->
-                val ka = a.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
-                val kb = b.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
-                for (i in 0 until maxOf(ka.size, kb.size)) {
-                    val c = (ka.getOrElse(i) { 0 }).compareTo(kb.getOrElse(i) { 0 })
-                    if (c != 0) return@sortedWith c
-                }
-                0
+                top.honorhook.xposed.core.HostVersion.compareVersionNames(a, b)
             }
     }
 
@@ -164,12 +159,14 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_MMS_AD_OFF, R.string.feature_mms_ad_off_title, R.string.feature_mms_ad_off_desc),
             ),
+            baselineVersion = "19.0.9.304",  // dumpsys 实证（sms-ads.md，设备 AAK-AN00；原 MmsHook 私有常量上提）
         ),
         Target(
             "com.sohu.inputmethod.sogou.honor", R.string.target_name_ime,
             listOf(
                 Feature(KEY_IME_CODE_FREE, R.string.feature_ime_code_free_title, R.string.feature_ime_code_free_desc),
             ),
+            baselineVersion = "10.32.44.202608251503",  // pm dump 实证 versionName（设备 AAK-AN00 2026-10-12；原 ImeHook 私有常量上提）
         ),
         Target(
             "com.hihonor.android.totemweather", R.string.target_name_purify,

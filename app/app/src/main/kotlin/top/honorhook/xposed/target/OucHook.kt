@@ -4,6 +4,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.data.HookPoint
 
 /**
  * 荣耀在线升级客户端 `com.hihonor.ouc`（HnOUC.apk 18.0.3.206，aapt2 实证）：禁止系统更新
@@ -30,49 +31,47 @@ object OucHook : TargetHook {
     private const val PKG_HNOUC = "com.hihonor.android.hnouc"
 
     /**
-     * 静默后台触发的 Receiver（onReceive void 短路）：每个都是一条自动链的入口。
+     * 挂载表（HookPoint 行，ThemeStoreMap 同款写法——adapt_new_version.py 的 NAMED_MOUNT_RE
+     * 按 className=/methodName=/paramCount= 具名三参提取，行化后 11 点全量可核对）。
+     * 全部 kind=CONST：Receiver 的 onReceive（value=null，void 短路）与 Service 的
+     * onStartCommand（value=2，START_NOT_STICKY 防 restart）；实际返回值由 [mountOne]
+     * 按 returnType 分派，value 不消费（表口径仍写全，与 ThemeStoreMap 行格式一致）。
+     *
      * 有意不收录：CheckNewVersionReceiver（手动检查路径）、HiskytoneVersionDemoReceiver（demo）。
      */
-    private val AUTO_RECEIVERS = listOf(
-        "biz.impl.reveiver.FirmwareAutoDownloadReceiver" to "固件自动下载触发（AUTO_DOWNLOAD_ALARM）",
-        "biz.impl.reveiver.NightUpgradeReceiver" to "夜间安装调度（NIGHT_UPGRADE_ALARM）",
-        "biz.impl.reveiver.UpgradeRemindReceiver" to "升级提醒（通知/红点复唤）",
-        "biz.impl.reveiver.PowerConnectedReceiver" to "充电触发检测（ACTION_POWER_CONNECTED）",
-        "biz.impl.reveiver.DeviceActivatedReceiver" to "设备激活触发检测",
-        "biz.impl.reveiver.SelfUpdateReceiver" to "OUC 自升级",
-        "biz.impl.reveiver.CarrierConfigReceiver" to "运营商配置变化触发",
-        "biz.impl.reveiver.FirmwareAndAppReceiver" to "固件推送接收",
-        "biz.impl.reveiver.FirmwareInstallReceiver" to "固件安装触发",
+    private val OUC_POINTS: List<HookPoint> = listOf(
+        HookPoint(id = "ota:recv.FirmwareAutoDownloadReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.FirmwareAutoDownloadReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "固件自动下载触发（AUTO_DOWNLOAD_ALARM）"),
+        HookPoint(id = "ota:recv.NightUpgradeReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.NightUpgradeReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "夜间安装调度（NIGHT_UPGRADE_ALARM）"),
+        HookPoint(id = "ota:recv.UpgradeRemindReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.UpgradeRemindReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "升级提醒（通知/红点复唤）"),
+        HookPoint(id = "ota:recv.PowerConnectedReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.PowerConnectedReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "充电触发检测（ACTION_POWER_CONNECTED）"),
+        HookPoint(id = "ota:recv.DeviceActivatedReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.DeviceActivatedReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "设备激活触发检测"),
+        HookPoint(id = "ota:recv.SelfUpdateReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.SelfUpdateReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "OUC 自升级"),
+        HookPoint(id = "ota:recv.CarrierConfigReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.CarrierConfigReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "运营商配置变化触发"),
+        HookPoint(id = "ota:recv.FirmwareAndAppReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.FirmwareAndAppReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "固件推送接收"),
+        HookPoint(id = "ota:recv.FirmwareInstallReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.FirmwareInstallReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "固件安装触发"),
+        // 周期自动版本检测的总调度（AutoCheckService.java:942 onStartCommand 自有覆写实证）
+        HookPoint(id = "ota:svc.AutoCheckService", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.check.auto.AutoCheckService", methodName = "onStartCommand", paramCount = 3, returnType = "int", value = 2, description = "周期自动检测调度"),
+        // WiFi 场景自动下载管理（WifiAutoDownloadManageService.java:63 onStartCommand 自有覆写实证）
+        HookPoint(id = "ota:svc.WifiAutoDownloadManageService", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.service.WifiAutoDownloadManageService", methodName = "onStartCommand", paramCount = 3, returnType = "int", value = 2, description = "WiFi 自动下载管理"),
     )
 
-    /** 自动调度 Service（onStartCommand 短路，返回 START_NOT_STICKY 防 restart）。 */
-    private val AUTO_SERVICES = listOf(
-        // 周期自动版本检测的总调度（AutoCheckService.java:942 onStartCommand 自有覆写实证）
-        "check.auto.AutoCheckService" to "周期自动检测调度",
-        // WiFi 场景自动下载管理（WifiAutoDownloadManageService.java:63 onStartCommand 自有覆写实证）
-        "biz.impl.service.WifiAutoDownloadManageService" to "WiFi 自动下载管理",
+    /** 表行 → 运行时任务（声明式字段直拷；value 不透传——拦截值由 [mountOne] 按 returnType 定）。 */
+    private fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
+        id = id,
+        className = className,
+        methodName = methodName,
+        paramCount = paramCount,
+        returnType = returnType,
+        description = description,
     )
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         val apkPath = param.applicationInfo.sourceDir
 
-        val pending = mutableListOf<Task>()
+        val pending = mutableListOf<MountEngine.SimpleTask>()
         if (top.honorhook.xposed.data.RemoteConfig.isEnabled(FeatureCatalog.KEY_OTA_BLOCK)) {
-            AUTO_RECEIVERS.forEach { (rel, what) ->
-                pending += Task(
-                    className = "$PKG_HNOUC.$rel", methodName = "onReceive", paramCount = 2,
-                    returnType = "void", id = "ota:recv.${rel.substringAfterLast('.')}",
-                    description = what,
-                )
-            }
-            AUTO_SERVICES.forEach { (rel, what) ->
-                pending += Task(
-                    className = "$PKG_HNOUC.$rel", methodName = "onStartCommand", paramCount = 3,
-                    returnType = "int", id = "ota:svc.${rel.substringAfterLast('.')}",
-                    description = what,
-                )
-            }
+            OUC_POINTS.forEach { point -> pending += point.toTask() }
         } else {
             logDisabled(module, FeatureCatalog.KEY_OTA_BLOCK, "OucHook")
         }
@@ -81,21 +80,12 @@ object OucHook : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    private class Task(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-    ) : MountEngine.Task
-
     /**
      * 统一短路：不 proceed（入口不执行 = 整链不发生）。
      * 返回值必须匹配原方法类型（libxposed 102 硬约束，见 systemui.md §7.4 实证）：
      * void onReceive → null；int onStartCommand → 2（START_NOT_STICKY，告诉系统别 restart）。
      */
-    private fun mountOne(task: Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             engine.judge(module, task, "ota-hook", "入口已短路")
             when (task.returnType) {

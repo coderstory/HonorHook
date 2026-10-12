@@ -139,35 +139,44 @@ object DualSignalFeature {
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(HOST_PACKAGE))
 
         val pending = listOf(
-            MountTask(CLS_SIGNAL_CLUSTER_VIEW, isClusterRoot = true),
-            MountTask(CLS_SIGNAL_UNIT_NORMAL),
-            MountTask(CLS_SIGNAL_UNIT_UCT),
+            MountEngine.SimpleTask(
+                className = CLS_SIGNAL_CLUSTER_VIEW,
+                methodName = METHOD_ATTACH,
+                paramCount = 0,
+                returnType = "void",
+                id = "systemui:dualSignal.SignalClusterView",
+                description = "U6 双排信号·attach 入口（SignalClusterView，cluster root 直取）",
+            ),
+            MountEngine.SimpleTask(
+                className = CLS_SIGNAL_UNIT_NORMAL,
+                methodName = METHOD_ATTACH,
+                paramCount = 0,
+                returnType = "void",
+                id = "systemui:dualSignal.SignalUnitNormalView",
+                description = "U6 双排信号·attach 入口（SignalUnitNormalView，上溯找 cluster root）",
+            ),
+            MountEngine.SimpleTask(
+                className = CLS_SIGNAL_UNIT_UCT,
+                methodName = METHOD_ATTACH,
+                paramCount = 0,
+                returnType = "void",
+                id = "systemui:dualSignal.SignalUnitUCTView",
+                description = "U6 双排信号·attach 入口（SignalUnitUCTView，上溯找 cluster root）",
+            ),
         )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    private class MountTask(
-        override val className: String,
-        val isClusterRoot: Boolean = false,
-    ) : MountEngine.Task {
-        override val methodName = METHOD_ATTACH
-        override val paramCount = 0
-        override val returnType = "void"
-        override val id = "systemui:dualSignal.${className.substringAfterLast('.')}"
-        override val description =
-            "U6 双排信号·attach 入口（${className.substringAfterLast('.')}，" +
-                (if (isClusterRoot) "cluster root 直取" else "上溯找 cluster root") + "）"
-        override val dex: MountEngine.DexHint? = null
-    }
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // after 语义：先放行宿主原 attach 逻辑，再调度注入（void 方法 → 回调显式返回 null，§7.4）
             chain.proceed()
             val self = chain.thisObject as? View
             if (self != null) {
                 // 原插件语义：root 找不到时退回 self（safeRestyle 对小子树遍历无副作用）
-                val root = if (task.isClusterRoot) self else findClusterRoot(self) ?: self
+                // cluster root 判定按类名（SimpleTask 无目标私有字段，isClusterRoot 由 className 推导）
+                val isClusterRoot = task.className == CLS_SIGNAL_CLUSTER_VIEW
+                val root = if (isClusterRoot) self else findClusterRoot(self) ?: self
                 schedule(root, task, module)
             }
             null
@@ -186,12 +195,12 @@ object DualSignalFeature {
     }
 
     /** attach 后立即 + 500ms 各刷一轮（原插件 schedule：首轮赌宿主刚建完，二轮兜异步构建）。 */
-    private fun schedule(root: View, task: MountTask, module: XposedModule) {
+    private fun schedule(root: View, task: MountEngine.SimpleTask, module: XposedModule) {
         root.post { safeRestyle(root, task, module) }
         root.postDelayed({ safeRestyle(root, task, module) }, 500L)
     }
 
-    private fun safeRestyle(root: View, task: MountTask, module: XposedModule) {
+    private fun safeRestyle(root: View, task: MountEngine.SimpleTask, module: XposedModule) {
         try {
             resolveResourceIdsOnce(root.context)
             val fixed = walkAndFix(root, task, module)
@@ -204,7 +213,7 @@ object DualSignalFeature {
     }
 
     /** 遍历找候选组：mobile_combo（按 id）或「水平 LinearLayout 且 ≥1 个 mobile 子单元」（按形态）。 */
-    private fun walkAndFix(v: View, task: MountTask, module: XposedModule): Int {
+    private fun walkAndFix(v: View, task: MountEngine.SimpleTask, module: XposedModule): Int {
         var n = 0
         if (v is LinearLayout) {
             val byId = idMobileCombo != 0 && v.id == idMobileCombo
@@ -245,7 +254,7 @@ object DualSignalFeature {
      * 接管单组：host = mobile_combo 的 FrameLayout 外壳。隐藏原生组，注入自绘容器，
      * 并挂三路维护（全局布局节流 / 2s 自续刷新 / Choreographer 取色）——全部原插件机制。
      */
-    private fun fixGroup(group: LinearLayout, task: MountTask, module: XposedModule): Boolean {
+    private fun fixGroup(group: LinearLayout, task: MountEngine.SimpleTask, module: XposedModule): Boolean {
         val host = group.parent as? FrameLayout ?: return false   // 原插件硬约束：组外壳必须是 FrameLayout
         if (backedOff[host] == true) return false
         // 冲突防护（先到先得）：插件的容器已在 → 本 host 永久退避，原生组交给插件处理
@@ -518,6 +527,9 @@ object DualSignalFeature {
         private var lastColor = Int.MIN_VALUE
 
         override fun doFrame(frameTimeNanos: Long) {
+            // host 脱离窗口即停拍（不再 post 下一帧）——原插件每帧自续永不注销的泄漏在此收口；
+            // 新 cluster/视图 attach 时 fixGroup 会挂新的 callback，生命周期随 host 走。
+            if (!host.isAttachedToWindow) return
             try {
                 val signal = findContainer(host)?.let { findSignal(it) } ?: return
                 val color = tintFromRow(host)

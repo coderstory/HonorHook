@@ -48,7 +48,7 @@ class HonorAdsHook(override val packageName: String) : TargetHook {
 
         // 挂载表 2 项；以真机 installed N/M 的 M 为准。
         val pending = listOf(
-            MountTask(
+            MountEngine.SimpleTask(
                 className = CLS_BASE_AD_VIEW,
                 methodName = "notifyAllChildView",
                 paramCount = 0,
@@ -56,7 +56,7 @@ class HonorAdsHook(override val packageName: String) : TargetHook {
                 id = "ads:BaseAdView.notifyAllChildView",
                 description = "广告内容注入收口：原逻辑跑完即 removeAllViews，信息流/横幅/开屏/插屏/激励广告内容清空（覆盖同步+异步加载）",
             ),
-            MountTask(
+            MountEngine.SimpleTask(
                 className = CLS_BASE_AD_VIEW,
                 methodName = "onAttachedToWindow",
                 paramCount = 0,
@@ -68,16 +68,7 @@ class HonorAdsHook(override val packageName: String) : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-    ) : MountEngine.Task
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // api 102 Chain：不调 proceed() = 原方法不执行（广告注入/原 attach 逻辑整体跳过）；
             // removeAllViews 只兜底 hook 生效前已注入的内容；不抛异常。

@@ -41,7 +41,7 @@ class HonorOpsAdHook(override val packageName: String) : TargetHook {
         engine.begin(param.applicationInfo?.sourceDir)
 
         val pending = listOf(
-            MountTask(
+            MountEngine.SimpleTask(
                 className = CLS_CLIENT,
                 methodName = "getRecommendView",
                 paramCount = 3,
@@ -53,16 +53,7 @@ class HonorOpsAdHook(override val packageName: String) : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-    ) : MountEngine.Task
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // api 102 Chain：不调 proceed() = 原方法不执行（配置拉取/广告请求/埋点整链跳过）。
             // args[2] = RecommendCallback（宿主匿名实现），必须回调 loadFail 让宿主立即走失败分支。

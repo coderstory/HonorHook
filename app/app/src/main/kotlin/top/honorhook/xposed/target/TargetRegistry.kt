@@ -58,19 +58,23 @@ object TargetRegistry {
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */
-    private fun register(target: TargetHook) {
+    private fun register(target: TargetHook) = synchronized(this) {
         targets.getOrPut(target.packageName) { mutableListOf() }.add(target)
     }
 
     /** 按包名查全部目标（未注册返回空：被注入但无适配器时静默，照 Rain 同情形）。 */
-    fun find(packageName: String): List<TargetHook> = targets[packageName].orEmpty()
+    fun find(packageName: String): List<TargetHook> = synchronized(this) {
+        targets[packageName].orEmpty()
+    }
 
     /**
      * 目标对象是否已装（对象级防重装门控）：多键共享安装状态，别名包共享进程时防 double mount。
      */
-    fun isInstalled(target: TargetHook): Boolean = target in installed
+    fun isInstalled(target: TargetHook): Boolean = synchronized(this) {
+        target in installed
+    }
 
     fun markInstalled(target: TargetHook) {
-        installed += target
+        synchronized(this) { installed += target }
     }
 }

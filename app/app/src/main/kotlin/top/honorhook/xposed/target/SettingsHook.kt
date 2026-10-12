@@ -40,9 +40,9 @@ object SettingsHook : TargetHook {
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 挂载表（**以真机 `installed N/M` 的 M 为准**；每个 feature 独立门控）
-        val pending = mutableListOf<MountTask>()
+        val pending = mutableListOf<MountEngine.SimpleTask>()
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SETTINGS_DISABLE_BTN)) {
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_APP_DETAILS,
                 methodName = "Q3",
                 paramCount = 0,
@@ -56,7 +56,7 @@ object SettingsHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SETTINGS_DISABLE_BTN, "SettingsHook")
         }
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SETTINGS_HIDE_ACCOUNT_DOT)) {
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_HWID_ENABLER,
                 methodName = "g",
                 paramCount = 1,
@@ -77,23 +77,13 @@ object SettingsHook : TargetHook {
     private const val ID_BUTTON_PANEL = "control_buttons_panel"
     private const val ID_BUTTON_DISABLE = "left_button"
 
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-        override val dex: DexHint? = null,
-    ) : MountEngine.Task
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
             ID_ACCOUNT_DOT -> mountHideAccountDot(task, module, loader)
             else -> mountEnableDisable(task, module, loader)
         }
 
-    private fun mountEnableDisable(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountEnableDisable(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // after 语义：原 Q3 跑完（全部业务门控保留副作用）后，强制启用停用按钮并补挂点击监听
             //（原逻辑仅在最终 enabled 时挂监听）。按钮视图按 id 名运行时查找。
@@ -123,7 +113,7 @@ object SettingsHook : TargetHook {
      * Drawable/String/String/boolean（u.java:423-434），**唯一 boolean 即 badge**——按字段类型定位，
      * 不依赖混淆名 f22223d（版本漂移安全）。置 false 后 proceed，宿主 else 分支自清红点。
      */
-    private fun mountHideAccountDot(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountHideAccountDot(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // void 方法：回调必须显式返回 null
             val data = runCatching { chain.getArg(0) }.getOrNull()

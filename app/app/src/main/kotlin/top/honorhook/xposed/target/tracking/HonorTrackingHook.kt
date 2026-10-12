@@ -38,7 +38,7 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
 
         // 挂载表 3 项（facade 工厂，未混淆）；以真机 installed N/M 为准。
         val pending = listOf(
-            MountTask(
+            MountEngine.SimpleTask(
                 className = "com.hihonor.hianalytics.process.HiAnalyticsInstance${'$'}Builder",
                 methodName = "create",
                 paramCount = 1,
@@ -46,7 +46,7 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
                 id = "track:HiAnalyticsInstance.Builder.create",
                 description = "埋点实例工厂收口：app 自建 tag 实例全量阻断上报方法",
             ),
-            MountTask(
+            MountEngine.SimpleTask(
                 className = "com.hihonor.hianalytics.process.HiAnalyticsManager",
                 methodName = "getInstanceByTag",
                 paramCount = 1,
@@ -54,7 +54,7 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
                 id = "track:HiAnalyticsManager.getInstanceByTag",
                 description = "埋点实例获取收口：含 _default_config_tag 默认实例（v2 静态 API 亦经此）",
             ),
-            MountTask(
+            MountEngine.SimpleTask(
                 className = "com.hihonor.hianalytics.process.HiAnalyticsInstanceEx${'$'}Builder",
                 methodName = "create",
                 paramCount = 0,
@@ -66,16 +66,7 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-    ) : MountEngine.Task
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // 原工厂照常执行拿返回实例；仅追加动态阻断，不改工厂行为
             val instance = chain.proceed()

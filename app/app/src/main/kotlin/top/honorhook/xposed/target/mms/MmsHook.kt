@@ -88,11 +88,11 @@ object MmsHook : TargetHook {
         }
 
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 挂载表（T1 探针 + T2 载体；**以真机 `installed N/M` 的 M 为准**）。
-        val pending = mutableListOf<MountTask>()
-        pending += MountTask(
+        val pending = mutableListOf<MountEngine.SimpleTask>()
+        pending += MountEngine.SimpleTask(
             className = CLS_SMART_SMS_UTIL,
             methodName = "getIntelligentIpMessageEnable",
             paramCount = 1,  // 签名实证：(Context)——system-files/honor-mms-19.0.9.304-jadx SmartSmsUtilControl.java:515
@@ -100,7 +100,7 @@ object MmsHook : TargetHook {
             id = "mms:SmartSmsUtilControl.getIntelligentIpMessageEnable",
             description = "T1 骨架探针：智能信息插件环境存活检查（proceed 后原值返回，零行为改动）",
         )
-        pending += MountTask(
+        pending += MountEngine.SimpleTask(
             className = CLS_MENU_FACTORY,
             methodName = "getMenuProcessor",
             paramCount = 0,  // 签名实证：static Optional getMenuProcessor()——SmartSmsProcessorFactory.java
@@ -111,19 +111,7 @@ object MmsHook : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
-    /** hook 编写时的宿主版本基线（sms-ads.md：pm/dumpsys 实证 19.0.9.304，设备 AAK-AN00）。 */
-    private const val HOST_VERSION_BASELINE = "19.0.9.304"
-
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-    ) : MountEngine.Task
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
             ID_MENU_FACTORY -> mountMenuFactory(task, module, loader)
             else -> mountProbe(task, module, loader)
@@ -134,7 +122,7 @@ object MmsHook : TargetHook {
      * 次，自带节流）→ **原值返回**，零行为改动。around 语义照 Exam8Hook 放行路径：chain.proceed()
      * 裸调不吞原方法异常，挂载级 PROTECTIVE 模式兜底防炸宿主。
      */
-    private fun mountProbe(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountProbe(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             val orig = chain.proceed()
             engine.judge(module, task, JUDGE_PREFIX, "当前值=$orig")
@@ -167,7 +155,7 @@ object MmsHook : TargetHook {
      * MountEngine 的 DexKit 轨扫的是 mms 自身 apk，扫不到插件 dex——若未来插件混淆改名，
      * 属版本适配问题（adapt_new_version.py 流程），本点诚实 NOT_RESOLVED 不误伤。
      */
-    private fun mountMenuFactory(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountMenuFactory(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             val result = chain.proceed()
             // 载体放行：菜单处理器照常返回，只在返回值上做插件 CL 捕获
@@ -183,14 +171,14 @@ object MmsHook : TargetHook {
             result
         }
 
-    /** 主轨一次幂标志（载体每次会话页都触发，避免重复 hook）。 */
+    /** 主轨一次幂标志（载体每次会话页都触发，避免重复 hook）；**仅成功时保持置位**——失败即复位，随下次会话页重试（P4：此前失败即永久放弃）。 */
     private val menuKillTried = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** T3 主轨一次幂标志（与 T2 分开：各自独立重试/失败留痕，互不拖累）。 */
+    /** T3 主轨一次幂标志（与 T2 分开：各自独立重试/失败留痕，互不拖累）；同上仅成功置位。 */
     private val cardKillTried = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** 主轨任务描述（判据日志用；不进 pending 表，挂载由载体回调事件驱动）。 */
-    private val findMenusTask = MountTask(
+    private val findMenusTask = MountEngine.SimpleTask(
         className = CLS_TED_MENU_PROCESSOR,
         methodName = "findMenus",
         paramCount = 1,  // 签名实证：private static JSONArray findMenus(String)——TedMenuProcessor.java
@@ -205,6 +193,7 @@ object MmsHook : TargetHook {
             val pluginCl = pluginClassLoaderOf(processor, hostLoader)
                 ?: run {
                     module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 未捕获插件 ClassLoader（处理器=${processor.javaClass.name}），菜单广告原样显示")
+                    menuKillTried.set(false)   // 失败不置位：下次会话页重试
                     return
                 }
             val method = MethodResolver.resolveMethod(
@@ -212,6 +201,7 @@ object MmsHook : TargetHook {
                 paramCount = findMenusTask.paramCount, returnType = findMenusTask.returnType,
             ) ?: run {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨未解析（$CLS_TED_MENU_PROCESSOR#findMenus，插件版本差异？），菜单广告原样显示")
+                menuKillTried.set(false)   // 失败不置位：下次会话页重试
                 return
             }
             module.hook(method)
@@ -225,12 +215,13 @@ object MmsHook : TargetHook {
                 }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_TED_MENU_PROCESSOR.findMenus → 空数组")
         }.onFailure { t ->
+            menuKillTried.set(false)   // 失败不置位：下次会话页重试
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨挂载异常（菜单广告原样显示，不 crash）: ${t.message}", t)
         }
     }
 
     /** T3 任务描述（判据日志用；不进 pending 表，挂载由载体回调事件驱动，同 [findMenusTask]）。 */
-    private val simpleActionTask = MountTask(
+    private val simpleActionTask = MountEngine.SimpleTask(
         className = CLS_SIMPLE_ACTION_LAYOUT,
         methodName = "b",
         paramCount = 4,  // 签名实证：public final void b(String msgId, String json, String smsNumber, TedCard)——SimpleActionLayout.java（全类唯一 4 参 b，无重载歧义）
@@ -261,6 +252,7 @@ object MmsHook : TargetHook {
             val pluginCl = pluginClassLoaderOf(processor, hostLoader)
                 ?: run {
                     module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 未捕获插件 ClassLoader（处理器=${processor.javaClass.name}），卡片按钮原样显示")
+                    cardKillTried.set(false)   // 失败不置位：下次会话页重试
                     return
                 }
             val method = MethodResolver.resolveMethod(
@@ -268,6 +260,7 @@ object MmsHook : TargetHook {
                 paramCount = simpleActionTask.paramCount, returnType = simpleActionTask.returnType,
             ) ?: run {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨未解析（$CLS_SIMPLE_ACTION_LAYOUT#b(4参)，插件版本差异？），卡片按钮原样显示")
+                cardKillTried.set(false)   // 失败不置位：下次会话页重试
                 return
             }
             module.hook(method)
@@ -287,6 +280,7 @@ object MmsHook : TargetHook {
                 }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.b → 全卡 json 置空")
         }.onFailure { t ->
+            cardKillTried.set(false)   // 失败不置位：下次会话页重试
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨挂载异常（卡片按钮原样显示，不 crash）: ${t.message}", t)
         }
     }

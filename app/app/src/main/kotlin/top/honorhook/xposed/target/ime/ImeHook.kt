@@ -63,10 +63,10 @@ object ImeHook : TargetHook {
             return
         }
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, HOST_VERSION_BASELINE)
+        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
         engine.attemptMount(
             listOf(
-                MountTask(
+                MountEngine.SimpleTask(
                     className = CLS_SETTING_MANAGER,
                     methodName = "zf",
                     paramCount = 2,  // 签名实证：(boolean z, boolean z2) —— SettingManager.java:5446
@@ -74,7 +74,7 @@ object ImeHook : TargetHook {
                     id = ID_ZF,
                     description = "T4：验证码候选 pref 免联网服务擦除（zf(false)→true，仅此 pref，其余同意门原样）",
                 ),
-                MountTask(
+                MountEngine.SimpleTask(
                     className = CLS_SETTING_MANAGER,
                     methodName = "X5",
                     paramCount = 0,  // 签名实证：()Z —— SettingManager.java:2596
@@ -82,7 +82,7 @@ object ImeHook : TargetHook {
                     id = ID_X5,
                     description = "T4：验证码候选功能读数强制 true（用户 2026-10-12 拍板强制开启；不落盘、不改同意态，开关关即复原）",
                 ),
-                MountTask(
+                MountEngine.SimpleTask(
                     className = CLS_CLIPBOARD_IMPL,
                     methodName = "getClipboard2Candidate",
                     paramCount = 0,  // 签名实证：()Z —— ClipboardServiceImpl.java:59
@@ -90,7 +90,7 @@ object ImeHook : TargetHook {
                     id = ID_CLIP,
                     description = "T4：剪贴板候选读数强制 true（同上，读数层强制，未装判断/同意框全不涉）",
                 ),
-                MountTask(
+                MountEngine.SimpleTask(
                     // h20.k 验证码 chip 门（h20.java:131）：直接调 u10.d().b()，绕过 Service 包装 ——
                     // 必须在存储读数层强制，否则 chip 门仍被设置页关态挡死
                     className = CLS_U10,
@@ -100,7 +100,7 @@ object ImeHook : TargetHook {
                     id = ID_U10B,
                     description = "T4：剪贴板候选存储读数强制 true（h20.k 直读点）",
                 ),
-                MountTask(
+                MountEngine.SimpleTask(
                     // h20.k 第二门（h20.java:131 SettingManager.A4）—— 候选增强开关，默认 true，
                     // 防历史/云端写关；同为读数强制
                     className = CLS_SETTING_MANAGER,
@@ -116,19 +116,7 @@ object ImeHook : TargetHook {
         ) { task -> mountOne(task, module, loader) }
     }
 
-    /** hook 编写时的 IME 版本基线（pm dump 实证 versionName，设备 AAK-AN00 2026-10-12）。 */
-    private const val HOST_VERSION_BASELINE = "10.32.44.202608251503"
-
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-    ) : MountEngine.Task
-
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             when (task.id) {
                 ID_ZF -> {

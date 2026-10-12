@@ -102,11 +102,11 @@ object SystemUiHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook")
         }
 
-        val pending = mutableListOf<MountTask>()
+        val pending = mutableListOf<MountEngine.SimpleTask>()
 
         // U1 副卡隐藏（数据层：updateSubs 入参剔除 slotId==1）
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_SIM2)) {
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_MOBILE_DATA_CONTROLLER,
                 methodName = "updateSubs",
                 paramCount = 1,
@@ -126,7 +126,7 @@ object SystemUiHook : TargetHook {
         //   NPE。已查明根因：NPE 来自 U3 的 addSignalView 误返回 null（非 void 方法），与 U2 无关，
         //   U2 已恢复启用。
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_5G)) {
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_SIGNAL_ICON_BINDER,
                 methodName = METHOD_BIND,
                 paramCount = BIND_PARAM_COUNT,
@@ -143,7 +143,7 @@ object SystemUiHook : TargetHook {
             //   U2 的 bind 时置 GONE 被覆盖 ⇒ 5G 标仍在。uct 布局变体同构（AnonymousClass9 :907-925）。
             // 收口在 setIconForView：命中类型标 view 就 GONE + 短路；drawable 不再设置，
             // 外层随后的 setVisibility(0) 只剩无 drawable 无 margin 的空 view，不占位（margin 已被 U2 清零）。
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_SIGNAL_UTILS,
                 methodName = METHOD_SET_ICON_FOR_VIEW,
                 paramCount = 2,
@@ -153,7 +153,7 @@ object SystemUiHook : TargetHook {
                 dex = DexHint(strings = listOf("setIconForView:imageView is null, return")),
             )
             // U2c：Icon.Loaded 路收口（IconViewBinder.bind 同时覆盖 Resource/Loaded 两分支）
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_ICON_VIEW_BINDER,
                 methodName = METHOD_BIND,
                 paramCount = 2,
@@ -173,7 +173,7 @@ object SystemUiHook : TargetHook {
             FeatureCatalog.KEY_SYSTEMUI_HIDE_ADB_NOTIF,
         )
         if (notifKeys.any { RemoteConfig.isEnabled(it) }) {
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_HW_NOTIFICATION_FILTER,
                 methodName = "shouldFilterOut",
                 paramCount = 1,
@@ -181,7 +181,7 @@ object SystemUiHook : TargetHook {
                 id = ID_FILTER_NOTIF,
                 description = "U4 系统通知隐藏（充电/热点/USB 调试，身份匹配见 matchesHiddenNotif）",
             )
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_HW_NOTIFICATION_FEATURE,
                 methodName = "isDisableShownInShade",
                 paramCount = 1,
@@ -195,7 +195,7 @@ object SystemUiHook : TargetHook {
 
         // U5 手电筒低电量放行（纯查询门短路返回 true，见 mountFlashlightLowBatt 注释）
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT)) {
-            pending += MountTask(
+            pending += MountEngine.SimpleTask(
                 className = CLS_HW_PHONE_STATUSBAR,
                 methodName = "canOpenFlashLight",
                 paramCount = 0,
@@ -215,15 +215,6 @@ object SystemUiHook : TargetHook {
         }
     }
 
-    private class MountTask(
-        override val className: String,
-        override val methodName: String,
-        override val paramCount: Int,
-        override val returnType: String,
-        override val id: String,
-        override val description: String,
-        override val dex: DexHint? = null,
-    ) : MountEngine.Task
 
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "systemui-hook"
@@ -248,7 +239,7 @@ object SystemUiHook : TargetHook {
         }
     }
 
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
             ID_HIDE_5G -> mountHide5G(task, module, loader)
             ID_SET_ICON_FOR_VIEW -> mountTypeIconSink(task, module, loader)
@@ -260,7 +251,7 @@ object SystemUiHook : TargetHook {
         }
 
     /** U1 副卡隐藏：updateSubs 入参剔除 slotId==1（数据层，宿主重建时自然用改过的数据）。 */
-    private fun mountHideSim2(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountHideSim2(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // ⚠️ updateSubs 是 void 方法：hook 回调**必须返回 null**。
@@ -301,7 +292,7 @@ object SystemUiHook : TargetHook {
      *
      * 只读不改：不改宿主数据，纯粹让这个子视图不占位；宿主其它逻辑不受影响。
      */
-    private fun mountHide5G(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountHide5G(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // SignalIconBinder.bind 是 void 方法：回调必须返回 null（见 mountHideSim2 的崩溃实证注释）
@@ -327,7 +318,7 @@ object SystemUiHook : TargetHook {
      * 两路必经点。扫描前两参找 ImageView：命中类型标 view → GONE + 短路；其余一律放行
      * （信号格/漫游/箭头不受影响）。
      */
-    private fun mountTypeIconSink(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountTypeIconSink(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // void 方法：回调必须显式返回 null（见 mountHideSim2 的崩溃实证注释）
@@ -417,7 +408,7 @@ object SystemUiHook : TargetHook {
      * 再 OR 上我们的匹配结果——宿主原有过滤行为不受影响。
      * 返回类型 Z：hook 回调必须返回 Boolean（返回值规则见 mountHideSim2 的 2026-10-11 崩溃实证注释）。
      */
-    private fun mountHideSystemNotifs(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountHideSystemNotifs(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // 入参是 NotificationEntry，抽 public 字段 mSbn（U4b 的入参直接就是 sbn）
             val hit = runCatching {
@@ -440,7 +431,7 @@ object SystemUiHook : TargetHook {
      * 命中返 true 与宿主官方隐藏机制同语义（上游一致性）；恒 proceed 放行宿主逻辑后 OR。
      * 2026-10-12 真机实证：只挂 U4 管线过滤点，判据命中但通知中心仍渲染——本点才是渲染仲裁。
      */
-    private fun mountHideInNotificationCenter(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountHideInNotificationCenter(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             val hit = runCatching { matchesHiddenNotif(chain.getArg(0), module) }.getOrNull()
             val hostResult = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
@@ -520,7 +511,7 @@ object SystemUiHook : TargetHook {
      * 另一扇门，不在此点覆盖（未实现，见 docs/reverse/systemui.md §九）；长按亮度面板是内联
      * mBatteryLevel>5 判断（FlashlightActivity.java:243），无单点可挂，放弃。
      */
-    private fun mountFlashlightLowBatt(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountFlashlightLowBatt(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
             // 只在宿主本来会拦的低电量档留判据；电量充足时宿主本就放行，不打点
             val level = runCatching {
