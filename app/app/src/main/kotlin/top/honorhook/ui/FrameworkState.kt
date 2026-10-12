@@ -27,6 +27,16 @@ object FrameworkState {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /**
+     * 主线程强制预热：mutableStateOf 在 <clinit> 建。若首次触碰来自 binder 线程（onServiceBind），
+     * state 会建在一个主线程尚未 apply 的 snapshot 上 → 主线程组合读取时
+     * `IllegalStateException: Reading a state that was created after the snapshot was taken` → FC。
+     * 在 Application.onCreate（主线程）先调本方法，把类加载钉死在主线程。
+     */
+    fun warmUp() {
+        // 触发 <clinit> 即可；成员均为默认值，无副作用。
+    }
+
     /** 当前可用 XposedService（宿主写远端 prefs 用）；无服务返回 null（未激活）。 */
     fun current(): XposedService? = service
 
