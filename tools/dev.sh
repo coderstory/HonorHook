@@ -93,6 +93,7 @@ HonorHook 开发工具
   install-release  安装 release APK
   enable-module    重装后自动重新启用 LSPosed 模块（点通知+开关，含作用域进程清理）
   deploy-release   一键全流程：build-release + install-release + enable-module
+  connect <ip[:port]> 无线 adb 连接（省端口默认 5555）
   devices          列出已连接设备与授权状态
   launch           冷启动模块 App（主 Activity）
   log              实时日志：宿主阻断 + HonorHook tag
@@ -408,6 +409,18 @@ PYEOF
     "$0" install-release
     sleep 4   # 等 LSPosed 发"尚未激活"通知
     "$0" enable-module
+    ;;
+
+  # 无线 adb：dev.sh connect <ip[:port]>（省端口默认 5555）。连上后其余子命令照常（多设备时 adb 需 -s，见 devices 输出）
+  connect)
+    require "$ADB"
+    [ -n "$2" ] || die "用法：tools/dev.sh connect <ip[:port]>"
+    target="$2"
+    case "$target" in *:*) ;; *) target="${target}:5555" ;; esac
+    "$ADB" start-server >/dev/null 2>&1 || true
+    info "连接 ${target}"
+    "$ADB" connect "$target" | tr -d '\r'
+    "$ADB" devices -l | tr -d '\r'
     ;;
 
   devices)
