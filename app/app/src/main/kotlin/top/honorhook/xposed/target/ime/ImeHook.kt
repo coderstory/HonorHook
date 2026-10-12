@@ -54,6 +54,9 @@ object ImeHook : TargetHook {
     /** 剪贴板候选读数（ClipboardServiceImpl.java:59 实证 getClipboard2Candidate → u10.d().b()）。 */
     private const val CLS_CLIPBOARD_IMPL = "com.sogou.inputmethod.clipboard.impl.ClipboardServiceImpl"
 
+    /** 剪贴板候选存储直读类（defpackage 混淆名，随 IME 版本漂移，失配诚实 NOT_RESOLVED）。 */
+    private const val CLS_U10 = "u10"
+
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_IME_CODE_FREE)) {
             logDisabled(module, FeatureCatalog.KEY_IME_CODE_FREE, "ImeHook")
@@ -86,6 +89,26 @@ object ImeHook : TargetHook {
                     returnType = "boolean",
                     id = ID_CLIP,
                     description = "T4：剪贴板候选读数强制 true（同上，读数层强制，未装判断/同意框全不涉）",
+                ),
+                MountTask(
+                    // h20.k 验证码 chip 门（h20.java:131）：直接调 u10.d().b()，绕过 Service 包装 ——
+                    // 必须在存储读数层强制，否则 chip 门仍被设置页关态挡死
+                    className = CLS_U10,
+                    methodName = "b",
+                    paramCount = 0,  // 签名实证：()Z —— u10.java:48（talkback 检查在原方法内，proceed 后覆盖）
+                    returnType = "boolean",
+                    id = ID_U10B,
+                    description = "T4：剪贴板候选存储读数强制 true（h20.k 直读点）",
+                ),
+                MountTask(
+                    // h20.k 第二门（h20.java:131 SettingManager.A4）—— 候选增强开关，默认 true，
+                    // 防历史/云端写关；同为读数强制
+                    className = CLS_SETTING_MANAGER,
+                    methodName = "A4",
+                    paramCount = 0,  // 签名实证：()Z —— SettingManager.java:447
+                    returnType = "boolean",
+                    id = ID_A4,
+                    description = "T4：候选增强开关读数强制 true（默认本 true，防写关）",
                 ),
             ),
             module,
@@ -136,4 +159,6 @@ object ImeHook : TargetHook {
     private const val ID_ZF = "ime:SettingManager.zf"
     private const val ID_X5 = "ime:SettingManager.X5"
     private const val ID_CLIP = "ime:ClipboardServiceImpl.getClipboard2Candidate"
+    private const val ID_U10B = "ime:u10.b"
+    private const val ID_A4 = "ime:SettingManager.A4"
 }

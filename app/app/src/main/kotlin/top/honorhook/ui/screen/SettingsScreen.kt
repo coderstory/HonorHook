@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.add
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.captionBar
@@ -278,13 +281,20 @@ private fun RestartPicker(
     onCancel: () -> Unit,
 ) {
     Column {
-        FeatureCatalog.targets.forEach { target ->
-            CheckboxPreference(
-                title = target.name,
-                summary = RESTART_SIDE_EFFECT[target.packageName] ?: target.packageName,
-                checked = target.packageName in selected,
-                onCheckedChange = { onToggle(target.packageName, it) },
-            )
+        // 目标数随 scope 增长（现 13），纯 Column 会撑爆 WindowDialog：限高内滚动
+        Column(
+            modifier = Modifier
+                .heightIn(max = 420.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            FeatureCatalog.targets.forEach { target ->
+                CheckboxPreference(
+                    title = target.name,
+                    summary = RESTART_SIDE_EFFECT[target.packageName] ?: target.packageName,
+                    checked = target.packageName in selected,
+                    onCheckedChange = { onToggle(target.packageName, it) },
+                )
+            }
         }
         Row(
             modifier = Modifier.padding(top = 8.dp),
