@@ -40,6 +40,14 @@ object ThemeStoreHook : TargetHook {
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
+    /** DOWNLOAD_TYPE_ROUTE 的 DownloadInfo 实例获取（口径同 isUriBlank 的 UriOwner 分派；drift → null → 放行）。 */
+    private fun downloadInfoFor(chain: XposedInterface.Chain, task: MountTask): Any? = when (task.uriOwner) {
+        UriOwner.THIS -> chain.thisObject
+        UriOwner.GET_DOWNLOAD_INFO -> chain.thisObject?.let { owner ->
+            cachedMethod(owner, "getDownloadInfo")?.invoke(owner)
+        }
+    }
+
     /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 kind 分派的 intercept 构造）。 */
     private fun mountOne(
         task: MountTask,
@@ -56,6 +64,40 @@ object ThemeStoreHook : TargetHook {
                 // 常量短路：命中即返回强制值，不调原方法
                 MountKind.CONST -> builder.intercept { chain ->
                     if (routeActive(chain, module, task)) value else chain.proceed()
+                }
+                // 下载类型路由（2026-10-12，docs/reverse/theme-store.md §E）：
+                // o52.addDownloadItem 是下载策略唯一分派点（o52.java:604 免费分支审计门 / :616 付费分派），
+                // getDownloadType 是其唯一读点。按 DownloadInfo 实际状态改写分派值，三类目标各归其道：
+                //   空 URL → 3（f71 VIP 试用授权，原 H2b 语义：付费资源服务端不下发 JSON 直链，须 sendProduct 签发）
+                //   免费但加密（isSpecialEncrypt）→ 4（a71 审计通道 = o52 原生 free+enc+4 路线，
+                //     sendAuditProduct 免购买签发 URL+内容密钥——小部件/图标「文件已损坏」的根治）
+                //   有 URL 付费项（price>0 / -100 已购标记）→ 3（避开 c71 普通购买策略弹 IAP 支付页）
+                //   真免费明文直链 → 放行原值（不误伤）
+                // DownloadInfo.price/isSpecialEncrypt 是 public 字段且 d.setDownloadInfo 用**字段直拷**（d.java:174/196），
+                // 不经过被 F2 hook 的 getter——此处读到的是服务端真实值，路由判定不受 F2 影响。
+                MountKind.DOWNLOAD_TYPE_ROUTE -> builder.intercept { chain ->
+                    val info = downloadInfoFor(chain, task)
+                    if (info == null) {
+                        chain.proceed()   // 实例缺失/反射漂移 → 放行（安全默认）
+                    } else {
+                        val uri = reflectGet(info, "uri") as? String
+                        val price = (reflectGet(info, "price") as? Double) ?: 0.0
+                        val encrypted = reflectGet(info, "isSpecialEncrypt") as? Boolean ?: false
+                        // uri 判空口径与 isUriBlank 一致：空串/"null" 占位/无 "://"
+                        val uriBlank = uri == null || uri.isEmpty() || uri == "null" || !uri.contains("://")
+                        val route = when {
+                            uriBlank -> 3
+                            encrypted && price <= 0.0 -> 4
+                            price > 0.0 || price == -100.0 -> 3
+                            else -> null
+                        }
+                        if (route == null) {
+                            chain.proceed()
+                        } else {
+                            engine.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
+                            route
+                        }
+                    }
                 }
                 // 参数强制（setter 写点 / 下载类型路由点）
                 MountKind.FORCE_ARG -> builder.intercept { chain ->

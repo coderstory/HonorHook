@@ -73,7 +73,7 @@ internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
 internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 
 /** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制； */
-internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX }
+internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE }
 
 /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
 internal enum class UriOwner { THIS, GET_DOWNLOAD_INFO }
@@ -186,6 +186,7 @@ internal fun actionDesc(task: MountTask): String = when (task.kind) {
     MountKind.FINISH_ACTIVITY -> "放行原方法后 finish Activity"
     MountKind.PRE_PROCESS -> "前置修正 this 数据后放行原方法"
     MountKind.VIP_STATE_FIX -> "VipState 实例字段改写（after，null 自建）"
+    MountKind.DOWNLOAD_TYPE_ROUTE -> "downloadType 按 DownloadInfo 状态分派（空URL→3 / 免费加密→4 / 付费→3，见 theme-store.md §E）"
 }
 
 /** 反射方法缓存（`类名#方法名` → Method），避免在 getList 这类的取数路径上反复查找。 */
