@@ -80,15 +80,23 @@ object ThemeStoreHook : TargetHook {
                     if (info == null) {
                         chain.proceed()   // 实例缺失/反射漂移 → 放行（安全默认）
                     } else {
-                        val uri = reflectGet(info, "uri") as? String
-                        val price = (reflectGet(info, "price") as? Double) ?: 0.0
-                        val encrypted = reflectGet(info, "isSpecialEncrypt") as? Boolean ?: false
+                        // uri/price/isSpecialEncrypt 必须走**字段直读**（reflectFieldGet）：三者是
+                        // DownloadInfo 的 public 字段且无同名 getter（DownloadInfo.java:119/131/145），
+                        // getMethod 语义的 reflectGet 全读 null → uriBlank 恒 true → 每次下载误路由 3
+                        // （W3，2026-10-12；详见 reflectFieldGet 注释与 theme-store.md §E）。
+                        val uri = reflectFieldGet(info, "uri") as? String
+                        val price = (reflectFieldGet(info, "price") as? Double) ?: 0.0
+                        val encrypted = reflectFieldGet(info, "isSpecialEncrypt") as? Boolean ?: false
                         // uri 判空口径与 isUriBlank 一致：空串/"null" 占位/无 "://"
                         val uriBlank = uri == null || uri.isEmpty() || uri == "null" || !uri.contains("://")
+                        // 付费判定（含 -100 已购标记）先于加密判定：-100+加密若落入审计通道会改走
+                        // getAuditApplyThemeLicenseV2（与 §E.3「付费→3」表不一致）；真免费（price=0）
+                        // 加密项才进 4 审计通道（a71，字节码实证 free 分支 new a71 后 move-object v0 接回
+                        // downloadItem，jadx 丢弃了该 move——o52 smali 0x010f-0x0136）
                         val route = when {
                             uriBlank -> 3
-                            encrypted && price <= 0.0 -> 4
                             price > 0.0 || price == -100.0 -> 3
+                            encrypted && price <= 0.0 -> 4
                             else -> null
                         }
                         if (route == null) {
