@@ -48,7 +48,7 @@
 ## 构建 gotchas
 
 - `packaging { excludes += "**" }` + 显式 merge `META-INF/xposed/*` = 混淆后 `java_init.list` 存活的保证；动 proguard/packaging 必须回归 release 包元数据
-- release = 混淆 + 收缩 + debug 签名；`abiFilters` 只 arm64
+- release = 混淆 + 收缩 + 稳定 keystore 签名（CI 走 Secrets `-Phh*`，本地走 gitignored `app/app/signing.properties`，无凭据回落 debug；keystore 在 `tools/signing/`，备份见 `credentials.txt`）；`abiFilters` 只 arm64
 - 模块名/简介只从 `<application>` 的 label 与 description（必须 `@string`）读
 - DexKit 兜底必须有内容锚点，无锚点诚实跳过（`NOT_RESOLVED`），不猜类名
 - 失败分级：`FAILED` = 重试无意义；`NOT_RESOLVED` = 随类加载重试

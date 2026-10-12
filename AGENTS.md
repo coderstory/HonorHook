@@ -12,7 +12,7 @@
 tools/dev.sh help            # 子命令全量清单（唯一权威）
 tools/dev.sh env             # 工具链解析结果：java/adb/aapt2/apktool/jadx 在哪
 tools/dev.sh build           # debug APK
-tools/dev.sh build-release   # release APK（混淆+收缩+debug 签名）
+tools/dev.sh build-release   # release APK（混淆+收缩+稳定 keystore 签名）
 tools/dev.sh test            # JVM 单测（= :app:testDebugUnitTest）
 tools/dev.sh deploy-release  # build-release + install-release + enable-module
 ```
@@ -69,7 +69,7 @@ N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**
 
 ## 构建 gotchas
 
-- release = 混淆 + 资源收缩 + **debug 签名**；`abiFilters` 只有 `arm64-v8a`
+- release = 混淆 + 资源收缩 + **稳定 keystore 签名**（CI Secrets / 本地 `app/app/signing.properties`，缺省回落 debug）；`abiFilters` 只有 `arm64-v8a`
 - `packaging { excludes += "**" }` + 显式 `merges += "META-INF/xposed/*"` 是混淆后 `java_init.list` 存活的**唯一保证**。动 proguard / packaging 必须回归 release 包的 Xposed 元数据
 - `HookEntry` 必须具名且禁止混淆（proguard 里有具名 keep，不是通配 + allowobfuscation——那是锁步脆弱设计，R8 改行为时构建零报错但模块被静默跳过）
 - `libxposed` api 是 `compileOnly`，proguard 需要 `-dontwarn io.github.libxposed.annotation.**`

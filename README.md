@@ -38,11 +38,18 @@ SystemUI [`docs/reverse/systemui.md`](docs/reverse/systemui.md)、UI 面板 [`ui
 
 ```bash
 tools/dev.sh build           # debug APK
-tools/dev.sh build-release   # release APK（混淆 + 资源收缩，debug 签名直出）
+tools/dev.sh build-release   # release APK（混淆 + 资源收缩；签名用稳定 keystore，见下）
 tools/dev.sh test            # JVM 单元测试（表驱动决策回归）
 ```
 
 或直接 Gradle：`./app/gradlew -p app assembleRelease`
+
+### 签名（在线更新可覆盖安装的前提）
+
+release 用稳定 keystore 签名，三级取值：CI Secrets 注入 `-Phh*` 属性 > 本地 gitignored
+`app/app/signing.properties`（引用 `tools/signing/honorhook-release.jks`）> 缺省回落 debug keystore。
+CI 每次 run 的 debug keystore 随机生成，签名不一致会导致覆盖安装失败（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`），
+故发布构建必须走前两级。keystore 与口令永不入库（公开仓库）；本地备份见 `tools/signing/credentials.txt`。
 
 ## 安装
 

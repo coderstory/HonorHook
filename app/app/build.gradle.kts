@@ -25,14 +25,39 @@ android {
         }
     }
 
+    // 稳定 release 签名（在线更新覆盖安装的前提：签名跨构建必须一致，debug keystore 在 CI 上每次 run 随机生成）。
+    // 取值优先级：-Phh* gradle 属性（CI Secrets 注入）> 本地未入库 app/app/signing.properties > debug keystore 回落。
+    // 公开仓库：keystore 与口令永不入库；备份见 tools/signing/credentials.txt（gitignored）。
+    val signingProps: Map<String, String> =
+        file("signing.properties").takeIf { it.isFile }?.readLines()
+            ?.filter { '=' in it }?.associate {
+                val (k, v) = it.split('=', limit = 2)
+                k.trim() to v.trim()
+            } ?: emptyMap()
+    fun hhProp(name: String): String? =
+        providers.gradleProperty("hh$name").orElse(signingProps["hh$name"] ?: "").get().ifBlank { null }
+
+    val stableCreds = listOf("KeystoreFile", "StorePassword", "KeyAlias", "KeyPassword").mapNotNull { name ->
+        hhProp(name)?.let { name to it }
+    }
+    if (stableCreds.size == 4) {
+        signingConfigs.create("stable") {
+            val creds = stableCreds.toMap()
+            storeFile = file(creds.getValue("KeystoreFile"))
+            storePassword = creds.getValue("StorePassword")
+            keyAlias = creds.getValue("KeyAlias")
+            keyPassword = creds.getValue("KeyPassword")
+        }
+    }
+
     buildTypes {
         release {
-            // 混淆 + 资源收缩 + debug 签名直出（本机无正式 keystore）；
+            // 混淆 + 资源收缩；签名走上方 stable（无凭据回落 debug keystore）。
             // proguard-rules.pro 已备 java_init.list 改写 + XposedModule 入口 keep 规则。
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("stable") ?: signingConfigs.getByName("debug")
         }
     }
 

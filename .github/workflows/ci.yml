@@ -56,9 +56,27 @@ jobs:
 
       # master 分支：编译 release 并发 GitHub Release
       # -PbuildNum：run_number 注入 BuildConfig.BUILD_NUM，与 tag v<version>.r<N> 对齐供在线更新对比
+      # 签名：稳定 keystore 从 Secrets 注入（签名跨 run 一致 = 在线更新可覆盖安装；
+      # debug keystore 在 CI 每次随机生成，不可用于发布）。
+      - name: Decode signing keystore (master)
+        if: github.ref_name == 'master'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.HONORHOOK_KEYSTORE_BASE64 }}
+        run: printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/honorhook-release.jks"
+
       - name: Build release (master)
         if: github.ref_name == 'master'
-        run: ./app/gradlew -p app assembleRelease -PbuildNum=${{ github.run_number }} --no-daemon --stacktrace
+        env:
+          HH_STORE_PASSWORD: ${{ secrets.HONORHOOK_STORE_PASSWORD }}
+          HH_KEY_ALIAS: ${{ secrets.HONORHOOK_KEY_ALIAS }}
+          HH_KEY_PASSWORD: ${{ secrets.HONORHOOK_KEY_PASSWORD }}
+        run: |
+          ./app/gradlew -p app assembleRelease -PbuildNum=${{ github.run_number }} \
+            -PhhKeystoreFile="$RUNNER_TEMP/honorhook-release.jks" \
+            -PhhStorePassword="$HH_STORE_PASSWORD" \
+            -PhhKeyAlias="$HH_KEY_ALIAS" \
+            -PhhKeyPassword="$HH_KEY_PASSWORD" \
+            --no-daemon --stacktrace
 
       - name: Publish release (master)
         if: github.ref_name == 'master'

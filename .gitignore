@@ -17,6 +17,9 @@ tools/jadx/
 tools/jadx.zip
 tools/apktool.jar
 tools/__pycache__/
+# 签名资产（keystore + 口令 + 本地 signing.properties，公开仓库绝不入库；备份见 tools/signing/credentials.txt）
+tools/signing/
+app/app/signing.properties
 
 # Gradle 构建产物与本地配置
 app/.gradle/
