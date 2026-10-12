@@ -84,6 +84,7 @@ CONST_STR_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+([A-Z][A-Z0-9_]
 CONST_INT_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+([A-Z][A-Z0-9_]*)\s*=\s*(\d+)')
 PKG_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG\s*=\s*"((?:[^"\\]|\\.)*)"')
 PKG_HN_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG_HN\s*=\s*"((?:[^"\\]|\\.)*)"')
+PKG_HNOUC_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+PKG_HNOUC\s*=\s*"((?:[^"\\]|\\.)*)"')
 # add* 位置式封装（Exam8 addConst/addConditional、Installer addBlock…）：第一参 pending，前 5 参同构
 POS_MOUNT_RE = re.compile(
     r'\badd[A-Z]\w*\(\s*pending\s*,\s*'
@@ -103,11 +104,21 @@ def unescape_kotlin_str(raw: str) -> str:
     """Kotlin 字符串字面量 → 实际值（本项目只出现 \\$ 转义；通用处理 \\x）。"""
     return re.sub(r'\\(.)', r'\1', raw)
 
-def resolve_class_name(cls_ref: str, clss: dict, pkg: str) -> str:
-    """className 引用 → 全限定类名：CLS_* 查常量表；字符串字面量直接解析。"""
+def resolve_class_name(cls_ref: str, clss: dict, pkg: str, pkg_hn: str = '', pkg_hnouc: str = '') -> str:
+    """className 引用 → 全限定类名：CLS_* 查常量表；字符串字面量直接解析并展开 $PKG* 模板。
+
+    模板替换必须最长优先（$PKG_HNOUC → $PKG_HN → $PKG）：$PKG 是 $PKG_HNOUC 的前缀，
+    先替 $PKG 会把 $PKG_HNOUC 撕成 "<thememanager>_HNOUC"（审计 2026-10-12 major 项）。"""
     if cls_ref.startswith('CLS_'):
         return clss[cls_ref]
-    return unescape_kotlin_str(cls_ref).strip('"')   # 字符串字面量形式（如 "java.net.Socket"）剥引号
+    val = unescape_kotlin_str(cls_ref).strip('"')   # 字符串字面量形式（如 "java.net.Socket"）剥引号
+    if '$PKG_HNOUC' in val and pkg_hnouc:
+        val = val.replace('$PKG_HNOUC', pkg_hnouc)
+    if '$PKG_HN' in val and pkg_hn:
+        val = val.replace('$PKG_HN', pkg_hn)
+    if '$PKG' in val and pkg:
+        val = val.replace('$PKG', pkg)
+    return val
 
 def extract_call_block(text: str, start: int) -> str:
     """从匹配起点（已含开括号）向后做括号深度扫描，截取整个调用块文本。失败返回 ''。"""
@@ -134,6 +145,7 @@ def extract_mounts() -> list:
     global_int_consts: dict = {}   # 全大写整型常量（paramCount 引用，如 BIND_PARAM_COUNT）
     global_pkg: str = ''  # 全局 PKG（从 ThemeStoreParts.kt 继承）
     global_pkg_hn: str = ''  # 全局 PKG_HN（从 InstallerHook.kt 继承）
+    global_pkg_hnouc: str = ''  # 全局 PKG_HNOUC（从 OucHook.kt 继承）
     for hf in hook_files:
         src = hf.read_text(encoding='utf-8', errors='replace')
         pkg_m = PKG_DEF_RE.search(src)
@@ -142,6 +154,9 @@ def extract_mounts() -> list:
         pkg_hn_m = PKG_HN_DEF_RE.search(src)
         if pkg_hn_m:
             global_pkg_hn = unescape_kotlin_str(pkg_hn_m.group(1))
+        pkg_hnouc_m = PKG_HNOUC_DEF_RE.search(src)
+        if pkg_hnouc_m:
+            global_pkg_hnouc = unescape_kotlin_str(pkg_hnouc_m.group(1))
     # 构建全局常量表（应用模板替换）
     for hf in hook_files:
         src = hf.read_text(encoding='utf-8', errors='replace')
@@ -162,6 +177,7 @@ def extract_mounts() -> list:
         src = hf.read_text(encoding='utf-8', errors='replace')
         pkg = global_pkg
         pkg_hn = global_pkg_hn
+        pkg_hnouc = global_pkg_hnouc
         clss = dict(global_clss)  # 从全局常量表继承（已应用模板替换）
         seen = set()
         for m in NAMED_MOUNT_RE.finditer(src):
@@ -176,21 +192,21 @@ def extract_mounts() -> list:
             # 匹配起点在 className，块提取须回退到调用开括号（HookPoint/MountTask）
             block = extract_call_block(src, src.rfind('(', 0, m.start()))
             rt_m = re.search(r'returnType\s*=\s*("(?:[^"\\]|\\.)*"|CLS_[A-Z0-9_]+)', block)
-            ret = resolve_class_name(rt_m.group(1).strip('"'), clss, pkg) if rt_m else ''
+            ret = resolve_class_name(rt_m.group(1).strip('"'), clss, pkg, pkg_hn, pkg_hnouc) if rt_m else ''
             # 数据表 HookPoint 有 id 字段；源码直挂 MountTask 无 id，回退按项目 id 约定（小写前缀:名称）搜块内字符串
             id_m = re.search(r'\bid\s*=\s*"([^"]+)"', block)
             mid = id_m.group(1) if id_m else ''
             if not mid:
                 id_m2 = re.search(r'"[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[^"]+"', block)
                 mid = id_m2.group(0).strip('"') if id_m2 else ''
-            _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
+            _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg, pkg_hn, pkg_hnouc),
                  method, pcount, ret, mid)
         for m in POS_MOUNT_RE.finditer(src):
             # add* 位置式封装（Exam8 addConst/addConditional、Installer addBlock…）
             cls_ref, method, pcount, ret = (m.group(1), m.group(2), int(m.group(3)), m.group(4))
             block = extract_call_block(src, m.start())
             id_m = re.search(r'"[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[^"]+"', block)
-            _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg),
+            _add(mounts, seen, hf.name, pkg, resolve_class_name(cls_ref, clss, pkg, pkg_hn, pkg_hnouc),
                  method, pcount, unescape_kotlin_str(ret), id_m.group(0).strip('"') if id_m else '')
     if not mounts:
         raise SystemExit('挂载点提取结果为 0——Hook 源码里没有可识别的挂载调用，请检查书写格式')
