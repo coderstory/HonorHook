@@ -103,8 +103,42 @@ internal fun pruneBottomTabPayload(orig: Any?, module: XposedModule): List<*>? {
     return out
 }
 
-internal fun fixWallpaperPackagePath(chain: XposedInterface.Chain, module: XposedModule) {
+/**
+ * W2 付费壁纸密文强制解密（2026-10-12，第二处 A1 撕裂）：
+ * `bz2.createApplyWallPaper`（defpackage/bz2.java:256）以 `isNeedPayItem()` 门控解密——F2 A1 把它
+ * 强 false ⇒ 付费壁纸**跳过 getDecryptWallpaperFile**，`.payed` 密文直达动态壁纸引擎 → 解不出 →
+ * `reportApplyFailedEvent("403")` 纯埋点 →「点击应用没反应」。
+ * 修：入口前置——packagePath 含 `.payed` 即按付费路径强制解密（判文件位置，不依赖被 A1 改写的判定）；
+ * 复用宿主 `gl5.getDecryptWallpaperFile(serviceId, file)`（有解密缓存则复用；gl5 类名混淆，
+ * DexKit 锚点 = 解密工具日志串）。
+ */
+internal fun decryptPaidWallpaper(chain: XposedInterface.Chain, module: XposedModule, loader: ClassLoader) {
     runCatching {
+        val info = chain.getArg(0) ?: return
+        val pathField = info.javaClass.getField("packagePath")
+        val cur = pathField.get(info) as? String
+        if (cur.isNullOrEmpty() || !cur.contains(".payed")) return   // 免费/已解密路径 → 零干预
+        val file = java.io.File(cur)
+        if (!file.exists()) return
+        val serviceId = info.javaClass.getField("serviceId").get(info).toString()
+        val gl5 = runCatching { loader.loadClass("gl5") }.getOrElse {
+            module.log(Log.WARN, TAG, "壁纸解密工具类漂移（gl5），放行原逻辑")
+            return
+        }
+        val decrypted = gl5.getDeclaredMethod("getDecryptWallpaperFile", String::class.java, java.io.File::class.java)
+            .invoke(null, serviceId, file) as? java.io.File
+        if (decrypted != null && decrypted.exists()) {
+            pathField.set(info, decrypted.canonicalPath)
+            module.log(Log.INFO, TAG, "W2 壁纸密文已解密: serviceId=$serviceId → ${decrypted.canonicalPath}")
+        } else {
+            module.log(Log.WARN, TAG, "W2 壁纸解密产物不存在（内容密钥缺失? serviceId=$serviceId），packagePath 保留密文")
+        }
+    }.onFailure { t ->
+        module.log(Log.WARN, TAG, "W2 壁纸解密前置失败（放行原逻辑）: ${t.message}")
+    }
+}
+
+internal fun fixWallpaperPackagePath(chain: XposedInterface.Chain, module: XposedModule) {    runCatching {
         val activity = chain.thisObject ?: return
         val info = activity.javaClass.getDeclaredField("mInfo").apply { isAccessible = true }.get(activity)
             ?: return

@@ -996,6 +996,24 @@ URL 写入 `downloadInfo.uri` 后 `super.downloadItem()` 直下。）
 a71/f71 的成功路径一致：`productSendFinish` 校验 secretKeySaveResult（Pair.second）→
 `uri=签名URL; super.downloadItem()` → 带密钥闭环下载。失败路径弹「下载失败」并 abort（非静默）。
 
+### E.5 动态壁纸「应用没反应」定案（2026-10-12 真机+provider 实证）
+
+真机数据：付费壁纸 .mp4 已下载成功（下载表 status=6，`.payed/HNWallpapers`），应用静默无反应、
+无 dialog、W1 无日志（路径检查通过——文件确实在，是**密文**）。
+
+根因 = **第二处 A1 撕裂**：`bz2.createApplyWallPaper`（defpackage/bz2.java:256）以
+`isNeedPayItem()` 门控解密——F2 A1 强 false ⇒ `getDecryptWallpaperFile` 跳过 ⇒ 密文直达
+`CommonEngine.setDynamicWallpaper` → 解不出 → `reportApplyFailedEvent("403")` 纯埋点静默。
+（ecota 定制开关已排除：`msc.ecota.change_wallpaper_disable` 真机为空。）
+
+修 = **W2**（`theme:WallpaperPreview.decryptPaidWp`）：`createApplyWallPaper` PRE_PROCESS，
+packagePath 含 `.payed` 即强制 `gl5.getDecryptWallpaperFile(serviceId, file)` 换明文路径
+（判文件位置，不依赖被 A1 改写的判定）。gl5 类名混淆，锚点 = 解密工具日志串。
+若 W2 判据报「解密产物不存在」= 内容密钥缺失（下载未走 sendProduct 签发），转下载层查。
+
+另：**付费主题/付费字体连下载表都没进** = 下载层 dispatch 前 abort（server 对 theme/font 的
+试用授权判定待真机 logcat 实证）；付费壁纸/AOD/小部件/图标下载全成功。
+
 ### E.4 待真机分诊（静态无法定案）
 
 - **字体 0%**：字体详情经 H5（CommonJsPlugin.WebDetailBean）→ g.java:474-520 组 FontInfo →

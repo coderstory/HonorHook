@@ -165,6 +165,8 @@ object ThemeStoreHook : TargetHook {
                     if (routeActive(chain, module, task)) {
                         if (task.id == "theme:WallpaperPreview.fixPackagePath") {
                             fixWallpaperPackagePath(chain, module)  // W1：壁纸 packagePath 路径撕裂修复
+                        } else if (task.id == "theme:WallpaperPreview.decryptPaidWp") {
+                            decryptPaidWallpaper(chain, module, loader)  // W2：付费壁纸密文强制解密（A1 撕裂第二处）
                         } else {
                             pruneTabStateFlowBeforeCreateTabs(chain, module)  // S2b：tab 缓存路径兜底
                         }
