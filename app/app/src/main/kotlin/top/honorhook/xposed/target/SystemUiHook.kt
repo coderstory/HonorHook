@@ -49,6 +49,10 @@ object SystemUiHook : TargetHook {
     /** 单卡信号视图布局里的 5G/4G 类型标 view id（Resource entry name，运行时 getIdentifier 取）。 */
     private const val ID_MOBILE_TYPE = "mobile_type"
 
+    /** 类型标收口点（U2b）：所有图标 drawable 设置的必经静态工具（jadx 实证，类/方法未混淆）。 */
+    private const val CLS_SIGNAL_UTILS = "com.android.systemui.utils.HnSignalUtils"
+    private const val METHOD_SET_ICON_FOR_VIEW = "setIconForView"
+
     /** 副卡 = 卡槽 2（SubscriptionModel.slotId 0-based；SimData slotId=1/subId=2 真机实证）。 */
     private const val HIDDEN_SLOT_ID = 1
 
@@ -89,6 +93,23 @@ object SystemUiHook : TargetHook {
                 description = "U2 隐藏 5G/4G 类型标（bind 入参 View 内 mobile_type 置 GONE；单卡双卡一律生效）",
                 dex = DexHint(classStrings = listOf("signal_unit_normal_view")),
             )
+            // U2b 类型标收口（2026-10-12 systemui-jadx 实证）：只在 bind() 置一次 GONE 不够——
+            // mobile_type 可见性由网络类型 StateFlow 驱动：SignalIconBinder$bind$1$2$1$4 收集
+            // commonImpl.getNetworkTypeIcon()，每次发射走 C01821 case 1：
+            //   IconViewBinder.bind(resource, view)（Icon.Resource → setIconForView 设 drawable）
+            //   随后 view.setVisibility(0)（SignalIconBinder.java:437-439）——首条发射即把 GONE 复原，
+            //   U2 的 bind 时置 GONE 被覆盖 ⇒ 5G 标仍在。uct 布局变体同构（AnonymousClass9 :907-925）。
+            // 收口在 setIconForView：命中类型标 view 就 GONE + 短路；drawable 不再设置，
+            // 外层随后的 setVisibility(0) 只剩无 drawable 无 margin 的空 view，不占位（margin 已被 U2 清零）。
+            pending += MountTask(
+                className = CLS_SIGNAL_UTILS,
+                methodName = METHOD_SET_ICON_FOR_VIEW,
+                paramCount = 2,
+                returnType = "void",
+                id = ID_SET_ICON_FOR_VIEW,
+                description = "U2b 5G/4G 类型标收口（setIconForView 命中 mobile_type/mobile_signal_type 置 GONE 并短路，覆盖 StateFlow 重显路径）",
+                dex = DexHint(strings = listOf("setIconForView:imageView is null, return")),
+            )
         } else {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_5G, "SystemUiHook")
         }
@@ -116,6 +137,7 @@ object SystemUiHook : TargetHook {
 
     /** 挂载点 id（mountOne 按 id 分派）。 */
     private const val ID_HIDE_5G = "systemui:signalIconBinder.bind"
+    private const val ID_SET_ICON_FOR_VIEW = "systemui:hnSignalUtils.setIconForView"
 
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
     private val unreadableWarned = AtomicBoolean(false)
@@ -123,6 +145,7 @@ object SystemUiHook : TargetHook {
     private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
             ID_HIDE_5G -> mountHide5G(task, module, loader)
+            ID_SET_ICON_FOR_VIEW -> mountTypeIconSink(task, module, loader)
             else -> mountHideSim2(task, module, loader)
         }
 
@@ -183,6 +206,36 @@ object SystemUiHook : TargetHook {
             chain.proceed()
             null   // void 方法：必须显式 null
         }
+
+    /** 类型标 view 的资源 entry name（normal 布局 mobile_type / uct 布局 mobile_signal_type；uct_mobile_type_roam 混漫游语义不收）。 */
+    private val TYPE_VIEW_NAMES = setOf("mobile_type", "mobile_signal_type")
+
+    /**
+     * U2b 收口：setIconForView(ImageView, int) 是所有图标 drawable 设置的必经点（信号格/漫游/箭头/类型标
+     * 全走它，HnSignalUtils.java:28）。命中类型标 view → GONE + 短路；其余一律放行（信号格等不受影响）。
+     */
+    private fun mountTypeIconSink(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
+            // void 方法：回调必须显式返回 null（见 mountHideSim2 的崩溃实证注释）
+            val iconView = runCatching { chain.getArg(0) as? android.widget.ImageView }.getOrNull()
+            if (iconView != null && isTypeIconView(iconView)) {
+                runCatching { iconView.visibility = android.view.View.GONE }
+                engine.judge(module, task, JUDGE_PREFIX, "类型标收口命中，已 GONE")
+                null   // 短路：drawable 不设置；外层随后的 setVisibility(0) 只作用于空 view
+            } else {
+                chain.proceed()
+                null
+            }
+        }
+
+    /** 按 view id 的资源 entry name 判类型标（id 为 0/读不到 = 不命中，放行原逻辑）。 */
+    private fun isTypeIconView(view: android.view.View): Boolean {
+        val name = runCatching {
+            val id = view.id
+            if (id == 0) null else view.resources.getResourceEntryName(id)
+        }.getOrNull()
+        return name != null && name in TYPE_VIEW_NAMES
+    }
 
     /** 在每卡视图里找 `mobile_type` 并置 GONE；返回是否命中。 */
     private fun hideMobileType(cardView: android.view.View): Boolean {

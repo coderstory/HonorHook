@@ -126,8 +126,38 @@ StateFlow → `setIconForView` 才是**。该方法（`com.android.systemui.util
 ### 7.5 U2 隐藏 5G 标
 
 挂 `SignalIconBinder.bind`（6 参、具名、静态、无重载歧义），第 2 参是每卡的 `SignalUnitNormalView`，
-在宿主把 `mobile_type` 交给协程绑定**之前**置 `GONE`。`bind` 只在每卡视图创建时调一次（随 `updateSubs` 重建），
-故置 GONE 即持久。找不到 `mobile_type` 时**留痕告警**（布局漂移信号，不刷屏）。
+在宿主把 `mobile_type` 交给协程绑定**之前**置 `GONE`。找不到 `mobile_type` 时**留痕告警**（布局漂移信号，不刷屏）。
+
+> ⚠️ 2026-10-12 勘误：原文「bind 只在每卡视图创建时调一次（随 updateSubs 重建），故置 GONE 即持久」
+> **不成立**——mobile_type 可见性由网络类型 StateFlow 驱动，首条发射即把 GONE 复原（§7.10）。
+> 真机现象「installed 2/2 但 5G 没去掉」即此。本点降级为「初始 GONE + 清 margin」，根治靠 U2b 收口。
+
+### 7.10 U2 根因与收口（2026-10-12，jadx 静态实证）
+
+**为什么 bind 时置 GONE 必被复原**：`SignalIconBinder.bind` 内 launch 的
+`SignalIconBinder$bind$1$2$1$4` 收集 `commonImpl.getNetworkTypeIcon()`（distinctUntilChanged），
+每次发射走 `C01821` case 1（SignalIconBinder.java:437-439）：
+
+```
+if (resource != null) IconViewBinder.bind(resource, view)   // Icon.Resource → HnSignalUtils.setIconForView(view, res)
+view.setVisibility(resource == null ? 8 : 0)                 // 非空资源 → 无条件 VISIBLE
+```
+
+StateFlow collect 首条发射立刻到达 ⇒ bind 时的 GONE 被覆盖。uct 布局变体同构
+（`AnonymousClass9`，SignalIconBinder.java:907-925：int id 非 0 → setVisibility(0)+setIconForView）。
+
+**收口（U2b）**：`HnSignalUtils.setIconForView(ImageView, int)`（HnSignalUtils.java:28，静态 void，
+未混淆，方法体日志串 `"setIconForView:imageView is null, return"` 可做 DexKit 锚点）是**所有**
+图标 drawable 设置的必经点（信号格 :432 / 漫游 :615 / 数据箭头 :688/:759 / uct 类型 :911/:925 /
+IconViewBinder 的 Icon.Resource 路同走它）。挂它，按 view id 的资源 entry name 过滤：
+命中 `mobile_type` / `mobile_signal_type` → 置 GONE 并**短路**（drawable 不设置；外层随后的
+setVisibility(0) 只剩无 drawable 无 margin 的空 view，不占位）；其余（信号格/漫游/箭头）一律
+`proceed()` 放行——与 §7.9 教训 #2 一致：吞掉的只有类型标一路，其余放行。
+
+- `uct_mobile_type_roam` 故意不收（混漫游语义）。
+- `MobileIconBinder`（QS 瓷贴）路径若最终也走 setIconForView 且 view 同名，则一并隐藏（预期内）。
+- 数据源轨备选（未采用）：hook `LocationBasedMobileViewModel.getNetworkTypeIcon` 返回恒 null Flow
+  ——会同时杀 QS 瓷贴网络图标（MobileIconBinder$bind$1:857 同读 commonImpl），面更宽，弃。
 
 ### 7.6 U3 双卡信号合并
 
