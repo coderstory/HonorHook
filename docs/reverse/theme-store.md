@@ -956,3 +956,53 @@ URL 写入 `downloadInfo.uri` 后 `super.downloadItem()` 直下。）
   未加载时归懒加载重试）。
 - **C8** `AgreeRepo.isTrialSupportOnline`→true（云控试用开关常开）。
 - **C9** `ThemeResManager.isTrialTheme`→false（移除"试用中"判定 → 无试用角标/到期提醒）。
+
+## E · 下载族补全：免费加密资源与付费项 IAP（2026-10-12，jadx 实证 20.1.63.305）
+
+> 现象（用户报告）：小部件/图标下载后提示「文件已损坏，请重新下载」；字体下载进度卡 0%；
+> 下载记录里没有付费主题。本节给前两者的机制与修复；字体与下载记录见 §E.4 待真机分诊。
+
+### E.1 分派真相：DownloadInfo.price 是**字段直拷**，F2 getter hook 管不到下载层
+
+`common/d.setDownloadInfo`（d.java:169-223）构造 DownloadInfo 时：
+- :174 `double d = itemInfo.price` —— **字段直读**，不走被 F2 hook 的 `getPrice()`
+- :175 `downloadInfo.price = (d <= 0 || actualPrice != 0) ? actualPrice : -100.0` —— 付费项
+  （价>0 且无实付价）落到 **-100 已购标记**；`DownloadInfo.isPayedItem()`（:925）认 `>0 或 ==-100`
+- :196 `downloadInfo.isSpecialEncrypt = itemInfo.isSpecialEncrypt()`（H5 详情/列表均带此标记，
+  g.java:488/:525/:567、u02.java:206）
+
+⇒ o52.addDownloadItem（o52.java:604-634）分派时 isPayedItem 读的是**服务端真实值**：
+免费项（price 0）走免费直下分支；`downloadType==4 && isSpecialEncrypt` 才进 a71 审计通道。
+
+### E.2 「文件已损坏」机制（小部件/图标/AOD）
+
+免费但加密的项（price=0、isSpecialEncrypt=1）且 downloadType=1：免费直下分支**跳过 sendProduct**，
+裸 GET 拿到**密文**；应用时 `ThemeDecryptTool` 解密/哈希校验失败 → `toast_pkg_error`
+（「文件已损坏，请重新下载」，ThemeDecryptTool.java:121；WidgetDetailChooseActivity.java:2460
+是文件缺失分支）。密钥 `ThemesKeyStoreManager.saveResContentKey` 只在 sendProduct/sendAuditProduct
+链路里保存（OrderManagerImpl.java:335）——免费直下永远拿不到。
+
+### E.3 修复：H2b → H2b'（DOWNLOAD_TYPE_ROUTE）
+
+挂 `DownloadModel.getDownloadType`（o52 分派唯一读点），按 DownloadInfo 实际状态路由：
+
+| 状态 | 判定 | 路由值 | 落点 |
+|---|---|---|---|
+| 空 URL（空串/"null"/无 `://`） | uri | **3** | f71 VIP 试用授权（原 H2b 语义） |
+| isSpecialEncrypt && price≤0 | 加密免费 | **4** | a71 审计通道：`getDownloadUrlForAudit`→`sendAuditProduct`（免购买签发 URL+密钥，OrderManagerImpl.java:369 起）——o52 原生 free+enc+4 路线 |
+| price>0 或 ==-100 | 付费（含已购标记） | **3** | f71，避开 c71 普通购买策略弹 IAP 支付页（c71.java:70-83） |
+| 其余 | 真免费明文直链 | 放行 | 原值 |
+
+a71/f71 的成功路径一致：`productSendFinish` 校验 secretKeySaveResult（Pair.second）→
+`uri=签名URL; super.downloadItem()` → 带密钥闭环下载。失败路径弹「下载失败」并 abort（非静默）。
+
+### E.4 待真机分诊（静态无法定案）
+
+- **字体 0%**：字体详情经 H5（CommonJsPlugin.WebDetailBean）→ g.java:474-520 组 FontInfo →
+  `startItemDownload(1)`（OnlineFontPreviewActivity.java:865）→ 同一分派点。路由修复后付费字体
+  必进 f71；若仍 0% 或弹「下载失败」= 服务端对 resType=4 拒发试用授权（sendProduct resultCode
+  可查），届时需换 4 审计通道或放弃该类。判据：logcat 过 `DownloadItemIfVip|OrderManagerImpl|DownloadHandler`。
+- **动态壁纸/息屏「应用没反应」**：下载属壁纸族（g.java:525），isLiveWallpaper 单列（d.java:194）；
+  应用链是壁纸专用 apply（非 ThemeApplyState C7 那条），待复现时抓 apply 侧日志定位。
+- **下载记录缺付费主题**：记录页 = NewLocalThemeActivity（my_downloads，:315，extends CountActivity），
+  列表来源待查（本地 provider 行 or 服务端已购列表）；疑点：f71 下载项是否写 provider。
