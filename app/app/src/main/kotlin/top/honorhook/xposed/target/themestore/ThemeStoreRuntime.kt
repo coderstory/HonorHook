@@ -270,7 +270,13 @@ private var vipFixLogCount = 0
  * setter 逐个独立容错（缺失 = 版本漂移，跳过）；整体失败放行原逻辑。
  */
 internal fun fixVipState(chain: XposedInterface.Chain, module: XposedModule, task: MountTask): Any? {
-    val orig = runCatching { chain.proceed() }.getOrNull()
+    // proceed 异常必须留痕（评审 #3）：runCatching.getOrNull() 把「proceed 抛异常 + 自建填充成功」变成
+    // 静默伪造全套 VIP 的窗口——行为不变（仍自建+填充），只补 WARN 关掉静默。
+    val proceedResult = runCatching { chain.proceed() }
+    proceedResult.onFailure { t ->
+        module.log(Log.WARN, TAG, "vip-state proceed 异常（${t.message}），转自建实例")
+    }
+    val orig = proceedResult.getOrNull()
     val state = orig ?: runCatching {
         val loader = chain.thisObject?.javaClass?.classLoader
         Class.forName(CLS_VIP_STATE, true, loader).getDeclaredConstructor().newInstance()

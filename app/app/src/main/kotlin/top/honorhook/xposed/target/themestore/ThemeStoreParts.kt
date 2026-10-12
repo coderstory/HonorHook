@@ -8,7 +8,7 @@ import top.honorhook.xposed.core.MountEngine.DexHint
 
 /**
  * 主题商店 hook 的**共享部件**：目标类名常量、挂载任务类型、数据表→任务映射与运行时工具。
- * 挂载点本体在数据表 `ThemeStoreMap_*.kt`（tools/gen_hook_map.py 生成），装配与 kind 分派在 [ThemeStoreHook]。
+ * 挂载点本体在数据表 `ThemeStoreMap_*.kt`（手维护唯一事实源），装配与 kind 分派在 [ThemeStoreHook]。
  * 设计依据归档于 `docs/theme-store.md`；删除历史见 `docs/hook-inventory-audit.md` §五。
  */
 import top.honorhook.xposed.data.HookPoint
@@ -99,6 +99,8 @@ internal class MountTask(
     val forceArgIndex: Int = 0,
     /** DexKit 兜底特征（混淆名目标用；null = 仅直连轨；四维强度与纪律见 [DexHint]）。 */
     override val dex: DexHint? = null,
+    /** 功能点 id（通路汇总用，与 MountEngine.Task.group 契约对齐）。 */
+    override val group: String = "",
 ) : MountEngine.Task
 
 /** 数据表挂载点 → 运行时任务（HookPoint 的声明式字段在此落到具体类型）。 */
@@ -111,6 +113,7 @@ internal fun HookPoint.toMountTask(): MountTask = MountTask(
     value = value,
     id = id,
     description = description,
+    group = group,
     resolveValue = enumRef?.let { ref ->
         { loader: ClassLoader ->
             runCatching {

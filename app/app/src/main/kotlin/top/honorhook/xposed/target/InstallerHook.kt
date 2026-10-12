@@ -48,12 +48,19 @@ object InstallerHook : TargetHook {
         engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
 
         // 旧版宿主结构漂移 → 专用表优先；未命中任何表 = 基线源码路径（行为与表迁移前一致）
-        val pick = HostVersion.pick(installerTables, HostVersion.resolve(apkPath))
+        val actual = HostVersion.resolve(apkPath)
+        val pick = HostVersion.pick(installerTables, actual)
         val pending: List<MountTask> = if (pick.matched) {
             pick.tasks
                 .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
                 .map { it.toInstallerTask() }
         } else {
+            // 盲挂留痕（评审 R7）：基线版本不在任何精确套内是常态路径（默认套缺席），盲挂行为显式化——
+            // 判据以 installed N/M 为准（与 MountEngine.checkHostVersionOnce 的 WARN 互补：那条说风险，这条说行为）。
+            val baseline = FeatureCatalog.baselineVersionOf(packageName)
+            if (actual != null && baseline != null) {
+                module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 不在适配表，按基线 $baseline 挂载点盲挂，判据以 installed N/M 为准")
+            }
             buildSourcePending()
         }
 
@@ -63,8 +70,9 @@ object InstallerHook : TargetHook {
     /** 版本表注册：精确套（旧版）；无默认套——基线走 [buildSourcePending]。
      *  版本集唯一来源是 FeatureCatalog（extraVersions），增删适配版本只改那里；挂载点表文件名仍按版本命名。
      *  空集守卫：extraVersions 被清空时 Table(空集) 会翻成「默认套=任意版本兜底」（HostVersion.pick 语义），
-     *  旧版挂载点将打到所有宿主版本上——必须整条表剔除而非留空表。 */
-    private val installerTables =
+     *  旧版挂载点将打到所有宿主版本上——必须整条表剔除而非留空表。
+     *  internal = DecisionTablesTest 交叉校验 extraVersions ↔ 本表用（评审 #20）。 */
+    internal val installerTables =
         FeatureCatalog.extraVersionsOf(packageName).takeIf { it.isNotEmpty() }
             ?.let { listOf(HostVersion.Table(it) { INSTALLER_POINTS_14_0_22_326 }) }
             ?: emptyList()
@@ -100,6 +108,7 @@ object InstallerHook : TargetHook {
         value = value,
         id = id,
         description = description,
+        group = group,
         dex = DexHint(
             strings = dexStrings,
             paramTypes = dexParamTypes,
@@ -317,7 +326,8 @@ object InstallerHook : TargetHook {
      * [CHECK_BYPASS_RET] 检测直通·返回式（旧版：不调原方法，静态工厂 a(isHn) 的返回值直接作为方法结果，失败放行）；
      * [FINGERPRINT_BYPASS] 指纹校验直接通过（回调 c()+a(true)，失败放行原方法）。
      */
-    private enum class MountKind { CONST, BLOCK, CHECK_BYPASS, CHECK_BYPASS_RET, FINGERPRINT_BYPASS }
+    // internal = DecisionTablesTest 校验挂载表 kind 合法性用（评审 #18）
+    internal enum class MountKind { CONST, BLOCK, CHECK_BYPASS, CHECK_BYPASS_RET, FINGERPRINT_BYPASS }
 
     private class MountTask(
         val kind: MountKind,
@@ -330,6 +340,8 @@ object InstallerHook : TargetHook {
         override val description: String,
         /** DexKit 兜底特征（混淆名目标用；null = 仅直连轨；四维强度与纪律见 [DexHint]）。 */
         override val dex: DexHint? = null,
+        // group 排在 dex 之后：addConst/addBlock 走位置传参，插前会错位
+        override val group: String = "",
     ) : MountEngine.Task
 
     private fun addConst(

@@ -1,5 +1,6 @@
 package top.honorhook.xposed.target
 
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.data.HookPoint
 
 /**
@@ -21,7 +22,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "ad-request:AdCondition.checkIsSupportAdRequest",
         kind = "CONST",
-        feature = "installer.ad",
+        feature = FeatureCatalog.KEY_INSTALLER_AD,
         className = "no0",
         methodName = "b",
         paramCount = 1,
@@ -34,7 +35,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "ad-source:AdRespV2.getLocalUseAdInfos",
         kind = "CONST",
-        feature = "installer.ad",
+        feature = FeatureCatalog.KEY_INSTALLER_AD,
         className = "com.hihonor.packageinstaller.entity.resp.AdRespV2",
         methodName = "getLocalUseAdInfos",
         paramCount = 0,
@@ -45,7 +46,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "ab-request:AbExpUtils.updateAbExpStrategy",
         kind = "BLOCK",
-        feature = "installer.ad",
+        feature = FeatureCatalog.KEY_INSTALLER_AD,
         className = "lq0",
         methodName = "r",
         paramCount = 0,
@@ -56,7 +57,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "installer:SafeModeDialogGate.isShowGuideOpenSafeModeDialog",
         kind = "CONST",
-        feature = "installer.no_safe_prompt",
+        feature = FeatureCatalog.KEY_INSTALLER_NO_SAFE_PROMPT,
         className = "is0",
         methodName = "c",
         paramCount = 4,
@@ -74,7 +75,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "installer:SafeModeCard.isSupportSafeModeCardShow",
         kind = "CONST",
-        feature = "installer.no_safe_prompt",
+        feature = FeatureCatalog.KEY_INSTALLER_NO_SAFE_PROMPT,
         className = "js0",
         methodName = "f",
         paramCount = 3,
@@ -91,7 +92,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "installer:SafeModeCard.setSafeModeBottomSheetShow",
         kind = "BLOCK",
-        feature = "installer.no_safe_prompt",
+        feature = FeatureCatalog.KEY_INSTALLER_NO_SAFE_PROMPT,
         className = "js0",
         methodName = "k",
         paramCount = 2,
@@ -106,7 +107,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "installer:SecurityCheck.bypass",
         kind = "CHECK_BYPASS_RET",
-        feature = "installer.skip_check",
+        feature = FeatureCatalog.KEY_INSTALLER_SKIP_CHECK,
         className = "br0",
         methodName = "b",
         paramCount = 4,
@@ -116,7 +117,7 @@ internal val INSTALLER_POINTS_14_0_22_326: List<HookPoint> = listOf(
     HookPoint(
         id = "installer:FingerprintAuth.bypass",
         kind = "FINGERPRINT_BYPASS",
-        feature = "installer.skip_check",
+        feature = FeatureCatalog.KEY_INSTALLER_SKIP_CHECK,
         className = "c01",
         methodName = "d",
         paramCount = 2,

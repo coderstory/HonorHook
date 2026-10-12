@@ -29,10 +29,17 @@ object ThemeStoreHook : TargetHook {
         // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
-        // 挂载表 46 项（F1 VIP 12 + 挽留弹窗 2 + F2 免费化 14 + 下载链 5（H1/H2b'/W1/W2 + VIP fallback 2）
-        // + F3/F4 试用与应用态 7 + 云控读点 2 + 槽位裁剪 1 + 底部 tab 裁剪 2），
-        // 数据表 ThemeStoreMap_20_1_63_305.kt 生成；逐点清点口径**仍以真机 `installed N/M` 的 M 为准。**
-        val pick = HostVersion.pick(versionTables, HostVersion.resolve(param.applicationInfo?.sourceDir))
+        // 挂载表 46 项；各项归属见 description 编号（A/B/C/H/T/W/S 系列）。计数注释历史上一再漂移
+        // （评审 #14：43→44→46 三代不符），故不再列分类算术——以表行数与真机 installed N/M 的 M 为准。
+        // 数据表 ThemeStoreMap_20_1_63_305.kt 手维护。
+        val actual = HostVersion.resolve(param.applicationInfo?.sourceDir)
+        val pick = HostVersion.pick(versionTables, actual)
+        // 盲挂留痕（评审 R7：把隐式行为变显式日志）：默认套任意版本兜底，实际版本偏离基线 = 按基线表盲挂，
+        // 判据以 installed N/M 为准（与 MountEngine.checkHostVersionOnce 的 WARN 互补：那条说风险，这条说行为）。
+        val baseline = FeatureCatalog.baselineVersionOf(packageName)
+        if (actual != null && baseline != null && actual != baseline) {
+            module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 未适配，按基线 $baseline 挂载表盲挂，判据以 installed N/M 为准")
+        }
         val pending = pick.tasks
             .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
             .map { it.toMountTask() }
@@ -48,168 +55,162 @@ object ThemeStoreHook : TargetHook {
         }
     }
 
-    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 kind 分派的 intercept 构造）。 */
+    /** PRE_PROCESS 按 task.id 的处理函数表（评审 #12：if/else 魔法串分派表化——新表行忘登记从静默跑错变 WARN 可见）。 */
+    private val preProcessHandlers: Map<String, (XposedInterface.Chain, XposedModule, ClassLoader) -> Unit> = mapOf(
+        "theme:WallpaperPreview.fixPackagePath" to { chain, module, _ -> fixWallpaperPackagePath(chain, module) },
+        "theme:WallpaperPreview.decryptPaidWp" to { chain, module, loader -> decryptPaidWallpaper(chain, module, loader) },
+        "adsource:CreateTabs.pruneStateFlow" to { chain, module, _ -> pruneTabStateFlowBeforeCreateTabs(chain, module) },
+    )
+
+    /**
+     * 单个挂载任务执行：解析/per-task 隔离/回调留痕/汇总全部交给共享 [engine.mount]，本函数只产出 kind 分派逻辑。
+     * （评审 #13：46 点最大目标此前自行内联 resolve+builder+fold 绕开 engine——engine 的任何增强对 theme 不生效，
+     * 两份 fold 已漂移；现在收敛到统一模板。）
+     */
     private fun mountOne(
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
-    ): MountEngine.Result {
-        val method = engine.resolveTask(task, module, loader)
-            ?: return MountEngine.Result.NOT_RESOLVED
-        // resolveValue 幂等（enumConstants 纯查找，无副作用），此处二次调用仅为取值；null 情况已在 engine 内拦截
+    ): MountEngine.Result = engine.mount(task, module, loader) { chain ->
+        // resolveValue 幂等（enumConstants 纯查找，无副作用），intercept 内二次取值仅为拿强制值；
+        // null 未就绪已被 engine.resolveTask 拦成 NOT_RESOLVED（能走到这里必非 null，?: 兜底取声明值）
         val value = task.resolveValue?.invoke(loader) ?: task.value
-        return runCatching {
-            val builder = module.hook(method).setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE).setId(task.id)
-            when (task.kind) {
-                // 常量短路：命中即返回强制值，不调原方法
-                MountKind.CONST -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) value else chain.proceed()
-                }
-                // 下载类型路由（2026-10-12，docs/reverse/theme-store.md §E）：
-                // o52.addDownloadItem 是下载策略唯一分派点（o52.java:604 免费分支审计门 / :616 付费分派），
-                // getDownloadType 是其唯一读点。按 DownloadInfo 实际状态改写分派值，三类目标各归其道：
-                //   空 URL → 3（f71 VIP 试用授权，原 H2b 语义：付费资源服务端不下发 JSON 直链，须 sendProduct 签发）
-                //   免费但加密（isSpecialEncrypt）→ 4（a71 审计通道 = o52 原生 free+enc+4 路线，
-                //     sendAuditProduct 免购买签发 URL+内容密钥——小部件/图标「文件已损坏」的根治）
-                //   有 URL 付费项（price>0 / -100 已购标记）→ 3（避开 c71 普通购买策略弹 IAP 支付页）
-                //   真免费明文直链 → 放行原值（不误伤）
-                // DownloadInfo.price/isSpecialEncrypt 是 public 字段且 d.setDownloadInfo 用**字段直拷**（d.java:174/196），
-                // 不经过被 F2 hook 的 getter——此处读到的是服务端真实值，路由判定不受 F2 影响。
-                MountKind.DOWNLOAD_TYPE_ROUTE -> builder.intercept { chain ->
-                    val info = downloadInfoFor(chain, task)
-                    if (info == null) {
-                        chain.proceed()   // 实例缺失/反射漂移 → 放行（安全默认）
-                    } else {
-                        // uri/price/isSpecialEncrypt 必须走**字段直读**（reflectFieldGet）：三者是
-                        // DownloadInfo 的 public 字段且无同名 getter（DownloadInfo.java:119/131/145），
-                        // getMethod 语义的 reflectGet 全读 null → uriBlank 恒 true → 每次下载误路由 3
-                        // （W3，2026-10-12；详见 reflectFieldGet 注释与 theme-store.md §E）。
-                        val uri = reflectFieldGet(info, "uri") as? String
-                        val price = (reflectFieldGet(info, "price") as? Double) ?: 0.0
-                        val encrypted = reflectFieldGet(info, "isSpecialEncrypt") as? Boolean ?: false
-                        // uri 判空口径与 isUriBlank 一致：空串/"null" 占位/无 "://"
-                        val uriBlank = uri == null || uri.isEmpty() || uri == "null" || !uri.contains("://")
-                        // 付费判定（含 -100 已购标记）先于加密判定：-100+加密若落入审计通道会改走
-                        // getAuditApplyThemeLicenseV2（与 §E.3「付费→3」表不一致）；真免费（price=0）
-                        // 加密项才进 4 审计通道（a71，字节码实证 free 分支 new a71 后 move-object v0 接回
-                        // downloadItem，jadx 丢弃了该 move——o52 smali 0x010f-0x0136）
-                        val route = when {
-                            uriBlank -> 3
-                            price > 0.0 || price == -100.0 -> 3
-                            encrypted && price <= 0.0 -> 4
-                            else -> null
-                        }
-                        if (route == null) {
-                            chain.proceed()
-                        } else {
-                            engine.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
-                            route
-                        }
+        when (task.kind) {
+            // 常量短路：命中即返回强制值，不调原方法
+            MountKind.CONST -> {
+                if (routeActive(chain, module, task)) value else chain.proceed()
+            }
+            // 下载类型路由（2026-10-12，docs/reverse/theme-store.md §E）：
+            // o52.addDownloadItem 是下载策略唯一分派点（o52.java:604 免费分支审计门 / :616 付费分派），
+            // getDownloadType 是其唯一读点。按 DownloadInfo 实际状态改写分派值，三类目标各归其道：
+            //   空 URL → 3（f71 VIP 试用授权，原 H2b 语义：付费资源服务端不下发 JSON 直链，须 sendProduct 签发）
+            //   免费但加密（isSpecialEncrypt）→ 4（a71 审计通道 = o52 原生 free+enc+4 路线，
+            //     sendAuditProduct 免购买签发 URL+内容密钥——小部件/图标「文件已损坏」的根治）
+            //   有 URL 付费项（price>0 / -100 已购标记）→ 3（避开 c71 普通购买策略弹 IAP 支付页）
+            //   真免费明文直链 → 放行原值（不误伤）
+            // DownloadInfo.price/isSpecialEncrypt 是 public 字段且 d.setDownloadInfo 用**字段直拷**（d.java:174/196），
+            // 不经过被 F2 hook 的 getter——此处读到的是服务端真实值，路由判定不受 F2 影响。
+            MountKind.DOWNLOAD_TYPE_ROUTE -> {
+                val info = downloadInfoFor(chain, task)
+                if (info == null) {
+                    chain.proceed()   // 实例缺失/反射漂移 → 放行（安全默认）
+                } else {
+                    // uri/price/isSpecialEncrypt 必须走**字段直读**（reflectFieldGet）：三者是
+                    // DownloadInfo 的 public 字段且无同名 getter（DownloadInfo.java:119/131/145），
+                    // getMethod 语义的 reflectGet 全读 null → uriBlank 恒 true → 每次下载误路由 3
+                    // （W3，2026-10-12；详见 reflectFieldGet 注释与 theme-store.md §E）。
+                    val uri = reflectFieldGet(info, "uri") as? String
+                    val price = (reflectFieldGet(info, "price") as? Double) ?: 0.0
+                    val encrypted = reflectFieldGet(info, "isSpecialEncrypt") as? Boolean ?: false
+                    // uri 判空口径与 isUriBlank 一致：空串/"null" 占位/无 "://"
+                    val uriBlank = uri == null || uri.isEmpty() || uri == "null" || !uri.contains("://")
+                    // 付费判定（含 -100 已购标记）先于加密判定：-100+加密若落入审计通道会改走
+                    // getAuditApplyThemeLicenseV2（与 §E.3「付费→3」表不一致）；真免费（price=0）
+                    // 加密项才进 4 审计通道（a71，字节码实证 free 分支 new a71 后 move-object v0 接回
+                    // downloadItem，jadx 丢弃了该 move——o52 smali 0x010f-0x0136）
+                    val route = when {
+                        uriBlank -> 3
+                        price > 0.0 || price == -100.0 -> 3
+                        encrypted && price <= 0.0 -> 4
+                        else -> null
                     }
-                }
-                // VIP 通道下载兜底（F-fallback，2026-10-12）：f71.downloadItem 布看门狗，
-                // f71.productSendFinish 失败/15s 无回调（过期 VIP 服务端挂死，真机实证）→ 已购通道兜底。
-                // 实现（看门狗/守卫/续流）在 ThemeStoreRuntime；此处只做 kind 分派。
-                MountKind.DOWNLOAD_FALLBACK -> builder.intercept { chain ->
-                    if (task.methodName == "downloadItem") {
-                        armVipFallbackWatchdog(chain, module, loader)
+                    if (route == null) {
                         chain.proceed()
                     } else {
-                        chain.proceed()   // productSendFinish：after 语义，先让宿主失败路径跑完（toast/abort）
-                        onVipProductSendFinish(chain, module, loader)
+                        engine.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
+                        route
                     }
-                }
-                // 参数强制（setter 写点 / 下载类型路由点）
-                MountKind.FORCE_ARG -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) {
-                        val args = chain.args?.toTypedArray() ?: arrayOfNulls<Any?>(task.forceArgIndex + 1)
-                        args[task.forceArgIndex] = value
-                        chain.proceedWith(chain.thisObject, args)
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // 云控读点：按第 1 参 key 查表，命中即短路返回强制值；未命中放行原逻辑（对非表内 key 零影响）
-                MountKind.KEY_OVERRIDE -> builder.intercept { chain ->
-                    val key = runCatching { chain.getArg(0) as? String }.getOrNull()
-                    val forced = top.honorhook.xposed.data.CloudSwitchTable.forced(key)
-                    if (key != null && forced != null) {
-                        logCloudOverride(module, key, forced)
-                        forced
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // 服务端槽位载荷出口裁剪（美豆 S1）：proceed 拿到 SlotData.list 后按表剔营销槽位，失败放行原值
-                MountKind.SLOT_PRUNE -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) {
-                        val orig = chain.proceed()
-                        pruneSlotPayload(orig, module) ?: orig
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // 服务端底部 tab 配置出口裁剪（S2）：proceed 拿到 tab 列表后按表剔 VIP/福利 tab，失败放行原值
-                MountKind.BOTTOM_TAB_PRUNE -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) {
-                        val orig = chain.proceed()
-                        pruneBottomTabPayload(orig, module) ?: orig
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // void 空实现阻断（挽留弹窗 F1；判据日志不受 DEBUG_LOGGING 门控）
-                MountKind.BLOCK -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) {
-                        module.log(Log.INFO, MountEngine.TAG, "挽留弹窗已拦截: ${task.methodName}")
-                        null
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // 放行后 finish（挽留弹窗 F2 兜底）：先 proceed 再 finish，生命周期完整（不 proceed 会让
-                // onStart/onDestroy 等在未初始化状态跑，可能 NPE；fanqie MainHook.java:689 先例，HC 的
-                // finish+不 proceed 模式不采用）
-                MountKind.FINISH_ACTIVITY -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) {
-                        val result = chain.proceed()
-                        (chain.thisObject as? Activity)?.finish()
-                        module.log(Log.INFO, MountEngine.TAG, "挽留弹窗已拦截: ${task.methodName}")
-                        result
-                    } else {
-                        chain.proceed()
-                    }
-                }
-                // 前置数据修正（proceed 前修 this/共享数据，再原样放行）：按任务分流
-                MountKind.PRE_PROCESS -> builder.intercept { chain ->
-                    if (routeActive(chain, module, task)) {
-                        if (task.id == "theme:WallpaperPreview.fixPackagePath") {
-                            fixWallpaperPackagePath(chain, module)  // W1：壁纸 packagePath 路径撕裂修复
-                        } else if (task.id == "theme:WallpaperPreview.decryptPaidWp") {
-                            decryptPaidWallpaper(chain, module, loader)  // W2：付费壁纸密文强制解密（A1 撕裂第二处）
-                        } else {
-                            pruneTabStateFlowBeforeCreateTabs(chain, module)  // S2b：tab 缓存路径兜底
-                        }
-                    }
-                    chain.proceed()
-                }
-                // VIP 状态漏斗改写（after 语义）：proceed 拿 VipState 实例逐 setter 填会员值；null 自建。
-                // 2026-10-10 真机回归后恢复——getter 短路覆盖不了 null 实例与类内字段直读（见 collectVipHooks 注释）
-                MountKind.VIP_STATE_FIX -> builder.intercept { chain ->
-                    fixVipState(chain, module, task)
                 }
             }
-        }.fold(
-            onSuccess = {
-                if (MountEngine.DEBUG_LOGGING) {
-                    module.log(Log.INFO, MountEngine.TAG, "hook 已挂载: ${task.description} → ${actionDesc(task)} ${value ?: "null"}")
+            // VIP 通道下载兜底（F-fallback，2026-10-12）：f71.downloadItem 布看门狗，
+            // f71.productSendFinish 失败/15s 无回调（过期 VIP 服务端挂死，真机实证）→ 已购通道兜底。
+            // 实现（看门狗/守卫/续流）在 ThemeStoreRuntime；此处只做 kind 分派。
+            MountKind.DOWNLOAD_FALLBACK -> {
+                if (task.methodName == "downloadItem") {
+                    armVipFallbackWatchdog(chain, module, loader)
+                    chain.proceed()
+                } else {
+                    chain.proceed()   // productSendFinish：after 语义，先让宿主失败路径跑完（toast/abort）
+                    onVipProductSendFinish(chain, module, loader)
                 }
-                MountEngine.Result.OK
-            },
-            onFailure = { t ->
-                module.log(Log.WARN, MountEngine.TAG, "hook 挂载失败（不阻断其他 hook）: ${task.description} — ${t.message}", t)
-                MountEngine.Result.FAILED
-            },
-        )
+            }
+            // 参数强制（setter 写点 / 下载类型路由点）
+            MountKind.FORCE_ARG -> {
+                if (routeActive(chain, module, task)) {
+                    val args = chain.args?.toTypedArray() ?: arrayOfNulls<Any?>(task.forceArgIndex + 1)
+                    args[task.forceArgIndex] = value
+                    chain.proceedWith(chain.thisObject, args)
+                } else {
+                    chain.proceed()
+                }
+            }
+            // 云控读点：按第 1 参 key 查表，命中即短路返回强制值；未命中放行原逻辑（对非表内 key 零影响）
+            MountKind.KEY_OVERRIDE -> {
+                val key = runCatching { chain.getArg(0) as? String }.getOrNull()
+                val forced = top.honorhook.xposed.data.CloudSwitchTable.forced(key)
+                if (key != null && forced != null) {
+                    logCloudOverride(module, key, forced)
+                    forced
+                } else {
+                    chain.proceed()
+                }
+            }
+            // 服务端槽位载荷出口裁剪（美豆 S1）：proceed 拿到 SlotData.list 后按表剔营销槽位，失败放行原值
+            MountKind.SLOT_PRUNE -> {
+                if (routeActive(chain, module, task)) {
+                    val orig = chain.proceed()
+                    pruneSlotPayload(orig, module) ?: orig
+                } else {
+                    chain.proceed()
+                }
+            }
+            // 服务端底部 tab 配置出口裁剪（S2）：proceed 拿到 tab 列表后按表剔 VIP/福利 tab，失败放行原值
+            MountKind.BOTTOM_TAB_PRUNE -> {
+                if (routeActive(chain, module, task)) {
+                    val orig = chain.proceed()
+                    pruneBottomTabPayload(orig, module) ?: orig
+                } else {
+                    chain.proceed()
+                }
+            }
+            // void 空实现阻断（挽留弹窗 F1；判据日志不受 DEBUG_LOGGING 门控）
+            MountKind.BLOCK -> {
+                if (routeActive(chain, module, task)) {
+                    module.log(Log.INFO, MountEngine.TAG, "挽留弹窗已拦截: ${task.methodName}")
+                    null
+                } else {
+                    chain.proceed()
+                }
+            }
+            // 放行后 finish（挽留弹窗 F2 兜底）：先 proceed 再 finish，生命周期完整（不 proceed 会让
+            // onStart/onDestroy 等在未初始化状态跑，可能 NPE；fanqie MainHook.java:689 先例，HC 的
+            // finish+不 proceed 模式不采用）
+            MountKind.FINISH_ACTIVITY -> {
+                if (routeActive(chain, module, task)) {
+                    val result = chain.proceed()
+                    (chain.thisObject as? Activity)?.finish()
+                    module.log(Log.INFO, MountEngine.TAG, "挽留弹窗已拦截: ${task.methodName}")
+                    result
+                } else {
+                    chain.proceed()
+                }
+            }
+            // 前置数据修正（proceed 前修 this/共享数据，再原样放行）：按任务 id 查表分派（未注册 = 新表行错路，WARN 可见）
+            MountKind.PRE_PROCESS -> {
+                if (routeActive(chain, module, task)) {
+                    preProcessHandlers[task.id]?.invoke(chain, module, loader)
+                        ?: module.log(
+                            Log.WARN, MountEngine.TAG,
+                            "PRE_PROCESS 处理函数未注册（放行原逻辑）: ${task.id} — 新表行需在 preProcessHandlers 登记",
+                        )
+                }
+                chain.proceed()
+            }
+            // VIP 状态漏斗改写（after 语义）：proceed 拿 VipState 实例逐 setter 填会员值；null 自建。
+            // 2026-10-10 真机回归后恢复——getter 短路覆盖不了 null 实例与类内字段直读（见 collectVipHooks 注释）
+            MountKind.VIP_STATE_FIX -> {
+                fixVipState(chain, module, task)
+            }
+        }
     }
 }
