@@ -56,11 +56,11 @@
         android:strokeLineCap="round"
         android:fillColor="#00000000" />
 
-    <!-- 冒号：两个等大圆点 -->
+    <!-- 冒号：两个等大圆点，中心 (73.5,49)/(73.5,70)——比 R 的视觉重心更靠右下，与竖笔顶部错开 -->
     <path
-        android:pathData="M74,45 A4.5,4.5 0 1 1 65,45 A4.5,4.5 0 1 1 74,45 Z"
+        android:pathData="M78,49 A4.5,4.5 0 1 1 69,49 A4.5,4.5 0 1 1 78,49 Z"
         android:fillColor="#FFFFFFFF" />
     <path
-        android:pathData="M74,66 A4.5,4.5 0 1 1 65,66 A4.5,4.5 0 1 1 74,66 Z"
+        android:pathData="M78,70 A4.5,4.5 0 1 1 69,70 A4.5,4.5 0 1 1 78,70 Z"
         android:fillColor="#FFFFFFFF" />
 </vector>
