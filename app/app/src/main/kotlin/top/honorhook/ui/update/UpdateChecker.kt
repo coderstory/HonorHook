@@ -12,10 +12,9 @@ import top.honorhook.BuildConfig
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** 一个 GitHub release（tag 契约 = CI ci.yml 的 `v<UTC YYYYMMDDHHMMSS>`，14 位时间戳即构建号）。 */
+/** 一个 GitHub release（tag 契约 = CI ci.yml 的 `v<versionName>`，语义版本，仅 skill `release` 发布时 +1）。 */
 data class Release(
     val version: String,
-    val buildNum: Long,
     val apkUrl: String,
     val tag: String,
 )
@@ -24,17 +23,29 @@ object UpdateChecker {
 
     const val REPO = "coderstory/HonorHook"
     private const val API_URL = "https://api.github.com/repos/$REPO/releases/latest"
-    private val TAG_RE = Regex("""^v(\d{14})$""")
+    private val TAG_RE = Regex("""^v(\d+\.\d+\.\d+)$""")
 
-    /** "v20261012193045" → Release；不符契约返回 null。 */
+    /** "v1.0.1" → Release；不符契约返回 null。 */
     fun parseTag(tag: String, apkUrl: String): Release? {
         val m = TAG_RE.matchEntire(tag) ?: return null
-        val ts = m.groupValues[1]
-        return Release(ts, ts.toLong(), apkUrl, tag)
+        val v = m.groupValues[1]
+        return Release(v, apkUrl, tag)
     }
 
-    /** 远端是否比本地新：14 位 UTC 时间戳直接比大小。 */
-    fun isNewer(remote: Release, localBuildNum: Long): Boolean = remote.buildNum > localBuildNum
+    /**
+     * 远端是否比本地新：语义版本逐段比（'.' 分段、数字前缀、缺段按 0）。
+     * 与 HostVersion.compareVersionNames 同语义但不引用——后者尚未入库（另一工作流在改），
+     * 本文件须随本次 commit 自包含可编译；那边入库后可收敛回去。
+     */
+    fun isNewer(remote: Release, localVersionName: String): Boolean {
+        val ka = remote.version.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        val kb = localVersionName.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(ka.size, kb.size)) {
+            val c = (ka.getOrElse(i) { 0 }).compareTo(kb.getOrElse(i) { 0 })
+            if (c != 0) return c > 0
+        }
+        return false
+    }
 
     /** 拉 releases/latest（IO）。失败抛异常，由调用方决定如何呈现。 */
     fun fetchLatest(): Release {
@@ -57,7 +68,7 @@ object UpdateChecker {
                 }
             }
             val rel = parseTag(json.getString("tag_name"), apkUrl)
-                ?: error("tag 不符合 v<UTC 时间戳 14 位> 契约")
+                ?: error("tag 不符合 v<主.中.尾> 契约")
             android.util.Log.i("HonorHookUpdate", "fetchLatest ${rel.tag} apk=${apkUrl.isNotEmpty()}")
             return rel
         } finally {
@@ -100,7 +111,7 @@ object UpdateState {
                 .onSuccess { r ->
                     withContext(Dispatchers.Main) {
                         latest = r
-                        if (UpdateChecker.isNewer(r, BuildConfig.BUILD_NUM)) {
+                        if (UpdateChecker.isNewer(r, BuildConfig.VERSION_NAME)) {
                             showDialog = true
                             // 弹窗弹出即并行探测全部下载源（同一 apkUrl 不重复探，手动重查不白等）
                             val apk = r.apkUrl
@@ -111,7 +122,7 @@ object UpdateState {
                                 probeJob = launch { probedUrl = ApkInstaller.probeSources(apk) }
                             }
                         } else if (manual) {
-                            notice = "已是最新版本 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_NUM}）"
+                            notice = "已是最新版本 v${BuildConfig.VERSION_NAME}"
                         }
                     }
                 }

@@ -21,6 +21,13 @@
 - 新操作先加 `dev.sh` 子命令再做；子任务只跑定向编译
 - 路径全英文
 
+## 发布
+
+- master 只读：禁直接 push/commit/tag/force master；唯一入口 = skill `release`（dev 快进 + 版本 bump + changelog → push）
+- 版本唯一事实源 = `app/app/version.properties`（versionCode/versionName/lastReleaseCommit，入库）；仅 release skill 写，构建只读；tag 契约 `v<versionName>`；versionCode = 三段×100（1.0.1 → 10100），必须大于历史所有包（旧机制历史值 100）
+- 更新内容清单 = `RELEASE_NOTES.md`（用户向中文，= GitHub release 正文，CI 双发布：先源 repo release，后 Xposed-Modules-Repo 同步）
+- 原「本地计数器自增 + BUILD_NUM 时间戳」机制已删（2026-10-12），版本只在发布时 +1
+
 ## 设备铁律
 
 - 🚫 **禁 reboot（任何形态）**——需要重启才生效的事，停下告诉用户，等用户自己重启

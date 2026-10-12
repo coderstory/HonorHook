@@ -15,24 +15,15 @@ android {
         minSdk = 26
         targetSdk = 34
 
-        // 本地构建自增版本：计数器落 app/app/version.properties（gitignored，各 checkout 独立）。
-        // dev.sh 每次构建传 -PhhLocalBuild=1 → 计数 +1：versionCode = 计数×100（100 的整数倍）；
-        // versionName = 1.<中段>.<尾段>，尾段 0-9 循环、满 9 进中段（1.0.0 → 1.0.1 → … → 1.0.9 → 1.1.0）。
-        // 并行构建可能同计数，可接受。
-        // CI 不传该属性：版本保持计数器基准（100 / 1.0.0），发布区分走 BUILD_NUM（buildNum）。
+        // 版本唯一事实源 = app/app/version.properties（入库），仅 skill `release` 写（.claude/skills/release/）：
+        // versionCode = (主段*100 + 中段*10 + 尾段) × 100，随 versionName 严格单调、必须大于历史所有包
+        // （旧时间戳机制的最后基准 versionCode = 100，覆盖安装要求 versionCode 单调不减）。
+        // 构建只读不改——「本地计数器 + hhLocalBuild 自增」机制已删（2026-10-12），版本只在发布时 +1。
         val versionProps = Properties()
         val versionPropsFile = file("version.properties")
         if (versionPropsFile.isFile) versionPropsFile.inputStream().use { versionProps.load(it) }
-        val buildCounter = versionProps.getProperty("counter")?.toIntOrNull() ?: 1
-        if (providers.gradleProperty("hhLocalBuild").orElse("").get() == "1") {
-            versionProps.setProperty("counter", (buildCounter + 1).toString())
-            versionPropsFile.outputStream().use { versionProps.store(it, null) }
-        }
-        versionCode = buildCounter * 100
-        versionName = "1.${(buildCounter - 1) / 10}.${(buildCounter - 1) % 10}"
-
-        // CI 构建标识（ci.yml 传 -PbuildNum = 14 位 UTC 时间戳）；更新器按时间戳比大小判断新版本
-        buildConfigField("long", "BUILD_NUM", providers.gradleProperty("buildNum").orElse("0").get() + "L")
+        versionCode = versionProps.getProperty("versionCode")?.toIntOrNull() ?: 100
+        versionName = versionProps.getProperty("versionName") ?: "1.0.0"
 
         // 只保留真机 arm64：x86/x86_64（模拟器）与 armeabi-v7a（32 位）的 libdexkit.so 全部裁掉，
         // 项目只做真机直连验证（CLAUDE.md），无用架构 so 约 1.07MB。
@@ -107,6 +98,8 @@ android {
 dependencies {
     // libxposed：api 仅编译期（运行时由框架提供）。
     compileOnly(libs.libxposed.api)
+    // 单测需要 api 类型可加载（RegistryConsistencyTest 触发 TargetRegistry<clinit> → 目标 hook 引用 Chain 等类型）
+    testImplementation(libs.libxposed.api)
     // service：宿主 App 经它与 LSPosed 通信——远程 prefs 下发 + 真实激活状态（照 LSPFRIDA/HyperChanger）。
     implementation(libs.libxposed.service)
 

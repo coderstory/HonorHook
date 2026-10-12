@@ -18,22 +18,21 @@ class UpdateCheckerNetworkTest {
 
         val r = UpdateChecker.fetchLatest()
 
-        assertTrue("tag 应符合 v<UTC YYYYMMDDHHMMSS> 契约: ${r.tag}", r.tag.matches(Regex("^v\\d{14}$")))
-        assertEquals("version 应为去掉 v 的 14 位时间戳: ${r.version}", r.tag.removePrefix("v"), r.version)
-        assertTrue("buildNum 应为正: ${r.buildNum}", r.buildNum > 0)
+        assertTrue("tag 应符合 v<versionName> 契约: ${r.tag}", r.tag.matches(Regex("^v\\d+\\.\\d+\\.\\d+$")))
+        assertEquals("version 应为去掉 v 的语义版本: ${r.version}", r.tag.removePrefix("v"), r.version)
         assertTrue("release 应附带 APK: ${r.apkUrl}", r.apkUrl.endsWith(".apk"))
 
-        // 与本地构建号对比不抛异常（任一方向都合法）
-        val newer = UpdateChecker.isNewer(r, 0L)
-        println("latest=${r.tag} apk=${r.apkUrl} isNewerThanLocal(0)=$newer")
+        // 与本地版本号对比不抛异常（任一方向都合法）
+        val newer = UpdateChecker.isNewer(r, "1.0.0")
+        println("latest=${r.tag} apk=${r.apkUrl} isNewerThan(1.0.0)=$newer")
     }
 
     @Test
     fun parseTag_currentRealTag() {
-        // 锁定契约形状：v + 恰好 14 位 UTC 时间戳（2026-10-12 切换）
-        val r = UpdateChecker.parseTag("v20261012193045", "https://example.com/x.apk")
+        // 锁定契约形状：v + 三段语义版本（2026-10-12 从 UTC 时间戳契约切换）
+        val r = UpdateChecker.parseTag("v1.0.1", "https://example.com/x.apk")
         assertNotNull(r)
-        assertEquals("20261012193045", r!!.version)
-        assertEquals(20261012193045L, r.buildNum)
+        assertEquals("1.0.1", r!!.version)
+        assertEquals("v1.0.1", r.tag)
     }
 }

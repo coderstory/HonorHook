@@ -11,6 +11,3 @@ captures/
 .DS_Store
 *.apk
 output.json
-
-# 本地构建版本计数器（每次 dev.sh 构建 +1，不入库）
-app/version.properties

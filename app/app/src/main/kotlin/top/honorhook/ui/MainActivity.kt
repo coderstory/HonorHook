@@ -70,7 +70,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // 打开即静默查一次更新（失败无感，结果进设置页「检查更新」行）。
-        // debug 构建跳过：本地 debug 包 BUILD_NUM 恒 0（无 buildNum 属性），静默查必判「远端更新」弹窗，干扰自装调试；手动检查不受影响
+        // debug 构建跳过：debug 包版本号跟入库 version.properties（常落后远端发布版），静默查必弹「发现新版本」干扰自装调试；手动检查不受影响
         if (!BuildConfig.DEBUG) UpdateState.checkAsync()
         setContent {
             HonorHookTheme { AppRoot() }

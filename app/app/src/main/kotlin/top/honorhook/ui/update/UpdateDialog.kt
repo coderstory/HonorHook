@@ -72,7 +72,7 @@ fun UpdateDialog(onDismiss: () -> Unit) {
         when (p) {
             is Phase.Confirm -> {
                 Text(
-                    text = "当前 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_NUM}）"
+                    text = "当前 v${BuildConfig.VERSION_NAME}"
                             + " → 最新 ${release.tag}"
                             + (if (release.apkUrl.isEmpty()) "\n⚠️ 该 release 未附带 APK" else ""),
                 )
