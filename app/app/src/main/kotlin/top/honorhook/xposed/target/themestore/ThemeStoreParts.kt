@@ -73,7 +73,7 @@ internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
 internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 
 /** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制； */
-internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX }
+internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE }
 
 /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
 internal enum class UriOwner { THIS, GET_DOWNLOAD_INFO }
@@ -186,6 +186,7 @@ internal fun actionDesc(task: MountTask): String = when (task.kind) {
     MountKind.FINISH_ACTIVITY -> "放行原方法后 finish Activity"
     MountKind.PRE_PROCESS -> "前置修正 this 数据后放行原方法"
     MountKind.VIP_STATE_FIX -> "VipState 实例字段改写（after，null 自建）"
+    MountKind.DOWNLOAD_TYPE_ROUTE -> "downloadType 按 DownloadInfo 状态分派（空URL→3 / 免费加密→4 / 付费→3，见 theme-store.md §E）"
 }
 
 /** 反射方法缓存（`类名#方法名` → Method），避免在 getList 这类的取数路径上反复查找。 */
@@ -201,6 +202,24 @@ internal fun cachedMethod(o: Any, name: String): java.lang.reflect.Method? = ref
 
 internal fun reflectGet(o: Any, name: String): Any? =
     runCatching { cachedMethod(o, name)?.invoke(o) }.getOrNull()
+
+/**
+ * public 字段直读（[Class.getField] 语义，Field 缓存）——与 [reflectGet] 的 getMethod 语义区别是
+ * H2b' 路由判定的生死线：DownloadInfo.uri/price/isSpecialEncrypt 在 20.1.63.305 上全是 public 字段
+ * 且无同名 getter（DownloadInfo.java:119/131/145；父类仅 BaseColumns/Parcelable，全方法清单已核）。
+ * 用 getMethod 读会静默 NoSuchField→null→uriBlank 恒 true→所有下载误路由 3，免费加密项永远进不了审计通道。
+ * 宿主自身同点位也走字段直读（o52 smali 0x0119 iget-boolean isSpecialEncrypt；d.java:174 itemInfo.price）。
+ */
+private val reflFieldCache = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<java.lang.reflect.Field>>()
+
+internal fun reflectFieldGet(o: Any, name: String): Any? =
+    runCatching {
+        reflFieldCache.computeIfAbsent("${o.javaClass.name}#$name") { key ->
+            java.util.Optional.ofNullable(
+                runCatching { o.javaClass.getField(key.substringAfterLast('#')) }.getOrNull(),
+            )
+        }.orElse(null)?.get(o)
+    }.getOrNull()
 
 /** 云控强制命中计数（key → 已打印次数）。读点高频（多处循环内读取），每 key 只打前 [CLOUD_LOG_PER_KEY] 次防刷屏。 */
 private val cloudHitLogCount = java.util.concurrent.ConcurrentHashMap<String, Int>()

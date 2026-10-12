@@ -27,6 +27,9 @@ object TargetRegistry {
         register(Exam8Hook)
         register(LauncherHook)
         register(SystemUiHook)
+        // 系统更新阻断（ota.block 一个开关管两个包，同 ads.block 跨包先例）
+        register(OucHook)
+        register(UpgradeGuideHook)
         // 荣耀短信（第 7 目标，T1 骨架：只观测不干预）。
         register(MmsHook)
         // 搜狗输入法荣耀版（第 8 目标，T4：验证码候选免联网服务同意）。

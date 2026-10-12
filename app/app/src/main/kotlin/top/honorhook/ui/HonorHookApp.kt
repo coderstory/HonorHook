@@ -14,6 +14,7 @@ class HonorHookApp : Application(), XposedServiceHelper.OnServiceListener {
         super.onCreate()
         AppSettings.init(this)
         FeatureStore.init(this)
+        FrameworkState.warmUp()   // 必须在 registerListener（可能 binder 线程首触 FrameworkState）之前
         XposedServiceHelper.registerListener(this)
     }
 

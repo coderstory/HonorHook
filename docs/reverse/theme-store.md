@@ -956,3 +956,94 @@ URL 写入 `downloadInfo.uri` 后 `super.downloadItem()` 直下。）
   未加载时归懒加载重试）。
 - **C8** `AgreeRepo.isTrialSupportOnline`→true（云控试用开关常开）。
 - **C9** `ThemeResManager.isTrialTheme`→false（移除"试用中"判定 → 无试用角标/到期提醒）。
+
+## E · 下载族补全：免费加密资源与付费项 IAP（2026-10-12，jadx 实证 20.1.63.305）
+
+> 现象（用户报告）：小部件/图标下载后提示「文件已损坏，请重新下载」；字体下载进度卡 0%；
+> 下载记录里没有付费主题。本节给前两者的机制与修复；字体与下载记录见 §E.4 待真机分诊。
+
+### E.1 分派真相：DownloadInfo.price 是**字段直拷**，F2 getter hook 管不到下载层
+
+`common/d.setDownloadInfo`（d.java:169-223）构造 DownloadInfo 时：
+- :174 `double d = itemInfo.price` —— **字段直读**，不走被 F2 hook 的 `getPrice()`
+- :175 `downloadInfo.price = (d <= 0 || actualPrice != 0) ? actualPrice : -100.0` —— 付费项
+  （价>0 且无实付价）落到 **-100 已购标记**；`DownloadInfo.isPayedItem()`（:925）认 `>0 或 ==-100`
+- :196 `downloadInfo.isSpecialEncrypt = itemInfo.isSpecialEncrypt()`（H5 详情/列表均带此标记，
+  g.java:488/:525/:567、u02.java:206）
+
+⇒ o52.addDownloadItem（o52.java:604-634）分派时 isPayedItem 读的是**服务端真实值**：
+免费项（price 0）走免费直下分支；`downloadType==4 && isSpecialEncrypt` 才进 a71 审计通道。
+
+### E.2 「文件已损坏」机制（小部件/图标/AOD）
+
+免费但加密的项（price=0、isSpecialEncrypt=1）且 downloadType=1：免费直下分支**跳过 sendProduct**，
+裸 GET 拿到**密文**；应用时 `ThemeDecryptTool` 解密/哈希校验失败 → `toast_pkg_error`
+（「文件已损坏，请重新下载」，ThemeDecryptTool.java:121；WidgetDetailChooseActivity.java:2460
+是文件缺失分支）。密钥 `ThemesKeyStoreManager.saveResContentKey` 只在 sendProduct/sendAuditProduct
+链路里保存（OrderManagerImpl.java:335）——免费直下永远拿不到。
+
+### E.3 修复：H2b → H2b'（DOWNLOAD_TYPE_ROUTE）
+
+挂 `DownloadModel.getDownloadType`（o52 分派唯一读点），按 DownloadInfo 实际状态路由：
+
+| 状态 | 判定 | 路由值 | 落点 |
+|---|---|---|---|
+| 空 URL（空串/"null"/无 `://`） | uri | **3** | f71 VIP 试用授权（原 H2b 语义） |
+| isSpecialEncrypt && price≤0 | 加密免费 | **4** | a71 审计通道：`getDownloadUrlForAudit`→`sendAuditProduct`（免购买签发 URL+密钥，OrderManagerImpl.java:369 起）——o52 原生 free+enc+4 路线 |
+| price>0 或 ==-100 | 付费（含已购标记） | **3** | f71，避开 c71 普通购买策略弹 IAP 支付页（c71.java:70-83） |
+| 其余 | 真免费明文直链 | 放行 | 原值 |
+
+a71/f71 的成功路径一致：`productSendFinish` 校验 secretKeySaveResult（Pair.second）→
+`uri=签名URL; super.downloadItem()` → 带密钥闭环下载。失败路径弹「下载失败」并 abort（非静默）。
+
+### E.5 动态壁纸「应用没反应」定案（2026-10-12 真机+provider 实证）
+
+真机数据：付费壁纸 .mp4 已下载成功（下载表 status=6，`.payed/HNWallpapers`），应用静默无反应、
+无 dialog、W1 无日志（路径检查通过——文件确实在，是**密文**）。
+
+根因 = **第二处 A1 撕裂**：`bz2.createApplyWallPaper`（defpackage/bz2.java:256）以
+`isNeedPayItem()` 门控解密——F2 A1 强 false ⇒ `getDecryptWallpaperFile` 跳过 ⇒ 密文直达
+`CommonEngine.setDynamicWallpaper` → 解不出 → `reportApplyFailedEvent("403")` 纯埋点静默。
+（ecota 定制开关已排除：`msc.ecota.change_wallpaper_disable` 真机为空。）
+
+修 = **W2**（`theme:WallpaperPreview.decryptPaidWp`）：`createApplyWallPaper` PRE_PROCESS，
+packagePath 含 `.payed` 即强制 `gl5.getDecryptWallpaperFile(serviceId, file)` 换明文路径
+（判文件位置，不依赖被 A1 改写的判定）。gl5 类名混淆，锚点 = 解密工具日志串。
+若 W2 判据报「解密产物不存在」= 内容密钥缺失（下载未走 sendProduct 签发），转下载层查。
+
+另：**付费主题/付费字体连下载表都没进** = 下载层 dispatch 前 abort（server 对 theme/font 的
+试用授权判定待真机 logcat 实证）；付费壁纸/AOD/小部件/图标下载全成功。
+
+### E.4 待真机分诊（静态无法定案）
+
+- **字体 0%**：字体详情经 H5（CommonJsPlugin.WebDetailBean）→ g.java:474-520 组 FontInfo →
+  `startItemDownload(1)`（OnlineFontPreviewActivity.java:865）→ 同一分派点。路由修复后付费字体
+  必进 f71；若仍 0% 或弹「下载失败」= 服务端对 resType=4 拒发试用授权（sendProduct resultCode
+  可查），届时需换 4 审计通道或放弃该类。判据：logcat 过 `DownloadItemIfVip|OrderManagerImpl|DownloadHandler`。
+- **动态壁纸/息屏「应用没反应」（2026-10-12 链路实证，OnlineWallpaperPreviewLowActivity.java:617）**：
+  ```
+  apply() :617
+    ├ checkResBeforeApply(VipCheckData{resTypeToUser, payedInfo=isNeedPayItem()}) :619
+    │    ThemeSourceManager.checkResBeforeApply :500 —— VIP 类资源过
+    │    登录/网络/AgreeRepo.isSupportVip/VipManager.isVipUser 检查，失败**弹 dialog**（非静默）
+    ├ bz2.createApplyWallPaper(mInfo) :625
+    └ isLiveWallpaper → applyLiveWallpaperPrepare() :638
+         ├ ecotaIgnoreApplyToast(5)（po.java:205，CustomizedUtils.getForbidWpApply 运营商定制开关）→ toast+跳过
+         ├ mInfo.packagePath 文件不存在 → reportApplyFailedEvent("402") + **静默 return** ←「没反应」最像这里
+         └ home/unlock → progress dialog + ServiceHandler msg6 安装；其它 → createDialog(1, …)
+  ```
+  静默点只有 file-missing(402) 与 ecota 定制跳过两个；静态定不了是哪个，复现时
+  `tools/dev.sh grep-log 'applyLiveWallpaper|OnlineWallpaperPreviewLowActivity|ThemeSourceManager'`
+  一眼分案（"applyLiveWallpaper start" 后有无 402 上报即分界）。
+- **下载记录缺付费主题（2026-10-12 链路实证）**：记录页 ≠ 下载表。主题 tab =
+  `MyDownloadSource.loadLocalThemeData(1)` → `ThemeInfo.getThemeInstallInfo`（ThemeInfo.java:4552）
+  查 **themeInfo provider**（apply 成功时 `saveThemeInfo` 写入，ThemeInfo.java:3876；非下载即写），
+  selection `spare_two='0' OR spare_two IS NULL`（= subType 0；AOD=3/图标=91/小部件=90 各走各查询），
+  widget/icon 变体还剔 `packagePath` 含 `TRIAL_PATH` 的行（ThemeInfo.java:382/:745）。⇒ 付费主题不在
+  记录 = **apply 没成功（行没写）** 或行被 subType/TRIAL_PATH 过滤——与「应用没反应」大概率同根。
+  分诊命令（provider 权威值，无需猜）：
+  ```
+  adb shell content query --uri content://com.hihonor.android.thememanager.ContentProvider/themeInfo --where "title LIKE '%<主题名>%'"
+  adb shell content query --uri content://com.hihonor.android.thememanager.ContentProvider/theme --where "title LIKE '%<主题名>%'"
+  ```
+  （前者无行 = apply 未写库；有行看 spare_two/file_path 是否踩过滤条件。）

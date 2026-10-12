@@ -4,6 +4,8 @@
 
 > 2026-10-10 · 目标 `com.android.systemui` 基线 **17.0.0.1**（versionCode 1700000001，AAK-AN00，Android 17，双卡 DSDS 双联通在网）。
 > 2026-10-11 · 新增 U2 隐藏 5G 标 / U3 双卡信号合并（见 §七）；U1 副卡隐藏实现不变。
+> 2026-10-12 · 新增 U6 双排信号（移植 DualSignal 3.3，§7.11）；U3 已废弃（§7.9）。
+> 2026-10-12 · 新增 U4 系统通知隐藏 ×3（§八）/ U5 手电筒低电量放行（§九）。
 
 ## 一、需求
 
@@ -126,8 +128,38 @@ StateFlow → `setIconForView` 才是**。该方法（`com.android.systemui.util
 ### 7.5 U2 隐藏 5G 标
 
 挂 `SignalIconBinder.bind`（6 参、具名、静态、无重载歧义），第 2 参是每卡的 `SignalUnitNormalView`，
-在宿主把 `mobile_type` 交给协程绑定**之前**置 `GONE`。`bind` 只在每卡视图创建时调一次（随 `updateSubs` 重建），
-故置 GONE 即持久。找不到 `mobile_type` 时**留痕告警**（布局漂移信号，不刷屏）。
+在宿主把 `mobile_type` 交给协程绑定**之前**置 `GONE`。找不到 `mobile_type` 时**留痕告警**（布局漂移信号，不刷屏）。
+
+> ⚠️ 2026-10-12 勘误：原文「bind 只在每卡视图创建时调一次（随 updateSubs 重建），故置 GONE 即持久」
+> **不成立**——mobile_type 可见性由网络类型 StateFlow 驱动，首条发射即把 GONE 复原（§7.10）。
+> 真机现象「installed 2/2 但 5G 没去掉」即此。本点降级为「初始 GONE + 清 margin」，根治靠 U2b 收口。
+
+### 7.10 U2 根因与收口（2026-10-12，jadx 静态实证）
+
+**为什么 bind 时置 GONE 必被复原**：`SignalIconBinder.bind` 内 launch 的
+`SignalIconBinder$bind$1$2$1$4` 收集 `commonImpl.getNetworkTypeIcon()`（distinctUntilChanged），
+每次发射走 `C01821` case 1（SignalIconBinder.java:437-439）：
+
+```
+if (resource != null) IconViewBinder.bind(resource, view)   // Icon.Resource → HnSignalUtils.setIconForView(view, res)
+view.setVisibility(resource == null ? 8 : 0)                 // 非空资源 → 无条件 VISIBLE
+```
+
+StateFlow collect 首条发射立刻到达 ⇒ bind 时的 GONE 被覆盖。uct 布局变体同构
+（`AnonymousClass9`，SignalIconBinder.java:907-925：int id 非 0 → setVisibility(0)+setIconForView）。
+
+**收口（U2b）**：`HnSignalUtils.setIconForView(ImageView, int)`（HnSignalUtils.java:28，静态 void，
+未混淆，方法体日志串 `"setIconForView:imageView is null, return"` 可做 DexKit 锚点）是**所有**
+图标 drawable 设置的必经点（信号格 :432 / 漫游 :615 / 数据箭头 :688/:759 / uct 类型 :911/:925 /
+IconViewBinder 的 Icon.Resource 路同走它）。挂它，按 view id 的资源 entry name 过滤：
+命中 `mobile_type` / `mobile_signal_type` → 置 GONE 并**短路**（drawable 不设置；外层随后的
+setVisibility(0) 只剩无 drawable 无 margin 的空 view，不占位）；其余（信号格/漫游/箭头）一律
+`proceed()` 放行——与 §7.9 教训 #2 一致：吞掉的只有类型标一路，其余放行。
+
+- `uct_mobile_type_roam` 故意不收（混漫游语义）。
+- `MobileIconBinder`（QS 瓷贴）路径若最终也走 setIconForView 且 view 同名，则一并隐藏（预期内）。
+- 数据源轨备选（未采用）：hook `LocationBasedMobileViewModel.getNetworkTypeIcon` 返回恒 null Flow
+  ——会同时杀 QS 瓷贴网络图标（MobileIconBinder$bind$1:857 同读 commonImpl），面更宽，弃。
 
 ### 7.6 U3 双卡信号合并
 
@@ -221,3 +253,136 @@ imageView.setImageDrawable(new ResScalingDrawableWrapper(drawable2, i, getScaleF
 **教训**：LSPosed 拦截器的默认姿势是「先 `proceed()` 放行宿主，再做旁路采集」；
 拿不到可靠锚点（subId/卡序/档位）时，双排这种**强视图操作**不可做——
 应改用 §7.3 的数据源轨（`getPrimaryLevel()` StateFlow）重做，而不是继续在渲染点硬刚。
+
+### 7.11 U6 状态栏双排信号：移植 DualSignal 3.3（2026-10-12）
+
+**决策**：U3 自研路线按 §7.9 废弃后，改用用户已验证可用的第三方插件 `com.mod.dualsignal`
+3.3 的渲染方案（jadx 源 `system-files/DualSignal-jadx`，872 行读毕），整移植为 U6（去类型标，
+U4/U4b/U5 已被通知隐藏系列占用）。用户随后停用 DualSignal，由本模块接管。
+
+**为什么它能绕开 §7.9 的三条死路**：
+1. 档位**自读** `SubscriptionManager.getActiveSubscriptionInfoList` + `TelephonyManager
+   .createForSubscriptionId(subId).signalStrength.level`——完全不经宿主 StateFlow/`setIconForView`
+   资源 id，绕开教训 #6（档位采集口径拿不到）；U1 在数据层剔副卡也不影响它（数据源独立）。
+2. 强视图操作的对象是**自建容器**（tag `dual_container` 注入 mobile_combo 外壳 FrameLayout），
+   原生组整体 GONE，宿主 `setIconForView` 刷不到它，绕开教训 #2/#3。
+3. 维护靠 OnGlobalLayout 节流（250ms）+ 2s 自续刷新 + Choreographer 每帧取色，不依赖宿主
+   重绑时机，绕开教训 #5（重建 churn——重建后下一轮 attach/维护周期重新接管）。
+
+**移植改造**（`DualSignalFeature.kt` 文件头有全量取舍清单）：
+- 硬编码 id 2131364317/318/2131363001 → aapt2 实证 entry name = `mobile_combo` /
+  `mobile_combo_card` / `ethernet_combo`，运行时 `getIdentifier`。
+- **ModernStatusBarMobileView 挂载点不搬**：该类未覆写 `onAttachedToWindow`（jadx 实证），
+  declaredMethods 直连解析必落空；旧 API 挂它实际落到 `View.onAttachedToWindow` 全局点，
+  且 §7.9 教训 #4 实证其显示路径零触发 ⇒ 死挂载，不做。HwSignalClusterView 同理不单挂
+  （继承 SignalClusterView 且未覆写 attach）。实际挂 3 点：SignalClusterView /
+  SignalUnitNormalView / SignalUnitUCTView 的 onAttachedToWindow（均类自声明，直连可解析）。
+- 类型标 label TextView 及其数据链（getNetworkLabel/isWifiConnected/isMobileDataEnabled）不搬
+  ——U2/U2b/U2c 已收口 native 类型标，不双份。
+- 原生 mobile_combo 整组 GONE（含其内 5G 标）⇒ U6 开启时 5G 标视觉上随组消失，属预期。
+
+**冲突防护（与 DualSignal 插件二选一）**：两模块挂同一批 attach，回调先后不保证——
+按 host（mobile_combo 的 FrameLayout 外壳）探测插件容器 tag `dual_container`：
+插件先到 ⇒ 我们不注入；我们先到 ⇒ 插件随后注入，我们在 ≤2s 内的维护周期里探得后
+移除自建容器、恢复原生组并永久退避（瞬时双份自愈）。包存在性只留痕不做门
+（包已装但 LSPosed 停用时插件 hook 不跑，tag 探测才是真判据）。
+
+**判据**（modlog-f 'SystemUiHook'）：`SystemUiHook·U6: installed 3/3` 汇总行；
+`SystemUiHook·U6 生效: systemui:dualSignal.* — 双排容器已接管 N 处`；
+包探测留痕行。冲突退避 = `本 host 退避不注入` WARN 行。
+
+**已真机验证（2026-10-12）**：`installed 3/3` 全绿；双排视觉生效，与 DualSignal 插件
+先到退避 / 后到自愈双向实证（18:42 轮）。
+
+## 八、U4 系统通知隐藏（充电 / 热点共享 / USB 调试，2026-10-12）
+
+### 8.1 选点：两个点，各管一层
+
+**U4b（真仲裁，渲染层）**：`com.android.systemui.statusbar.notification.HwNotificationFeatureImpl#isDisableShownInShade(StatusBarNotification)Z`（未混淆、具名）。
+
+本方法是宿主自带隐藏标志（extras `hw_disable_ntf_show_in_shade`）的**唯一读口**
+（`HwNotificationFeatureImpl.java:644`），消费方 4+：
+
+- `NotificationCenterCoordinator.onNotificationCardUpdated:142`（true = **不进通知中心**——荣耀自建
+  `com.hihonor.systemui.dynamicserver` 管线才是下拉菜单的真渲染链）
+- `NotificationCenterCardManager:422 / :460`（shade 与 AOD/锁屏分支）
+- `HwNotificationFilterImpl:76`（U4 管线的 shade 分支也汇到这）
+
+命中返 true = 走宿主自己的「不进通知中心」分支，与官方隐藏机制同语义（上游一致性）。
+
+**U4（管线层，保留）**：`HwNotificationFilterImpl#shouldFilterOut(NotificationEntry)Z`。
+传播链（smali 复核，jadx 烂流会假报 return false）：
+
+```
+HnCoordinatorImpl.attach():325-327  addPreGroupFilter(mHnPreGroupNotifFilter) + addFinalizeFilter(mHnFilter)
+  → HnCoordinatorImpl$4.smali:46-52  classId=1 分支调 mNotificationFilterEx.shouldFilterOut(entry)
+      返回 true ⇒ :cond_4 ⇒ return true
+  → ShadeListBuilder.applyFilters:285-301  命中即设 excludingFilter ⇒ entry 出渲染列表
+HwNotificationListnerImpl.wakeScreenOn:444  同判 ⇒ 隐藏的不再点亮屏幕/AOD
+```
+
+⚠️ **2026-10-12 真机实证（门≠仲裁者的标准案例）**：首轮只挂 U4 管线点，判据两发命中
+（`隐藏热点通知(android/group=TetheredNotification)`）但**通知中心照常渲染**——
+AOSP NotifPipeline 过滤不是这版下拉菜单的渲染链，荣耀自建 dynamicserver 管线才是。
+U4 点保留的唯一实际职责 = wakeScreenOn 侧（屏灭时不为隐藏通知亮屏）。
+
+两点的 hook 策略一致：恒 `proceed()` 放行宿主逻辑、OR 上匹配结果；返回类型 Z，
+回调必须返回 Boolean。
+
+### 8.2 身份匹配（dumpsys 实证 2026-10-12，设备在网）
+
+| 功能 | 规则 | 证据 |
+|---|---|---|
+| 充电 | `pkg==com.hihonor.systemmanager && id==200001` | 插充电器后真机活跃条目：title「极速充电」text「加速充电中，设备温度会升高」action「本次关闭」，ONGOING |
+| 热点 | `pkg==android && group=="TetheredNotification"` | 热点开时真机活跃条目：title「1 台设备」text「已共享 275 MB」，group 为 AOSP framework 硬编码串 |
+| USB 调试 | `pkg==android && channelId 含 "adb"`（宽匹配） | 静态推断：system_server `AdbDebuggingManager` 发、pkg=android；wifi tcpip 模式不发此通知，未抓到活跃条目 |
+
+- NMS 对渠道 id 强制打码（`dumpsys --noredact` / `cmd notification get` 均为 `***`，隐私补丁）⇒ 充电/热点不用渠道做锚点；**渠道 id 唯一证据源 = 模块内建探针**（`probeNotifIdentity`，每 key 一条、封顶 40 条，打 pkg/id/group/channel/title）。
+- 充电发帖方是**系统管家**（非 powergenie，初判错误）；普通充电态可能同 id 换标题，探针运行期核对。
+- `id=2000 pkg=android` 是「LSPosed 已加载」框架通知，与上述规则均不符，不受影响。
+
+### 8.3 排查备忘
+
+- 静态读不到发帖方时走 `cmd notification list` + `dumpsys notification`（活跃条目对比插拔前后差集）；
+  `HnCoordinatorImpl` 还注册了 `HnNotificationEntryDumper` 进 DumpManager，可作宿主侧 dump 通道。
+- sbn 全量反射读取（`mSbn` public 字段 + 无参 getter）：本地 android.jar（android-37.0）缺
+  `android.app.StatusBarNotification`，走可解析 stub 强转会撞运行期类身份。
+
+## 九、U5 手电筒低电量放行（2026-10-12）
+
+### 9.1 门清单（全部 5% 阈值，jadx 实证）
+
+| 入口 | 门 | 位置 |
+|---|---|---|
+| QS 瓷贴（下拉菜单） | `HwPhoneStatusBar.canOpenFlashLight()` | `HwPhoneStatusBar.java:625-628`：`mBatteryManager == null \|\| mLevel > 5`；基类 `StatusBar.java:1648` 是恒 true 的 stub |
+| 桌面小部件 | 同上 | `FlashWidgetIntentService.java:49` |
+| 锁屏工具箱 ×2 | `BatteryStateInfo.isExhaustBatteryLevel()` | `BatteryStateInfo.java:400`：`getChargeLevel() <= 5`；`FlashlightToolLayout.java:585` / `ToolBoxView.java:731` |
+| 长按亮度面板 | 内联 `mBatteryLevel > 5` | `FlashlightActivity.java:243`（另 disable 按钮） |
+
+挂 `canOpenFlashLight` 一点盖 QS + 小部件（2 消费方，纯查询门短路返回 true 不 proceed）。
+锁屏门未实现（用户未要求）；亮度面板内联判断无单点可挂，放弃。
+
+### 9.2 风险与验证
+
+- 5% 是厂商电池保护阈值，绕过后可开到深度放电自动关机——UI 描述已注明，默认关。
+- 真机验证（用户自执行，无需真放电）：`dumpsys battery unplug` + `set level 4` 模拟，
+  下拉点手电筒应开灯无 toast「电量过低，手电筒无法开启」；验完 `dumpsys battery reset`。
+
+## 十、U4/U5 验证判据（用户自执行）
+
+```bash
+tools/dev.sh deploy-release        # 编译+装包+自动重新启用+强停作用域进程（含 systemui）
+tools/dev.sh modlog SystemUiHook   # LSPosed 日志判据
+```
+
+- **SystemUI 是 persistent 应用**：`am force-stop` 无效（pid 不变），须 root kill
+  （`su -c 'killall com.android.systemui'`，2026-10-12 实证；`dev.sh enable-module` 的
+  force-stop 只对普通作用域包有效）。
+- `SystemUiHook: installed N/N`（U1/U2/U4/U4b/U5 全开时 N=5）
+- 通知探针行：插充电器 / 开热点 / 插 USB 线各触发一次，`systemui-hook 通知探针:` 行给出全量身份
+  （收紧 USB 调试渠道 id 与充电普通态 id 的依据；热点渠道已实证 = `sap_capsule_channel_id`）
+- 判据行：`隐藏充电通知(...)` / `隐藏热点通知(...)` / `隐藏USB调试通知(...)` / `电量 N% 放行手电筒`
+- **已真机验证（2026-10-12）**：热点通知从下拉通知中心消失（U4b 命中即生效；状态栏「热点已开启」
+  chip 是状态图标非通知，保留属预期）。
+- 未验证：充电（系统管家）与 USB 调试条目的实际消失效果、充电普通态 id、USB 调试渠道 id、
+  手电筒低电量（须 `dumpsys battery set level 4` 模拟）。

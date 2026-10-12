@@ -144,7 +144,7 @@ EOF
     # 不 require jlink：debug 编译不需要，缺 jlink 的 JDK 也应能编 debug（release 才要）
     require "$GRADLEW"
     info "编译 debug APK（JAVA_HOME=${JAVA_HOME}）"
-    (cd "$ROOT/app" && "$GRADLEW" :app:assembleDebug --console=plain)
+    (cd "$ROOT/app" && "$GRADLEW" -PhhLocalBuild=1 :app:assembleDebug --console=plain)
     ls -lh "$APK_DEBUG"
     ;;
 
@@ -264,7 +264,7 @@ EOF
 
   build-release)
     require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
-    (cd "$ROOT/app" && "$GRADLEW" :app:assembleRelease --console=plain)
+    (cd "$ROOT/app" && "$GRADLEW" -PhhLocalBuild=1 :app:assembleRelease --console=plain)
     ls -lh "$APK_RELEASE"
     ;;
 
@@ -427,6 +427,77 @@ PYEOF
     require "$ADB"
     "$ADB" start-server >/dev/null 2>&1 || true
     "$ADB" devices -l | tr -d '\r'
+    ;;
+
+  # root 直装（su 0 pm install -r）+ 自动点 ROM 安装确认弹窗（荣耀安装器两段式：继续安装 → 确认）。
+  # ROM 对 adb/su 安装都弹确认（纯净模式/USB 安装管控），本命令轮询 UI 找确认按钮代点，最多 ~20s。
+  install-root)
+    require "$ADB"
+    APK="app/app/build/outputs/apk/release/app-release.apk"
+    [ -f "$APK" ] || die "release APK 不存在，先 build-release"
+    "$ADB" push "$APK" /data/local/tmp/honorhook-install.apk >/dev/null 2>&1 || die "push 失败"
+    "$ADB" shell "nohup su 0 sh -c 'pm install -r /data/local/tmp/honorhook-install.apk' >/dev/null 2>&1 &"
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+      sleep 1
+      # uiautomator dump 走文件再 cat（/dev/tty 直排在安装弹窗上常返回空，2026-10-12 实证）
+      "$ADB" shell uiautomator dump /sdcard/hh_dlg.xml >/dev/null 2>&1
+      XY=$("$ADB" shell cat /sdcard/hh_dlg.xml 2>/dev/null | tr -d '\r' | python3 -c '
+import sys, re
+xml = sys.stdin.read()
+for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", xml):
+    t = m.group(1)
+    if t in ("继续", "继续安装", "仍要安装", "确定", "安装", "允许"):
+        x1, y1, x2, y2 = (int(m.group(i)) for i in range(2, 6))
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        break')
+      if [ -n "$XY" ]; then
+        info "点安装确认: $XY（第 $i 轮）"
+        "$ADB" shell input tap $XY >/dev/null 2>&1
+      fi
+    done
+    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 lastUpdateTime || echo "  未安装"
+    "$ADB" shell rm -f /data/local/tmp/honorhook-install.apk >/dev/null 2>&1
+    ;;
+
+  # 重启作用域进程：root kill（TERM，干净，无 crash 记录不计 LSPosed 安全模式频次）——
+  # 与模块 App「强制重启作用域应用」同机制。用法：restart-scope [pkg...]（缺省 = scope.list 全部）。
+  # 进程被 kill 后由系统自动拉起（persistent）。禁用 am crash（用户 2026-10-12 永久禁令）。
+  restart-scope)
+    require "$ADB"
+    pkgs="${*:-$(tr -d '\r' < app/app/src/main/resources/META-INF/xposed/scope.list | tr '\n' ' ')}"
+    for p in $pkgs; do
+      pid=$("$ADB" shell "su 0 pidof $p" 2>/dev/null | tr -d '\r' | tr ' ' '\n' | head -1)
+      if [ -n "$pid" ]; then
+        "$ADB" shell "su 0 kill $pid" >/dev/null 2>&1 && info "$p (pid $pid) 已 TERM，等系统拉起"
+      else
+        info "$p 未在运行"
+      fi
+    done
+    ;;
+
+  # 判据金标准：直接 grep LSPosed 框架日志文件（modlog 的 60 行窗口会漏早期判据行，2026-10-12 教训）
+  modlog-f)
+    TAG="${1:-HonorHook}"
+    require "$ADB"
+    "$ADB" shell "su 0 sh -c 'grep -h \"$TAG\" /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30'" 2>&1 | tr -d '\r'
+    ;;
+
+  # LSPosed 官方 CLI 启用/查询模块（替代 enable-module 的 UI 自动化——后者会扰动通知栏/热点开关）。
+  # 依赖设备端 /data/adb/modules/zygisk_lsposed/lspctl（LSPosed 2.2+ 自带）。scope 是 static（随 APK
+  # scope.list 自动生效），无需手动同步；重装（install -r）不清启用态，只有卸载重装才需要本命令。
+  enable-cli)
+    LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
+    require "$ADB"
+    "$ADB" shell "su 0 $LSPCTL module enable --user=0 top.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL module show top.honorhook" 2>&1 | tr -d '\r' | grep -E 'User'
+    ;;
+
+  # LSPosed CLI 查询：模块启用态与作用域（只读）
+  modctl)
+    LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
+    require "$ADB"
+    "$ADB" shell "su 0 $LSPCTL module show top.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL scope list top.honorhook" 2>&1 | tr -d '\r' | head -20
     ;;
 
   launch)
