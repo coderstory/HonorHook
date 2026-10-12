@@ -5,5 +5,77 @@
   故必须落一个字符串资源。本文件只承载 Manager 展示用的简介文本；应用 UI 的图标/主题在 drawable、mipmap、values/themes.xml。
 -->
 <resources>
-    <string name="module_description">重新编译你的荣耀体验——系统深处，由你执笔。</string>
+    <string name="module_description">净化荣耀系统应用的广告与推广，解锁会员内容与更多实用功能。</string>
+
+    <!-- ===== 目标应用名（FeatureCatalog.Target.nameRes）===== -->
+    <string name="target_name_thememanager">主题商店</string>
+    <string name="target_name_installer">包管理器</string>
+    <string name="target_name_settings">系统设置</string>
+    <string name="target_name_exam8">成考题库</string>
+    <string name="target_name_launcher">系统桌面</string>
+    <string name="target_name_systemui">SystemUI</string>
+    <string name="target_name_ouc">系统更新</string>
+    <string name="target_name_upgradeguide">升级引导</string>
+    <string name="target_name_mms">短信</string>
+    <string name="target_name_ime">搜狗键盘</string>
+    <string name="target_name_purify">荣耀系统净化</string>
+
+    <!-- ===== 功能名与说明（FeatureCatalog.Feature.titleRes/descRes）=====
+         命名约定：feature_<key 中 . 换 _>_title / _desc；ota.block 双目标共用 key，
+         升级引导目标单独用 _guide 后缀。改文案只改这里。 -->
+    <string name="feature_theme_vip_title">VIP 会员解锁</string>
+    <string name="feature_theme_vip_desc">免费使用主题商店的会员专属内容，不再弹出会员过期和续费提醒</string>
+    <string name="feature_theme_free_title">主题全免费</string>
+    <string name="feature_theme_free_desc">付费主题、字体、壁纸、小部件免费下载和应用，不再卡进度或提示文件损坏</string>
+    <string name="feature_theme_trial_title">试用永不过期</string>
+    <string name="feature_theme_trial_desc">试用主题不再有到期倒计时和「试用中」标记，应用后不会被自动换回默认主题</string>
+    <string name="feature_theme_ad_off_title">广告净化</string>
+    <string name="feature_theme_ad_off_desc">隐藏主题商店里的广告位、福利活动和会员推荐板块</string>
+
+    <string name="feature_installer_ad_title">广告净化</string>
+    <string name="feature_installer_ad_desc">安装应用时不再显示广告</string>
+    <string name="feature_installer_no_intercept_title">安装不拦截</string>
+    <string name="feature_installer_no_intercept_desc">从浏览器、文件管理器等来源安装应用时，不再被强制跳转到风险提示页</string>
+    <string name="feature_installer_no_safe_prompt_title">安全模式提示净化</string>
+    <string name="feature_installer_no_safe_prompt_desc">不再弹出「开启安全模式」的引导弹窗和提示卡片</string>
+    <string name="feature_installer_skip_check_title">跳过安全检测</string>
+    <string name="feature_installer_skip_check_desc">安装前不再联网检测应用风险，直接安装，不弹风险页和确认勾选</string>
+
+    <string name="feature_settings_disable_btn_title">停用按钮解锁</string>
+    <string name="feature_settings_disable_btn_desc">应用详情页的「停用」按钮对系统应用也可以点击</string>
+    <string name="feature_settings_hide_account_dot_title">隐藏账户小红点</string>
+    <string name="feature_settings_hide_account_dot_desc">设置首页账户名后面的红点不再显示</string>
+
+    <string name="feature_exam8_super_vip_title">超级会员解锁</string>
+    <string name="feature_exam8_super_vip_desc">解锁会员专属题库和功能</string>
+    <string name="feature_exam8_burn_reading_title">阅后即焚解锁</string>
+    <string name="feature_exam8_burn_reading_desc">题目和答案可以完整查看，不再被遮盖</string>
+
+    <string name="feature_launcher_hide_card_title_title">隐藏卡片标题</string>
+    <string name="feature_launcher_hide_card_title_desc">隐藏桌面卡片上的标题文字（如「YOYO 建议」），不影响应用图标</string>
+    <string name="feature_launcher_keep_folder_open_title">文件夹保持打开</string>
+    <string name="feature_launcher_keep_folder_open_desc">从文件夹打开应用后返回桌面，文件夹保持打开状态；点空白处或回主屏仍会正常关闭</string>
+
+    <string name="feature_systemui_hide_sim2_title">隐藏副卡图标</string>
+    <string name="feature_systemui_hide_sim2_desc">双卡时状态栏只显示主卡的信号图标，隐藏副卡（SIM2）</string>
+    <string name="feature_systemui_hide_5g_title">隐藏 5G 标识</string>
+    <string name="feature_systemui_hide_5g_desc">状态栏信号旁不再显示 5G/4G 字样</string>
+    <string name="feature_systemui_dual_signal_title">双排信号</string>
+    <string name="feature_systemui_dual_signal_desc">状态栏信号分上下两排显示（上排主卡、下排副卡）；与其他双排信号类插件二选一，不要同时开启</string>
+
+    <string name="feature_mms_ad_off_title">广告净化</string>
+    <string name="feature_mms_ad_off_desc">去除短信里的营销内容：会话底部的充值菜单、推广按钮和应用推广卡片（如 10010 发的流量套餐入口）</string>
+
+    <string name="feature_ime_code_free_title">验证码候选免同意</string>
+    <string name="feature_ime_code_free_desc">键盘候选区的「短信验证码一键填充」不再要求先同意搜狗联网服务；其他联网功能不受影响</string>
+
+    <string name="feature_ads_block_title">广告净化</string>
+    <string name="feature_ads_block_desc">去除日历、天气、浏览器、游戏中心、视频等系统应用里的开屏、横幅、信息流广告</string>
+    <string name="feature_tracking_block_title">去除跟踪</string>
+    <string name="feature_tracking_block_desc">阻止日历、天气、浏览器、游戏中心、视频、音乐等应用上报你的使用记录和设备标识</string>
+
+    <string name="feature_ota_block_title">禁止自动检测与提示</string>
+    <string name="feature_ota_block_desc">系统更新不再在后台自动检测和下载，不再弹出升级提醒通知；在设置里手动检查更新不受影响</string>
+    <string name="feature_ota_block_guide_title">屏蔽升级引导页</string>
+    <string name="feature_ota_block_guide_desc">解锁手机后弹出的全屏「发现新版本」页面不再出现</string>
 </resources>

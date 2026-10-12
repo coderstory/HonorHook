@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -142,13 +143,13 @@ private fun SettingsMain(
                             .fillMaxWidth(),
                     ) {
                         ArrowPreference(
-                            title = "强制重启作用域应用",
-                            summary = "强停目标进程，让开关改动生效",
+                            title = "重启目标应用",
+                            summary = "关闭相关应用进程，让开关立即生效",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.RestartAlt,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "强制重启作用域应用",
+                                    contentDescription = "重启目标应用",
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -239,7 +240,7 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
 
     WindowDialog(
         show = true,
-        title = "强制重启作用域应用",
+        title = "重启目标应用",
         summary = null,
         onDismissRequest = { if (!running) onDismiss() },
     ) {
@@ -289,7 +290,7 @@ private fun RestartPicker(
         ) {
             FeatureCatalog.targets.forEach { target ->
                 CheckboxPreference(
-                    title = target.name,
+                    title = stringResource(target.nameRes),
                     summary = RESTART_SIDE_EFFECT[target.packageName] ?: target.packageName,
                     checked = target.packageName in selected,
                     onCheckedChange = { onToggle(target.packageName, it) },
@@ -323,13 +324,13 @@ private fun RestartResult(
     onDismiss: () -> Unit,
 ) {
     Column {
-        Text(text = "已停止 ${result.stopped.size} / 在跑 ${result.runningCount}")
+        Text(text = "已关闭 ${result.stopped.size} 个，${result.runningCount} 个正在运行")
         push?.let {
             Text(
                 text = if (!it.connected) {
-                    "⚠️ LSPosed 未连接：开关未下发，hook 侧仍按上次远端值运行"
+                    "⚠️ LSPosed 未连接：开关没有同步，功能仍按之前的设置运行"
                 } else {
-                    "开关已下发 ${it.sent}/${it.total}"
+                    "开关已同步 ${it.sent}/${it.total}"
                 },
             )
         }
@@ -348,7 +349,7 @@ private fun RestartResult(
 
 private fun failureText(failure: ScopeRestarter.Failure): String = when (failure) {
     ScopeRestarter.Failure.NO_SU -> "未能获取 Root 授权"
-    ScopeRestarter.Failure.NOT_GRANTED -> "root 未授权本应用：请在 KernelSU 管理器中允许 top.honorhook 后重试"
+    ScopeRestarter.Failure.NOT_GRANTED -> "Root 未授权本应用：请在 Root 管理器中允许 top.honorhook 后重试"
     ScopeRestarter.Failure.TIMEOUT -> "命令执行超时（5 秒），请重试"
 }
 

@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -160,7 +161,7 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
             when {
                 installedTargets == null -> item { EmptyHint("正在读取设备上已安装的目标应用…") }
                 installedTargets!!.isEmpty() -> item {
-                    EmptyHint("设备上未检测到任何目标应用。\n本模块的 6 个目标都是荣耀系统应用与指定第三方应用，装齐后会显示在这里。")
+                    EmptyHint("设备上没有检测到支持的应用。\n本模块只支持荣耀系统应用和指定第三方应用，装上后会自动显示在这里。")
                 }
                 else -> items(count = installedTargets!!.size) { index ->
                     val target = installedTargets!![index]
@@ -317,7 +318,7 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
         Row(verticalAlignment = Alignment.CenterVertically) {
             AppIconSlot(
                 packageName = target.packageName,
-                fallbackText = target.name,
+                fallbackText = stringResource(target.nameRes),
                 iconKey = target.iconKey,
                 modifier = Modifier
                     .padding(end = 10.dp)
@@ -325,7 +326,7 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = target.name,
+                    text = stringResource(target.nameRes),
                     modifier = Modifier.basicMarquee(),
                     fontWeight = FontWeight(550),
                     color = colorScheme.onSurface,
@@ -389,7 +390,7 @@ private fun AppHeaderCard(
         ) {
             AppIconSlot(
                 packageName = target.packageName,
-                fallbackText = target.name,
+                fallbackText = stringResource(target.nameRes),
                 iconKey = target.iconKey,
                 modifier = Modifier.size(44.dp),
             )
@@ -400,7 +401,7 @@ private fun AppHeaderCard(
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Text(
-                    text = target.name,
+                    text = stringResource(target.nameRes),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = colorScheme.onSurface,
@@ -511,7 +512,7 @@ private fun FeatureListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = target.name,
+                title = stringResource(target.nameRes),
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,
             )
@@ -595,9 +596,9 @@ private fun FeatureListScreen(
                         // 不加图标：每个开关都重复同一个目标应用图标反而是噪声，
                         // 左侧色条（开=primary / 关=primaryContainer）已经能表达状态。
                         SwitchPreference(
-                            title = feature.title,
+                            title = stringResource(feature.titleRes),
                             // 用户要求：二级菜单每个选项都带功能说明
-                            summary = feature.description,
+                            summary = stringResource(feature.descRes),
                             checked = enabled,
                             onCheckedChange = { FeatureStore.setEnabled(feature.key, it) },
                             // 卡片内边距：原来只设了 horizontal，内容贴着上下边缘很挤
@@ -631,11 +632,11 @@ private fun SwitchSemanticsCard(
 ) {
     val inactive = noticeWhenInactive && !FrameworkState.active
     if (!inactive && !restartHint) return
-    val title = if (inactive) "LSPosed 未激活" else "改动何时生效"
+    val title = if (inactive) "LSPosed 未激活" else "开关何时生效"
     val summary = if (inactive) {
-        "开关只会保存到本地，不会下发到目标进程；hook 侧仍按默认全开运行。"
+        "LSPosed 未连接，开关暂时不会生效。请先在 LSPosed 中启用本模块。"
     } else {
-        "开关在目标进程下次启动时读取 —— 改完请强停并重开对应应用。"
+        "开关会在应用下次启动时生效。改完后请彻底关闭对应应用再重新打开。"
     }
     val bg = if (inactive) colorScheme.tertiaryContainer.copy(alpha = 0.6f) else colorScheme.secondaryContainer.copy(alpha = 0.6f)
     val fg = if (inactive) colorScheme.onTertiaryContainer else colorScheme.onSecondaryContainer
