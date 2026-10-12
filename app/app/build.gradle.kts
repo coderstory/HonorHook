@@ -31,8 +31,8 @@ android {
         versionCode = buildCounter * 100
         versionName = "1.${(buildCounter - 1) / 10}.${(buildCounter - 1) % 10}"
 
-        // CI 构建 run_number（ci.yml 传 -PbuildNum）；对比 GitHub release tag v<version>.r<build> 用
-        buildConfigField("int", "BUILD_NUM", providers.gradleProperty("buildNum").orElse("0").get())
+        // CI 构建标识（ci.yml 传 -PbuildNum = 14 位 UTC 时间戳）；更新器按时间戳比大小判断新版本
+        buildConfigField("long", "BUILD_NUM", providers.gradleProperty("buildNum").orElse("0").get() + "L")
 
         // 只保留真机 arm64：x86/x86_64（模拟器）与 armeabi-v7a（32 位）的 libdexkit.so 全部裁掉，
         // 项目只做真机直连验证（CLAUDE.md），无用架构 so 约 1.07MB。

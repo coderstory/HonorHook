@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.rel.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
 
@@ -31,12 +31,15 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Extract version
-        id: ver
+      # 发布标识 = UTC 时间戳（年月日时分秒）。versionName 是构建期 Kotlin 表达式（计数器文件），
+      # CI 上无该文件恒为 1.0.0——grep 源码只会抓到未求值字面量（r50 翻车教训），不再从源码取版本。
+      - name: Create release tag (UTC timestamp)
+        id: rel
         run: |
-          VERSION=$(grep -oE 'versionName = "[^"]+"' app/app/build.gradle.kts | cut -d'"' -f2)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "versionName=$VERSION"
+          TS=$(date -u +%Y%m%d%H%M%S)
+          echo "tag=v$TS" >> "$GITHUB_OUTPUT"
+          echo "ts=$TS" >> "$GITHUB_OUTPUT"
+          echo "tag=v$TS"
 
       # dev 分支：编译 debug + 单测
       - name: Build debug (dev)
@@ -57,7 +60,7 @@ jobs:
           retention-days: 3
 
       # master 分支：编译 release 并发 GitHub Release
-      # -PbuildNum：run_number 注入 BuildConfig.BUILD_NUM，与 tag v<version>.r<N> 对齐供在线更新对比
+      # -PbuildNum：UTC 时间戳注入 BuildConfig.BUILD_NUM，与 release tag v<ts> 同源，在线更新按时间戳比大小
       # 签名：稳定 keystore 从 Secrets 注入（签名跨 run 一致 = 在线更新可覆盖安装；
       # debug keystore 在 CI 每次随机生成，不可用于发布）。
       - name: Decode signing keystore (master)
@@ -73,7 +76,7 @@ jobs:
           HH_KEY_ALIAS: ${{ secrets.HONORHOOK_KEY_ALIAS }}
           HH_KEY_PASSWORD: ${{ secrets.HONORHOOK_KEY_PASSWORD }}
         run: |
-          ./app/gradlew -p app assembleRelease -PbuildNum=${{ github.run_number }} \
+          ./app/gradlew -p app assembleRelease -PbuildNum=${{ steps.rel.outputs.ts }} \
             -PhhKeystoreFile="$RUNNER_TEMP/honorhook-release.jks" \
             -PhhStorePassword="$HH_STORE_PASSWORD" \
             -PhhKeyAlias="$HH_KEY_ALIAS" \
@@ -87,7 +90,7 @@ jobs:
           cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
           自动构建（run #${{ github.run_number }}，commit ${{ github.sha }}）
 
-          - 模块版本：${{ steps.ver.outputs.version }}
+          - 发布标识：${{ steps.rel.outputs.tag }}（UTC 时间戳）
           - 宿主基线：主题商店 20.1.63.305 / 包管理器 14.0.37.301 / 系统桌面 18.0.0.234 /
             成人高考题库 5.9.0.0-release
           - 安装：LSPosed 管理器导入 APK，启用模块即可（模块自带静态作用域声明，
@@ -99,8 +102,8 @@ jobs:
         if: github.ref_name == 'master'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
-          name: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
+          tag_name: ${{ steps.rel.outputs.tag }}
+          name: ${{ steps.rel.outputs.tag }}
           body_path: ${{ runner.temp }}/release-notes.md
           files: app/app/build/outputs/apk/release/app-release.apk
           make_latest: true
@@ -112,7 +115,7 @@ jobs:
         if: github.ref_name == 'master'
         env:
           GH_TOKEN: ${{ secrets.XMREPO_TOKEN }}
-          TAG: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
+          TAG: ${{ steps.rel.outputs.tag }}
           NOTES: ${{ runner.temp }}/release-notes.md
           APK: app/app/build/outputs/apk/release/app-release.apk
         run: |

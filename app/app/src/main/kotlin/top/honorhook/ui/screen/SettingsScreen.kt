@@ -106,7 +106,7 @@ private fun SettingsMain(
         val latest = UpdateState.latest
         when {
             UpdateState.checking -> "检查中…"
-            latest != null && UpdateChecker.isNewer(latest, BuildConfig.VERSION_NAME, BuildConfig.BUILD_NUM) ->
+            latest != null && UpdateChecker.isNewer(latest, BuildConfig.BUILD_NUM) ->
                 "发现新版本 ${latest.tag}"
             latest != null -> "已是最新（构建 ${BuildConfig.BUILD_NUM}）"
             else -> "当前 v${BuildConfig.VERSION_NAME}（构建 ${BuildConfig.BUILD_NUM}）"
