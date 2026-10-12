@@ -9,6 +9,12 @@ pluginManagement {
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
     }
+    plugins {
+        kotlin("jvm") version "2.4.21"
+    }
+}
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 dependencyResolutionManagement {
@@ -26,6 +32,7 @@ dependencyResolutionManagement {
                 includeGroup("io.github.libxposed")
             }
         }
+        mavenCentral()
     }
 }
 
