@@ -47,3 +47,4 @@ app/app/src/main/cpp/
 __pycache__/
 *.pyc
 .workbuddy/
+tools/android-sdk
