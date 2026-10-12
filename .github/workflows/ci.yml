@@ -103,7 +103,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.XMREPO_TOKEN }}
           TAG: ${{ steps.rel.outputs.tag }}
-          NOTES: ${{ runner.temp }}/release-notes.md
+          NOTES: RELEASE_NOTES.md
           APK: app/app/build/outputs/apk/release/app-release.apk
         run: |
           REPO=Xposed-Modules-Repo/io.github.coderstory.honorhook
