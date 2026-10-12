@@ -3,6 +3,7 @@ package top.honorhook.xposed.target
 import top.honorhook.xposed.target.ads.HonorAdsHook
 import top.honorhook.xposed.target.ads.HonorOpsAdHook
 import top.honorhook.xposed.target.exam8.Exam8Hook
+import top.honorhook.xposed.target.mms.MmsHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 import top.honorhook.xposed.target.tracking.HonorTrackingHook
 
@@ -25,6 +26,8 @@ object TargetRegistry {
         register(Exam8Hook)
         register(LauncherHook)
         register(SystemUiHook)
+        // 荣耀短信（第 7 目标，T1 骨架：只观测不干预）。
+        register(MmsHook)
         // 荣耀系统广告 SDK（com.hihonor.adsdk）通杀净化：同一 SDK 库，按包分别注册挂载。
         register(HonorAdsHook("com.hihonor.calendar"))
         register(HonorAdsHook("com.hihonor.android.totemweather"))

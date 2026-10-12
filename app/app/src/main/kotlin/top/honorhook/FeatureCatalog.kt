@@ -33,6 +33,9 @@ object FeatureCatalog {
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
 
+    const val KEY_MMS_AD_OFF = "mms.ad_off"
+    const val KEY_MMS_CODE_FREE = "mms.code_free"
+
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
 
@@ -88,6 +91,16 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, "隐藏副卡图标", "隐藏副卡(SIM2)状态栏信号图标，双卡时只显示主卡"),
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
+            ),
+        ),
+        Target(
+            "com.hihonor.mms", "短信",
+            listOf(
+                Feature(
+                    KEY_MMS_AD_OFF, "广告净化",
+                    "去除智能信息营销内容——10010 会话底部自定义菜单（流量充值/1元30G/百元回馈）、卡片按钮（1元30G/抢100G）、应用推广卡（查看应用跳应用市场）",
+                ),
+                Feature(KEY_MMS_CODE_FREE, "验证码免服务", "验证码本地复制，无需开启智能信息服务，全程不联网"),
             ),
         ),
         Target(
