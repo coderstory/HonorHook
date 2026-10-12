@@ -78,20 +78,48 @@ jobs:
             -PhhKeyPassword="$HH_KEY_PASSWORD" \
             --no-daemon --stacktrace
 
+      # master 分支：release notes 落盘一次，源仓库与 Xposed-Modules-Repo 共用
+      - name: Write release notes (master)
+        if: github.ref_name == 'master'
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          自动构建（run #${{ github.run_number }}，commit ${{ github.sha }}）
+
+          - 模块版本：${{ steps.ver.outputs.version }}
+          - 宿主基线：主题商店 20.1.63.305 / 包管理器 14.0.37.301 / 系统桌面 18.0.0.234 /
+            成人高考题库 5.9.0.0-release
+          - 安装：LSPosed 管理器导入 APK，启用模块即可（模块自带静态作用域声明，
+            LSPosed 会提示勾选全部作用域）
+          - 判据：LSPosed 框架日志 `/data/adb/lspd/log/modules_*.log` 里的 `installed N/M`
+          EOF
+
       - name: Publish release (master)
         if: github.ref_name == 'master'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
           name: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
-          body: |
-            自动构建（run #${{ github.run_number }}，commit ${{ github.sha }}）
-
-            - 模块版本：${{ steps.ver.outputs.version }}
-            - 宿主基线：主题商店 20.1.63.305 / 包管理器 14.0.37.301 / 系统桌面 18.0.0.234 /
-              成人高考题库 5.9.0.0-release
-            - 安装：LSPosed 管理器导入 APK，启用模块后勾选全部 6 个作用域
-              （主题商店 / 包管理器 / 设置 / SystemUI / 系统桌面 / 成人高考题库）
-            - 判据：LSPosed 框架日志 `/data/adb/lspd/log/modules_*.log` 里的 `installed N/M`
+          body_path: ${{ runner.temp }}/release-notes.md
           files: app/app/build/outputs/apk/release/app-release.apk
           make_latest: true
+
+      # 同步发布到 Xposed-Modules-Repo（xposedmodules.org 索引源，repo 名 = 模块包名）
+      # Secret XMREPO_TOKEN：fine-grained PAT，仅授权目标仓库，Contents: Read and write
+      # 幂等：workflow 重跑且 tag 已存在时不再建 release，只覆盖上传 APK
+      - name: Publish release to Xposed-Modules-Repo (master)
+        if: github.ref_name == 'master'
+        env:
+          GH_TOKEN: ${{ secrets.XMREPO_TOKEN }}
+          TAG: v${{ steps.ver.outputs.version }}.r${{ github.run_number }}
+          NOTES: ${{ runner.temp }}/release-notes.md
+          APK: app/app/build/outputs/apk/release/app-release.apk
+        run: |
+          REPO=Xposed-Modules-Repo/io.github.coderstory.honorhook
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber --repo "$REPO"
+          else
+            gh release create "$TAG" "$APK" \
+              --repo "$REPO" \
+              --title "$TAG" \
+              --notes-file "$NOTES"
+          fi
