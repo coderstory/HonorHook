@@ -44,12 +44,12 @@ jobs:
       # dev 分支：编译 debug + 单测
       - name: Build debug (dev)
         if: github.ref_name == 'dev'
-        run: ./app/gradlew -p app assembleDebug --no-daemon --stacktrace
+        run: ./app/gradlew -p app assembleDebug --stacktrace
 
       # 单测门禁：仅 dev 分支跑（master release 构建不执行测试）
       - name: Run tests
         if: github.ref_name == 'dev'
-        run: ./app/gradlew -p app test --no-daemon --stacktrace
+        run: ./app/gradlew -p app test --stacktrace
 
       - name: Upload debug APK (dev)
         if: github.ref_name == 'dev'
@@ -82,7 +82,7 @@ jobs:
             -PhhStorePassword="$HH_STORE_PASSWORD" \
             -PhhKeyAlias="$HH_KEY_ALIAS" \
             -PhhKeyPassword="$HH_KEY_PASSWORD" \
-            --no-daemon --stacktrace
+            --stacktrace
 
       # release notes = 仓库根 RELEASE_NOTES.md（skill `release` 每次发布重写；源仓库与 Xposed-Modules-Repo 共用）
       - name: Publish release (master)
