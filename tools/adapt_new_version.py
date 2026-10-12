@@ -78,7 +78,7 @@ class MountPoint:
     return_type: str     # hook 期望的返回类型（ThemeStoreHook 另按它匹配；空串表无）
     mount_id: str        # 幂等 ID（如 theme:ItemInfo.isNeedPayItem），报告追溯用
 
-CLS_DEF_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+(CLS_\w+)\s*=\s*"((?:[^"\\]|\\.)*)"')
+CLS_DEF_RE = re.compile(r'(?:(?:private|internal)\s+)?(?:const\s+)?val\s+(CLS_\w+)\s*=\s*"((?:[^"\\]|\\.)*)"')  # 修饰符可选（ads 钩子 private val / tracking 伴生对象裸 const val 也入表，否则全局表缺键 KeyError）
 # methodName/paramCount 允许引用全大写蛇形常量（如 SystemUiHook 的 METHOD_BIND / BIND_PARAM_COUNT）
 CONST_STR_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+([A-Z][A-Z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"')
 CONST_INT_RE = re.compile(r'(?:private|internal)\s+const\s+val\s+([A-Z][A-Z0-9_]*)\s*=\s*(\d+)')

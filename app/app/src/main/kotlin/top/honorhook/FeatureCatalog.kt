@@ -33,6 +33,10 @@ object FeatureCatalog {
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
 
+    const val KEY_MMS_AD_OFF = "mms.ad_off"
+
+    const val KEY_IME_CODE_FREE = "ime.code_free"
+
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
 
@@ -121,6 +125,24 @@ object FeatureCatalog {
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
             ),
             baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
+        ),
+        Target(
+            "com.hihonor.mms", "短信",
+            listOf(
+                Feature(
+                    KEY_MMS_AD_OFF, "广告净化",
+                    "去除智能信息营销内容——10010 会话底部自定义菜单（流量充值/1元30G/百元回馈）、卡片按钮（1元30G/抢100G）、应用推广卡（查看应用跳应用市场）",
+                ),
+            ),
+        ),
+        Target(
+            "com.sohu.inputmethod.sogou.honor", "搜狗键盘",
+            listOf(
+                Feature(
+                    KEY_IME_CODE_FREE, "验证码候选免同意",
+                    "键盘候选区「短信验证码一键填充」不再要求同意搜狗联网服务——只解绑本功能的同意擦除（提码/正则全程本地），其余云功能同意门原样",
+                ),
+            ),
         ),
         Target(
             "com.hihonor.android.totemweather", "荣耀系统净化",
