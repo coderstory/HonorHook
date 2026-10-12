@@ -459,6 +459,22 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
     "$ADB" shell rm -f /data/local/tmp/honorhook-install.apk >/dev/null 2>&1
     ;;
 
+  # 重启作用域进程：root kill（TERM，干净，无 crash 记录不计 LSPosed 安全模式频次）——
+  # 与模块 App「强制重启作用域应用」同机制。用法：restart-scope [pkg...]（缺省 = scope.list 全部）。
+  # 进程被 kill 后由系统自动拉起（persistent）。禁用 am crash（用户 2026-10-12 永久禁令）。
+  restart-scope)
+    require "$ADB"
+    pkgs="${*:-$(tr -d '\r' < app/app/src/main/resources/META-INF/xposed/scope.list | tr '\n' ' ')}"
+    for p in $pkgs; do
+      pid=$("$ADB" shell "su 0 pidof $p" 2>/dev/null | tr -d '\r' | tr ' ' '\n' | head -1)
+      if [ -n "$pid" ]; then
+        "$ADB" shell "su 0 kill $pid" >/dev/null 2>&1 && info "$p (pid $pid) 已 TERM，等系统拉起"
+      else
+        info "$p 未在运行"
+      fi
+    done
+    ;;
+
   # 判据金标准：直接 grep LSPosed 框架日志文件（modlog 的 60 行窗口会漏早期判据行，2026-10-12 教训）
   modlog-f)
     TAG="${1:-HonorHook}"
