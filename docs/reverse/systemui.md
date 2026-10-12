@@ -4,6 +4,7 @@
 
 > 2026-10-10 · 目标 `com.android.systemui` 基线 **17.0.0.1**（versionCode 1700000001，AAK-AN00，Android 17，双卡 DSDS 双联通在网）。
 > 2026-10-11 · 新增 U2 隐藏 5G 标 / U3 双卡信号合并（见 §七）；U1 副卡隐藏实现不变。
+> 2026-10-12 · 新增 U4 双排信号（移植 DualSignal 3.3，§7.11）；U3 已废弃（§7.9）。
 
 ## 一、需求
 
@@ -251,3 +252,42 @@ imageView.setImageDrawable(new ResScalingDrawableWrapper(drawable2, i, getScaleF
 **教训**：LSPosed 拦截器的默认姿势是「先 `proceed()` 放行宿主，再做旁路采集」；
 拿不到可靠锚点（subId/卡序/档位）时，双排这种**强视图操作**不可做——
 应改用 §7.3 的数据源轨（`getPrimaryLevel()` StateFlow）重做，而不是继续在渲染点硬刚。
+
+### 7.11 U4 状态栏双排信号：移植 DualSignal 3.3（2026-10-12）
+
+**决策**：U3 自研路线按 §7.9 废弃后，改用用户已验证可用的第三方插件 `com.mod.dualsignal`
+3.3 的渲染方案（jadx 源 `system-files/DualSignal-jadx`，872 行读毕），整移植为 U4（去类型标）。
+用户随后停用 DualSignal，由本模块接管。
+
+**为什么它能绕开 §7.9 的三条死路**：
+1. 档位**自读** `SubscriptionManager.getActiveSubscriptionInfoList` + `TelephonyManager
+   .createForSubscriptionId(subId).signalStrength.level`——完全不经宿主 StateFlow/`setIconForView`
+   资源 id，绕开教训 #6（档位采集口径拿不到）；U1 在数据层剔副卡也不影响它（数据源独立）。
+2. 强视图操作的对象是**自建容器**（tag `dual_container` 注入 mobile_combo 外壳 FrameLayout），
+   原生组整体 GONE，宿主 `setIconForView` 刷不到它，绕开教训 #2/#3。
+3. 维护靠 OnGlobalLayout 节流（250ms）+ 2s 自续刷新 + Choreographer 每帧取色，不依赖宿主
+   重绑时机，绕开教训 #5（重建 churn——重建后下一轮 attach/维护周期重新接管）。
+
+**移植改造**（`DualSignalFeature.kt` 文件头有全量取舍清单）：
+- 硬编码 id 2131364317/318/2131363001 → aapt2 实证 entry name = `mobile_combo` /
+  `mobile_combo_card` / `ethernet_combo`，运行时 `getIdentifier`。
+- **ModernStatusBarMobileView 挂载点不搬**：该类未覆写 `onAttachedToWindow`（jadx 实证），
+  declaredMethods 直连解析必落空；旧 API 挂它实际落到 `View.onAttachedToWindow` 全局点，
+  且 §7.9 教训 #4 实证其显示路径零触发 ⇒ 死挂载，不做。HwSignalClusterView 同理不单挂
+  （继承 SignalClusterView 且未覆写 attach）。实际挂 3 点：SignalClusterView /
+  SignalUnitNormalView / SignalUnitUCTView 的 onAttachedToWindow（均类自声明，直连可解析）。
+- 类型标 label TextView 及其数据链（getNetworkLabel/isWifiConnected/isMobileDataEnabled）不搬
+  ——U2/U2b/U2c 已收口 native 类型标，不双份。
+- 原生 mobile_combo 整组 GONE（含其内 5G 标）⇒ U4 开启时 5G 标视觉上随组消失，属预期。
+
+**冲突防护（与 DualSignal 插件二选一）**：两模块挂同一批 attach，回调先后不保证——
+按 host（mobile_combo 的 FrameLayout 外壳）探测插件容器 tag `dual_container`：
+插件先到 ⇒ 我们不注入；我们先到 ⇒ 插件随后注入，我们在 ≤2s 内的维护周期里探得后
+移除自建容器、恢复原生组并永久退避（瞬时双份自愈）。包存在性只留痕不做门
+（包已装但 LSPosed 停用时插件 hook 不跑，tag 探测才是真判据）。
+
+**判据**（modlog-f 'SystemUiHook'）：`SystemUiHook·U4: installed 3/3` 汇总行；
+`SystemUiHook·U4 生效: systemui:dualSignal.* — 双排容器已接管 N 处`；
+包探测留痕行。冲突退避 = `本 host 退避不注入` WARN 行。
+
+**未验证**：代码 + 编译 + 单测通过；双排视觉/冲突退避待真机（见验证清单）。

@@ -68,6 +68,14 @@ object SystemUiHook : TargetHook {
         val loader = param.defaultClassLoader
         val apkPath = param.applicationInfo.sourceDir
 
+        // U4 状态栏双排信号（独立文件，渲染方案移植自 com.mod.dualsignal 3.3）：按开关转发，
+        // 自带引擎与 installed 汇总行（SystemUiHook·U4），与本文件的 U1/U2 挂载互不计数。
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL)) {
+            DualSignalFeature.install(module, param)
+        } else {
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook")
+        }
+
         val pending = mutableListOf<MountTask>()
 
         // U1 副卡隐藏（数据层：updateSubs 入参剔除 slotId==1）

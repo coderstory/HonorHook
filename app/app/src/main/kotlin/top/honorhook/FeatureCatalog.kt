@@ -33,6 +33,7 @@ object FeatureCatalog {
 
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
+    const val KEY_SYSTEMUI_DUAL_SIGNAL = "systemui.dual_signal"
 
     const val KEY_MMS_AD_OFF = "mms.ad_off"
 
@@ -126,6 +127,7 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, "隐藏副卡图标", "隐藏副卡(SIM2)状态栏信号图标，双卡时只显示主卡"),
                 Feature(KEY_SYSTEMUI_HIDE_5G, "隐藏 5G 标识", "不显示状态栏信号图标旁的 5G/4G 类型标，单卡双卡一律不显示"),
+                Feature(KEY_SYSTEMUI_DUAL_SIGNAL, "双排信号", "状态栏信号格双排显示（整合第三方方案，不含类型标）；与 DualSignal 插件二选一"),
             ),
             baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
         ),
