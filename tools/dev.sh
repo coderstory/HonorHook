@@ -174,7 +174,7 @@ EOF
   diag-module)
     require "$ADB"
     info "① 包是否安装"
-    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m2 -E "versionName|firstInstallTime" || echo "  未安装"
+    "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m2 -E "versionName|firstInstallTime" || echo "  未安装"
     info "② 主题商店进程是否存活"
     "$ADB" shell pidof com.hihonor.android.thememanager 2>/dev/null | tr -d '\r' || echo "  未运行（需打开主题商店触发挂载）"
     info "③ LSPosed 框架内的模块记录"
@@ -277,20 +277,20 @@ EOF
   install)
     require "$ADB"; require "$APK_DEBUG"
     info "先卸载旧包（用户约定：每次安装前必须卸载，避免覆盖安装残留）"
-    "$ADB" uninstall top.honorhook 2>&1 | tr -d '\r' || true
+    "$ADB" uninstall io.github.coderstory.honorhook 2>&1 | tr -d '\r' || true
     "$ADB" install "$APK_DEBUG" | tr -d '\r'
     info "校验已安装包版本："
-    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
+    "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
     ;;
 
   install-release)
     require "$ADB"; require "$APK_RELEASE"
     info "先卸载旧包（用户约定：每次安装前必须卸载）"
-    "$ADB" uninstall top.honorhook 2>&1 | tr -d '\r' || true
+    "$ADB" uninstall io.github.coderstory.honorhook 2>&1 | tr -d '\r' || true
     # -g：设备侧确认弹窗会以 INSTALL_FAILED_ABORTED 打断纯 adb install（2026-10-11 实证）
     "$ADB" install -g "$APK_RELEASE" | tr -d '\r'
     info "校验已安装包版本："
-    "$ADB" shell dumpsys package top.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
+    "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
     ;;
 
   enable-module)
@@ -431,10 +431,10 @@ PYEOF
 
   launch)
     require "$ADB"
-    info "冷启动 top.honorhook（明确 LAUNCHER intent，不用 monkey 避免干扰）"
-    "$ADB" shell am force-stop top.honorhook 2>/dev/null || true
+    info "冷启动 io.github.coderstory.honorhook（明确 LAUNCHER intent，不用 monkey 避免干扰）"
+    "$ADB" shell am force-stop io.github.coderstory.honorhook 2>/dev/null || true
     "$ADB" shell am start -a android.intent.action.MAIN \
-      -c android.intent.category.LAUNCHER -n top.honorhook/.ui.MainActivity 2>&1 | tr -d '\r'
+      -c android.intent.category.LAUNCHER -n io.github.coderstory.honorhook/.ui.MainActivity 2>&1 | tr -d '\r'
     sleep 3
     "$0" top
     ;;
@@ -446,7 +446,7 @@ PYEOF
       | grep -m8 -E "mResumedActivity|topResumedActivity|^ *Hist " || echo "（未取到栈顶，可能 Activity 未存活）"
     info "包存活状态："
     "$ADB" shell dumpsys activity processes 2>/dev/null | tr -d '\r' \
-      | grep -A2 -m1 "top.honorhook" || true
+      | grep -A2 -m1 "io.github.coderstory.honorhook" || true
     ;;
 
   log)
@@ -470,17 +470,17 @@ PYEOF
     require "$ADB"
     info "① 清空设备日志缓冲"
     "$ADB" logcat -c
-    info "② 冷启动 top.honorhook"
-    "$ADB" shell am force-stop top.honorhook 2>/dev/null || true
-    "$ADB" shell monkey -p top.honorhook -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || \
-      "$ADB" shell am start -n top.honorhook/.ui.MainActivity >/dev/null 2>&1 || true
+    info "② 冷启动 io.github.coderstory.honorhook"
+    "$ADB" shell am force-stop io.github.coderstory.honorhook 2>/dev/null || true
+    "$ADB" shell monkey -p io.github.coderstory.honorhook -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || \
+      "$ADB" shell am start -n io.github.coderstory.honorhook/.ui.MainActivity >/dev/null 2>&1 || true
     sleep 5
     info "③ 进程存活检查"
-    pid="$("$ADB" shell pidof top.honorhook 2>/dev/null | tr -d '\r' || true)"
+    pid="$("$ADB" shell pidof io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' || true)"
     [ -n "$pid" ] && echo "进程存活 pid=$pid" || echo "进程不存在（已崩溃或退后台）"
     info "④ 本次启动日志（崩溃/异常优先）"
     "$ADB" logcat -d -v threadtime 2>/dev/null | tr -d '\r' \
-      | grep -E "FATAL|AndroidRuntime|top\.honorhook|Exception|Error caused|am_proc_died|ActivityManager: (Force|Process)" \
+      | grep -E "FATAL|AndroidRuntime|io\.github\.coderstory\.honorhook|Exception|Error caused|am_proc_died|ActivityManager: (Force|Process)" \
       | tail -50
     ;;
 
@@ -597,7 +597,7 @@ PYEOF
     require "$ADB"
     mkdir -p "$LOG_OUT"
     out="$LOG_OUT/honorhook_$(stamp).log"
-    "$ADB" shell su -c "cat /data/user/0/top.honorhook/files/honorhook.log" 2>/dev/null | tr -d '\r' > "$out" || true
+    "$ADB" shell su -c "cat /data/user/0/io.github.coderstory.honorhook/files/honorhook.log" 2>/dev/null | tr -d '\r' > "$out" || true
     if [ -s "$out" ]; then info "已落盘: $out"; cat "$out"; else
       info "未在应用私有目录取到（日志文件由 XposedService.openRemoteFile 提供，走 App 内日志页查看）"
     fi

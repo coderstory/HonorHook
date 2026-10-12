@@ -9,7 +9,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "top.honorhook"
+        applicationId = "io.github.coderstory.honorhook"
         minSdk = 26
         targetSdk = 34
         versionCode = 100
