@@ -162,10 +162,20 @@ object MiHealthHook : TargetHook {
         }
         val isDownload = path?.contains(DOWNLOAD_PATH) == true
         val isList = !isDownload && path != null && LIST_PATHS.any { path.contains(it) }
-        if (req == null || url == null || (!isDownload && !isList)) {
-            return chain.javaClass.getMethod("proceed").invoke(chain)
-        }
-        val resp = chain.javaClass.getMethod("proceed").invoke(chain) ?: return null
+        // proceed 反射：okhttp4 RealInterceptorChain.proceed(Request) 是 **1 参**（0 参查不到 →
+        // NoSuchMethodException 经 Proxy 变 UndeclaredThrowableException 直接打爆 OkHttp 线程，
+        // 2026-10-13 真机闪退实证）。按参个数匹配：1 参优先，0 参兜底（旧 okhttp）。
+        val proceed = runCatching {
+            chain.javaClass.methods.firstOrNull { it.name == "proceed" && it.parameterCount == 1 }
+                ?.also { it.isAccessible = true }
+        }.getOrNull()
+        val resp = if (proceed != null && req != null) {
+            invokeUnchecked(proceed, chain, arrayOf(req))
+        } else {
+            val zero = runCatching { chain.javaClass.getMethod("proceed") }.getOrNull()
+                ?: return null
+            invokeUnchecked(zero, chain, null)
+        } ?: return null
         return try {
             if (isDownload) handleDownload(module, loader, url, req, path, resp)
             else handleList(module, loader, resp)
@@ -174,6 +184,18 @@ object MiHealthHook : TargetHook {
             resp
         }
     }
+
+    /**
+     * 反射 invoke 统一出口：解包 InvocationTargetException（Proxy 对声明外受检异常会包成
+     * UndeclaredThrowableException 掩盖宿主真实异常），按宿主原语义重抛 cause。
+     */
+    private fun invokeUnchecked(method: java.lang.reflect.Method, target: Any?, args: Array<Any?>?): Any? =
+        try {
+            method.invoke(target, *(args ?: emptyArray()))
+        } catch (e: java.lang.reflect.InvocationTargetException) {
+            val cause = e.cause
+            throw cause as? RuntimeException ?: (cause?.let { RuntimeException(it) } ?: e)
+        }
 
     /** 事 A：download 2xx → 缓存原文 + license/sign 置空返回；事 B：非 2xx 且有缓存 → 回放。 */
     private fun handleDownload(
