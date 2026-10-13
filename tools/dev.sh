@@ -410,11 +410,11 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
 
   # 判据金标准：直接 grep LSPosed 框架日志文件（modlog 的 60 行窗口会漏早期判据行，2026-10-12 教训）
   modlog-f)
-    TAG="${1:-HonorHook}"
+    TAG="${2:-HonorHook}"   # $1 = 子命令名（dispatch 无 shift），tag 落在 $2
     # tag 进 su -c 双引号内层 grep：先校验字符集，杜绝引号/分号注入碎 shell（d3）
     [[ "$TAG" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "tag 仅限字母/数字/._:-（防注入碎 shell）"
     require "$ADB"
-    "$ADB" shell "su 0 sh -c 'grep -h \"$TAG\" /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30'" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 grep -h $TAG /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30" 2>&1 | tr -d '\r'
     ;;
 
   # LSPosed 官方 CLI 启用/查询模块（enable-module = 本命令 + 作用域进程强停）。
