@@ -98,10 +98,17 @@ object SettingsHook : TargetHook {
                         val btn: android.view.View =
                             panel.findViewById<View>(res.getIdentifier(ID_BUTTON_DISABLE, "id", packageName))
                                 ?: return@runCatching
-                        btn.isEnabled = true
-                        val listener = self as? android.view.View.OnClickListener
-                        if (listener != null) btn.setOnClickListener(listener)
-                engine.judge(module, task, JUDGE_PREFIX)
+                        // 介入条件（2026-10-13 用户拍板）：仅当原生把按钮判为「不可用」（禁用灰按钮，
+                        // 即不可停用的系统应用）才处理；原生 enabled 的场景（普通应用「卸载」等）一律不碰，
+                        // 零误伤。灰按钮原生会清空文字 ⇒ 恢复可点时同时补回文案；文字非空保留原字，勿覆盖。
+                        // 文案硬编码 zh-CN（自用模块，该分支按钮语义唯一为「停用」）；资源名不猜（无锚点不硬兜）。
+                        if (!btn.isEnabled) {
+                            btn.isEnabled = true
+                            (btn as? android.widget.TextView)?.takeIf { it.text.isNullOrEmpty() }?.text = "停用"
+                            val listener = self as? android.view.View.OnClickListener
+                            if (listener != null) btn.setOnClickListener(listener)
+                            engine.judge(module, task, JUDGE_PREFIX, "原生禁用按钮已恢复可点+补字")
+                        }
             }.onFailure { t ->
                 module.log(Log.WARN, MountEngine.TAG, "停用按钮启用失败（放行原状态）: ${t.message}")
             }
