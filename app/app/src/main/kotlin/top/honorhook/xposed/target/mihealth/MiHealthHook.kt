@@ -60,8 +60,8 @@ object MiHealthHook : TargetHook {
      */
     private val LIST_PATHS = listOf(
         "/ops/v1/paidwatchface/",
-        "/ops/v1/mall/v4/watchface/tab",
-        "/ops/v1/mall/watchface/tab",
+        "/ops/v1/mall/v4/watchface/",
+        "/ops/v1/mall/watchface/",
     )
 
     /** 缓存目录（appInfo.dataDir 下；install 时传入，null = 无法缓存，hook 退化为纯放行）。 */
@@ -80,6 +80,9 @@ object MiHealthHook : TargetHook {
 
     /** 判据日志节流（每 key 1 次）。 */
     private val loggedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** [diag] 已采样请求路径（定位用，cap 60；定位后随探针一并删除）。 */
+    private val diagPaths: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_MIH_FACE_FREE)) {
@@ -160,6 +163,11 @@ object MiHealthHook : TargetHook {
         val path = url?.let {
             runCatching { it.javaClass.getMethod("encodedPath").invoke(it) as? String }.getOrNull()
         }
+        // [diag] 请求路径采样（每唯一 path 前 1 次，cap 60）——定位「试用装完但 download 分支零命中」的
+        // 真机问题：请求到底走没走 Java okhttp / 实际路径长啥样。定位后删除。
+        if (path != null && diagPaths.size < 60 && diagPaths.add(path)) {
+            module.log(Log.INFO, MountEngine.TAG, "mih-face [diag] okhttp 请求: $path")
+        }
         val isDownload = path?.contains(DOWNLOAD_PATH) == true
         val isList = !isDownload && path != null && LIST_PATHS.any { path.contains(it) }
         // proceed 反射：okhttp4 RealInterceptorChain.proceed(Request) 是 **1 参**（0 参查不到 →
@@ -186,15 +194,23 @@ object MiHealthHook : TargetHook {
     }
 
     /**
-     * 反射 invoke 统一出口：解包 InvocationTargetException（Proxy 对声明外受检异常会包成
-     * UndeclaredThrowableException 掩盖宿主真实异常），按宿主原语义重抛 cause。
+     * 反射 invoke 统一出口：
+     * - 解包 InvocationTargetException，还原宿主真实异常（Proxy 对声明外受检异常会包成
+     *   UndeclaredThrowableException 掩盖 cause）；
+     * - **okhttp4 异步链只兜 IOException**（AsyncCall.run 对非 IOException 的 Throwable 直接
+     *   rethrow 打爆 Dispatcher 线程 = 进程级闪退，2026-10-13 真机实证 Canceled→RuntimeException
+     *   连环炸）：cause 是 IOException 原样重抛，其余一律包成 IOException（拦截器链契约内的失败）。
      */
     private fun invokeUnchecked(method: java.lang.reflect.Method, target: Any?, args: Array<Any?>?): Any? =
         try {
             method.invoke(target, *(args ?: emptyArray()))
         } catch (e: java.lang.reflect.InvocationTargetException) {
             val cause = e.cause
-            throw cause as? RuntimeException ?: (cause?.let { RuntimeException(it) } ?: e)
+            when (cause) {
+                is java.io.IOException -> throw cause
+                null -> throw e
+                else -> throw java.io.IOException(cause)
+            }
         }
 
     /** 事 A：download 2xx → 缓存原文 + license/sign 置空返回；事 B：非 2xx 且有缓存 → 回放。 */
@@ -209,6 +225,11 @@ object MiHealthHook : TargetHook {
         val code = respCode(resp)
         val faceId = runCatching { extractFaceId(loader, url, req) }.getOrNull()
         val urlText = runCatching { url?.toString() }.getOrNull() ?: ""
+        // [diag] download 响应分诊（code + body 前 160 字符；定位缓存零生成。定位后删除）
+        runCatching {
+            val head = peekText(resp)?.take(160) ?: "<peekBody null>"
+            module.log(Log.INFO, MountEngine.TAG, "mih-face [diag] download code=$code faceId=$faceId body=$head")
+        }
         if (code in 200..299) {
             val text = peekText(resp) ?: return resp
             val json = runCatching { JSONObject(text) }.getOrNull() ?: return resp
