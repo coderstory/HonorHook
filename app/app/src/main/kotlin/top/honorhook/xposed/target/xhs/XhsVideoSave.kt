@@ -54,6 +54,32 @@ object XhsVideoSave {
     private val P_ORIGIN_KEY: Pattern = Pattern.compile("\"origin_video_key\"\\s*:\\s*\"([^\"]+)\"")
 
     /**
+     * X5 图集采集（外挂解析，2026-10-14 定案）：笔记 JSON 的 images[].url_default 即 XHS-Downloader
+     * 的同源数据（imageList urlDefault），比在 app 内存里翻 adapter/实体图稳得多——混淆零依赖。
+     * 逐 `"images":[` 区段取 noteId 与 url_default 列表。
+     */
+    private val P_NOTE_ID_PLAIN: Pattern = Pattern.compile("\"note_id\"\\s*:\\s*\"([0-9a-f]{16,32})\"")
+
+    /** 图集采集命中计数（联调仪表，稳定后撤）。 */
+    private val imgProbe = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** noteId → 图集 url 列表（外挂缓存，供 X5 批量直下）。 */
+    private val noteImages = ConcurrentHashMap<String, MutableList<String>>()
+
+    /** 最近一篇带图的笔记（用户正在看的），X5 批量取这里。 */
+    @Volatile private var lastImageNoteId: String? = null
+
+    /** X5 取最近笔记图集（空列表 = 尚未采集到）。 */
+    fun lastNoteImages(): List<String> =
+        lastImageNoteId?.let { noteImages[it]?.toList() } ?: emptyList()
+
+    /** 日志回调（install 期注入，模块 logger；采集探测仪表用）。 */
+    @Volatile var logHook: ((Int, String, String) -> Unit)? = null
+
+    /** note 响应 key 探测计数（联调期仪表，字段名定位后撤）。 */
+    private val noteProbeCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /**
      * 全流最高档扫描（XHS-Downloader get_video_link 语义）：MediaStream 实为 {h264[],h265[],h266[]}
      * 三编解码 × 多档（entities/video/MediaStream.java 实证），h264[0] 只是默认播放档——按
      * height+avg_bitrate 取全部 master_url 中的最大者才是流内最高档。
@@ -94,6 +120,8 @@ object XhsVideoSave {
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         hostLoader = loader
+        // 采集探测仪表回调（X5 联调期；稳定后撤）
+        logHook = { prio, tag, msg -> module.log(prio, tag, msg) }
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
 
         val pending = listOf(
@@ -164,7 +192,7 @@ object XhsVideoSave {
 
     /**
      * 入口分流：/note/video/save 改写响应（命中返回新 Response，未命中/异常返回 null = 原响应原样）；
-     * 其余 /api/sns/ 采集视频源（返回 null）。返回非 null = intercept 出口用新响应替换。
+     * 其余 /api/sns/ 采集视频源（返回 null）。
      */
     private fun rewriteVideoSave(request: Any?, response: Any?, module: XposedModule): Any? {
         if (request == null || response == null) return null
@@ -175,7 +203,66 @@ object XhsVideoSave {
             return patchVideoSaveResponse(url, body, response, module)
         }
         harvestVideoSources(body)
+        harvestNoteImages(body, url)
         return null
+    }
+
+    /**
+     * X5 图集采集：逐 `"images":[` 区段，noteId 取区段前最近十六进制串（视频同款启发式），
+     * 区段内收全部 url_default。**只认数组形 `"images":[`**——字符串形 `"images":"https…"`
+     * 是评论区头像字段（2026-10-14 探测实证），跳过。
+     * note 响应另配 key 探测（url 含 /note/ 时打 image 类 key 清单，定位图集真实字段名）。
+     */
+    /**
+     * X5 图集采集（外挂解析，2026-10-14 定案）：笔记图集数据在 `/api/sns/v1/note/imagefeed`
+     * 响应（探测实证 key=images_list；此前 "images" 命中的全是评论区头像字符串字段）。
+     * 不赌字段名——直接收响应里全部 `sns-img`/`sns-webpic` host 的 URL（头像=sns-avatar 天然排除），
+     * noteId 取响应内第一个 `"note_id"`（大图集分页多次响应累加去重）。
+     */
+    /**
+     * X5 图集采集（外挂解析，2026-10-14 流量探测定案）：图集字段 = `images_list[]`，元素含
+     * {fileid, height, width, url, original}，图床 host = sns-na-i6.xhscdn.com（url 带
+     * imageView2 压缩参数；videofeed 段直接带 `original` 原图直链）。
+     * 数据源端点：/note/detailfeed/preload（进笔记必发）+ /note/videofeed + homefeed。
+     * 采集规则：original 直链优先；miss 收 url（[toOriginal] 落盘时剥参数）。
+     * noteId 取响应内 `"note_id"`（homefeed 多笔记混包时沿用最近值——批量目标=当前浏览笔记）。
+     */
+    private val P_ORIGINAL_URL: Pattern = Pattern.compile("\"original\"\\s*:\\s*\"(https://sns-[^\"]+)\"")
+    private val P_NOTE_IMG_URL: Pattern = Pattern.compile("\"url\"\\s*:\\s*\"(https://sns-(?:na|img|webpic)[^\"]+)\"")
+
+    private fun harvestNoteImages(body: String, url: String) {
+        // 触发端点收窄（2026-10-14 实测 62 张污染修正）：只认 imagefeed（逐图 feed，进图浏览必发）
+        // 与 detailfeed（笔记详情/预载）。宽前缀 /note/ 会把 user/posted（他人主页笔记列表）等
+        // 无关响应收进来；homefeed 直接整条信息流的图灌进单笔记缓存。
+        if (!url.contains("/note/imagefeed") && !url.contains("/note/detailfeed")) return
+        // noteId 三轨：body 内 "note_id"（comment/detail 型）→ URL query note_id（imagefeed 型，
+        // 2026-10-14 诊断实证 body 无 note_id 而 query 有）→ 沿用最近值
+        val noteId = P_NOTE_ID_PLAIN.matcher(body).takeIf { it.find() }?.group(1)
+            ?: queryParam(url, "note_id")
+            ?: lastImageNoteId
+        val found = LinkedHashSet<String>()
+        var m = P_ORIGINAL_URL.matcher(body)
+        while (m.find()) found += m.group(1)
+        if (found.isEmpty()) {
+            m = P_NOTE_IMG_URL.matcher(body)
+            while (m.find()) found += m.group(1)
+        }
+        if (noteId == null || found.isEmpty()) return
+        if (noteImages.size > URL_MAP_LIMIT) noteImages.clear()
+        val merged = (noteImages[noteId] ?: mutableListOf()) + found
+        val distinct = merged.distinct()
+        // 单笔记张数护栏：多图笔记上限 ~20 张（9.49.1 图集极限），超 30 判定污染整包丢弃
+        if (distinct.size > 30) {
+            if (logHook != null) {
+                logHook!!(Log.WARN, MountEngine.TAG, "XhsHook·X4 图集护栏触发 noteId=$noteId ${distinct.size} 张疑似污染，丢弃")
+            }
+            return
+        }
+        noteImages[noteId] = distinct.toMutableList()
+        lastImageNoteId = noteId
+        if (logHook != null && imgProbe.incrementAndGet() <= 8) {
+            logHook!!(Log.INFO, MountEngine.TAG, "XhsHook·X4 图集采集命中 noteId=$noteId 累计 ${noteImages[noteId]?.size} 张（来自 ${url.substringBefore('?').takeLast(40)}）")
+        }
     }
 
     private fun peekBodyString(response: Any): String? = runCatching {

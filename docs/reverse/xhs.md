@@ -52,7 +52,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 | X2c | no_watermark | ImageBean disable_ai getter → true | 未混淆类·运行时注解定位 | jm7 期 ImageBean.u()，9.49.1=v()，**方法号漂移实证** |
 | X3 | hd_save | `qc8.i.i(...)` args[3] 图 url → token 重建直链 | 混淆·串锚 DexKit | jm7.i 系 |
 | X4 | video_save | `okhttp3.OkHttpClient$Builder.build()` 注入 Interceptor 代理 | 公开 API | 同 |
-| X5 | batch_save | `mh9.b` 保存点击拦截弹窗（本张/全部） | 混淆·双日志串锚 DexKit | — |
+| X5 | batch_save | `mh9.b` 保存点击 → 本张原生保存后弹追加卡片（自绘）→ **外挂直下**（imagefeed 采集 + HttpURLConnection + MediaStore） | 混淆·双日志串锚 DexKit | — |
 
 ### 每点重定位备注
 
@@ -114,14 +114,18 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 - 重定位：okhttp3 类名公开；`interceptors` 字段名公开源码。工程意义上无需重定位。
 - 失败分级：FAILED（okhttp 缺失说明目标结构大改）。
 
-**X5 `mh9.b`（图片长按面板「保存」点击 lambda）→ 弹窗 [保存本张（原图）/ 保存全部 N 张]**
-- 混淆 lambda 类（classes7），逻辑体 `invoke(Object)` 含日志串 `"download blocked, disableSaveMedia=true"` / `"onDownloadClick, noteId="`（jadx mh9/b.java:55/63 实证）——双串 DexKit 锚。类另有 0 参 invoke 委托，挂 1 参逻辑体即覆盖。
-- 弹窗规则（2026-10-14 二版，用户拍板「一律弹窗」）：**不预检张数**——图集数量移到按「保存全部」时现查（图搜空 → toast「未取到图片列表」+ WARN）；首版「≤1 张静默直通」路径已删（无日志静默路径 = 观测盲区，真机排查实锤教训）。视频面板不拦（X4 已把原生视频保存改写为直链）。Activity 取不到直通 + WARN。
-- 「本张」= 重入门闩（AtomicBoolean）下 `chain.executable` 手动重放原方法；「全部」= 逐张 300ms 原生 SPI（X3 直链替换逐张生效）。
-- 图片列表数据源 = **运行期类型图搜**：从点击 controller 出发 BFS ≤3 层扫字段，找「元素全为 ImageBean 的非空 List」——不赌 NoteFeed/ta9.g/presenter 任一具体结构（结构不变式混淆绑定，类型不变式稳）。
-- 首版画廊三击已否决（400ms 窗口苛刻 + 双击缩放冲突，2026-10-14 用户拍板）；onAttach 挂 ag9.b 方案随之废弃（记录：onAttach 声明在基类，子类直连必落空——教训保留）。
-- 重定位：双日志串 + invoke(Object) 签名；controller 提取按「lambda 首个非 null 字段值」。
-- 失败分级：NOT_RESOLVED（DexKit 零命中 = 点击链改版，X5 整体失活不影响其余）。
+**X5 `mh9.b`（图片长按面板「保存」点击 lambda）→ 追加弹窗 → 外挂直下（2026-10-14 定稿）**
+- 挂点与锚同前表。交互：**先 proceed 后弹窗**——本张原生保存（fresh token）→ 追加卡片（自绘：圆角卡 + XHS 红主按钮 + 深色自适应）「已保存本张（原图）/ 检测到本篇还有 N 张」[保存全部/不用了]；单图笔记零打扰。
+- **外挂数据链（四版演进终局，前四版死因存档勿复活）**：
+  1. 画廊三击——400ms 窗口 + 双击缩放冲突（用户否决）
+  2. 拦截-重放本张——dispatch token 一次性，事后重放被下游身份过滤静默丢弃
+  3. app 内存找图集（controller 图搜/adapter.setItems 快照）——sheet 图里图集实证为空；MultiTypeAdapter.setItems 真机不存在
+  4. **外挂解析（定稿）**：X4 interceptor 旁路 `/api/sns/v1/note/imagefeed`（逐图 feed，进图浏览必发）+ `/note/detailfeed`，收 `images_list[]` 的 `original` 直链（优先）/`url`；noteId 三轨 = body `"note_id"` → URL query `note_id` → 沿用最近值；触发端点**精确匹配**（宽前缀 /note/ 会收进 user/posted 污染；homefeed 会灌整条信息流——实测 62 张污染）；单笔记 >30 张护栏丢弃。
+  5. 直下：模块自己 HttpURLConnection（UA+Referer+302 跟随）→ MediaStore `Pictures/小红书`；URL 原图化 = 剥 `?`/`!` 参数**不换 host**（sns-na-i6 无参即原图；换 host 拼接对带目录 fileid 未实证）。
+- 弹窗 Activity 来源：controller 图搜（Lazy 主动 getValue 解包 + Dialog 轨——LCBBottomSheetDialog.context）。
+- 边界：当前张会与原生保存重复一张（无现图 fileid 判定链路，接受重存）；视频笔记不弹（X4 已直链）。
+- 重定位：双日志串 + invoke(Object) 签名；采集端点 `note/imagefeed` 路径字面量。
+- 失败分级：NOT_RESOLVED（零命中 = 点击链改版，X5 失活不影响其余）。
 
 ## 四、注册与开关
 
