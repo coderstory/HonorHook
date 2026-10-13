@@ -93,7 +93,7 @@ HonorHook 开发工具
   build-release    编译 release APK（混淆+收缩）
   install          安装 debug APK 到已连接设备（-r 覆盖）
   install-release  安装 release APK
-  enable-module    重装后自动重新启用 LSPosed 模块（点通知+开关，含作用域进程清理）
+  enable-module    重装后重新启用 LSPosed 模块（lspctl CLI 通道，含作用域进程强停）
   deploy-release   一键全流程：build-release + install-release + enable-module
   connect <ip[:port]> 无线 adb 连接（省端口默认 5555）
   devices          列出已连接设备与授权状态
@@ -300,108 +300,15 @@ EOF
     ;;
 
   enable-module)
-    # 重装后 LSPosed 停用模块并发"尚未激活"通知（深链直达模块页）——模拟点击通知+开关全自动重新启用。
-    # 通知栏与寄生管理器对 uiautomator 均不可见 ⇒ 全程 screencap + PIL：
-    #   通知定位 = 图标列的 LSPosed 深灰蓝像素带 (85,98,105)+白色并存；
-    #   开关状态 = 模块页固定位置取色（ON=蓝 74,128,247 / OFF=白底+灰边 230）。
-    # 注意：先跑 install-release（触发通知）再跑本命令；deploy-release 已串好。
+    # 重装后重新启用模块 + 强停作用域进程（hook 必须强停重启才生效）。
+    # 走 LSPosed 官方 CLI lspctl（/data/adb/modules/zygisk_lsposed/lspctl，2.2+ 自带），
+    # 不再模拟点击——旧实现截屏取色+点通知，扰动通知栏/热点开关且依赖 Pillow，脆弱。
+    LSPCTL="/data/adb/modules/zygisk_lsposed/lspctl"
     require "$ADB"
-    # 像素分析用解释器：HONORHOOK_PYTHON 覆盖 > 工程内 venv > PATH（Windows Git Bash 常见 python 而非 python3）
-    PYVENV="${HONORHOOK_PYTHON:-}"
-    if [ -z "$PYVENV" ]; then
-      for c in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" \
-               "$(command -v python3 || true)" "$(command -v python || true)"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then PYVENV="$c"; break; fi
-      done
-    fi
-    [ -n "$PYVENV" ] && [ -x "$PYVENV" ] || die "缺少 python3（enable-module 需 Pillow 做截屏取色）"
-    "$PYVENV" -c 'import PIL' 2>/dev/null || die "python3 缺少 Pillow：${PYVENV}（pip3 install pillow）"
-    LSP_FOCUS="com.android.shell/org.lsposed.manager"
-
-    SZ=$("$ADB" shell wm size | tr -d '\r' | grep -oE '[0-9]+x[0-9]+')
-    W=${SZ%x*}; H=${SZ#*x}
-    SX=$((W * 1000 / 1272)); SY=$((H * 1000 / 2800))   # 千分比缩放（基准 1272x2800）
-    SW_X=$((1054 * SX / 1000)); SW_Y=$((604 * SY / 1000))
-
-    shade_classify() {  # 截屏模块页开关区 → stdout: on / off / other
-      "$ADB" exec-out screencap -p > "$LOG_OUT/enable_page.png" 2>/dev/null
-      "$PYVENV" - "$LOG_OUT/enable_page.png" "$SW_X" "$SW_Y" << 'PYEOF'
-import sys
-from PIL import Image
-im = Image.open(sys.argv[1]).convert('RGB')
-sx, sy = int(sys.argv[2]), int(sys.argv[3])
-blue = gray_edge = white = 0
-for dx in range(-40, 41, 10):
-    r, g, b = im.getpixel((sx + dx, sy))[:3]
-    if abs(r-74) < 40 and abs(g-128) < 40 and abs(b-247) < 40: blue += 1
-    elif r > 245 and g > 245 and b > 245: white += 1
-    if abs(r-230) < 12 and abs(g-230) < 12 and abs(b-230) < 12: gray_edge += 1
-print("on" if blue >= 6 else ("off" if white >= 5 and gray_edge >= 1 else "other"))
-PYEOF
-    }
-
-    shade_candidates() {  # 展开通知栏 → 截屏 → 输出 LSPosed 图标候选 y（自上而下）
-      "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1
-      sleep 2
-      "$ADB" exec-out screencap -p > "$LOG_OUT/enable_shade.png" 2>/dev/null
-      "$PYVENV" - "$LOG_OUT/enable_shade.png" << 'PYEOF'
-import sys
-from PIL import Image
-im = Image.open(sys.argv[1]).convert('RGB')
-W, H = im.size
-px = im.load()
-counts = {}
-for y in range(300, H, 3):
-    slate = white = 0
-    for x in range(80, 250, 4):   # 通知图标列
-        r, g, b = px[x, y]
-        if abs(r-85) < 25 and abs(g-98) < 25 and abs(b-105) < 25: slate += 1
-        elif r > 240 and g > 240 and b > 240: white += 1
-    if slate >= 8 and white >= 2:
-        counts[y] = True
-rows = sorted(counts)
-bands = []
-for y in rows:
-    if bands and y - bands[-1][1] <= 40: bands[-1][1] = y
-    else: bands.append([y, y])
-print(" ".join(str((a + b) // 2) for a, b in bands))
-PYEOF
-    }
-
-    info "展开通知栏，扫描 LSPosed 通知…"
-    BANDS=$(shade_candidates)
-    [ -n "$BANDS" ] || die "通知栏里没找到 LSPosed 通知（先 install-release 重装触发）"
-    info "候选: $BANDS"
-
-    done_flag=0
-    for y in $BANDS; do
-      "$ADB" shell "input tap $((W / 2)) $y" 2>/dev/null
-      sleep 3
-      FOCUS=$("$ADB" shell "dumpsys window | grep mCurrentFocus" 2>/dev/null | tr -d '\r' || true)
-      case "$FOCUS" in
-        *"$LSP_FOCUS"*) ;;
-        *NotificationShade*) "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 1; continue ;;
-        *) "$ADB" shell "input keyevent 4" >/dev/null 2>&1; "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 2; continue ;;
-      esac
-      # 管理器已打开：判别落在哪个页
-      STATE=$(shade_classify)
-      case "$STATE" in
-        on)  info "模块页已打开且模块为启用状态"; done_flag=1; break ;;
-        off) info "模块页已打开（开关 OFF），点击启用…"
-             "$ADB" shell "input tap $SW_X $SW_Y"; sleep 2
-             STATE2=$(shade_classify)
-             [ "$STATE2" = "on" ] || die "点击开关后未变蓝（截屏 $LOG_OUT/enable_page.png 人工核对）"
-             info "模块已重新启用 ✓"; done_flag=1; break ;;
-        *)   info "落点非模块页（管理器首页），返回重试下一候选"
-             "$ADB" shell "input keyevent 4" >/dev/null 2>&1
-             "$ADB" shell "cmd statusbar expand-notifications" >/dev/null 2>&1; sleep 2 ;;
-      esac
-    done
-    [ "$done_flag" = 1 ] || die "未能进入模块页完成启用（通知可能失效，重跑 install-release 再试）"
-    "$ADB" shell "cmd statusbar collapse" >/dev/null 2>&1
-    # 作用域进程**全部**强停（hook 必须强停重启才生效），下次拉起即带 hook。
-    # 包名清单直接读 scope.list（单一事实源，跳过空行/注释行）——此前硬编码 6 包而
-    # scope.list 已扩到 18，漏强停的宿主会出现"部署报成功但该目标 hook 没生效"的假成功。
+    "$ADB" shell "su 0 $LSPCTL module enable --user=0 io.github.coderstory.honorhook" 2>&1 | tr -d '\r'
+    "$ADB" shell "su 0 $LSPCTL module show io.github.coderstory.honorhook" 2>&1 | tr -d '\r' | grep -E 'User'
+    # 包名清单直接读 scope.list（单一事实源，跳过空行/注释行）——漏强停的宿主会出现
+    # "部署报成功但该目标 hook 没生效"的假成功。
     SCOPE_PKGS="$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | grep -vE '^[[:space:]]*(#|$)' || true)"
     [ -n "$SCOPE_PKGS" ] || die "scope.list 读取为空（$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list）"
     for pkg in $SCOPE_PKGS; do
@@ -411,10 +318,10 @@ PYEOF
     ;;
 
   deploy-release)
-    # 全流程一键：编译 → 卸载重装（触发 LSPosed 停用）→ 自动重新启用 → 清作用域进程
+    # 全流程一键：编译 → 卸载重装 → lspctl 重新启用 → 清作用域进程
     "$0" build-release
     "$0" install-release
-    sleep 4   # 等 LSPosed 发"尚未激活"通知
+    sleep 4   # 等包管理器落盘（lspctl 直启用，无需等 LSPosed 通知）
     "$0" enable-module
     ;;
 
@@ -442,7 +349,7 @@ PYEOF
     require "$ADB"
     APK="app/app/build/outputs/apk/release/app-release.apk"
     [ -f "$APK" ] || die "release APK 不存在，先 build-release"
-    # 弹窗按钮解析用解释器：与 enable-module 同款探测链（d5，原裸 python3 在无 python3 PATH 的机器上挂）
+    # 弹窗按钮解析用解释器：HONORHOOK_PYTHON 覆盖 > 工程 venv > PATH 探测链（d5，原裸 python3 在无 python3 PATH 的机器上挂）
     pick_python() {
       local c
       if [ -n "${HONORHOOK_PYTHON:-}" ] && [ -x "${HONORHOOK_PYTHON}" ]; then printf '%s\n' "$HONORHOOK_PYTHON"; return 0; fi
@@ -452,7 +359,7 @@ PYEOF
       done
       return 1
     }
-    PARSER="$(pick_python)" || die "缺少 python3（install-root 安装弹窗解析需要，同 enable-module 的 Pillow 链）"
+    PARSER="$(pick_python)" || die "缺少 python3（install-root 安装弹窗解析需要）"
     "$ADB" push "$APK" /data/local/tmp/honorhook-install.apk >/dev/null 2>&1 || die "push 失败"
     "$ADB" shell "nohup su 0 sh -c 'pm install -r /data/local/tmp/honorhook-install.apk' >/dev/null 2>&1 &"
     for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
@@ -507,7 +414,7 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
     "$ADB" shell "su 0 sh -c 'grep -h \"$TAG\" /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30'" 2>&1 | tr -d '\r'
     ;;
 
-  # LSPosed 官方 CLI 启用/查询模块（替代 enable-module 的 UI 自动化——后者会扰动通知栏/热点开关）。
+  # LSPosed 官方 CLI 启用/查询模块（enable-module = 本命令 + 作用域进程强停）。
   # 依赖设备端 /data/adb/modules/zygisk_lsposed/lspctl（LSPosed 2.2+ 自带）。scope 是 static（随 APK
   # scope.list 自动生效），无需手动同步；重装（install -r）不清启用态，只有卸载重装才需要本命令。
   enable-cli)
