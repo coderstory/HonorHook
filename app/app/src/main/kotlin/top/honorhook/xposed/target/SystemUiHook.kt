@@ -84,6 +84,11 @@ object SystemUiHook : TargetHook {
     private const val PKG_ANDROID = "android"
     private const val HOTSPOT_NOTIF_GROUP = "TetheredNotification"
 
+    /** USB 调试通知 id（2026-10-13 探针+dumpsys 实证：pkg=android id=26 channel=DEVELOPER_IMPORTANT，
+     *  AOSP DevelopmentSettings 发帖；extras 里 usbdevicemanager.adb.tv 是 tv 扩展字段而非渠道 id，
+     *  静态推断「channelId 含 adb」据此落空——这就是 USB 调试通知隐藏不住的根因）。 */
+    private const val ADB_NOTIF_ID = 26
+
     /** 手电筒低电量阈值（与宿主同款 5%，仅用于判据日志打点，不影响放行语义）。 */
     private const val LOW_BATTERY_THRESHOLD = 5
 
@@ -462,9 +467,10 @@ object SystemUiHook : TargetHook {
             return "热点通知($pkg/group=$group)"
         }
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_ADB_NOTIF) && pkg == PKG_ANDROID) {
+            val id = sbn.callOrNull("getId") as? Int
             val channel = sbn.callOrNull("getNotification")?.callOrNull("getChannelId") as? String
-            if (channel?.contains("adb", ignoreCase = true) == true) {
-                return "USB调试通知($pkg/channel=$channel)"
+            if (id == ADB_NOTIF_ID || channel?.contains("adb", ignoreCase = true) == true) {
+                return "USB调试通知($pkg/id=$id/channel=$channel)"
             }
         }
         return null
