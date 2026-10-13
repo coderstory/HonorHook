@@ -47,6 +47,7 @@ object FeatureCatalog {
 
     const val KEY_JD_SPLASH = "jd.splash"
     const val KEY_MFA_SPLASH = "mfa.splash"
+    const val KEY_MIH_FACE_FREE = "mih.face_free"
     const val KEY_SYSMGR_ANTIVIRUS = "sysmgr.antivirus"
 
     const val KEY_IME_CODE_FREE = "ime.code_free"
@@ -199,6 +200,13 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
+        ),
+        Target(
+            "com.mi.health", R.string.target_name_mihealth,
+            listOf(
+                Feature(KEY_MIH_FACE_FREE, R.string.feature_mih_face_free_title, R.string.feature_mih_face_free_desc),
+            ),
+            baselineVersion = "3.59.1",  // 真机 pull 实证（dev.sh pull-apk；逆向记录 docs/reverse/mihealth-face.md）
         ),
     )
 
