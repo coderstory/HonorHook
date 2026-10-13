@@ -21,6 +21,7 @@
     <string name="target_name_purify">荣耀系统净化</string>
     <string name="target_name_jd">京东</string>
     <string name="target_name_mfa">MFA身份验证器</string>
+    <string name="target_name_sysmgr">系统管家</string>
 
     <!-- ===== 功能名与说明（FeatureCatalog.Feature.titleRes/descRes）=====
          命名约定：feature_<key 中 . 换 _>_title / _desc；ota.block 双目标共用 key，
@@ -97,4 +98,7 @@
     <string name="feature_ota_block_desc">系统更新不再在后台自动检测和下载，不再弹出升级提醒通知；在设置里手动检查更新不受影响</string>
     <string name="feature_ota_block_guide_title">屏蔽升级引导页</string>
     <string name="feature_ota_block_guide_desc">解锁手机后弹出的全屏「发现新版本」页面不再出现</string>
+
+    <string name="feature_sysmgr_antivirus_title">病毒检测全禁用</string>
+    <string name="feature_sysmgr_antivirus_desc">安装应用时不再检测风险、不再弹出「发现病毒应用」弹窗，后台闲时病毒扫描也一并跳过</string>
 </resources>
