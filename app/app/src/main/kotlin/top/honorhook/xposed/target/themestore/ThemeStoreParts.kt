@@ -75,6 +75,12 @@ internal const val CLS_BOTTOM_TAB_CONFIGS = "$PKG.hitop.entity.BottomTabConfigs"
 // 主页 Activity（未混淆 keep 名单）——createTabs 的宿主，S2b 前置裁剪挂载点。
 internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 
+// 2026-10-13 详情页推广卡（抖音「推广」卡）反查：荣耀统一广告 SDK（@Keep 未混淆，跨版本稳）。
+// init 是唯一初始化口（AdSdkManager.java:126 / OverseaAdSdkManager.java:503 实证）；isInitialized 仅查
+// context+config 非空，全部 12 处 loader 先 isSdkInit() 守门 → init 空实现 = 全类型广告静默无填充。
+internal const val CLS_HN_ADS = "com.hihonor.adsdk.base.HnAds"
+internal const val CLS_HN_ADS_OVERSEA = "com.hihonor.adsdk.oversea.base.HnAds"
+
 /** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制； */
 internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE, DOWNLOAD_FALLBACK }
 

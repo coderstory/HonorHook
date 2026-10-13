@@ -174,10 +174,10 @@ object ThemeStoreHook : TargetHook {
                     chain.proceed()
                 }
             }
-            // void 空实现阻断（挽留弹窗 F1；判据日志不受 DEBUG_LOGGING 门控）
+            // void 空实现阻断（挽留弹窗 F1 / 广告 SDK init S3；判据日志不受 DEBUG_LOGGING 门控）
             MountKind.BLOCK -> {
                 if (routeActive(chain, module, task)) {
-                    module.log(Log.INFO, MountEngine.TAG, "挽留弹窗已拦截: ${task.methodName}")
+                    module.log(Log.INFO, MountEngine.TAG, "已空实现阻断: ${task.methodName}")
                     null
                 } else {
                     chain.proceed()

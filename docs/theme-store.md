@@ -156,6 +156,21 @@ hook 侧 `module.log()` 落 **LSPosed 框架日志** `/data/adb/lspd/log/modules
 
 > 逐点载荷实证、为什么不挂消费方、为什么不关 `AgreeRepo.isSupportVip()` 总闸 → 证据层 §E。
 
+## 九·A、详情页推广卡 + 广告 SDK 源头堵死（S3，2026-10-13）
+
+抖音「推广」卡数据来源链（jadx 20.1.63.305 实证）：
+`requestFreeResDetailAdConfig`（OnlinePreviewBaseActivity:25837，调用点 :155785/:222714）
+→ `DetailModel.requestResourceCardAdConfig`（DetailModel.kt:448 coroutine）
+→ `AdsRequestSource.getResourceCardAdConfig`（HTTP① 广告位配置 InfoAdResponse）
+→ `PictureTextLoader.loaddetailAd`（HTTP② adsdk 拉真实广告；:87/120/170/268 等全部先 `isSdkInit()` 守门）
+→ `_detailAdCardInfoSource.postValue(DetailAdCardInfo)` → UI 渲染。
+
+S3 三点（feature = theme.ad_off）：
+- `com.hihonor.adsdk.base.HnAds.init` / `com.hihonor.adsdk.oversea.base.HnAds.init` → **BLOCK**：SDK 唯一初始化口（@Keep 未混淆，跨版本稳；AdSdkManager:126 / OverseaAdSdkManager:503）。init 空实现 ⇒ `isInitialized()` 恒 false ⇒ 12 处 loader 全部静默跳过（无填充、无网络、无激活/埋点上报；init 回调无宿主依赖逻辑，AdSdkManager.initSdk 仅打日志）。SDK 级通用点——浏览器/天气等荣耀系 app 同 SDK 可复用。
+- `OnlinePreviewBaseActivity.shouldBlockDetailAd` → **CONST true**：官方留的子类门（基类恒 false，:4850 首行早退）——B 纵深，详情页配置+广告两条 HTTP 全断；OnlineThemePreviewActivity 已用同门（NfcAdBlockHelper 时长门），字体页无覆盖。
+
+判据：强停主题商店重进 → `tools/dev.sh modlog HonorHook` 中 installed N/M 的 M 增 3 且全 installed；进字体详情页无推广卡、冷启动无开屏广告。若个别点 NOT_RESOLVED：HnAds 类名是 @Keep 公开 API 不随版本变，失败即宿主结构变化，需重查。
+
 ## 十、顶层策略：用户 VIP + 主题免费 + 下载走 VIP 通道
 
 三层**数据态**，不碰表现层：
