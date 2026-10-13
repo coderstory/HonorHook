@@ -6,7 +6,6 @@ import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.ime.ImeHook
 import top.honorhook.xposed.target.jd.JdHook
 import top.honorhook.xposed.target.mfauth.MfaAuthHook
-import top.honorhook.xposed.target.mihealth.MiHealthHook
 import top.honorhook.xposed.target.mms.MmsHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 import top.honorhook.xposed.target.tracking.HonorTrackingHook
@@ -58,8 +57,6 @@ object TargetRegistry {
         register(MfaAuthHook)
         // 系统管家服务（第 11 目标）：病毒检测/查杀/弹窗三路全禁；scope.list 已同步。
         register(SysmgrHook)
-        // 第 12 目标：表盘试用授权缓存/回放/免费化（okhttp Builder.build 前置注入单例拦截器）。
-        register(MiHealthHook)
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */

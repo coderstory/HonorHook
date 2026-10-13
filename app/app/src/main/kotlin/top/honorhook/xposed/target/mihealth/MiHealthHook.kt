@@ -34,6 +34,12 @@ import java.util.concurrent.ConcurrentHashMap
  * v1/v2 的 wire 层级与 tag 速查（历史记录，工具函数仍在文末）：详见 [rewritePrepareInstall]
  * 注释与 doc §Y。选点依据不变：YRNBluetoothModule 类与方法未混淆（jadx 复核）。
  */
+/**
+ * ⚠️ 已关线（2026-10-14，docs/reverse/mihealth-face.md §关线）：未注册（TargetRegistry 无此目标、
+ * scope.list 无 com.mi.health）——代码留档供后续变体实验复用，任何复活须先读 §关线三轮实证。
+ * 关线原因：手表端三重校验（v1 verification 签名 / v2 时长字段 / v3 文件内容）全部拒收。
+ * 残留活路 = 试用循环（10 分钟还原后重点试用，服务端重发授权已实证）。
+ */
 object MiHealthHook : TargetHook {
 
     override val packageName = "com.mi.health"

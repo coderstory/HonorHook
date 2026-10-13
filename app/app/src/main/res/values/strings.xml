@@ -22,7 +22,6 @@
     <string name="target_name_jd">京东</string>
     <string name="target_name_mfa">MFA身份验证器</string>
     <string name="target_name_sysmgr">系统管家</string>
-    <string name="target_name_mihealth">小米运动健康</string>
 
     <!-- ===== 功能名与说明（FeatureCatalog.Feature.titleRes/descRes）=====
          命名约定：feature_<key 中 . 换 _>_title / _desc；ota.block 双目标共用 key，
@@ -102,7 +101,5 @@
 
     <string name="feature_sysmgr_antivirus_title">病毒检测全禁用</string>
     <string name="feature_sysmgr_antivirus_desc">安装应用时不再检测风险、不再弹出「发现病毒应用」弹窗，后台闲时病毒扫描也一并跳过</string>
-    <string name="feature_mih_face_free_title">表盘试用永久化</string>
-    <string name="feature_mih_face_free_desc">试用过的付费表盘缓存授权后可永久免费重装；依赖试用期内成功拉取过授权，手表端最终校验结果以真机实测为准</string>
 
 </resources>

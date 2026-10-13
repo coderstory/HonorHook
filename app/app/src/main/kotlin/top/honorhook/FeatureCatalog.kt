@@ -201,13 +201,6 @@ object FeatureCatalog {
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
         ),
-        Target(
-            "com.mi.health", R.string.target_name_mihealth,
-            listOf(
-                Feature(KEY_MIH_FACE_FREE, R.string.feature_mih_face_free_title, R.string.feature_mih_face_free_desc),
-            ),
-            baselineVersion = "3.59.1",  // 真机 pull 实证（dev.sh pull-apk；逆向记录 docs/reverse/mihealth-face.md）
-        ),
     )
 
     /** 查表：宿主挂载基线版本（未登记返回 null = 该目标版本自检静默关闭）。 */
