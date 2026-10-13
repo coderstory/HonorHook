@@ -33,8 +33,8 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * 选点依据：唯一挂载点 `okhttp3.OkHttpClient$Builder.build()`——okhttp3 未混淆、公开 API，
  * 跨版本最稳锚点（RN bundle 周更动态化，业务层类名/接口路径随时漂移，网络栈公开类不动）。
- * hook 语义 = **前置**：build 前往 builder.interceptors() 头部插入单例 Interceptor 再 proceed 放行
- * （头插保证先于宿主自有拦截器看到响应原文）。Interceptor 经 Proxy 实现于目标 ClassLoader
+ * hook 语义 = **前置挂载、尾部注入**：build 前往 builder.interceptors() 末尾追加单例 Interceptor
+ * 再 proceed 放行（宿主响应解密在应用层拦截器链内完成，尾插才能拿到解密后明文，见 ensureInterceptor）。Interceptor 经 Proxy 实现于目标 ClassLoader
  * （模块不引 okhttp 依赖，避免重复类与版本错配）。全部响应改写 runCatching 包裹：
  * 任何异常放行原始响应，绝不 break 网络。
  *
@@ -116,8 +116,11 @@ object MiHealthHook : TargetHook {
     // ---------------------------------------------------------------- Interceptor 注入
 
     /**
-     * 往 builder.interceptors() 头部插入本模块单例 Interceptor（identity 判重防重复插入）。
-     * 头插 = 先于宿主自有拦截器处理响应；宿主 build() 本体逻辑零改动（proceed 放行）。
+     * 往 builder.interceptors() 插入本模块单例 Interceptor（identity 判重防重复插入）。
+     * **尾插**（列表末 = 最内层 application interceptor）：宿主响应**解密**在应用层拦截器链内完成
+     * （com.xiaomi.fitness.app.CloudInterceptor，2026-10-13 真机 [diag] download 实证 body=Base64
+     * 密文），头插看到的是密文、JSON 解析必败；尾插拿到的才是解密后明文。宿主 build() 本体逻辑
+     * 零改动（proceed 放行）。
      */
     private fun ensureInterceptor(builder: Any?, module: XposedModule, loader: ClassLoader) {
         builder ?: return
@@ -125,8 +128,8 @@ object MiHealthHook : TargetHook {
             val proxy = interceptorProxy ?: createInterceptor(module, loader).also { interceptorProxy = it }
             val list = builder.javaClass.getMethod("interceptors").invoke(builder) as? MutableList<Any?> ?: return
             if (list.any { it === proxy }) return
-            list.add(0, proxy)
-            module.log(Log.INFO, MountEngine.TAG, "mih-face: okhttp 拦截器已注入（头部）")
+            list.add(proxy)
+            module.log(Log.INFO, MountEngine.TAG, "mih-face: okhttp 拦截器已注入（尾部）")
         }
     }
 
