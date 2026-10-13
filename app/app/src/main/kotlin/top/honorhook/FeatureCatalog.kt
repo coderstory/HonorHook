@@ -47,6 +47,7 @@ object FeatureCatalog {
 
     const val KEY_JD_SPLASH = "jd.splash"
     const val KEY_MFA_SPLASH = "mfa.splash"
+    const val KEY_SYSMGR_ANTIVIRUS = "sysmgr.antivirus"
 
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
@@ -191,6 +192,13 @@ object FeatureCatalog {
                 Feature(KEY_MFA_SPLASH, R.string.feature_mfa_splash_title, R.string.feature_mfa_splash_desc),
             ),
             baselineVersion = "1.0.5",  // dumpsys 实证 2026-10-12（docs/reverse/mfa-authenticator.md）
+        ),
+        Target(
+            "com.hihonor.systemmanager", R.string.target_name_sysmgr,
+            listOf(
+                Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
+            ),
+            baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
         ),
     )
 

@@ -4,7 +4,7 @@
 
 ## 定位
 
-荣耀 LSPosed 模块（libxposed 102，`top.honorhook`）。hook 侧注入 6 个目标进程（默认全开，只改内存态）；UI 侧 Miuix Compose 面板经远端 prefs 下发开关（写 false 才关，**下次注入才生效**）。
+荣耀 LSPosed 模块（libxposed 102，`top.honorhook`）。hook 侧注入多个目标进程（默认全开，只改内存态）；UI 侧 Miuix Compose 面板经远端 prefs 下发开关（写 false 才关，**下次注入才生效**）。
 
 ## 先看这里
 
@@ -38,7 +38,7 @@
 ## 工具清单（tools/，详情 `tools/README.md`）
 
 自写脚本：`dev.sh`（构建/安装/日志/UI 自动化/反编译统一入口）、`adapt_new_version.py`
-（宿主新版本适配校验：从 hook 源码+数据表提取全部挂载点，现 68 点，对反编译产物核对类/方法存活）、
+（宿主新版本适配校验：从 hook 源码+数据表提取全部挂载点，现 71 点，对反编译产物核对类/方法存活）、
 `rain-decrypt.py`（Rain 参考模块字符串解密，逆向期）。
 下载件：`apktool.jar`（APK→smali，需 JDK 21）、`android-sdk/`（gradle 构建 + aapt2）、
 `bin/apktool`、`bin/jadx`（PATH 垫片）。

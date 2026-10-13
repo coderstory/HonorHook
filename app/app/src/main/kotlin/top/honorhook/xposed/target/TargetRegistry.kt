@@ -55,6 +55,8 @@ object TargetRegistry {
         register(JdHook)
         // MFA身份验证器开屏（第 10 目标）：360 加固，框架 Activity.onCreate 收口 + 类名门控跳页。
         register(MfaAuthHook)
+        // 系统管家服务（第 11 目标）：病毒检测/查杀/弹窗三路全禁；scope.list 已同步。
+        register(SysmgrHook)
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */
