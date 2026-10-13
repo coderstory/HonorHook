@@ -1,45 +1,47 @@
 package top.honorhook.xposed.target.mihealth
 
+import android.util.Base64
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
-import org.json.JSONArray
-import org.json.JSONObject
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
-import java.io.File
-import java.lang.reflect.Proxy
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 小米运动健康 `com.mi.health` 表盘试用永久化（基线 3.59.1，逆向记录 `docs/reverse/mihealth-face.md`）。
  *
- * 数据链（实证）：表盘商店是 RN 应用。付费表盘安装链 =
- * `GET /ops/v1/paidwatchface/download` → 响应 JSON 含 `downloadInfo.configFileV2`（CDN 签名 URL，
- * Expires=Long.MAX 永不过期）+ `license`（JSON 串，含 trial_duration）+ `sign`。
- * JS 侧 license 非空 ⇒ BT 推送 verification{info,sign,trialDuration} ⇒ 试用；
- * license 空 ⇒ 免费安装（免费表盘同链路同结构，实证）。UI 按钮状态机由 list/tab 接口的
- * face 记录驱动（price/purchaseStatus/onTrial 字段）。
+ * 数据链（实证）：表盘商店是 RN 应用。付费表盘试用授权 = JS 侧组装 protobuf `WearPacket`
+ * （base64 字符串）→ `YRNBluetoothModule.sendRaw(requestData, options, callback)`（@ReactMethod，
+ * 未混淆，jadx 复核：内部 base64 decode → `DeviceContact.call(did, 101, bytes)`）→ BT 推手表。
+ * 试用包语义：type=4(WATCH_FACE) 且 id=4(PREPARE_INSTALL_WATCH_FACE) 的包带
+ * `verification{info=license, sign, trialDuration}`；**抹空 verification（tag 保留 + len=0 的零长
+ * 消息 = 全默认值）= 手表按免费安装收货 = 试用永不过期**。
  *
- * 功能语义 = **试用过的表盘永久免费重装**，三件事：
- * A. download 响应 2xx → 原文缓存到磁盘 + license/sign 置空后返回（走免费安装路径）；
- * B. download 非 2xx（试用过期服务端拒绝）且有缓存 → 回放缓存（同样置空后返回 200）；
- * C. list/tab 响应中属于已缓存 faceId 的记录改免费（price=0 / purchaseStatus=0 / onTrial=false），
- *    让 UI 出「安装」按钮。
+ * 响应层死路（实证，详见 doc §X）：download/list 响应是 Mi WUP 加密二进制，okhttp 链任何位置
+ * （头插/尾插/消费式 body.string()）都只拿到 Base64 密文，解密在 JS/桥层——okhttp 拦截器/
+ * 缓存/免费化三件套已整体删除，不再走响应层。
  *
- * 选点依据：唯一挂载点 `okhttp3.OkHttpClient$Builder.build()`——okhttp3 未混淆、公开 API，
- * 跨版本最稳锚点（RN bundle 周更动态化，业务层类名/接口路径随时漂移，网络栈公开类不动）。
- * hook 语义 = **前置挂载、尾部注入**：build 前往 builder.interceptors() 末尾追加单例 Interceptor
- * 再 proceed 放行（宿主响应解密在应用层拦截器链内完成，尾插才能拿到解密后明文，见 ensureInterceptor）。Interceptor 经 Proxy 实现于目标 ClassLoader
- * （模块不引 okhttp 依赖，避免重复类与版本错配）。全部响应改写 runCatching 包裹：
- * 任何异常放行原始响应，绝不 break 网络。
+ * 选点依据：唯一挂载点 `YRNBluetoothModule.sendRaw`——类与方法未混淆（jadx 复核），BT 通道
+ * 收口点（所有 WearPacket 出手表必经），比 JS bundle 内锚点跨周更稳定。
  *
- * 边界：手表端是否接受空 verification 是实验问题（sign 覆盖范围黑箱），以真机为准；
- * 依赖试用期内成功拉取过一次授权（缓存生成的前提）。
+ * 顶层 tag 速查（protobuf wire format，schema 来自 common bundle 的 protobuf.js encoder，
+ * 字段号已核对；详见 doc §Y）：
+ * ```
+ * WearPacket                  { 1: type(int32), 2: id(uint32), 6: watchFace(msg) }
+ * WatchFace                   { 6: prepareInfo(msg) }
+ * PrepareInfo                 { 1: id(string), 2: size, 3: versionCode, 5: verification(msg) }
+ * PrepareInfo.Verification    { 1: info(string), 2: sign(string), 3: trialDuration(varint) }
+ * ```
+ * 顶层 tag：field1 varint=0x08 / field2 varint=0x10 / field6 len=0x32；
+ * WatchFace 内 prepareInfo=0x32；PrepareInfo 内 verification=0x2A。
+ *
+ * 实验变量：手表端是否校验 sign 覆盖范围 = 黑箱（手表固件不可见），空 verification 是否被
+ * 接受以真机为准（doc §Y 判据 3/4）。rewrite 带结构轻校验：字段号漂移/结构不符一律 null
+ * 放行原包，绝不改坏其它协议包。
  */
 object MiHealthHook : TargetHook {
 
@@ -51,410 +53,151 @@ object MiHealthHook : TargetHook {
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "mih-face"
 
-    /** download 接口路径（缓存/回放的分流锚点；list/tab 也以它为排除项）。 */
-    private const val DOWNLOAD_PATH = "/ops/v1/paidwatchface/download"
-
-    /**
-     * 免费化生效的 list/tab 接口路径前缀（download 已在分流时排除；三选一命中即处理，
-     * 多路径并陈是因为接口随 RN bundle 版本迭代会换前缀，宁可多试探不漏）。
-     */
-    private val LIST_PATHS = listOf(
-        "/ops/v1/paidwatchface/",
-        "/ops/v1/mall/v4/watchface/",
-        "/ops/v1/mall/watchface/",
-    )
-
-    /** 缓存目录（appInfo.dataDir 下；install 时传入，null = 无法缓存，hook 退化为纯放行）。 */
-    private const val CACHE_DIR_REL = "files/honorhook_face_cache"
-
-    /** peekBody 上限（响应 JSON 远小于此；超限时截断 → JSON 解析失败 → 放行原始响应，失败安全）。 */
-    private const val PEEK_MAX_BYTES = 4L * 1024 * 1024
-
-    /** install 时传入的目标数据目录（缓存落盘根）。 */
-    @Volatile
-    private var dataDir: String? = null
-
-    /** 单例 Interceptor（Proxy 实例，目标 ClassLoader 生成；同进程只建一次）。 */
-    @Volatile
-    private var interceptorProxy: Any? = null
-
     /** 判据日志节流（每 key 1 次）。 */
     private val loggedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
-
-    /** [diag] 已采样请求路径（定位用，cap 60；定位后随探针一并删除）。 */
-    private val diagPaths: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_MIH_FACE_FREE)) {
             logDisabled(module, FeatureCatalog.KEY_MIH_FACE_FREE, "MiHealthHook")
             return
         }
-        dataDir = param.applicationInfo?.dataDir
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
         val loader = param.defaultClassLoader
         val task = object : MountEngine.Task {
-            override val className = "okhttp3.OkHttpClient\$Builder"
-            override val methodName = "build"
-            override val paramCount = 0
-            override val returnType = "okhttp3.OkHttpClient"
-            override val id = "mih:okhttp.builderBuild"
-            override val description = "okhttp Builder.build 前置注入表盘授权缓存/回放/免费化拦截器"
+            override val className = "com.xiaomi.wearable.yrn.modules.bluetooth.YRNBluetoothModule"
+            override val methodName = "sendRaw"
+            override val paramCount = 3
+            override val returnType = "void"
+            override val id = "mih:bt.sendRaw"
+            override val description = "sendRaw BT 出包手术：PREPARE_INSTALL 包抹空 verification（免费安装收货）"
         }
-        engine.attemptMount(listOf(task), module, loader) { t -> mountBuilderBuild(t, module, loader) }
+        engine.attemptMount(listOf(task), module, loader) { t -> mountSendRaw(t, module, loader) }
     }
 
-    private fun mountBuilderBuild(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountSendRaw(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
-            engine.judge(module, task, JUDGE_PREFIX, "okhttp Builder.build 已注入授权拦截器")
-            runCatching { ensureInterceptor(chain.thisObject, module, loader) }
-                .onFailure { t ->
-                    module.log(Log.WARN, MountEngine.TAG, "mih-face 拦截器注入失败（放行原调用）: ${t.message}")
+            // 就绪判定（每进程一次）：首个 sendRaw 调用即 hook 已挂载且通路被踩过
+            logThrottled(module, "ready", "$JUDGE_PREFIX: sendRaw hook 就绪")
+            val args = chain.args
+            val b64 = args?.getOrNull(0) as? String
+            if (args == null || b64 == null) {
+                // 参数骨架不完整：无从判断包类型，原样放行（宁漏改不误改）
+                return@mount chain.proceed()
+            }
+            // 整体 runCatching：任何异常（含 base64 解码失败）= 原样 proceed，绝不 throw
+            // （okhttp 教训：回调抛非预期异常会打爆宿主线程；ReactMethod 异步线程同理）
+            runCatching {
+                val bytes = Base64.decode(b64, Base64.DEFAULT)
+                val rewritten = rewritePrepareInstall(bytes)
+                if (rewritten != null) {
+                    val faceId = prepareFaceId(bytes)?.take(64) ?: ""
+                    logThrottled(module, "wipe:$faceId", "$JUDGE_PREFIX: PREPARE_INSTALL verification 已抹空 faceId=$faceId")
+                    chain.proceedWith(chain.thisObject, arrayOf(Base64.encodeToString(rewritten, Base64.NO_WRAP), args[1], args[2]))
+                } else {
+                    chain.proceed()
                 }
-            chain.proceed()
+            }.getOrElse { chain.proceed() }
         }
 
-    // ---------------------------------------------------------------- Interceptor 注入
+    // ---------------------------------------------------------------- wire 解析（纯 Kotlin，无反射）
 
-    /**
-     * 往 builder.interceptors() 插入本模块单例 Interceptor（identity 判重防重复插入）。
-     * **尾插**（列表末 = 最内层 application interceptor）：宿主响应**解密**在应用层拦截器链内完成
-     * （com.xiaomi.fitness.app.CloudInterceptor，2026-10-13 真机 [diag] download 实证 body=Base64
-     * 密文），头插看到的是密文、JSON 解析必败；尾插拿到的才是解密后明文。宿主 build() 本体逻辑
-     * 零改动（proceed 放行）。
-     */
-    private fun ensureInterceptor(builder: Any?, module: XposedModule, loader: ClassLoader) {
-        builder ?: return
-        synchronized(this) {
-            val proxy = interceptorProxy ?: createInterceptor(module, loader).also { interceptorProxy = it }
-            val list = builder.javaClass.getMethod("interceptors").invoke(builder) as? MutableList<Any?> ?: return
-            if (list.any { it === proxy }) return
-            list.add(proxy)
-            module.log(Log.INFO, MountEngine.TAG, "mih-face: okhttp 拦截器已注入（尾部）")
+    /** 读 varint（protobuf，最多 10 字节），返回 (值, 下一位置)；越界/超长返回 null。 */
+    private fun readVarint(b: ByteArray, pos: Int, end: Int): Pair<Long, Int>? {
+        var result = 0L
+        var shift = 0
+        var p = pos
+        while (true) {
+            if (p >= end) return null
+            if (shift >= 64) return null
+            val byte = b[p].toInt() and 0xFF
+            result = result or ((byte and 0x7F).toLong() shl shift)
+            p++
+            if (byte and 0x80 == 0) return result to p
+            shift += 7
         }
     }
 
     /**
-     * 经 Proxy 在目标 ClassLoader 实现 okhttp3.Interceptor——模块不引 okhttp 编译依赖，
-     * 避免模块自带 okhttp 与宿主内置 okhttp 双类冲突/版本错配。
+     * 单个 protobuf 字段：字段号 + wire type + 原始包内的定位（tag 起始 / 值起止）。
+     * 定位字段是为原位手术（改 len 而非整体重组包）——多余字节零扰动。
      */
-    private fun createInterceptor(module: XposedModule, loader: ClassLoader): Any {
-        val itf = loader.loadClass("okhttp3.Interceptor")
-        val holder = arrayOfNulls<Any>(1)
-        val proxy = Proxy.newProxyInstance(loader, arrayOf(itf)) { _, m, args ->
-            when (m.name) {
-                "intercept" -> handleChain(module, loader, args?.getOrNull(0))
-                "hashCode" -> System.identityHashCode(holder[0])
-                "equals" -> args?.getOrNull(0) === holder[0]
-                "toString" -> "HonorHook-MiHealth-FaceInterceptor"
-                else -> null
-            }
-        }
-        holder[0] = proxy
-        return proxy
-    }
-
-    // ---------------------------------------------------------------- Interceptor 逻辑
+    private data class WireField(val no: Int, val wire: Int, val tagStart: Int, val valStart: Int, val valEnd: Int)
 
     /**
-     * 分流：download → 缓存/回放；list/tab → 免费化；其余一律直接 proceed。
-     * 前置解析（request/url/path）失败 = 无从分流 ⇒ 放行，绝不吞请求。
+     * 逐 tag 解析 [start, end) 区间内的 protobuf 字段。只认 wireType 0（varint）与 2（len-delimited），
+     * 未知 wireType 返回 null；解析必须恰好消耗到 [end]，否则 null（截断/畸形包 = 不改）。
      */
-    private fun handleChain(module: XposedModule, loader: ClassLoader, chain: Any?): Any? {
-        if (chain == null) return null
-        val req = runCatching { chain.javaClass.getMethod("request").invoke(chain) }.getOrNull()
-        val url = req?.let { runCatching { it.javaClass.getMethod("url").invoke(it) }.getOrNull() }
-        val path = url?.let {
-            runCatching { it.javaClass.getMethod("encodedPath").invoke(it) as? String }.getOrNull()
-        }
-        // [diag] 请求路径采样（每唯一 path 前 1 次，cap 60）——定位「试用装完但 download 分支零命中」的
-        // 真机问题：请求到底走没走 Java okhttp / 实际路径长啥样。定位后删除。
-        if (path != null && diagPaths.size < 60 && diagPaths.add(path)) {
-            module.log(Log.INFO, MountEngine.TAG, "mih-face [diag] okhttp 请求: $path")
-        }
-        val isDownload = path?.contains(DOWNLOAD_PATH) == true
-        val isList = !isDownload && path != null && LIST_PATHS.any { path.contains(it) }
-        // proceed 反射：okhttp4 RealInterceptorChain.proceed(Request) 是 **1 参**（0 参查不到 →
-        // NoSuchMethodException 经 Proxy 变 UndeclaredThrowableException 直接打爆 OkHttp 线程，
-        // 2026-10-13 真机闪退实证）。按参个数匹配：1 参优先，0 参兜底（旧 okhttp）。
-        val proceed = runCatching {
-            chain.javaClass.methods.firstOrNull { it.name == "proceed" && it.parameterCount == 1 }
-                ?.also { it.isAccessible = true }
-        }.getOrNull()
-        val resp = if (proceed != null && req != null) {
-            invokeUnchecked(proceed, chain, arrayOf(req))
-        } else {
-            val zero = runCatching { chain.javaClass.getMethod("proceed") }.getOrNull()
-                ?: return null
-            invokeUnchecked(zero, chain, null)
-        } ?: return null
-        return try {
-            if (isDownload) handleDownload(module, loader, url, req, path, resp)
-            else handleList(module, loader, resp)
-        } catch (t: Throwable) {
-            module.log(Log.WARN, MountEngine.TAG, "mih-face 响应处理异常（放行原始响应）: ${t.message}")
-            resp
-        }
-    }
-
-    /**
-     * 反射 invoke 统一出口：
-     * - 解包 InvocationTargetException，还原宿主真实异常（Proxy 对声明外受检异常会包成
-     *   UndeclaredThrowableException 掩盖 cause）；
-     * - **okhttp4 异步链只兜 IOException**（AsyncCall.run 对非 IOException 的 Throwable 直接
-     *   rethrow 打爆 Dispatcher 线程 = 进程级闪退，2026-10-13 真机实证 Canceled→RuntimeException
-     *   连环炸）：cause 是 IOException 原样重抛，其余一律包成 IOException（拦截器链契约内的失败）。
-     */
-    private fun invokeUnchecked(method: java.lang.reflect.Method, target: Any?, args: Array<Any?>?): Any? =
-        try {
-            method.invoke(target, *(args ?: emptyArray()))
-        } catch (e: java.lang.reflect.InvocationTargetException) {
-            val cause = e.cause
-            when (cause) {
-                is java.io.IOException -> throw cause
-                null -> throw e
-                else -> throw java.io.IOException(cause)
-            }
-        }
-
-    /** 事 A：download 2xx → 缓存原文 + license/sign 置空返回；事 B：非 2xx 且有缓存 → 回放。 */
-    private fun handleDownload(
-        module: XposedModule,
-        loader: ClassLoader,
-        url: Any?,
-        req: Any?,
-        path: String,
-        resp: Any,
-    ): Any? {
-        val code = respCode(resp)
-        val faceId = runCatching { extractFaceId(loader, url, req) }.getOrNull()
-        val urlText = runCatching { url?.toString() }.getOrNull() ?: ""
-        if (code in 200..299) {
-            // 消费式读取（走宿主惰性解密 ResponseBody 包装，peekBody 只能拿到密文——2026-10-13
-            // 真机实证尾插+peek 仍 Base64）。body 消费后必须 rebuild，读不到 = 放行（native 失败语义）
-            val text = consumeText(loader, resp) ?: return resp
-            val json = runCatching { JSONObject(text) }.getOrNull()
-                ?: return rebuildBody(loader, resp, text) ?: resp
-            val key = faceId ?: md5Key(urlText.ifEmpty { path })
-            saveCache(key, faceId, urlText, text)
-            val stripped = stripLicenseSign(json) ?: text
-            logThrottled(module, "cache:$key", "mih-face: 授权已缓存并置空 license faceId=$key")
-            return rebuildBody(loader, resp, stripped) ?: resp
-        }
-        // 非 2xx：试用过期服务端拒绝 → 有缓存则回放（同样置空后返回 200 走免费安装路径）
-        val files = cacheDir()?.listFiles()?.filter { it.isFile }.orEmpty()
-        if (files.isEmpty()) return resp
-        val file = findCacheFile(files, faceId) ?: return resp
-        val (cachedFaceId, bodyText) = readCache(file) ?: return resp
-        val bodyJson = runCatching { JSONObject(bodyText) }.getOrNull() ?: return resp
-        val stripped = stripLicenseSign(bodyJson) ?: bodyText
-        val shownId = cachedFaceId ?: file.nameWithoutExtension
-        logThrottled(module, "replay:$shownId", "mih-face: 服务端拒绝，已回放缓存 faceId=$shownId")
-        return rebuildBody(loader, resp, stripped, forceCode = 200) ?: resp
-    }
-
-    /** 事 C：list/tab 响应中属于已缓存 faceId 的记录改免费，让 UI 出「安装」按钮。 */
-    private fun handleList(module: XposedModule, loader: ClassLoader, resp: Any): Any? {
-        val files = cacheDir()?.listFiles()?.filter { it.isFile }.orEmpty()
-        if (files.isEmpty()) return resp
-        val ids = files.mapNotNull { readCache(it)?.first }.toSet()
-        if (ids.isEmpty()) return resp
-        if (respCode(resp) !in 200..299) return resp
-        // 消费式读取（同 handleDownload：宿主 body 是惰性解密包装，消费后必须 rebuild）
-        val text = consumeText(loader, resp) ?: return resp
-        val json = runCatching { JSONObject(text) }.getOrNull()
-            ?: return rebuildBody(loader, resp, text) ?: resp
-        val changed = mutableSetOf<String>()
-        runCatching { freeize(json, ids, changed) }
-        if (changed.isNotEmpty()) {
-            changed.forEach { id -> logThrottled(module, "free:$id", "mih-face: 记录免费化 id=$id") }
-        }
-        return rebuildBody(loader, resp, if (changed.isEmpty()) text else json.toString()) ?: resp
-    }
-
-    // ---------------------------------------------------------------- JSON 处理
-
-    /**
-     * 置空 license/sign：优先 data 层，顶层字段存在也一并置空（两种都尝试——字段层级随版本漂移，
-     * 置空多余层级无副作用）。无任何字段命中返回 null = 无改动（免费表盘同链路，正常路径）。
-     */
-    private fun stripLicenseSign(json: JSONObject): String? {
-        var changed = false
-        for (field in listOf("license", "sign")) {
-            val data = json.optJSONObject("data")
-            if (data != null && data.has(field)) {
-                data.put(field, "")
-                changed = true
-            }
-            if (json.has(field)) {
-                json.put(field, "")
-                changed = true
-            }
-        }
-        return if (changed) json.toString() else null
-    }
-
-    /** 递归遍历：含 "id"+"price" 的对象且 id 已缓存 ⇒ price=0 / purchaseStatus=0 / onTrial=false。 */
-    private fun freeize(node: Any?, ids: Set<String>, changed: MutableSet<String>) {
-        when (node) {
-            is JSONObject -> {
-                if (node.has("id") && node.has("price")) {
-                    val id = node.opt("id")?.toString()
-                    if (id != null && id in ids) {
-                        node.put("price", 0)
-                        node.put("purchaseStatus", 0)
-                        node.put("onTrial", false)
-                        changed += id
-                    }
+    private fun parseFields(b: ByteArray, start: Int, end: Int): List<WireField>? {
+        val fields = ArrayList<WireField>()
+        var pos = start
+        while (pos < end) {
+            val tagStart = pos
+            val (tag, afterTag) = readVarint(b, pos, end) ?: return null
+            val no = (tag ushr 3).toInt()
+            val wire = (tag and 0x7).toInt()
+            if (no == 0) return null
+            val (valStart, valEnd) = when (wire) {
+                0 -> {
+                    val (_, next) = readVarint(b, afterTag, end) ?: return null
+                    afterTag to next
                 }
-                val keys = node.keys()
-                while (keys.hasNext()) freeize(node.opt(keys.next()), ids, changed)
-            }
-            is JSONArray -> for (i in 0 until node.length()) freeize(node.opt(i), ids, changed)
-        }
-    }
-
-    /**
-     * faceId 提取：先 URL query（faceId/watchFaceId/id），取不到再读请求体 JSON
-     * （faceId/watchFaceId 全树找；"id" 只认顶层，防抓到无关嵌套 id）。
-     * 请求体经 okio Buffer 读（writeTo 不消费原 body）。全链 runCatching，取不到返回 null。
-     */
-    private fun extractFaceId(loader: ClassLoader, url: Any?, req: Any?): String? {
-        url?.let { u ->
-            for (name in listOf("faceId", "watchFaceId", "id")) {
-                val v = runCatching {
-                    u.javaClass.getMethod("queryParameter", String::class.java).invoke(u, name) as? String
-                }.getOrNull()
-                if (!v.isNullOrEmpty()) return v
-            }
-        }
-        val body = req?.let { runCatching { it.javaClass.getMethod("body").invoke(it) }.getOrNull() }
-            ?: return null
-        val text = runCatching {
-            val buf = loader.loadClass("okio.Buffer").getDeclaredConstructor().newInstance()
-            body.javaClass.getMethod("writeTo", buf.javaClass).invoke(body, buf)
-            buf.javaClass.getMethod("readUtf8").invoke(buf) as? String
-        }.getOrNull() ?: return null
-        val json = runCatching { JSONObject(text) }.getOrNull() ?: return null
-        findFirstStringDeep(json, listOf("faceId", "watchFaceId"))?.let { return it }
-        for (k in listOf("faceId", "watchFaceId", "id")) {
-            if (!json.has(k)) continue
-            json.optString(k).takeIf { it.isNotEmpty() && it != "null" }?.let { return it }
-        }
-        return null
-    }
-
-    /** 全树找第一个命中 [keys] 的标量值（对象/数组值跳过）。 */
-    private fun findFirstStringDeep(node: Any?, keys: List<String>): String? {
-        return when (node) {
-            is JSONObject -> {
-                for (k in keys) {
-                    val v = node.opt(k)
-                    if (v is String && v.isNotEmpty()) return v
-                    if (v != null && v !is JSONObject && v !is JSONArray) return v.toString()
+                2 -> {
+                    val (len, next) = readVarint(b, afterTag, end) ?: return null
+                    if (next + len > end) return null
+                    next to (next + len).toInt()
                 }
-                val it = node.keys()
-                while (it.hasNext()) findFirstStringDeep(node.opt(it.next()), keys)?.let { return it }
-                null
+                else -> return null
             }
-            is JSONArray -> {
-                for (i in 0 until node.length()) findFirstStringDeep(node.opt(i), keys)?.let { return it }
-                null
-            }
-            else -> null
+            fields.add(WireField(no, wire, tagStart, valStart, valEnd))
+            pos = valEnd
         }
-    }
-
-    // ---------------------------------------------------------------- 缓存
-
-    private fun cacheDir(): File? = dataDir?.let { File(it, CACHE_DIR_REL) }
-
-    /** 缓存文件格式：`{"faceId":"...","url":"...","body":"<原始响应文本>","savedAt":...}`。 */
-    private fun saveCache(key: String, faceId: String?, urlText: String, bodyText: String) {
-        val dir = cacheDir() ?: return
-        runCatching {
-            dir.mkdirs()
-            val wrapper = JSONObject()
-                .put("faceId", faceId ?: key)
-                .put("url", urlText)
-                .put("body", bodyText)
-                .put("savedAt", System.currentTimeMillis())
-            File(dir, "$key.json").writeText(wrapper.toString())
-        }
+        return fields
     }
 
     /**
-     * 读缓存 → (faceId, 原始响应文本)。兼容两种文件形态：本模块 wrapper（含 body 字段）
-     * 与直接是响应体的情况（无 body 字段 = 整个文件就是响应文本）。
+     * BT wire 手术：识别 PREPARE_INSTALL_WATCH_FACE 试用包，抹空 verification。
+     * 重建方式 = 原包字节原位替换 `[verification.tagStart, valEnd)` 段为 `0x2A, 0x00`
+     * （tag 保留 + 零长消息 = verification 全默认值），其余字段零扰动。
+     * 任一步解析失败 / 字段不唯一 → null（放行原包，绝不改坏其它协议包）。
      */
-    private fun readCache(file: File): Pair<String?, String>? = runCatching {
-        val text = file.readText()
-        val json = JSONObject(text)
-        if (json.has("body")) {
-            json.optString("faceId").takeIf { it.isNotEmpty() } to json.optString("body")
-        } else {
-            null to text
-        }
-    }.getOrNull()?.takeIf { it.second.isNotEmpty() }
-
-    /** 缓存命中：先文件名匹配（saveCache 的 key 口径），再 wrapper 内 faceId 匹配；都未命中用最新文件。 */
-    private fun findCacheFile(files: List<File>, faceId: String?): File? {
-        if (faceId != null) {
-            files.firstOrNull { it.nameWithoutExtension == faceId }?.let { return it }
-            files.firstOrNull { readCache(it)?.first == faceId }?.let { return it }
-        }
-        return files.maxByOrNull { it.lastModified() }
+    private fun rewritePrepareInstall(packet: ByteArray): ByteArray? {
+        val packetFields = parseFields(packet, 0, packet.size) ?: return null
+        // 语义门：type=4(WATCH_FACE) 且 id=4(PREPARE_INSTALL_WATCH_FACE) 才动
+        val typeField = packetFields.singleOrNull { it.no == 1 && it.wire == 0 } ?: return null
+        val idField = packetFields.singleOrNull { it.no == 2 && it.wire == 0 } ?: return null
+        val typeVal = readVarint(packet, typeField.valStart, typeField.valEnd)?.first ?: return null
+        val idVal = readVarint(packet, idField.valStart, idField.valEnd)?.first ?: return null
+        if (typeVal != 4L || idVal != 4L) return null
+        // 层级下钻：WearPacket.6 → WatchFace.6(prepareInfo) → PrepareInfo.5(verification)
+        val wfField = packetFields.singleOrNull { it.no == 6 && it.wire == 2 } ?: return null
+        val watchFace = parseFields(packet, wfField.valStart, wfField.valEnd) ?: return null
+        val piField = watchFace.singleOrNull { it.no == 6 && it.wire == 2 } ?: return null
+        val prepareInfo = parseFields(packet, piField.valStart, piField.valEnd) ?: return null
+        val verField = prepareInfo.singleOrNull { it.no == 5 && it.wire == 2 } ?: return null
+        val verification = parseFields(packet, verField.valStart, verField.valEnd) ?: return null
+        // 结构轻校验：verification 必须含 field1(info) 或 field2(sign) 字符串字段——防误伤
+        // 其它层级的 field5 消息（宿主 proto 字段号随版本可能漂移，不符即放行）
+        if (verification.none { (it.no == 1 || it.no == 2) && it.wire == 2 }) return null
+        val out = ByteArray(packet.size - (verField.valEnd - verField.tagStart) + 2)
+        System.arraycopy(packet, 0, out, 0, verField.tagStart)
+        out[verField.tagStart] = 0x2A // field5, wire2（tag 与原字段一致）
+        out[verField.tagStart + 1] = 0x00 // len=0：零长消息 = verification 全默认值 = 免费安装
+        System.arraycopy(packet, verField.valEnd, out, verField.tagStart + 2, packet.size - verField.valEnd)
+        return out
     }
 
-    // ---------------------------------------------------------------- 反射工具（响应改写）
-
-    private fun respCode(resp: Any): Int =
-        runCatching { resp.javaClass.getMethod("code").invoke(resp) as? Int }.getOrNull() ?: 0
-
-    /**
-     * 消费式读取响应文本（`body.string()`）：宿主 body 是**惰性解密 ResponseBody 包装**
-     * （CloudInterceptor 系），peekBody 只能偷到原始密文——只有真正消费 body 才走解密
-     * （2026-10-13 真机 [diag] 实证：头插/尾插 + peek 均 Base64）。消费后原 body 失效，
-     * 调用方必须 [rebuildBody] 重建响应；读取失败返回 null = 放行（native 失败语义）。
-     */
-    private fun consumeText(loader: ClassLoader, resp: Any): String? = runCatching {
-        val body = resp.javaClass.getMethod("body").invoke(resp) ?: return null
-        body.javaClass.getMethod("string").invoke(body) as? String
-    }.getOrNull()?.takeIf { it.isNotEmpty() }
-
-    /** peekBody 读响应原文（不消费原 body）；截断/异常返回 null。仅 [diag] 用。 */
-    private fun peekText(resp: Any): String? = runCatching {
-        val peeked = resp.javaClass.getMethod("peekBody", Long::class.javaPrimitiveType).invoke(resp, PEEK_MAX_BYTES)
-        peeked?.javaClass?.getMethod("string")?.invoke(peeked) as? String
-    }.getOrNull()?.takeIf { it.isNotEmpty() }
-
-    /**
-     * 用改写文本重建 response（读过 body 必须重建：`newBuilder().body(ResponseBody.create(...))`）。
-     * [forceCode] 非 null 时同时改 code（回放场景把服务端拒绝改 200）。失败返回 null = 放行原始响应。
-     */
-    private fun rebuildBody(loader: ClassLoader, resp: Any, newText: String, forceCode: Int? = null): Any? =
-        runCatching {
-            val bodyCls = loader.loadClass("okhttp3.ResponseBody")
-            val mediaType = runCatching {
-                val body = resp.javaClass.getMethod("body").invoke(resp)
-                body?.javaClass?.getMethod("contentType")?.invoke(body)
-            }.getOrNull()
-            val newBody = bodyCls.getMethod("create", loader.loadClass("okhttp3.MediaType"), String::class.java)
-                .invoke(null, mediaType, newText)
-            val b = resp.javaClass.getMethod("newBuilder").invoke(resp)
-            if (forceCode != null) b.javaClass.getMethod("code", Int::class.javaPrimitiveType).invoke(b, forceCode)
-            b.javaClass.getMethod("body", bodyCls).invoke(b, newBody)
-            b.javaClass.getMethod("build").invoke(b)
-        }.onFailure { t ->
-            Log.w(MountEngine.TAG, "mih-face 响应重建失败: ${t.message}")
-        }.getOrNull()
+    /** 判据日志用 faceId：PrepareInfo.Verification.1(info) 的 UTF-8 字符串；结构不符返回 null。 */
+    private fun prepareFaceId(packet: ByteArray): String? {
+        val packetFields = parseFields(packet, 0, packet.size) ?: return null
+        val wfField = packetFields.singleOrNull { it.no == 6 && it.wire == 2 } ?: return null
+        val watchFace = parseFields(packet, wfField.valStart, wfField.valEnd) ?: return null
+        val piField = watchFace.singleOrNull { it.no == 6 && it.wire == 2 } ?: return null
+        val prepareInfo = parseFields(packet, piField.valStart, piField.valEnd) ?: return null
+        val infoField = prepareInfo.singleOrNull { it.no == 1 && it.wire == 2 } ?: return null
+        return String(packet, infoField.valStart, infoField.valEnd - infoField.valStart, Charsets.UTF_8)
+    }
 
     // ---------------------------------------------------------------- 工具
-
-    /** 无 faceId 时的缓存 key：path+query（完整 URL）的 MD5。 */
-    private fun md5Key(input: String): String =
-        MessageDigest.getInstance("MD5")
-            .digest(input.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
 
     /** 判据日志节流（每 key 1 次，防高频刷屏）。 */
     private fun logThrottled(module: XposedModule, key: String, msg: String) {
