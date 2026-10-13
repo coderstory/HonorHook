@@ -5,6 +5,7 @@ import top.honorhook.xposed.target.ads.HonorOpsAdHook
 import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.ime.ImeHook
 import top.honorhook.xposed.target.jd.JdHook
+import top.honorhook.xposed.target.mailmaster.MailMasterHook
 import top.honorhook.xposed.target.mfauth.MfaAuthHook
 import top.honorhook.xposed.target.mms.MmsHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
@@ -57,6 +58,8 @@ object TargetRegistry {
         register(MfaAuthHook)
         // 系统管家服务（第 11 目标）：病毒检测/查杀/弹窗三路全禁；scope.list 已同步。
         register(SysmgrHook)
+        // 网易邮箱大师去广告（第 12 目标）：易盾加固，框架 onCreate 收口 + TopOn 断水 + 侦察。
+        register(MailMasterHook)
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */

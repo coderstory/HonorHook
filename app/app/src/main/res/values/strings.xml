@@ -22,6 +22,7 @@
     <string name="target_name_jd">京东</string>
     <string name="target_name_mfa">MFA身份验证器</string>
     <string name="target_name_sysmgr">系统管家</string>
+    <string name="target_name_mailmaster">网易邮箱大师</string>
 
     <!-- ===== 功能名与说明（FeatureCatalog.Feature.titleRes/descRes）=====
          命名约定：feature_<key 中 . 换 _>_title / _desc；ota.block 双目标共用 key，
@@ -101,4 +102,7 @@
 
     <string name="feature_sysmgr_antivirus_title">病毒检测全禁用</string>
     <string name="feature_sysmgr_antivirus_desc">安装应用时不再检测风险、不再弹出「发现病毒应用」弹窗，后台闲时病毒扫描也一并跳过</string>
+
+    <string name="feature_mailmaster_ad_off_title">去广告</string>
+    <string name="feature_mailmaster_ad_off_desc">跳过开屏广告，并切断开屏与信息流的联盟广告请求</string>
 </resources>

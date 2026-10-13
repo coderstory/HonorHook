@@ -48,6 +48,7 @@ object FeatureCatalog {
     const val KEY_JD_SPLASH = "jd.splash"
     const val KEY_MFA_SPLASH = "mfa.splash"
     const val KEY_SYSMGR_ANTIVIRUS = "sysmgr.antivirus"
+    const val KEY_MAILMASTER_AD_OFF = "mailmaster.ad_off"
 
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
@@ -199,6 +200,13 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
+        ),
+        Target(
+            "com.netease.mail", R.string.target_name_mailmaster,
+            listOf(
+                Feature(KEY_MAILMASTER_AD_OFF, R.string.feature_mailmaster_ad_off_title, R.string.feature_mailmaster_ad_off_desc),
+            ),
+            baselineVersion = "7.27.1",  // APK 基线（用户提供的安装包，真机版本待 dumpsys 核对）
         ),
     )
 
