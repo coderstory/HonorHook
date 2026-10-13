@@ -85,35 +85,63 @@ object SettingsHook : TargetHook {
 
     private fun mountEnableDisable(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
-            // after 语义：原 Q3 跑完（全部业务门控保留副作用）后，强制启用停用按钮并补挂点击监听
-            //（原逻辑仅在最终 enabled 时挂监听）。按钮视图按 id 名运行时查找。
+            // after 语义：Q3 决策跑完后按场景修残态（2026-10-13 用户拍板的两场景规格）。
+            // 用户应用：Q3 !z11 路径恒 setText(卸载)，永不为空 ⇒ 零介入。
+            // 系统应用：按钮语义 = 停用/启用，修两种残态——
+            //   · 管控灰按钮（原生 disabled，cust 层常清字）→ 恢复可点；
+            //   · HwCust 清字（enabled+空字，如预装推广应用，bilibili 实证）→ 补回文案。
+            // 文案按 info.enabled 给「停用/启用」（与原生 F3 的 disable_text/enable_text 同语义）；
+            // 已有字（卸载/停用/启用）保留原文，只确保可点。反射读 mAppEntry.info.flags 失败 = 不介入。
             runCatching {
-                        val self = chain.thisObject
-                        val root = self.javaClass.getMethod("getView").invoke(self) as? android.view.View
-                            ?: return@runCatching
-                        val res = self.javaClass.getMethod("getResources").invoke(self) as? android.content.res.Resources
-                            ?: return@runCatching
-                        val panel = root.findViewById<View>(res.getIdentifier(ID_BUTTON_PANEL, "id", packageName))
-                            as? android.view.ViewGroup ?: return@runCatching
-                        val btn: android.view.View =
-                            panel.findViewById<View>(res.getIdentifier(ID_BUTTON_DISABLE, "id", packageName))
-                                ?: return@runCatching
-                        // 介入条件（2026-10-13 用户拍板）：仅当原生把按钮判为「不可用」（禁用灰按钮，
-                        // 即不可停用的系统应用）才处理；原生 enabled 的场景（普通应用「卸载」等）一律不碰，
-                        // 零误伤。灰按钮原生会清空文字 ⇒ 恢复可点时同时补回文案；文字非空保留原字，勿覆盖。
-                        // 文案硬编码 zh-CN（自用模块，该分支按钮语义唯一为「停用」）；资源名不猜（无锚点不硬兜）。
-                        if (!btn.isEnabled) {
-                            btn.isEnabled = true
-                            (btn as? android.widget.TextView)?.takeIf { it.text.isNullOrEmpty() }?.text = "停用"
-                            val listener = self as? android.view.View.OnClickListener
-                            if (listener != null) btn.setOnClickListener(listener)
-                            engine.judge(module, task, JUDGE_PREFIX, "原生禁用按钮已恢复可点+补字")
-                        }
+                val self = chain.thisObject
+                val root = self.javaClass.getMethod("getView").invoke(self) as? android.view.View
+                    ?: return@runCatching
+                val res = self.javaClass.getMethod("getResources").invoke(self) as? android.content.res.Resources
+                    ?: return@runCatching
+                val panel = root.findViewById<View>(res.getIdentifier(ID_BUTTON_PANEL, "id", packageName))
+                    as? android.view.ViewGroup ?: return@runCatching
+                val btn: android.view.View =
+                    panel.findViewById<View>(res.getIdentifier(ID_BUTTON_DISABLE, "id", packageName))
+                        ?: return@runCatching
+                val info = appEntryInfo(self) ?: return@runCatching
+                if ((info.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) return@runCatching
+                val tv = btn as? android.widget.TextView
+                var touched = false
+                if (!btn.isEnabled) {
+                    btn.isEnabled = true
+                    touched = true
+                }
+                if (tv != null && tv.text.isNullOrEmpty()) {
+                    tv.text = if (info.enabled) "停用" else "启用"
+                    touched = true
+                }
+                if (!touched) return@runCatching
+                val listener = self as? android.view.View.OnClickListener
+                if (listener != null) btn.setOnClickListener(listener)
+                engine.judge(module, task, JUDGE_PREFIX, "系统应用停用位恢复: en=${btn.isEnabled} text=${tv?.text} appEnabled=${info.enabled}")
             }.onFailure { t ->
                 module.log(Log.WARN, MountEngine.TAG, "停用按钮启用失败（放行原状态）: ${t.message}")
             }
             null
         }
+
+    /** 反射沿 superclass 链读 mAppEntry.info（jadx 实证字段：InstalledAppDetails 祖辈 AppInfoBase.mAppEntry，
+     *  ApplicationsState.AppEntry.info 为 public ApplicationInfo）。任何一步失败 = null，调用方不介入。 */
+    private fun appEntryInfo(self: Any): android.content.pm.ApplicationInfo? {
+        var c: Class<*>? = self.javaClass
+        while (c != null) {
+            val entry = runCatching {
+                c.getDeclaredField("mAppEntry").apply { isAccessible = true }.get(self)
+            }.getOrNull()
+            if (entry != null) {
+                return runCatching {
+                    entry.javaClass.getField("info").get(entry) as? android.content.pm.ApplicationInfo
+                }.getOrNull()
+            }
+            c = c.superclass
+        }
+        return null
+    }
 
     /**
      * S2：u.g(tileData) 前置改数据。tileData 是 u 的嵌套 parcelable u.d，四字段

@@ -138,6 +138,7 @@ HonorHook 开发工具
   jadx <apk> [名称]        jadx 反编译（--show-bad-code）→ system-files/<名称>-jadx
   aapt2 <参数...>          aapt2 透传（自动选 build-tools 里最高版本）
   apkinfo <apk>            aapt2 dump badging 摘要（包名/版本/权限）
+  pull-apk <包名>          从设备拉取指定包的 APK（含 split）到 system-files/<包名>/
   exec <命令...>           带本项目工具链环境（PATH/JAVA_HOME/ANDROID_HOME）执行任意命令
 EOF
     ;;
@@ -310,11 +311,15 @@ EOF
     # 包名清单直接读 scope.list（单一事实源，跳过空行/注释行）——漏强停的宿主会出现
     # "部署报成功但该目标 hook 没生效"的假成功。
     # scope set 全量替换：卸载重装会抹掉作用域绑定（2026-10-13 实证，静态 scope 不会自动恢复），
-    # 每次启用按 scope.list 重铺 = 幂等自愈。
+    # 每次启用按 scope.list 重铺 = 幂等自愈。先按「本机已安装」过滤——lspctl scope set 遇到
+    # 未安装包会整体报错（scope.list 里的包不必都装在当前设备）。
     SCOPE_PKGS="$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | grep -vE '^[[:space:]]*(#|$)' || true)"
     [ -n "$SCOPE_PKGS" ] || die "scope.list 读取为空（$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list）"
-    "$ADB" shell "su 0 $LSPCTL scope set --user=0 io.github.coderstory.honorhook $(printf '%s ' $SCOPE_PKGS)" 2>&1 | tr -d '\r' | tail -1
-    for pkg in $SCOPE_PKGS; do
+    INSTALLED="$("$ADB" shell pm list packages --user 0 2>/dev/null | tr -d '\r' | sed 's/^package://' | sort)"
+    VALID="$(comm -12 <(printf '%s\n' "$INSTALLED") <(printf '%s\n' $SCOPE_PKGS | sort))"
+    [ -n "$VALID" ] || die "scope.list 与已安装包无交集"
+    "$ADB" shell "su 0 $LSPCTL scope set --user=0 io.github.coderstory.honorhook $(printf '%s ' $VALID)" 2>&1 | tr -d '\r' | tail -1
+    for pkg in $VALID; do
       "$ADB" shell "am force-stop $pkg" >/dev/null 2>&1
     done
     info "作用域进程已强停（scope.list 全部 $(printf '%s\n' $SCOPE_PKGS | wc -l | tr -d ' ') 个包）"
@@ -697,6 +702,25 @@ for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[
     [ -n "$AAPT2" ] || die "未找到 aapt2（tools/android-sdk/build-tools/*/aapt2）"
     [ -n "${2:-}" ] || die "用法: tools/dev.sh apkinfo <apk>"
     "$AAPT2" dump badging "$2" | head -14
+    ;;
+
+  pull-apk)
+    # 从设备拉取指定包名的 APK（多 split 时全部拉齐）到 system-files/<包名>/（先打 apkinfo 摘要）
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh pull-apk <包名>"
+    "$ADB" shell pm path "$2" 2>/dev/null | tr -d '\r' | sed 's/^package://' | grep -v '^$' > .buildtmp/pull-apk-paths.txt \
+      || die "设备未连接或包不存在: $2"
+    [ -s .buildtmp/pull-apk-paths.txt ] || die "设备上未找到包: $2"
+    outdir="$ROOT/system-files/$2"
+    mkdir -p "$outdir"
+    while IFS= read -r apk_path; do
+      name="$(basename "$apk_path")"
+      echo "pull: $apk_path"
+      "$ADB" pull "$apk_path" "$outdir/$name" 2>&1 | tail -1
+    done < .buildtmp/pull-apk-paths.txt
+    rm -f .buildtmp/pull-apk-paths.txt
+    echo "— apkinfo 摘要（base）:"
+    [ -f "$outdir/base.apk" ] && "$AAPT2" dump badging "$outdir/base.apk" 2>/dev/null | head -6 || true
+    echo "输出目录: $outdir"
     ;;
 
   *)
