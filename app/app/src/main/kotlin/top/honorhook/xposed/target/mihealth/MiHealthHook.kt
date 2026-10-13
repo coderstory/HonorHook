@@ -228,22 +228,17 @@ object MiHealthHook : TargetHook {
         val code = respCode(resp)
         val faceId = runCatching { extractFaceId(loader, url, req) }.getOrNull()
         val urlText = runCatching { url?.toString() }.getOrNull() ?: ""
-        // [diag] download 响应分诊（code + body 前 160 字符；定位缓存零生成。定位后删除）
-        runCatching {
-            val head = peekText(resp)?.take(160) ?: "<peekBody null>"
-            module.log(Log.INFO, MountEngine.TAG, "mih-face [diag] download code=$code faceId=$faceId body=$head")
-        }
         if (code in 200..299) {
-            val text = peekText(resp) ?: return resp
-            val json = runCatching { JSONObject(text) }.getOrNull() ?: return resp
+            // 消费式读取（走宿主惰性解密 ResponseBody 包装，peekBody 只能拿到密文——2026-10-13
+            // 真机实证尾插+peek 仍 Base64）。body 消费后必须 rebuild，读不到 = 放行（native 失败语义）
+            val text = consumeText(loader, resp) ?: return resp
+            val json = runCatching { JSONObject(text) }.getOrNull()
+                ?: return rebuildBody(loader, resp, text) ?: resp
             val key = faceId ?: md5Key(urlText.ifEmpty { path })
             saveCache(key, faceId, urlText, text)
-            val stripped = stripLicenseSign(json)
-            if (stripped != null) {
-                logThrottled(module, "cache:$key", "mih-face: 授权已缓存并置空 license faceId=$key")
-                return rebuildBody(loader, resp, stripped) ?: resp
-            }
-            return resp
+            val stripped = stripLicenseSign(json) ?: text
+            logThrottled(module, "cache:$key", "mih-face: 授权已缓存并置空 license faceId=$key")
+            return rebuildBody(loader, resp, stripped) ?: resp
         }
         // 非 2xx：试用过期服务端拒绝 → 有缓存则回放（同样置空后返回 200 走免费安装路径）
         val files = cacheDir()?.listFiles()?.filter { it.isFile }.orEmpty()
@@ -264,13 +259,16 @@ object MiHealthHook : TargetHook {
         val ids = files.mapNotNull { readCache(it)?.first }.toSet()
         if (ids.isEmpty()) return resp
         if (respCode(resp) !in 200..299) return resp
-        val text = peekText(resp) ?: return resp
-        val json = runCatching { JSONObject(text) }.getOrNull() ?: return resp
+        // 消费式读取（同 handleDownload：宿主 body 是惰性解密包装，消费后必须 rebuild）
+        val text = consumeText(loader, resp) ?: return resp
+        val json = runCatching { JSONObject(text) }.getOrNull()
+            ?: return rebuildBody(loader, resp, text) ?: resp
         val changed = mutableSetOf<String>()
         runCatching { freeize(json, ids, changed) }
-        if (changed.isEmpty()) return resp
-        changed.forEach { id -> logThrottled(module, "free:$id", "mih-face: 记录免费化 id=$id") }
-        return rebuildBody(loader, resp, json.toString()) ?: resp
+        if (changed.isNotEmpty()) {
+            changed.forEach { id -> logThrottled(module, "free:$id", "mih-face: 记录免费化 id=$id") }
+        }
+        return rebuildBody(loader, resp, if (changed.isEmpty()) text else json.toString()) ?: resp
     }
 
     // ---------------------------------------------------------------- JSON 处理
@@ -412,7 +410,18 @@ object MiHealthHook : TargetHook {
     private fun respCode(resp: Any): Int =
         runCatching { resp.javaClass.getMethod("code").invoke(resp) as? Int }.getOrNull() ?: 0
 
-    /** peekBody 读响应原文（不消费原 body）；截断/异常返回 null = 放行原始响应。 */
+    /**
+     * 消费式读取响应文本（`body.string()`）：宿主 body 是**惰性解密 ResponseBody 包装**
+     * （CloudInterceptor 系），peekBody 只能偷到原始密文——只有真正消费 body 才走解密
+     * （2026-10-13 真机 [diag] 实证：头插/尾插 + peek 均 Base64）。消费后原 body 失效，
+     * 调用方必须 [rebuildBody] 重建响应；读取失败返回 null = 放行（native 失败语义）。
+     */
+    private fun consumeText(loader: ClassLoader, resp: Any): String? = runCatching {
+        val body = resp.javaClass.getMethod("body").invoke(resp) ?: return null
+        body.javaClass.getMethod("string").invoke(body) as? String
+    }.getOrNull()?.takeIf { it.isNotEmpty() }
+
+    /** peekBody 读响应原文（不消费原 body）；截断/异常返回 null。仅 [diag] 用。 */
     private fun peekText(resp: Any): String? = runCatching {
         val peeked = resp.javaClass.getMethod("peekBody", Long::class.javaPrimitiveType).invoke(resp, PEEK_MAX_BYTES)
         peeked?.javaClass?.getMethod("string")?.invoke(peeked) as? String
