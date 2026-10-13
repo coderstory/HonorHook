@@ -2,11 +2,10 @@
 
 > 2026-10-13 整理：旧清单并入"已完成"归档，新增邮箱大师线与迭代候选。进度判据一律 = 真机 `installed N/M`（模块日志）。
 
-## 在途：网易邮箱大师（去广告 + 本地会员）
+## 已放弃：网易邮箱大师（2026-10-13 拍板）
 
-- [ ] **T1 真机验证**（2026-10-13 实测）：❌ 注入即死——`EXIT_SELF status=28`（native exit()，libnesec 加载后 ~160-360ms，主+子进程全灭，5/5 复现）；Java 三出口探针（System/Runtime.exit/halt）挂载成功但零命中 ⇒ native 路径；模块摘 scope 后 App 正常 ⇒ 易盾检出注入痕迹（21:36 一次同构存活 = 竞态孤例）。已撤 mail scope（App 恢复可用，commit 3fd6424 含探针与 dev.sh lspctl 化）。重开条件 = 反制方案拍板：①逆向 libnesec 定位 exit(28) 判定点（天级、版本绑定）②目标暂停归档
-- [ ] **T2**（等 `[mm-scout]` 侦察日志回来开工）：①信息流广告精确挂载（自渲染运营位不走联盟，按方法面挂）②VIP 判定真名修正（三个彩票若未命中，按 DashiVipService/Impl 真方法名重挂）
-- 判据：`tools/dev.sh modlog MailMasterHook` → installed N/M + [mm-scout] 16 类方法面
+- 易盾企业壳 runtime 反制无 Java 层解：注入即 native `exit(28)`（主+子进程全灭，5/5 复现；Java 三出口探针零命中），证据链见 commit 3fd6424 与 T1 实测记录。
+- 功能已下线：MailMasterHook / FeatureCatalog 两开关 / scope 条目全撤（本 commit）；调研档 `docs/reverse/mailmaster.md` 留档；生态或壳策略变化时可 git revert 复活。
 
 ## 待验证
 
