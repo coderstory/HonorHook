@@ -2,7 +2,7 @@
 
 > 需求：垃圾桶清后台时，保留清后台前的前台 app（热回原任务，不杀不冷启）。
 > 拍板（2026-10-12）：**热保留** + **仅垃圾桶按钮生效**。
-> 状态：**纯调研，未写任何 hook 代码，未真机验证**。
+> 状态：**已实现**（K1-K3 三点，1013c45）；2026-10-13 修复初版缺陷（§二·2）后待真机回归。
 
 ## 一、真机链路实证（launcher 18.0.0.234，AAK-AN00 MagicOS）
 
@@ -18,7 +18,7 @@ ClearAllButton onClick
     → createAllTasksDismissAnimation(300)                 // 卡片飞走动画（:3604）
       → 动画 onEnd
         → finishRecentsAnimation(true,false)              // :3621 lambda$createAllTasksDismissAnimation$29
-        → ActivityManagerWrapperEx.removeAllRecentTasks() // ★ 全杀收口 :3634（UI_HELPER_EXECUTOR）
+        → ActivityManagerWrapperEx.removeAllRecentTasks() // ★ 全杀收口 :3634 —— post 到 UI_HELPER_EXECUTOR（后台线程，晚于下行执行）
         → removeTasksViewsAndClearAllButton()
         → RecentsView.startHome()                         // ★ 回桌面 :3645
 ```
@@ -85,3 +85,16 @@ ClearAllButton onClick
 6. 锁定任务（卡片锁图标）存在时点垃圾桶：锁定卡是否豁免。
 7. 分身应用（微信/QQ 分身）任务存在时点垃圾桶：正常清、保留逻辑不串。
 8. 判据：modlog `installed N/M` 新挂载点全绿 + 上述场景观察。
+
+## 六、初版缺陷与修复（2026-10-13）
+
+**症状**：真机实测无效果（垃圾桶清后台后回到桌面，未热回原任务）。
+
+**根因（launcher 18.0.0.234 反编译实证）**：`lambda$createAllTasksDismissAnimation$28`
+把 `removeAllRecentTasks()` **post 到 UI_HELPER_EXECUTOR**，随后 `startHome()` 在主线程
+立即执行——真实顺序 **K3 先、K2 后**，与初版实现的「K2 先清 flag、K3 后消费」假设相反。
+初版 K3 消费时清空全部三个共享 flag ⇒ 几毫秒后 K2 读空透传原生全杀 ⇒ 刚热回去的保留任务
+被一并杀掉。
+
+**修复**：K2 只消费 `killTaskIds`、K3 只消费 `keepTaskIds`（互不清对方集合），时间戳双方
+都消费完才清，10s 超时兜底保留。两种执行顺序均正确。

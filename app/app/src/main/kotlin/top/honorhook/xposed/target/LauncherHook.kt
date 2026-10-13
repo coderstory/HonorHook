@@ -95,24 +95,28 @@ object LauncherHook : TargetHook {
                     chain.proceed()
                 }
                 // K2 全杀收口替换：`removeAllRecentTasks`（:3634）无排除参数（最终 binder
-                // removeAllVisibleRecentTasks 无参），只能整条替换。flag 消费即清——
+                // removeAllVisibleRecentTasks 无参），只能整条替换。真实执行顺序（launcher
+                // 18.0.0.234 反编译实证，RecentsView.lambda$createAllTasksDismissAnimation$28）：
+                // removeAllRecentTasks 被 post 到 UI_HELPER_EXECUTOR，startHome() 主线程先行
+                // ⇒ 本 hook 晚于 K3 执行。故只消费 killTaskIds、互不清对方集合（两种顺序均正确）；
+                // 时间戳在双方都消费完后才清。kill 为空数组也走替换分支（原生全杀会连保留集一起杀）。
                 // 反射失败也消费后透传原生全杀（fail-safe：宁可杀掉保留任务，不留脏标记）。
                 MountKind.REMOVE_ALL_KEEP_CURRENT -> {
-                    val keep = keepTaskIds
                     val kill = killTaskIds
-                    if (keep == null || kill == null || keepFlagStale()) {
+                    if (kill == null || keepFlagStale()) {
                         // 未捕获/已超时/已消费：垃圾桶 flow 之外的任何 removeAllRecentTasks 调用方
                         // 一律透传，绝不拦截。
                         chain.proceed()
                     } else {
-                        keepTaskIds = null
                         killTaskIds = null
-                        keepCapturedAtMs = 0L
+                        if (keepTaskIds == null) {
+                            keepCapturedAtMs = 0L
+                        }
                         if (removeTasksIndividually(kill) { reason ->
                                 module.log(Log.WARN, MountEngine.TAG, "RECENTS-KEEP 逐个移除失败: $reason")
                             }
                         ) {
-                            engine.judge(module, task, JUDGE_PREFIX, "已保留 ${keep.size} 任务，逐个移除 ${kill.size} 个")
+                            engine.judge(module, task, JUDGE_PREFIX, "已逐个移除 ${kill.size} 个任务，原生全杀未执行（保留集见 K1 捕获行）")
                         } else {
                             // 已动手才失败 ⇒ 透传原生全杀兜底（部分任务可能已被移除，原生全杀收尾幂等）。
                             chain.proceed()
@@ -120,16 +124,19 @@ object LauncherHook : TargetHook {
                     }
                 }
                 // K3 回桌面步替换：startHome（:2696）另有点 overview 空白回桌面等调用方
-                // （:1674/:1676）⇒ flag 有效才替换，否则一律透传。成功热回保留任务并拦掉回桌面；
-                // 失败记 WARN 后透传原生回桌面（回落路径：保留 id 已死/分身异常 → 静默降级）。
+                // （:1674/:1676）⇒ 必须门控。真实执行顺序里 K3 先于 K2（见 K2 注释）⇒ 只消费
+                // keepTaskIds，killTaskIds 留给晚到的 K2；时间戳在双方都消费完后才清。
+                // 门控有效时替换为 startActivityFromRecents(保留id, null)（recents 点卡片回
+                // app 同一条路）；失败/无效透传原生回桌面（回落：保留 id 已死/分身异常 → 静默降级）。
                 MountKind.START_TASK_INSTEAD_HOME -> {
                     val keep = keepTaskIds
                     if (keep == null || keep.isEmpty() || keepFlagStale()) {
                         chain.proceed()
                     } else {
                         keepTaskIds = null
-                        killTaskIds = null
-                        keepCapturedAtMs = 0L
+                        if (killTaskIds == null) {
+                            keepCapturedAtMs = 0L
+                        }
                         var started: Int? = null
                         for (id in keep) {
                             if (startTaskFromRecents(id) { reason ->
@@ -302,12 +309,20 @@ object LauncherHook : TargetHook {
     private var reopenTarget: Any? = null
 
     /**
-     * 垃圾桶 flow 的一组临时标记（K1 捕获 → K2/K3 消费即清 → 超时兜底清，三段都清空归零）。
+     * 垃圾桶 flow 的一组临时标记（K1 捕获 → K3/K2 **各自只消费自己的集合** → 双方都消费完
+     * 才清时间戳 → 超时兜底清）。
+     *
+     * **为什么拆分消费（2026-10-13 缺陷修复）**：真实执行顺序是 K3 先、K2 后——宿主把
+     * `removeAllRecentTasks()` post 到 UI_HELPER_EXECUTOR 后台线程，`startHome()` 在主线程
+     * 立即执行（RecentsView.lambda$createAllTasksDismissAnimation$28，launcher 18.0.0.234
+     * 反编译实证）。初版实现按「K2 先于 K3」的错误假设共用一组 flag 且消费即全清 ⇒ K3 热回
+     * 成功清空 flag，晚到的 K2 读空透传原生全杀，把刚热回去的 app 一并杀掉（实测无效果的
+     * 根因）。拆分后 K3→K2、K2→K3 两种顺序均正确，单边失效时另一边照常消费自己的集合。
      *
      * **为什么需要门控**：`RecentsView.startHome()`（:2696）另有点 overview 空白回桌面等
      * 常规调用方（:1674/:1676），`removeAllRecentTasks` 收口无排除参数只能整条替换——
-     * 不门控就会把「点空白回桌面」「其他全杀入口」一并改掉。两组 id 一起置位/消费，
-     * 保证 K2（杀谁）与 K3（回谁）来自同一次垃圾桶点击，单边失效时另一边整体透传原生。
+     * 不门控就会把「点空白回桌面」「其他全杀入口」一并改掉。两组 id 一起置位（同一次
+     * K1 捕获），保证 K2（杀谁）与 K3（回谁）来自同一次垃圾桶点击。
      */
     /** K1 捕获的保留集（清后台时的前台任务 id，getTaskIds 过滤 -1 后）。 */
     @Volatile
