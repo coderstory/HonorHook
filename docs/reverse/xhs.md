@@ -1,0 +1,183 @@
+# 小红书（com.xingin.xhs）逆向与 hook 设计
+
+> 2026-10-13 · 新目标 U-X1~U-X5。移植源：com.chekayo.xhssavefix 1.2.3（`reference/xhs/savefix-base.apk`，
+> jadx 产物 `system-files/xhssavefix-jadx/`）+ JoeanAmier/XHS-Downloader 图片/视频直链重建逻辑
+> （`reference/xhs/XHS-Downloader/`，application/image.py、video.py）+ 作者 9.33.4 期分析文档
+> `reference/xhs/reverse-notes.md`。
+> 目标宿主 9.49.1（versionCode 9491803，2026-10-13 真机拉取）；反编译：`system-files/xhs-jadx/`（全量）
+> + `system-files/xhs-partial/`（classes2/6/7/9/20 定向，链路分析基于后者）。
+> **每点附「重定位」**：新宿主版本适配时按备注锚点重找（混淆名必漂，锚点不改）。
+
+## 一、需求
+
+1. 解除「作者关闭下载/保存」限制（服务端 FunctionSwitch/MediaSaveConfig 下发，客户端 hook 唯一入口）
+2. 保存走原版无压缩图（XHS-Downloader 实证：app 默认存的是显示用压缩变体，token 重建直链为原图）
+3. 保存无水印（作者水印 + AI「生成」标签）
+4. 视频保存：`/api/sns/v10/note/video/save` 响应改写 + 原生 origin_video_key 优先直链
+5. 评论图片（用户上传的图片评论）同走高清无水印
+6. 批量下载开关：多图帖子一键全存
+
+边界：付费内容（`PAID_IMAGE_DOWNLOAD`）不绕过；live photo（vivo/oppo zip 双文件分支）不覆盖。
+
+## 二、保存链路（9.49.1 实证）
+
+```
+长按图/视频 → sb9/y（onDownloadClick lambda，classes7）
+  ├─ 图片: ISaveImageProxy（SPI，未混淆接口）
+  │    └─ com.xingin.image.SaveImageProxyImpl.save(activity, fileid, 头像url, 图url, 滤镜url, z, okCb, errCb)
+  │         └─ qc8.i.e → h → g → i   （qc8 = SaveImagesHelper 族，9.33.4 名 jm7.i/j）
+  │              └─ i.i: Uri.parse(str3=图url) → Fresco 解码（磁盘缓存按 url 键）
+  │                   → qc8.j.a(原图, 作者水印, 滤镜, AI标签, disableWaterMark, disableAi)  合成
+  │                   → qc8.e 写相册
+  ├─ 评论图: iu4/l（MediaBrowserNoteCommentSaveItemActionHelper，classes6）
+  │    └─ qc8.i.h 直调（绕过 SPI proxy）——与笔记图汇于 qc8.i.i 的 str3 解码源 ★单一收口
+  ├─ 视频: d49/q → NoteDetailService.saveVideo(note_id)（retrofit，classes9）
+  │    └─ GET /api/sns/v10/note/video/save → 响应 disable:true + 无 download_url = 服务端拒
+  └─ 门: mh9/b（DownloadController.onDownloadClick，classes2）
+       └─ note.Qa().h1().b()（MediaSaveConfig.disable_save）true → toast「download blocked」拦截
+```
+
+清晰度差距根源：`qc8.i.i` 拿显示 URL（`sns-webpic-*` 带 `!` 裁剪后缀）进 Fresco，存的就是压缩位图。
+XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `https://sns-img-bd.xhscdn.com/{token}` 原图直链。
+
+## 三、挂载点总表
+
+| # | 开关 | 点 | 层 | 9.33.4 对照 |
+|---|---|---|---|---|
+| X1a | save_unlock | `MediaSaveConfig.b()` → false | 未混淆直连 | 同名同号 |
+| X1b | save_unlock | `FunctionSwitch.a()` → true（type∈image/video_download） | 未混淆直连 | 同名同号 |
+| X1c | save_unlock | `ShareInfoDetail$Operate.a()` → false（同 type） | 未混淆直连 | 同名同号 |
+| X2a | no_watermark | `MediaSaveConfig.c()` → true | 未混淆直连 | 同名同号 |
+| X2b | no_watermark | `qc8.j.b(Context, boolean)` → null | 混淆·串锚 | jm7.j.b |
+| X2c | no_watermark | ImageBean disable_ai getter → true | 未混淆类·运行时注解定位 | jm7 期 ImageBean.u()，9.49.1=v()，**方法号漂移实证** |
+| X3 | hd_save | `qc8.i.i(...)` args[3] 图 url → token 重建直链 | 混淆·串锚 DexKit | jm7.i 系 |
+| X4 | video_save | `okhttp3.OkHttpClient$Builder.build()` 注入 Interceptor 代理 | 公开 API | 同 |
+| X5 | batch_save | `AsyncImageGalleryController` 注入三击 → 遍历存全部 | 未混淆直连 | — |
+
+### 每点重定位备注
+
+**X1a/X2a `com.xingin.entities.MediaSaveConfig`**（classes5）
+- 类名未混淆。`b()` = `@kd.c("disable_save")` 字段 getter；`c()` = `@kd.c("disable_watermark")` 字段 getter。
+- 9.33.4→9.49.1 方法号零漂移（jadx 双版本对照）。
+- 重定位：类名直查；方法号变了就按 JSON 注解找字段 → 该 boolean 字段的无参 getter。DexKit 兜底：dexStrings `disable_save`/`disable_watermark` + 类名串。
+- 失败分级：FAILED（重试无意义——类不存在说明结构大改）。
+
+**X1b `com.xingin.entities.notedetail.FunctionSwitch`**（classes5）
+- 类名未混淆。`a()` = `@kd.c("enable")` getter；`c()` = `@kd.c("type")` getter。
+- type 判定用字符串 `image_download`/`video_download`（服务端下发原文；客户端枚举 `notedetail/p.java` 未混淆但**不依赖它**，直比字符串）。
+- 重定位：同 X1a。**必须 hook 后动态取 `c()` 比对再改**，不能见 `a()` 就 true——其它 type（如 `paid_image_download`）会被误放。
+- 失败分级：FAILED。
+
+**X1c `com.xingin.entities.ShareInfoDetail$Operate`**
+- 类名未混淆（内部类 `$` 分隔）。`a()` = disable 位 getter；type 取 getter 读 `@kd.c("type")` 字段（9.49.1 方法号 g() 系 jm7 期同号，仍按注解定位）。
+- 重定位：同上；encoder 注意 `$`。
+
+**X2b `qc8.j.b(Context, boolean)` → null**（classes6）
+- 混淆名。锚：同类含日志串 `"disableAiWaterMark is "`（j.a 方法体）；b() 特征 = LayoutInflater inflate layout → view → Bitmap（`com.xingin.xhs.thread_monitor_lib` 的 BitmapFactoryProxy 代理调用）。
+- 重定位：DexKit dexStrings `["disableAiWaterMark is ", "SaveImagesHelper"]` → 同类中 1 个 (Context, boolean) → Bitmap 方法。上游 jm7.j.b（9.33.4）。
+- 失败分级：NOT_RESOLVED（随类加载重试；拿不到 = AIGC 帖仍画 AI 标签，可接受降级——作者水印走 X2a/X2c 不受影响）。
+
+**X2c ImageBean disable_ai getter → true**
+- `com.xingin.entities.ImageBean` 类名未混淆；**方法号已实证漂移**（9.33.4 `u()` → 9.49.1 `v()`；savefix 1.2.3 原样装 9.49.1 会挂到 `u0()`（original getter，返回 String），setResult(Boolean) 类型不匹配）。
+- 实现：**运行时注解反射**——install 期扫 `ImageBean.declaredFields` 找 `kd.c` 注解值 == `"disable_ai"` 的字段 f，再扫 `declaredMethods` 找无参、返回 boolean、方法体读 f 的 getter（默认双参兜底 `getX()` 命名不可靠），挂 after → true。
+- 重定位：注解串 `"disable_ai"` 不漂；字段名/方法号全漂移免疫。**adapt_new_version.py 盲区**：运行时解析无静态挂载点，该 target 的脚本核对点数会比源码少 1，属预期（脚本口径记录）。
+- 失败分级：NOT_RESOLVED（注解找不到 = 服务端改字段名，静默降级为 AI 标签可能保留）。
+
+**X3 `qc8.i.i` args[3] 图 url 替换**（classes6）
+- 混淆名。方法签名（11 参）：`(Activity, String×4, boolean, Function1×2, boolean×3)`；`args[3]` = 解码源图 url（`Uri.parse(args[3])` 进 Fresco 的那个）。
+- 锚（DexKit dexClassStrings，同类内）：`"saveImageBitmapNull"`、`"getBitmapFromFEPlatform failed"`、`"fetch image failed"`、tag 串 `"SaveImagesHelper"`——四个串全在 classes6 dex 字符串池（2026-10-13 grep 实证）。
+- 替换规则（XHS-Downloader image.py 实证移植）：
+  1. url 非 http/https 或 host 不含 `xhscdn.com`/`xiaohongshu.com` → 原样
+  2. host 已是 `sns-img-bd.xhscdn.com` 且 path 无 `!` → 原样（防重入）
+  3. token = path 全段重组（等价 `split("/")[5:].join("/")`）后截到第一个 `!` → `https://sns-img-bd.xhscdn.com/{token}`
+  4. 每 note 运行期 LRU 记忆已替换 url，省重复串操作
+- 覆盖面：笔记图（SPI 路径）+ 评论图（iu4/l 直调 qc8.i.h，h 是 i 的桥）——**一处 hook 双覆盖**。
+- 边界：live photo（vivo/oppo 双文件 zip 分支，iu4/l 内）不走 i.i 的单图解码，不覆盖；Fresco 缓存 miss 会走网络拉原图（正常路径）。
+- 重定位：四串锚 + 11 参特征。上游 jm7.i 系（9.33.4）。
+- 失败分级：NOT_RESOLVED。
+
+**X4 `okhttp3.OkHttpClient$Builder.build()` + Interceptor 动态代理**
+- 公开库 API（okhttp3 未 shade——dex 串池实证有 `okhttp3.Interceptor`/`okhttp3.Request$Builder`）。
+- before build() 反射读 `interceptors` 字段加代理（savefix 同款；字段名 `interceptors` 为 okhttp 公开源码字段，跨版稳定）。
+- 代理逻辑（savefix 移植 + 升级）：
+  - url 含 `/api/sns/` → `peekBody(512KB)`：
+    - 扫 `"origin_video_key"\s*:\s*"([^"]+)"`（VideoInfo `@kd.c("origin_video_key")` 实证 9.49.1 实体含此 JSON 字段）→ 优先
+    - 全流最高档（bestStreamOf）：区段内全部 `master_url`（覆盖 `MediaStream{h264[],h265[],h266[]}` 三编解码多档位，entities/video 实证）按 height 主序 + avg_bitrate 次序取最大（XHS-Downloader get_video_link preference=resolution 同语义；h264[0] 只是默认播放档非最高）→ 回落
+    - `video_info_v2` 区段 `"master_url"`（P_MASTER_MP4 h264 门限，savefix 原版）→ 殿后
+    - noteId = 同区段最近 `"(?:id|note_id)"\s*:\s*"([0-9a-f]{16,32})"`（savefix 同款）；map 上限 500 清空
+  - url 含 `/note/video/save` 且 body 含 `"disable"`：
+    - `"disable":true` → `"disable":false`；有 `"status"` 则统一 `"status":2`，无则在 disable 后插 `"status":2`
+    - 注 `"download_url"`：map[noteId] 命中时——**origin_video_key 优先**（`https://sns-video-bd.xhscdn.com/{key}`，XHS-Downloader video.py 实证 = 原始 key 最高画质），回落全流最高档，再回落 master_url（savefix 只到这层）
+    - `ResponseBody.create` 三轨重建（Kotlin Companion → create(MediaType,String) → create(String,MediaType)，savefix 同款容错）
+  - XHS-Downloader 的多 stream 按 bitrate/resistance 排序**不搬**：`origin_video_key` 已是最高档，多流排序要解析整个 stream 数组，JSON 解析成本高而收益为零。
+- 不搬 savefix `wh8.o1.a` 分支兜底（9.49.1 名已漂）：download_url 注入后客户端下载分支自愈（改数据源优于改参数；少一个漂移点）。
+- 重定位：okhttp3 类名公开；`interceptors` 字段名公开源码。工程意义上无需重定位。
+- 失败分级：FAILED（okhttp 缺失说明目标结构大改）。
+
+**X5 `com.xingin.matrix.notedetail.imagecontent.imagegallery.AsyncImageGalleryController`**
+- 类名未混淆（partial 产物实证）。批量触发 = gallery 内三击。
+- 实现：hook 其 view attach 通路（builder 实读该类定具体点：onAttachedToWindow 或构造后 view 获取处）→ view 上挂 GestureDetector（三击判定）→ 从 controller 持有的 note model 取 ImageBean 列表 → 逐张（≥300ms 间隔）经 ServiceLoader 取 ISaveImageProxy 调 `a.a(...)`（参数语义照 sb9/y：fileid, 头像 L0(), 图 url, 滤镜 url, k()），X3 的 qc8.i.i 替换对每张同样生效 = 批量也是高清。
+- 防重：同 note 会话内批量一次；进行中再触发忽略；开关关 = 零注入。
+- 重定位：类名未混淆；类若改名 → 按 gallery 包名 `imagegallery` + 类名 AsyncImageGalleryController 字面量 DexKit。
+- 失败分级：FAILED（不阻断其余功能）。
+
+## 四、注册与开关
+
+- 新 TargetHook：`XhsHook`（`com.xingin.xhs`）注册 TargetRegistry；scope.list 加 `com.xingin.xhs`
+- FeatureCatalog：Target(baselineVersion = "9.49.1") + 5 Feature：
+  `xhs.save_unlock` / `xhs.no_watermark` / `xhs.hd_save` / `xhs.video_save` / `xhs.batch_save`
+- 判据：modlog-f XhsHook —— `XhsHook·U-X: installed N/M` 汇总 + 各生效行（保存解锁/水印/替换 url/视频改写/批量）
+
+## 五、与 savefix 1.2.3 的差异清单
+
+| 项 | savefix | 本模块 | 理由 |
+|---|---|---|---|
+| 图片 URL | 不碰（存压缩图） | X3 token 重建原图 | XHS-Downloader 实证清晰度差距 |
+| 视频 download_url | master_url 单源 | origin_video_key 优先 | XHS-Downloader video.py：origin key = 原始最高档 |
+| wh8.o1.a 分支兜底 | 有 | 不搬 | download_url 注入后自愈；点已漂移 |
+| 评论图 | 不覆盖 | X3 同点覆盖 | qc8.i.i 收口发现 |
+| harvest/ndjson/autoExpand | 有 | 丢 | 作者采集基建，历史包袱 |
+| UpdatePrompt/设置 pill | 有 | 丢 | 注入宿主 UI 的自更新，包袱 |
+| OFF/PROBE/FAST 文件标记配置 | 有 | 丢 | 改用模块开关体系（远端 prefs） |
+| ImageBean.u() | 裸挂 | 运行时注解反射 | 9.49.1 漂移实证，裸挂会类型炸 |
+| 混淆点 jm7.j.b / kr9.c | 裸挂 | 串锚 DexKit + 丢弃(kr9.c 随 harvest) | 跨版本原则 |
+| 批量下载 | 无 | X5 | 新需求 |
+
+## 六、实现记录（2026-10-13，代码落地）
+
+实现 = `app/src/main/kotlin/top/honorhook/xposed/target/xhs/` 五文件 + FeatureCatalog/strings/scope.list/TargetRegistry 注册。全部按 §三总表实现，以下为实读后与 doc 表述的**偏差与定案**：
+
+### 各引擎挂点与汇总名
+
+| 引擎 | 功能 | 挂点 | 汇总行 |
+|---|---|---|---|
+| XhsHook·X1 | save_unlock | MediaSaveConfig.b / FunctionSwitch.a / ShareInfoDetail$Operate.a（三直连） | `XhsHook·X1: installed N/3` |
+| XhsHook·X2 | no_watermark | MediaSaveConfig.c / qc8.j.b（DexHint classStrings=["disableAiWaterMark is ","SaveImagesHelper"]）/ ImageBean disable_ai getter（运行时注解反射） | `XhsHook·X2: installed N/3` |
+| XhsHook·X3 | hd_save | qc8.i.i（11 参，DexHint 四串锚）before 改 args[3] | `XhsHook·X3: installed N/1` |
+| XhsHook·X4 | video_save | okhttp3.OkHttpClient$Builder.build() before 注 Interceptor 代理 | `XhsHook·X4: installed N/1` |
+| XhsHook·X5 | batch_save | AsyncImageGalleryController.onAttach(Bundle) after 挂三击 | `XhsHook·X5: installed N/1` |
+
+### 实读偏差（与 §三 表述不一致处，以 jadx 实读为准）
+
+1. **X1c type getter 不是 g()**：9.49.1 实读 `ShareInfoDetail$Operate`：`g()` 返回 `tag` 字段、`h()` 才返回 `type`（savefix 按 g() 判 type 是其适配版本的偏差）。实现不按方法号：优先直读**字段 `type`**（实体字段名 R8 未改名），回落方法号 c()（FunctionSwitch）/ h()（Operate）；两路都漂 = 不命中 = 放行原判定（安全侧，付费边界不受影响）。
+2. **X5 挂点定案**：AsyncImageGalleryController **没有** onAttachedToWindow 式 view 回调；view 绑在 presenter `aj9.h2 extends pe7.g<ImageGalleryView>` 的继承公共字段上（type V 擦除为 android.view.View），且 presenter.didLoad 在 controller.onAttach 内经 dispatchLoad 读 view（否则宿主自身 NPE）⇒ **onAttach after = view 必已绑定**的稳定直连点，选它而非 obfuscated 的 aj9.h2.didLoad（后者需 DexHint 兜底，能不引混淆锚就不引）。
+3. **X5 数据取法定案**：doc 建议的 controller.R（DetailNoteFeedHolder）→ NoteFeed.N0() 链路的 b()/N0() 是单字母混淆方法，防漂改走类型锚定：presenter 字段扫 `com.drakeet.multitype.MultiTypeAdapter`（库未 shade）→ `getItems()`（库 API）→ 条目内扫 `com.xingin.entities.ImageBean` 类型字段（y wrapper 的 b）。ImageBean 取值仍按 doc：K()=fileid、A0()=显示 url（实读链路：controller:5613 `gVarP2.q0(Uri.parse(imageBean.A0()))`，即 sb9/y 的 g.o()=filePath 来源）、R()?.o()=滤镜 url。**K()/A0()/R() 单字母号漂移 = X5 整体降级**（doc 失败分级 FAILED，不阻断其余功能；适配时按「ImageBean 无参 boolean/String getter + 注解」重找）。
+4. **X2c 探针定案**：无参构造 ImageBean → `@kd.c("disable_ai")` 字段置 true → 扫无参非静态返 boolean 且 invoke 后为 true 的 getter（只有读该字段的 getter 在探针下为 true）。注解串不漂、字段名/方法号全免疫。失败 = NOT_RESOLVED（重试 2 轮后进汇总失败清单，AI 标签可能保留 = doc 可接受降级）。
+5. **X4 语义**：照 savefix patchVideoSaveResponse/rebuildResponse/createResponseBody/queryParam/P_MASTER_MP4/P_NOTE_ID 搬；升级 = origin_video_key 优先（P_ORIGIN_KEY 同 video_info_v2 区段窗口扫，命中则 download_url = `https://sns-video-bd.xhscdn.com/{key}`，回落 master_url）。okhttp3 不进编译期 classpath，全程反射（peekBody/proceed/newBuilder/ResponseBody 三轨重建）。改写命中打 `XhsHook·X4 视频响应已改写 noteId=...`（每次命中，不走 judge 节流）。
+6. **X5 保存调用**：取 SPI 走 `com.xingin.spi.service.ServiceLoaderKtKt.service$default(Class,null,null,3,null)`（sb9/y 同链），回落 java.util.ServiceLoader；调 `save(8参)` 直连（a.a 默认方法 shim 不经）。boolean 参传 true（=disableWaterMark，与 X2a 同语义）；avatar 传 ""（sb9/y 对 null 的兜底同款）。success/error 回调用 Function1 动态代理计数，Toast「已保存 N/M」。触摸监听恒返回 false，不消费宿主手势；同 presenter 进行中忽略、同 note（fileid 指纹）会话内一次。
+
+### adapt_new_version.py 口径
+
+X2c 无静态挂载点（运行时注解反射解析）⇒ 本 target 脚本核对点数比源码少 1（源码 X2 引擎 3 点，脚本 2 点），**预期差，不修**。其余 8 点脚本口径正常。
+
+### 状态
+
+- ✅ 编译通过（`bash tools/dev.sh build`，2026-10-13）
+- ⏳ 未真机验证：判据 = modlog-f XhsHook 五行 `installed N/M`（X1 3 点/X2 3 点/X3 1 点/X4 1 点/X5 1 点）+ 各生效行；验证清单（保存受限帖/水印帖/AIGC 帖/评论图/视频帖/画廊三击）待用户自测
+
+### 评审修复（2026-10-13，同轮 9 处）
+
+- **X3**：before 改参由 `proceedWith(thisObject, args)` 改 `proceed(args)`（api 102 Chain：proceedWith = 跳过原方法以 result 充当返回值的结果改写轨，HonorAdsHook 短路语义；用于改参会令保存执行链整体不执行）；token 规则由 XHS-Downloader `split("/")[5:]` 改取「path 末段截 `!`」——原式依赖 Web 端深路径（token 前恒有 ≥2 目录段，结果即末段），客户端 ImageBean url 常为浅路径（host 后 0~1 段），drop(5) 取空 = 整功能静默 no-op；末段取法深路径与原式等价、浅路径才命中（§三 规则 3 已同步）。
+- **X4**：createResponseBody 三轨 Class.forName 由模块 loader 改宿主 loader（`@Volatile hostLoader`，install 期存 `param.defaultClassLoader`；模块 classpath 无 okhttp3，模块 loader = 三轨全 ClassNotFoundException = 采集正常但 save 响应永不改写）；防重注入由 `interceptors.contains`（代理 equals 恒 false——Kotlin lambda InvocationHandler 内 this 指外层 object，判重必失效 → 重复注入 = 同请求双拦截 + download_url 重复插 JSON）改 `toString()` 标记判重（处理器恒返 `HonorHook-XhsVideoSave`）。
+- **X2**：X2cTask.resolveValue 补 `also { resolvedGetter = it }` 写回——resolveValue 只是就绪门（MountEngine.resolveTask 丢弃返回值、仍按 methodName 解析），不写回则 methodName 恒 "" → 直连 0 命中 → 无锚 DexKit → NOT_RESOLVED 空转；探针改**差分**（置 true→true 且置 false→false 两态都符合才认定），防「默认值恰为 true 的其它布尔字段 getter」误挂（实例本地新建可丢弃，不复位）。
+- **X5**：resolveSaveProxy 类加载由模块 loader 改宿主 loader（ISaveImageProxy/ServiceLoaderKtKt 是宿主类）；save 回调代理 loader 显式用 `activity.classLoader`（Function1 类身份必须宿主 kotlin-stdlib，模块侧同名类 ClassCastException）；三击监听不覆盖宿主——先取 `prev = view.onTouchListener`，尾部委托 `prev?.onTouch(v, event) ?: false`；collectImages 的 adapter 字段扫描补超类链（aj9.h2 系 presenter 字段可能落父类，同 findImageBeanValue 写法）。

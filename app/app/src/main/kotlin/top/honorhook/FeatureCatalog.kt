@@ -51,6 +51,12 @@ object FeatureCatalog {
     const val KEY_MFA_SPLASH = "mfa.splash"
     const val KEY_SYSMGR_ANTIVIRUS = "sysmgr.antivirus"
 
+    const val KEY_XHS_SAVE_UNLOCK = "xhs.save_unlock"
+    const val KEY_XHS_NO_WATERMARK = "xhs.no_watermark"
+    const val KEY_XHS_HD_SAVE = "xhs.hd_save"
+    const val KEY_XHS_VIDEO_SAVE = "xhs.video_save"
+    const val KEY_XHS_BATCH_SAVE = "xhs.batch_save"
+
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
     const val KEY_ADS_BLOCK = "ads.block"
@@ -203,6 +209,17 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
+        ),
+        Target(
+            "com.xingin.xhs", R.string.target_name_xhs,
+            listOf(
+                Feature(KEY_XHS_SAVE_UNLOCK, R.string.feature_xhs_save_unlock_title, R.string.feature_xhs_save_unlock_desc),
+                Feature(KEY_XHS_NO_WATERMARK, R.string.feature_xhs_no_watermark_title, R.string.feature_xhs_no_watermark_desc),
+                Feature(KEY_XHS_HD_SAVE, R.string.feature_xhs_hd_save_title, R.string.feature_xhs_hd_save_desc),
+                Feature(KEY_XHS_VIDEO_SAVE, R.string.feature_xhs_video_save_title, R.string.feature_xhs_video_save_desc),
+                Feature(KEY_XHS_BATCH_SAVE, R.string.feature_xhs_batch_save_title, R.string.feature_xhs_batch_save_desc),
+            ),
+            baselineVersion = "9.49.1",  // versionCode 9491803，真机拉取 2026-10-13（docs/reverse/xhs.md）
         ),
     )
 

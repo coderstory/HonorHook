@@ -106,4 +106,16 @@
     <string name="feature_sysmgr_antivirus_title">病毒检测全禁用</string>
     <string name="feature_sysmgr_antivirus_desc">安装应用时不再检测风险、不再弹出「发现病毒应用」弹窗，后台闲时病毒扫描也一并跳过</string>
 
+    <string name="target_name_xhs">小红书</string>
+    <string name="feature_xhs_save_unlock_title">解除保存限制</string>
+    <string name="feature_xhs_save_unlock_desc">帖子被作者关闭「下载/保存」时仍可长按保存图片和视频；付费内容不绕过。重启小红书后生效</string>
+    <string name="feature_xhs_no_watermark_title">保存无水印</string>
+    <string name="feature_xhs_no_watermark_desc">保存图片不再带作者水印和 AI「生成」标签。重启小红书后生效</string>
+    <string name="feature_xhs_hd_save_title">保存原图</string>
+    <string name="feature_xhs_hd_save_desc">保存的是原始高清图而非页面压缩图（含评论图片），清晰度与页面显示一致或更高。首次保存需联网拉取原图。重启小红书后生效</string>
+    <string name="feature_xhs_video_save_title">视频直链保存</string>
+    <string name="feature_xhs_video_save_desc">视频帖保存不再被服务端拒绝，直接取最高画质原始视频流。重启小红书后生效</string>
+    <string name="feature_xhs_batch_save_title">批量保存</string>
+    <string name="feature_xhs_batch_save_desc">图片画廊页三击=保存全部：多图帖画廊内连续快速三击即可逐张保存全部图片（含去水印与原图），结束时弹「已保存 N/M」。重启小红书后生效</string>
+
 </resources>

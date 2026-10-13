@@ -9,6 +9,7 @@ import top.honorhook.xposed.target.mfauth.MfaAuthHook
 import top.honorhook.xposed.target.mms.MmsHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 import top.honorhook.xposed.target.tracking.HonorTrackingHook
+import top.honorhook.xposed.target.xhs.XhsHook
 
 /**
  * 目标注册表（融合 Rain va 静态注册表 + HC 布尔防重装；`.claude/skills/lsposed-hook-expert/references/rain-dexkit-and-mount-patterns.md`）。
@@ -57,6 +58,8 @@ object TargetRegistry {
         register(MfaAuthHook)
         // 系统管家服务（第 11 目标）：病毒检测/查杀/弹窗三路全禁；scope.list 已同步。
         register(SysmgrHook)
+        // 小红书（第 12 目标）：保存解锁/去水印/原图/视频直链/批量五路；scope.list 已同步。
+        register(XhsHook)
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */
