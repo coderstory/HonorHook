@@ -105,4 +105,7 @@
 
     <string name="feature_mailmaster_ad_off_title">去广告</string>
     <string name="feature_mailmaster_ad_off_desc">跳过开屏广告，并切断开屏与信息流的联盟广告请求</string>
+
+    <string name="feature_mailmaster_vip_title">本地会员</string>
+    <string name="feature_mailmaster_vip_desc">把会员判定改为已开通，解锁界面层的会员权益（去引导弹窗、皮肤、备注等）；AI 次数、云容量等服务器管理的权益不受影响，个别功能若异常可单独关闭本开关</string>
 </resources>

@@ -67,7 +67,7 @@
 | A. 真机脱壳 | 设备跑一次邮箱大师 + dump 解密后 dex → 完整静态分析 | 动主力机 | 易盾反调试检测；dump 只读无破坏 |
 | **B. 免脱壳盲试（已选）** | 运行时 hook 明文已知类 + 反射枚举 + 日志试错 | 零额外设备操作 | 方法语义靠侦察日志确认 |
 
-会员缓议（用户拍板只做去广告）；§四 VIP 架构调研保留供后续。
+去广告 T1 已落码（2026-10-13）；**VIP 后来重启（用户同日拍板「侦察+彩票一起上」）**，见 §五·3。
 
 ### 五·2、T1 挂载点设计（MailMasterHook，4 task + 侦察）
 
@@ -86,6 +86,23 @@ declaredMethods+Constructors 全签名打 `[mm-scout]` 日志 ⇒ **T2 据此把
 
 **时序注**：B/C/D 是加密 dex 类，PackageLoaded 时机壳未解密 ⇒ 首轮 NOT_RESOLVED 靠 MountEngine 重试轮
 （500ms/2s×2）；易盾解密通常 <1s，赶得上是常态、漏挂由 activity 兜底层补位，installed N/M 判读时属预期。
+
+### 五·3、T-vip 挂载点设计（2026-10-13 用户拍板「侦察+彩票一起上」）
+
+| task | 点 | 类型 | 依据 / 失败安全 |
+|---|---|---|---|
+| V1 `mm:vip.isDashiVip` | `DashiVipServiceImpl.isDashiVip()`(0 参 boolean)恒真 | 改返回值 | 方法名依据=业务日志串 `crossBorderGuide: onMailLoaded isDashiVip=`；挂不上 NOT_RESOLVED 静默 |
+| V2 `mm:vip.isVip` | `DashiVipServiceImpl.isVip()` 恒真 | 同上 | isVip 为字符串池裸 token |
+| V3 `mm:vip.isPlusVip` | `DashiVipServiceImpl.isPlusVip()` 恒真 | 同上 | isPlusVip/hasPlusVip 为字符串池裸 token |
+
+- **独立开关** `mailmaster.vip`（与 `mailmaster.ad_off` 分离，UI 可单独关）；双开关结构：都关才整体跳过，
+  taskA 恒挂、finish 行为受 adOn 运行时门控、侦察无条件执行。
+- **侦察扩 16 类**：+DashiVipService（接口契约最重要）/ DashiVipServiceImpl / biz.dashi.vip.a /
+  VipTrackStatisticsHelper / SearchDateFilterVipManager（日期定位消费方样例）/ TranslateVipHelper。
+- **风险边界**（hook-craft §二·3 两类失败模式）：伪造会员只解锁客户端 gate 权益；服务端对账权益
+  （AI 次数/云容量）无效，个别走服务端数据的路径可能异常（exam8 白屏先例）⇒ 远端开关独立可关兜底。
+- 真机判读：`mm-vip 生效: mm:vip.isDashiVip` judge 行 + 会员引导弹窗消失/会员图标生效即彩票命中；
+  全 NOT_RESOLVED 则按 [mm-scout] 的 DashiVipService(Impl) 方法面出 T-vip2 精确挂。
 
 ## 六、风险与边界（诚实结论）
 
