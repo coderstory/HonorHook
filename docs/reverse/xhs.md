@@ -13,7 +13,7 @@
 1. 解除「作者关闭下载/保存」限制（服务端 FunctionSwitch/MediaSaveConfig 下发，客户端 hook 唯一入口）
 2. 保存走原版无压缩图（XHS-Downloader 实证：app 默认存的是显示用压缩变体，token 重建直链为原图）
 3. 保存无水印（作者水印 + AI「生成」标签）
-4. 视频保存：`/api/sns/v10/note/video/save` 响应改写 + 原生 origin_video_key 优先直链
+4. 视频保存：`/api/sns/v10/note/video/save` 响应改写（**仅 `disable` 解锁有效**）+ 外挂 probeSize 选最大档直下（`origin_video_key` 在 app 网络层**不存在**，见 §三 X4 实证）
 5. 评论图片（用户上传的图片评论）同走高清无水印
 6. 批量下载开关：多图帖子一键全存
 
@@ -101,15 +101,25 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 - before build() 反射读 `interceptors` 字段加代理（savefix 同款；字段名 `interceptors` 为 okhttp 公开源码字段，跨版稳定）。
 - 代理逻辑（savefix 移植 + 升级）：
   - url 含 `/api/sns/` → `peekBody(512KB)`：
-    - 扫 `"origin_video_key"\s*:\s*"([^"]+)"`（VideoInfo `@kd.c("origin_video_key")` 实证 9.49.1 实体含此 JSON 字段）→ 优先
-    - 全流最高档（bestStreamOf）：区段内全部 `master_url`（覆盖 `MediaStream{h264[],h265[],h266[]}` 三编解码多档位，entities/video 实证）按 height 主序 + avg_bitrate 次序取最大（XHS-Downloader get_video_link preference=resolution 同语义；h264[0] 只是默认播放档非最高）→ 回落
-    - `video_info_v2` 区段 `"master_url"`（P_MASTER_MP4 h264 门限，savefix 原版）→ 殿后
+    - 扫 `"origin_video_key"\s*:\s*"([^"]+)"`（P_ORIGIN_KEY）→ 优先。**实证作废（2026-10-14）**：
+      该字段**不在 app 网络层**。全 dex 串池 grep 仅 1 处命中，在 `classes20.dex`
+      `com/xingin/arch/adapter/model/NoteDetailArgumentsExtensionsKt.java:176-180`，形态是
+      **Bundle extra**（`h.c(yVar, "origin_video_key", strA)`，`strA = VideoInfo.A()` = `VideoInfo.id`）；
+      app API 实体（`entities/video/Consumer.java`）无此字段，`originVideoKey` 全 dex 0 命中
+      ⇒ 本分支**恒 miss**；V-9（进程内 web 会话取原始档）已因 `_533` 实证作废，此处仅存分支占位，无调用价值
+    - **候选全量采集（2026-10-14 真机定稿，取代旧 bestStreamOf 打分）**：`video_info_v2` 区段内收集**全部** `master_url`（覆盖 `MediaStream{h264[],h265[],h266[]}` 多编解码多档位）+ 同流首个 `backup_urls[]`，去重成候选表，交给下载前 `probeSize`（HEAD / `Range: bytes=0-0` 读 `Content-Length`）**按实测字节选最大**。旧法（height 主序 + avg_bitrate 的 1200 字节窗口打分）真机漏档：只拿到 `_258`/`_4610`，漏 `_533`/`_526`
+    - `video_info_v2` 区段 h264 `"master_url"`（savefix 原版 P_MASTER_MP4 门限）已并入上面的候选全量采集，不再单独占一档
     - noteId = 同区段最近 `"(?:id|note_id)"\s*:\s*"([0-9a-f]{16,32})"`（savefix 同款）；map 上限 500 清空
   - url 含 `/note/video/save` 且 body 含 `"disable"`：
     - `"disable":true` → `"disable":false`；有 `"status"` 则统一 `"status":2`，无则在 disable 后插 `"status":2`
-    - 注 `"download_url"`：map[noteId] 命中时——**origin_video_key 优先**（`https://sns-video-bd.xhscdn.com/{key}`，XHS-Downloader video.py 实证 = 原始 key 最高画质），回落全流最高档，再回落 master_url（savefix 只到这层）
+    - 注 `"download_url"`：map[noteId] 命中时——**origin_video_key 优先**（`https://sns-video-bd.xhscdn.com/{key}`，XHS-Downloader video.py 语义），回落全流最高档，再回落 master_url（savefix 只到这层）。**注：此改写对客户端无效，见下「客户端不吃 download_url」实证**
     - `ResponseBody.create` 三轨重建（Kotlin Companion → create(MediaType,String) → create(String,MediaType)，savefix 同款容错）
-  - XHS-Downloader 的多 stream 按 bitrate/resistance 排序**不搬**：`origin_video_key` 已是最高档，多流排序要解析整个 stream 数组，JSON 解析成本高而收益为零。
+  - XHS-Downloader 的多 stream 按 bitrate/resistance 排序**不搬**：选档交给 `probeSize` 实测字节数（旧 height/bitrate 窗口打分法定档实错，见上条）。
+  - **客户端不吃 `download_url`（2026-10-14 真机实证，覆盖此前全部推断）**：01:17 日志 `视频响应已换链 … → ..._258.mp4`，用户实测客户端仍落 ~2.9MB（= 服务器原 `_4610`）⇒ 响应改写对客户端保存档位**无影响**。X4 响应改写的有效语义**只剩 `disable` 解锁**，换链为死路径（`swapUrl()` 依赖的 originKey 恒 null）。
+  - **`_533` 就是真原始档（2026-10-14 真机实证 ⇒ V-9 不需要）**：同 note 响应体采出候选 **8 个** = `_258`(4148KB) / **`_533`(6122KB)** / `_331`(1607KB) / `_526`(4455KB) / `_4610`(2859KB) + 各自 `sns-bak-v6` 镜像。取最大 `_533` 落盘后 MP4 box 解析 = **1440x1920 hvc1(HEVC) 8.685s**，与 app 自报 `height:1920` / `bbox 1080x1920` 吻合；客户端自存那份只 1607KB（≈`_331` 档）。⇒ 原始档就在**网络响应体**里，进程内 web 会话（V-9）可撤。
+  - 「裸 key 直链 `sns-video-bd.xhscdn.com/{32hex}` → 404」与「`seg×type` 矩阵除 `seg=110`+`type=258/4610` 外全 404」**结论作废**：`{fileid}` 每档不同，只替换 type 段无法构造有效 URL；档位清单只能来自响应体采集。旧的「`_258`(4.05MB,8.700s) 与 `_4610`(2.79MB,11.184s) 均 720x960 avc1 且时长不同」是**另一个 note** 的低档观测，非本 note 结论（本 note 各档时长一致 8.6~8.7s）。
+  - **交付链修复（V-4/V-5，2026-10-14）**：`downloadVideoHd` 改 `IS_PENDING=1` 占位 → 流式写 → 字节数 == `Content-Length` 校验 → `IS_PENDING=0`；失败 `rollbackHd()` 删占位。此前无 IS_PENDING 生命周期 ⇒ 产物在 `Movies/小红书` 消失。Content-Type **黑名单**（只拒 `text/*`/`application/xml`/`application/json`；`application/octet-stream` 合法放行——CDN 对原始档常回此类型）。`deleteLowQuality` 改时间窗（`DATE_ADDED >= t0-10s` + 非本 uri + `SIZE < ourSize`，走 `Video.EXTERNAL_CONTENT_URI` 覆盖 DCIM）。真机实证：`HD直下完成 … 6122KB → Movies/小红书/xhs_…_hd.mp4`（落盘 6,269,525B 存活）+ `已删低画质文件 Camera_xhs_1791916085784.mp4 (1607KB < 6122KB)`。
+  - **伪 originKey 采集是 bug**：扫 `"video":{` 后 3000 字符窗口内首个 `"id"` 作 origin key —— 实测命中两类垃圾：24 位 hex（= 别的 note id，`sns-video-bd/<hex>` → 404）与 `http://..._258.mp4`（窗口内其他对象的 id）。**已删（V-1，2026-10-14）**。
 - 不搬 savefix `wh8.o1.a` 分支兜底（9.49.1 名已漂）：download_url 注入后客户端下载分支自愈（改数据源优于改参数；少一个漂移点）。
 - 重定位：okhttp3 类名公开；`interceptors` 字段名公开源码。工程意义上无需重定位。
 - 失败分级：FAILED（okhttp 缺失说明目标结构大改）。
@@ -121,7 +131,9 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
   2. 拦截-重放本张——dispatch token 一次性，事后重放被下游身份过滤静默丢弃
   3. app 内存找图集（controller 图搜/adapter.setItems 快照）——sheet 图里图集实证为空；MultiTypeAdapter.setItems 真机不存在
   4. **外挂解析（定稿）**：X4 interceptor 旁路 `/api/sns/v1/note/imagefeed`（逐图 feed，进图浏览必发）+ `/note/detailfeed`，收 `images_list[]` 的 `original` 直链（优先）/`url`；noteId 三轨 = body `"note_id"` → URL query `note_id` → 沿用最近值；触发端点**精确匹配**（宽前缀 /note/ 会收进 user/posted 污染；homefeed 会灌整条信息流——实测 62 张污染）；单笔记 >30 张护栏丢弃。
-  5. 直下：模块自己 HttpURLConnection（UA+Referer+302 跟随）→ MediaStore `Pictures/小红书`；URL 原图化 = 剥 `?`/`!` 参数**不换 host**（sns-na-i6 无参即原图；换 host 拼接对带目录 fileid 未实证）。
+  5. 直下：模块自己 HttpURLConnection（UA+Referer+302 跟随）→ MediaStore `Pictures/小红书`；URL 原图化 = 剥 `?`/`!` 参数，**换 host 已实证安全**（见下）。
+- **换 host + 剥 query 实证（2026-10-14，三条真机 URL）**：token 取 3 例——根级 `1040g0083269625nml6105pou5a8jchgaphip3tg`、`notes_pre_post/1040g3k0325ubij8hk64g5nlvfu908d75654m610`、`spectrum/1040g34o32617jo6fk6105qh81qbgfs01n02n15g`。同一 token 对 `sns-na-i6` / `sns-img-bd` / `ci.xiaohongshu.com` / `sns-img-qc` 四 host **返回字节完全相同**（644,430B / 1,956,636B / 159,039B）⇒ 换 host 无损，原「未实证」作废。剥 query 即原图：`notes_pre_post/…` 无参 1,956,636B vs 签名预览 644,430B。**注意 Content-Type**：原图可能回 `application/octet-stream`（非 `image/*`）⇒ 下载端**禁按 Content-Type 白名单拒收**（改用黑名单拒 `text/*` 错误页）。落地实现 `XhsImageUrl.kt`（host 固定 `sns-img-bd.xhscdn.com`）。
+- **X5 真机实录（2026-10-14，4 图笔记）**：长按图片 →「保存」命中 `mh9.b` → 原生保存本张（客户端落 `/sdcard/DCIM/Camera_XHS_<ts><token路径>.jpg` 1,228,638B，**1728x2304**，X3 原图直链生效）→ 追加卡「检测到本篇还有 4 张」（采集自 `imagefeed`，首张 host 实测 `sns-na-i1.xhscdn.com`，改写后走 `sns-img-bd`）→「保存全部」→ 模块直下 **4/4** 落 `Pictures/小红书`（4.77/2.87/2.83/3.08 MB；首张 1728x2304 = 与客户端同分辨率，但为 CDN **原始字节**，远大于客户端重压的 1.23MB）。
 - 弹窗 Activity 来源：controller 图搜（Lazy 主动 getValue 解包 + Dialog 轨——LCBBottomSheetDialog.context）。
 - 边界：当前张会与原生保存重复一张（无现图 fileid 判定链路，接受重存）；视频笔记不弹（X4 已直链）。
 - 重定位：双日志串 + invoke(Object) 签名；采集端点 `note/imagefeed` 路径字面量。
@@ -139,7 +151,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 | 项 | savefix | 本模块 | 理由 |
 |---|---|---|---|
 | 图片 URL | 不碰（存压缩图） | X3 token 重建原图 | XHS-Downloader 实证清晰度差距 |
-| 视频 download_url | master_url 单源 | origin_video_key 优先 | XHS-Downloader video.py：origin key = 原始最高档 |
+| 视频 download_url | master_url 单源 | 无效（客户端不读） | 真机实证：换成 `_258` 后客户端仍落 `_4610`（2.9MB） |
 | wh8.o1.a 分支兜底 | 有 | 不搬 | download_url 注入后自愈；点已漂移 |
 | 评论图 | 不覆盖 | X3 同点覆盖 | qc8.i.i 收口发现 |
 | harvest/ndjson/autoExpand | 有 | 丢 | 作者采集基建，历史包袱 |
@@ -169,7 +181,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 2. **X5 挂点定案**：AsyncImageGalleryController **没有** onAttachedToWindow 式 view 回调；view 绑在 presenter `aj9.h2 extends pe7.g<ImageGalleryView>` 的继承公共字段上（type V 擦除为 android.view.View），且 presenter.didLoad 在 controller.onAttach 内经 dispatchLoad 读 view（否则宿主自身 NPE）⇒ **onAttach after = view 必已绑定**的稳定直连点，选它而非 obfuscated 的 aj9.h2.didLoad（后者需 DexHint 兜底，能不引混淆锚就不引）。
 3. **X5 数据取法定案**：doc 建议的 controller.R（DetailNoteFeedHolder）→ NoteFeed.N0() 链路的 b()/N0() 是单字母混淆方法，防漂改走类型锚定：presenter 字段扫 `com.drakeet.multitype.MultiTypeAdapter`（库未 shade）→ `getItems()`（库 API）→ 条目内扫 `com.xingin.entities.ImageBean` 类型字段（y wrapper 的 b）。ImageBean 取值仍按 doc：K()=fileid、A0()=显示 url（实读链路：controller:5613 `gVarP2.q0(Uri.parse(imageBean.A0()))`，即 sb9/y 的 g.o()=filePath 来源）、R()?.o()=滤镜 url。**K()/A0()/R() 单字母号漂移 = X5 整体降级**（doc 失败分级 FAILED，不阻断其余功能；适配时按「ImageBean 无参 boolean/String getter + 注解」重找）。
 4. **X2c 探针定案**：无参构造 ImageBean → `@kd.c("disable_ai")` 字段置 true → 扫无参非静态返 boolean 且 invoke 后为 true 的 getter（只有读该字段的 getter 在探针下为 true）。注解串不漂、字段名/方法号全免疫。失败 = NOT_RESOLVED（重试 2 轮后进汇总失败清单，AI 标签可能保留 = doc 可接受降级）。
-5. **X4 语义**：照 savefix patchVideoSaveResponse/rebuildResponse/createResponseBody/queryParam/P_MASTER_MP4/P_NOTE_ID 搬；升级 = origin_video_key 优先（P_ORIGIN_KEY 同 video_info_v2 区段窗口扫，命中则 download_url = `https://sns-video-bd.xhscdn.com/{key}`，回落 master_url）。okhttp3 不进编译期 classpath，全程反射（peekBody/proceed/newBuilder/ResponseBody 三轨重建）。改写命中打 `XhsHook·X4 视频响应已改写 noteId=...`（每次命中，不走 judge 节流）。
+5. **X4 语义**：照 savefix patchVideoSaveResponse/rebuildResponse/createResponseBody/queryParam/P_MASTER_MP4/P_NOTE_ID 搬；**`origin_video_key` 优先直链已于 2026-10-14 实证作废**（该字段不在 app 网络层，P_ORIGIN_KEY 恒 miss，`sns-video-bd/{32hex}` 实测 404）。okhttp3 不进编译期 classpath，全程反射（peekBody/proceed/newBuilder/ResponseBody 三轨重建）。改写命中打 `XhsHook·X4 视频响应已改写 noteId=...`（每次命中，不走 judge 节流）。有效语义只剩 `disable` 解锁。
 6. **X5 保存调用**：取 SPI 走 `com.xingin.spi.service.ServiceLoaderKtKt.service$default(Class,null,null,3,null)`（sb9/y 同链），回落 java.util.ServiceLoader；调 `save(8参)` 直连（a.a 默认方法 shim 不经）。boolean 参传 true（=disableWaterMark，与 X2a 同语义）；avatar 传 ""（sb9/y 对 null 的兜底同款）。success/error 回调用 Function1 动态代理计数，Toast「已保存 N/M」。触摸监听恒返回 false，不消费宿主手势；同 presenter 进行中忽略、同 note（fileid 指纹）会话内一次。
 
 ### adapt_new_version.py 口径

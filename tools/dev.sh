@@ -80,6 +80,72 @@ stamp() { date +%Y%m%d-%H%M%S; }
 
 require() { [ -x "$1" ] || [ -f "$1" ] || die "缺少文件: $1（工具链未就位？）"; }
 
+# ---- 安装确认弹窗代点（install / install-root 共用；T-1，2026-10-14）----
+# 场景：荣耀 ROM 对 `adb install` 与 root `pm install` 都弹确认（纯净模式 / USB 安装管控），
+# 两段式（先「继续 / 仍要安装」，再「继续安装 / 确定」）；实测按钮文本出现过：
+# 继续 / 继续安装 / 仍要安装 / 确定 / 安装 / 允许。
+# 纪律：坐标禁写死（真机实测出现过 901,2519 与 919,2575 两种）⇒ 一律从 uiautomator dump 的 bounds 现算中心点。
+# 解析用解释器：HONORHOOK_PYTHON 覆盖 > 工程 venv > PATH 探测链（d5：原裸 python3 在无 python3 PATH 的机器上挂）
+pick_python() {
+  local c
+  if [ -n "${HONORHOOK_PYTHON:-}" ] && [ -x "${HONORHOOK_PYTHON}" ]; then printf '%s\n' "$HONORHOOK_PYTHON"; return 0; fi
+  for c in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" \
+           "$(command -v python3 || true)" "$(command -v python || true)"; do
+    if [ -n "$c" ] && [ -x "$c" ]; then printf '%s\n' "$c"; return 0; fi
+  done
+  return 1
+}
+
+# 单轮：dump UI 层级 → 按文本匹配弹窗按钮 → 打印中心点 "x y"（未匹配打印空行）。
+# uiautomator dump 走文件再 cat（/dev/tty 直排在安装弹窗上常返回空，2026-10-12 实证）。
+# 恒返回 0：未匹配与设备侧报错都属正常分支，不能借 set -e 把调用方带走。
+find_install_confirm_xy() {
+  local parser="$1" xy=""
+  "$ADB" shell uiautomator dump /sdcard/hh_dlg.xml >/dev/null 2>&1 || true
+  xy="$("$ADB" shell cat /sdcard/hh_dlg.xml 2>/dev/null | tr -d '\r' | "$parser" -c '
+# 2026-10-14 修正（旧版恒不匹配 = 静默 no-op，install/install-root 都没真点过）：
+# 原来写 r"…\\[(\\d+)…" —— raw 串里 \\[ 是「字面反斜杠 + 字符类」，永远匹配不上 dump 的
+# bounds="[x,y][x,y]"；且要求 text→clickable→bounds 三段相邻。改为逐 <node> 标签取属性，顺序无关。
+import sys, re
+xml = sys.stdin.read()
+for tag in re.findall("<node[^>]*>", xml):
+    if "clickable=\"true\"" not in tag:
+        continue
+    mt = re.search("text=\"([^\"]*)\"", tag)
+    if not mt or mt.group(1) not in ("继续", "继续安装", "仍要安装", "确定", "安装", "允许"):
+        continue
+    mb = re.search("bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", tag)
+    if not mb:
+        continue
+    x1, y1, x2, y2 = (int(v) for v in mb.groups())
+    print((x1 + x2) // 2, (y1 + y2) // 2)
+    break' 2>/dev/null || true)"
+  printf '%s\n' "$xy"
+}
+
+# 轮询点安装确认弹窗：每轮间隔 1s，最多 <轮数> 轮（超时上限——弹窗没出现不死等）；
+# 两段式弹窗要连点，故命中后不提前收工。返回 0 = 点中过；1 = 全程未匹配（ROM 未弹窗，属正常分支）。
+# 非零返回是常规分支：调用方必须用 `|| true` / `|| warn` 接住，别让 set -e 带走脚本。
+tap_install_confirm() {
+  local parser="$1" rounds="${2:-18}" i=0 xy="" taps=0
+  while [ "$i" -lt "$rounds" ]; do
+    i=$((i + 1))
+    sleep 1
+    xy="$(find_install_confirm_xy "$parser")"
+    if [ -n "$xy" ]; then
+      info "点安装确认: ${xy}（第 ${i} 轮）"
+      # shellcheck disable=SC2086  # xy 形如 "x y" = 两个参数，故意不加引号
+      "$ADB" shell input tap $xy >/dev/null 2>&1 || true
+      taps=$((taps + 1))
+    fi
+  done
+  if [ "$taps" -eq 0 ]; then
+    warn "${rounds} 轮内未匹配到安装确认弹窗按钮（ROM 未弹窗 / 已被确认 / 按钮文本变更）"
+    return 1
+  fi
+  return 0
+}
+
 case "${1:-help}" in
 
   help|"")
@@ -91,7 +157,7 @@ HonorHook 开发工具
 子命令：
   build            编译 debug APK
   build-release    编译 release APK（混淆+收缩）
-  install          安装 debug APK 到已连接设备（-r 覆盖）
+  install          安装 debug APK 到已连接设备（-r 覆盖；自动点 ROM 安装确认弹窗）
   install-release  安装 release APK
   enable-module    重装后重新启用 LSPosed 模块（lspctl CLI 通道，含作用域进程强停）
   deploy-release   一键全流程：build-release + install-release + enable-module
@@ -285,7 +351,23 @@ EOF
     require "$ADB"; require "$APK_DEBUG"
     info "先卸载旧包（用户约定：每次安装前必须卸载，避免覆盖安装残留）"
     "$ADB" uninstall io.github.coderstory.honorhook 2>&1 | tr -d '\r' || true
-    "$ADB" install "$APK_DEBUG" | tr -d '\r'
+    # ROM 安装确认弹窗代点（T-1）：弹窗期间 `adb install` 是阻塞的 ⇒ 后台轮询点弹窗、
+    # 前台管道原样保留（输出与阻塞语义跟改造前一致）。缺 python3 时降级为纯 install（不 die）。
+    PARSER="$(pick_python || true)"
+    TAPPER=""
+    if [ -n "$PARSER" ]; then
+      tap_install_confirm "$PARSER" 60 &
+      TAPPER=$!
+    else
+      warn "缺少 python3 → 跳过安装弹窗自动点击（ROM 弹窗需手动确认）"
+    fi
+    rc=0
+    "$ADB" install "$APK_DEBUG" | tr -d '\r' || rc=$?
+    if [ -n "$TAPPER" ]; then
+      kill "$TAPPER" 2>/dev/null || true
+      wait "$TAPPER" 2>/dev/null || true
+    fi
+    [ "$rc" -eq 0 ] || exit "$rc"
     info "校验已安装包版本："
     "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
     ;;
@@ -357,37 +439,11 @@ EOF
     require "$ADB"
     APK="app/app/build/outputs/apk/release/app-release.apk"
     [ -f "$APK" ] || die "release APK 不存在，先 build-release"
-    # 弹窗按钮解析用解释器：HONORHOOK_PYTHON 覆盖 > 工程 venv > PATH 探测链（d5，原裸 python3 在无 python3 PATH 的机器上挂）
-    pick_python() {
-      local c
-      if [ -n "${HONORHOOK_PYTHON:-}" ] && [ -x "${HONORHOOK_PYTHON}" ]; then printf '%s\n' "$HONORHOOK_PYTHON"; return 0; fi
-      for c in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" \
-               "$(command -v python3 || true)" "$(command -v python || true)"; do
-        if [ -n "$c" ] && [ -x "$c" ]; then printf '%s\n' "$c"; return 0; fi
-      done
-      return 1
-    }
     PARSER="$(pick_python)" || die "缺少 python3（install-root 安装弹窗解析需要）"
     "$ADB" push "$APK" /data/local/tmp/honorhook-install.apk >/dev/null 2>&1 || die "push 失败"
     "$ADB" shell "nohup su 0 sh -c 'pm install -r /data/local/tmp/honorhook-install.apk' >/dev/null 2>&1 &"
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
-      sleep 1
-      # uiautomator dump 走文件再 cat（/dev/tty 直排在安装弹窗上常返回空，2026-10-12 实证）
-      "$ADB" shell uiautomator dump /sdcard/hh_dlg.xml >/dev/null 2>&1
-      XY=$("$ADB" shell cat /sdcard/hh_dlg.xml 2>/dev/null | tr -d '\r' | "$PARSER" -c '
-import sys, re
-xml = sys.stdin.read()
-for m in re.finditer(r"text=\"([^\"]+)\"[^>]*clickable=\"true\"[^>]*bounds=\"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]\"", xml):
-    t = m.group(1)
-    if t in ("继续", "继续安装", "仍要安装", "确定", "安装", "允许"):
-        x1, y1, x2, y2 = (int(m.group(i)) for i in range(2, 6))
-        print((x1 + x2) // 2, (y1 + y2) // 2)
-        break')
-      if [ -n "$XY" ]; then
-        info "点安装确认: $XY（第 $i 轮）"
-        "$ADB" shell input tap $XY >/dev/null 2>&1
-      fi
-    done
+    # 点弹窗逻辑见公共函数（T-1，与 install 共用）；轮询上限 18s 与改造前一致，未匹配属正常分支
+    tap_install_confirm "$PARSER" 18 || true
     "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m1 lastUpdateTime || echo "  未安装"
     "$ADB" shell rm -f /data/local/tmp/honorhook-install.apk >/dev/null 2>&1
     ;;

@@ -22,7 +22,7 @@ import java.util.IdentityHashMap
  *
  * 架构（2026-10-14 四版定案，外挂解析）：不碰 app 内部结构——图集数据从 [XhsVideoSave] 的
  * okhttp 旁路采集（笔记 JSON images[].url_default，XHS-Downloader 同源），下载由模块自己
- * HttpURLConnection + MediaStore 完成。零混淆依赖、零宿主反射（URL 重写复用 X3 的 token 规则）。
+ * HttpURLConnection + MediaStore 完成。零混淆依赖、零宿主反射（URL 重写走共享 [XhsImageUrl]，权威源 NoteOutput.imageUrls）。
  *
  * 前三版死因存档（勿复活）：
  * 1. 画廊三击——400ms 窗口苛刻 + 双击缩放冲突（用户否决）
@@ -51,11 +51,33 @@ object XhsBatchSave {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** 最近 resumed 的宿主 Activity（视频分支弹窗载体；ActivityThread.currentApplication 一次性注册）。 */
+    @Volatile private var lastActivity: Activity? = null
+    private val activityTracked = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun ensureActivityTracker() {
+        if (!activityTracked.compareAndSet(false, true)) return
+        runCatching {
+            val app = Class.forName("android.app.ActivityThread")
+                .getMethod("currentApplication").invoke(null) as? android.app.Application ?: return
+            app.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+                override fun onActivityResumed(a: Activity) { lastActivity = a }
+                override fun onActivityPaused(a: Activity) { if (lastActivity === a) lastActivity = null }
+                override fun onActivityCreated(a: Activity, b: android.os.Bundle?) {}
+                override fun onActivityStarted(a: Activity) {}
+                override fun onActivityStopped(a: Activity) {}
+                override fun onActivitySaveInstanceState(a: Activity, b: android.os.Bundle) {}
+                override fun onActivityDestroyed(a: Activity) {}
+            })
+        }
+    }
+
     /** 宿主 ClassLoader（弹窗 Activity 图搜用；直下链路已零宿主反射）。 */
     @Volatile private var hostLoader: ClassLoader? = null
 
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         hostLoader = param.defaultClassLoader
+        ensureActivityTracker()
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
 
         val pending = listOf(
@@ -73,15 +95,45 @@ object XhsBatchSave {
                     ),
                 ),
             ),
+            MountEngine.SimpleTask(
+                className = "d49.q",
+                methodName = "invoke",
+                paramCount = 1,
+                returnType = "java.lang.Object",
+                id = "xhs:batchSave.videoSaveClick.invoke",
+                description = "X5·视频保存发起（d49.q invoke default=saveVideo(noteFeed.F0())，d49/v.java:922 实证）→ 保存后弹反馈卡",
+                // d49.q = Function1 双参 lambda（构造 (NoteFeed,int)，case 2 分支=saveVideo 组装），
+                // d49/v.java:922 实证由保存点击链实例化；9.49.1 直连，锚弱跨版本靠 versionTables
+            ),
         )
         engine.attemptMount(pending, module, hostLoader!!) { task -> mountOne(task, module) }
     }
 
     private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
-        engine.mount(task, module, hostLoader!!) { chain ->
-            // 先 proceed：本张原生保存必须用当次 dispatch 的 fresh token 跑（v2 重放版死因）
-            val result = chain.proceed()
+        when (task.id) {
+            "xhs:batchSave.videoSaveClick.invoke" -> engine.mount(task, module, hostLoader!!) { chain ->
+                // d49.q 双分支：case1=分享引导（arg=Triple）default=saveVideo（arg=String）——只对
+                // String 轨弹反馈卡，分享路径静默放行
+                val isSave = runCatching { chain.getArg(0) is String }.getOrDefault(false)
+                val result = chain.proceed()
+                if (!isSave) return@mount result
+                val activity = lastActivity
+                if (activity != null) {
+                    engine.judge(module, task, JUDGE_PREFIX, "视频保存完成，弹反馈卡")
+                    mainHandler.post {
+                        runCatching { showVideoSavedDialog(activity, module) }
+                            .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 视频反馈卡失败: ${it.message}") }
+                    }
+                }
+                result
+            }
+            else -> mountClick(task, module)
+        }
 
+    /** 图片保存点击：先 proceed 后弹追加询问（fresh token 铁律）。 */
+    private fun mountClick(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        engine.mount(task, module, hostLoader!!) { chain ->
+            val result = chain.proceed()
             val controller = extractController(chain.thisObject)
             val activity = controller?.let { findActivity(it) }
             if (activity == null) {
@@ -92,6 +144,54 @@ object XhsBatchSave {
             mainHandler.post { maybeShowBatchDialog(activity, module) }
             result
         }
+
+    /** 视频保存反馈卡（复用图片卡样式，单按钮）。 */
+    private fun showVideoSavedDialog(activity: Activity, module: XposedModule) {
+        val night = (activity.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val bg = if (night) 0xFF1E1E22.toInt() else 0xFFFFFFFF.toInt()
+        val titleColor = if (night) 0xFFF5F5F7.toInt() else 0xFF17171A.toInt()
+        val accent = 0xFFFF2E4D.toInt()
+        val dp = activity.resources.displayMetrics.density
+        fun d(v: Int) = (v * dp).toInt()
+        val card = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(d(24), d(22), d(24), d(18))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = d(22).toFloat(); setColor(bg)
+            }
+        }
+        val title = android.widget.TextView(activity).apply {
+            text = "已保存本视频"
+            textSize = 17f
+            setTextColor(titleColor)
+            paint.isFakeBoldText = true
+        }
+        card.addView(title)
+        val ok = android.widget.TextView(activity).apply {
+            text = "好"
+            textSize = 15f
+            gravity = android.view.Gravity.CENTER
+            setPadding(d(18), d(11), d(18), d(11))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = d(18).toFloat(); setColor(accent)
+            }
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+        val dialog = android.app.Dialog(activity)
+        ok.setOnClickListener { dialog.dismiss() }
+        card.addView(ok.apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = d(18) }
+        })
+        dialog.setContentView(card)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+        dialog.setCancelable(true)
+        dialog.show()
+    }
 
     /** 点击 lambda 的 controller 字段（字段名 d 混淆，按「首个非 null 实例字段值」取）。 */
     private fun extractController(lambda: Any?): Any? {
@@ -247,7 +347,7 @@ object XhsBatchSave {
         Thread({
             var ok = 0
             urls.forEachIndexed { i, raw ->
-                val url = toOriginalUrl(raw)
+                val url = XhsImageUrl.toOriginal(raw) ?: raw
                 val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}") }
                     .getOrDefault(false)
                 if (saved) ok++
@@ -261,11 +361,6 @@ object XhsBatchSave {
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}")
         }, "HonorHook-xhs-batch").start()
     }
-
-    /** 原图化：剥 `?`/`!` 压缩参数（imageView2 等），保持原 host——sns-na-i6 无参路径即原图；
-     *  不换 host（fileid 形态带目录前缀 spectrum/…，换 host 拼接规则未实证，风险大于收益）。 */
-    private fun toOriginalUrl(url: String): String =
-        if (url.startsWith("http")) url.substringBefore('?').substringBefore('!') else url
 
     private fun extOf(url: String): String =
         url.substringBefore('?').substringAfterLast('/').substringAfterLast('.')
