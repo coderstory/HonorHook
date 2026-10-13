@@ -12,6 +12,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.data.RemoteConfig
 import java.lang.reflect.Proxy
 import java.util.WeakHashMap
@@ -47,6 +48,13 @@ object XhsBatchSave {
 
     private const val CLS_GALLERY_CONTROLLER =
         "com.xingin.matrix.notedetail.imagecontent.imagegallery.AsyncImageGalleryController"
+
+    /**
+     * onAttach(Bundle) 声明在抽象基类 ag9.b（ag9/b.java:118 实证），AsyncImageGalleryController
+     * 自身**未覆写**——挂在子类名上 declaredMethods 直连必落空（首装真机实证：installed 1/1 却
+     * 全程零触发，DexKit 兜底解析到了别处）。故挂基类 + 回调内按子类类名过滤。
+     */
+    private const val CLS_GALLERY_BASE = "ag9.b"
     private const val METHOD_ON_ATTACH = "onAttach"
 
     /** 类型锚点（均未混淆，jadx 实证）。 */
@@ -85,12 +93,21 @@ object XhsBatchSave {
 
         val pending = listOf(
             MountEngine.SimpleTask(
-                className = CLS_GALLERY_CONTROLLER,
+                className = CLS_GALLERY_BASE,
                 methodName = METHOD_ON_ATTACH,
                 paramCount = 1,
                 returnType = "void",
                 id = "xhs:batchSave.galleryController.onAttach",
-                description = "X5 批量保存·AsyncImageGalleryController.onAttach 后挂画廊三击（onAttach 返回时 view 必已绑 presenter，实读实证见 doc §六）",
+                description = "X5 批量保存·基类 ag9.b.onAttach(Bundle) 后按子类过滤挂画廊三击（onAttach 返回时 view 必已绑 presenter）",
+                // 锚点：paramTypes Bundle 精确签名 + 同类 FunctionReferenceImpl 调试串（混淆不改，
+                // ag9/b.java:42/56 实证）；基类被多个 controller 子类共享，回调内类名过滤
+                dex = DexHint(
+                    paramTypes = listOf("android.os.Bundle"),
+                    classStrings = listOf(
+                        "handleNoteDetailActions",
+                        "handleNoteDetailActionsAfterPresenterActive",
+                    ),
+                ),
             ),
         )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
@@ -100,6 +117,8 @@ object XhsBatchSave {
         engine.mount(task, module, loader) { chain ->
             chain.proceed()
             val controller = chain.thisObject ?: return@mount null
+            // 基类共享：只武装图片画廊这一支子类，其余 controller attach 静默放行
+            if (controller.javaClass.name != CLS_GALLERY_CONTROLLER) return@mount null
             val presenter = runCatching {
                 controller.javaClass.getMethod("getPresenter").invoke(controller)
             }.getOrNull()
