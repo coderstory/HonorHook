@@ -116,10 +116,11 @@ object XhsVideoSave {
                 return MountEngine.Result.FAILED
             }
         return engine.mount(task, module, loader) { chain ->
-            // before：往 interceptors 列表塞代理后放行 build()。防重不用 equals——Kotlin lambda
-            // InvocationHandler 内 this 指外层 object 而非代理，代理 equals 恒 false，
-            // contains 判重必失效（重复注入 = 同请求双拦截 + download_url 重复插 JSON）；
-            // 改用 toString 标记唯一身份（处理器已恒返 INTERCEPTOR_TAG）。
+            // before：往 interceptors 列表塞代理后放行 build()。
+            // ★ build() 非 void（返回 OkHttpClient）：intercept 返回值即方法最终返回值，
+            //   必须回传 proceed 结果——写成「proceed(); null」会让 build() 返回 null，
+            //   宿主全量 OkHttp 客户端 NPE 启动闪退（2026-10-14 真机实证，PROTECTIVE
+            //   只挡异常不救 null 返回值）。void 方法才用「proceed(); null」惯例（U6 同款）。
             runCatching {
                 val field = chain.thisObject.javaClass.getDeclaredField("interceptors")
                 field.isAccessible = true
@@ -135,7 +136,6 @@ object XhsVideoSave {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX interceptors 注入失败: ${it.message}")
             }
             chain.proceed()
-            null
         }
     }
 
