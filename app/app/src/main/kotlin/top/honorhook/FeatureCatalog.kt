@@ -49,6 +49,7 @@ object FeatureCatalog {
 
     const val KEY_JD_SPLASH = "jd.splash"
     const val KEY_MFA_SPLASH = "mfa.splash"
+    const val KEY_MIH_FACE_FREE = "mih.face_free"
     const val KEY_SYSMGR_ANTIVIRUS = "sysmgr.antivirus"
 
     const val KEY_XHS_SAVE_UNLOCK = "xhs.save_unlock"
