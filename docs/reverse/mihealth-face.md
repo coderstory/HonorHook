@@ -1,13 +1,13 @@
 # 小米运动健康 `com.mi.health` — 表盘试用永久化逆向
 
 > 基线 **3.59.1**（真机 pull，`dev.sh pull-apk` 实证）。
-> 状态：hook 已落码（`MiHealthHook.kt`，B 轨 BT wire 手术版），判据以真机自执行验证清单为准（本文 §Y·判据）。
+> 状态：hook 已落码 **v3「试用截获 → 免费流装载」**（`MiHealthHook.kt`，文件层手术），判据以真机自执行验证清单为准（本文 §Z·判据）。控制通道手术 v1/v2（§Y）已双证死透，仅作历史记录保留。
 
 ## 一、目标形态
 
 表盘商店是 **React Native 应用**（dial bundle）。业务逻辑在 JS 侧，Java 层只是容器 + BT 推送通道
 ——业务类名随 RN bundle 周更动态化随时漂移，**业务层类不是可用锚点**；BT 通道
-`YRNBluetoothModule.sendRaw` 未混淆（jadx 复核），是现行唯一挂载面。
+`YRNBluetoothModule`（类未混淆，jadx 复核）是现行唯一挂载面。
 
 ## 二、数据链（实证）
 
@@ -28,21 +28,23 @@ list/tab 接口（face 记录驱动 UI 按钮状态机：price / purchaseStatus 
 
 免费表盘走**同链路同结构**（实证：license 为空的响应可正常走完安装）。
 
-## 三、方案（现行 = B 轨 BT wire 手术）
+## 三、方案历史（均已废弃）
 
-> 原三件套方案（A 缓存回放 / B 上游 license 置空 / C UI 免费化，挂 okhttp Builder.build）
-> **已废弃（2026-10-13）**：响应层不可行——download/list 响应是 Mi WUP 加密二进制，okhttp 链
-> 任何位置都拿不到明文（死路实证见 §X），`MiHealthHook.kt` 中三件套代码已整体删除。
+> **现行方案 = v3 免费流装载（§Z）。** 本节仅留演进脉络。
 
-现行方案 = **B 轨 BT wire 手术**（详见 §Y）：挂 `YRNBluetoothModule.sendRaw`，在 BT 出包
-字节流上识别 `WearPacket{type=4(WATCH_FACE), id=4(PREPARE_INSTALL_WATCH_FACE)}` 试用包，
-把 `PrepareInfo.verification` 整段抹成零长消息（tag 保留 + len=0 = 全默认值）。手表按
-免费安装收货 = 试用永不过期。不碰组包逻辑上游、不碰响应层、不落盘。
+原三件套方案（A 缓存回放 / B 上游 license 置空 / C UI 免费化，挂 okhttp Builder.build）
+**已废弃（2026-10-13）**：响应层不可行——download/list 响应是 Mi WUP 加密二进制，okhttp 链
+任何位置都拿不到明文（死路实证见 §X）。
+
+B 轨 BT wire 手术（挂 `sendRaw` 改 `PrepareInfo.verification` 字节）**已废弃（2026-10-13）**：
+v1 抹空 verification、v2 保 info/sign 改 trialDuration 均被手表拒收（双证见 §Z·一），代码保留
+为历史记录，不再生成挂载任务。
 
 | 接缝 | 内容 | 判定 |
 |---|---|---|
-| B' BT 出包字节 | sendRaw 未混淆、所有 WearPacket 出手表必经；字节可手术 | **可 hook（现行）** |
-| C 手表端 sign 覆盖范围 | 手表端校验哪些字段被 sign 覆盖 = **黑箱**（手表固件侧不可见） | **唯一实验变量**：空 verification 是否被手表接受，只能真机实测（§Y 判据 3/4） |
+| B' BT 出包字节 | sendRaw 未混淆、所有 WearPacket 出手表必经；字节可手术 | **v1/v2 实测：手表校验 sign，改字节死路** |
+| C 手表端 sign 覆盖范围 | 手表端校验哪些字段被 sign 覆盖 | **已实证：sign 覆盖全字段（v1/v2 双拒收）** |
+| 文件层（§Z） | 传输的就是文件本身，参数零改动 | **现行（v3）** |
 
 ## X、响应层死路实证（2026-10-13 真机 [diag]）
 
@@ -59,7 +61,7 @@ jadx 复核宿主 `HttpHandlerInterceptor` = 空壳，无解密逻辑；解密�
 （RN dial bundle 内）。结论：**响应层（okhttp 拦截器/缓存/回放/JSON 免费化）整体不可行**，
 相关 hook 代码已删除。
 
-## Y、BT wire 手术（现行方案）
+## Y、BT wire 手术（v1/v2 历史，已死透——本节仅存档）
 
 ### 链路
 
@@ -85,28 +87,84 @@ PrepareInfo.Verification    { 1: info(string), 2: sign(string), 3: trialDuration
 WatchFace 内 prepareInfo=0x32；PrepareInfo 内 verification=0x2A。
 
 语义：type=4(WATCH_FACE) 且 id=4(PREPARE_INSTALL_WATCH_FACE) 的包带试用授权
-`verification{info=license, sign, trialDuration}`。抹空 verification（原包字节中
-`[tagStart, valEnd)` 段替换为 `0x2A, 0x00`——tag 保留 + 零长消息 = 全默认值）
-= 手表按免费安装收货 = 试用永不过期。
+`verification{info=license, sign, trialDuration}`。
 
-安全边界：rewrite 带结构轻校验（verification 必须含 field1/field2 字符串字段），任一步
-解析失败/字段不唯一 → null 放行原包，绝不改坏其它协议包；hook 回调整体 runCatching，
-任何异常（含 base64 解码失败）= 原样 proceed，绝不 throw（okhttp 期真机闪退教训：
-回调抛非预期异常打爆宿主线程）。
+安全边界（历史）：rewrite 带结构轻校验，任一步解析失败/字段不唯一 → null 放行原包；
+hook 回调整体 runCatching，任何异常 = 原样 proceed，绝不 throw。
 
-### 判据清单（用户自执行）
+### 判据（历史，v1/v2 均已实测拒收）
 
-1. 挂载：模块日志 `MiHealthHook: installed 1/1`（单挂载点 sendRaw）。
+- v1（verification 抹空 tag+len=0）：判据日志命中×2、手表拒收安装失败 ⇒ **手表校验 verification 结构**。
+- v2（保 info/sign 原字节，仅 trialDuration→36500）：同样拒收 ⇒ **sign 覆盖全字段，改任何字段死路**。
+
+## Z、v3 免费流装载（现行方案）
+
+### 一、为什么离开控制通道（v1/v2 拒收实证）
+
+2026-10-13 真机两轮安装实验：
+
+1. **v1**：sendRaw 侧把 `PrepareInfo.verification` 整段抹成零长消息（tag 保留 + len=0 =
+   全默认值 = 免费安装语义）→ 判据日志命中，**手表拒收，安装失败** ⇒ 手表校验 verification。
+2. **v2**：保 `info`/`sign` 原字节，仅把 `trialDuration` 改 36500 → 同样**拒收** ⇒
+   sign 覆盖不止 license 串（全字段）。
+
+结论：**prepareInfo 一个字节都不能动**。v3 完全不碰 prepareInfo（历史实证免费流手表不校验
+文件↔表盘绑定），转文件层。
+
+### 二、挂载点（jadx 已复核）
+
+`com.xiaomi.wearable.yrn.modules.bluetooth.YRNBluetoothModule`（类未混淆）：
+
+```
+@ReactMethod sendFileToDevice(did: String, type: Int, detailType: Int, path: String,
+                              segmentLength: Int, options: ReadableMap, finishCallback: Callback)
+```
+
+7 参，未混淆；`path`（args[3]）= 待传文件的本地路径。试用付费表盘时此方法被调用、path 指向
+临时文件（**安装后即删，错过即无**）；免费表盘走同一方法——参数无法区分付费/免费流。
+
+### 三、截获 / 装载 / md5 判别
+
+语义「试用截获 → 免费流装载」，同一挂载点两种模式：
+
+- **截获**：持久目录（`<dataDir>/files/honorhook_face_payload/`）无 `payload.json` → 本次是
+  截获：把 path 文件字节复制为 `payload.bin` + 写 `payload.json`
+  （`{"srcMd5":"…","srcLen":…,"savedAt":…}`）+ 判据日志。faceId 在 JS 层，元数据角度拿不到，不存。
+- **装载**：有截获记录且当前 path 文件 md5 ≠ `srcMd5`（= 本次传输的不是截获那份，即免费表盘
+  安装）→ 用 `payload.bin` 覆写 path 处临时文件，**参数零改动原样 proceed**（文件在盘上被换，
+  传输层照常读）。
+- **判别锚**：临时文件路径含表盘 hash 不可靠、付费/免费流参数不可分 → 唯一可靠锚 = 文件内容
+  md5（`java.security.MessageDigest` 流式计算）。重装同一付费表盘（服务端重发，md5 相同）不会
+  自装载；装载不一次性消耗，每次非同 md5 安装都换（可给多个免费位换装）。
+- **覆写细节**：临时文件可能正被宿主持有写句柄 → 清空重写（`RandomAccessFile setLength(0) +
+  write`，同 inode）而非 delete+create，避免句柄失效；payload 先整体读入内存缩小截断窗口。
+  写失败 → WARN + 放行（传输原文件）。
+- **异常边界**：挂载回调整体 runCatching，任何异常 = 不动文件放行；元数据缺失/损坏 =
+  重新截获（良性自愈）；`proceed` 唯一出口（防二次调用）。
+
+### 四、判据清单（用户自执行）
+
+1. 挂载：模块日志 `MiHealthHook: installed 1/1`（单挂载点 sendFileToDevice）；hook 就绪时另有
+   `mih-face: sendFileToDevice hook 就绪` 一行。
 2. 试用安装付费表盘 → 判据日志
-   `mih-face: PREPARE_INSTALL verification 已抹空 faceId=<id>`（每 faceId 1 次；
-   hook 就绪时另有 `mih-face: sendRaw hook 就绪` 一行）。
-3. 手表安装成功且 **10 天后不还原** = 实验 C 通过（此前实证：试用期 10 天后表盘还原）。
-4. 若手表拒绝安装 / 装完即还原 = 手表端校验 sign，本路线关闭，回填本文档。
+   `mih-face: 付费表盘文件已截获 len=<len> md5=<md5 前 8>`（每进程 1 次）。
+3. 再装一个**免费**表盘 → 判据日志
+   `mih-face: 已装载截获文件 len=<newLen>（原 len=<srcLen>）`（每进程 1 次）。
+4. **手表上显示的是付费表盘 = 成功**；手表拒装 / 装完闪退黑屏 = 失败关线（文件↔表盘绑定被
+   手表校验，回填本文档）。
+
+### 五、风险
+
+- **文件大小/结构校验未知**：手表是否校验收到文件与安装请求中 size/id 的一致性 = 黑箱。
+  历史人工实证「免费安装 + 换文件」可行，但换文件的具体时点/方式与 v3 不完全同构。
+- 付费/免费文件大小差异大时，传输时长异常可能触发宿主侧超时（未实证）。
+- 首次截获的时机依赖「试用安装走 sendFileToDevice 且文件此刻完整落盘」——若宿主改用其它
+  传输方法/流式直传，判据 2 缺行即暴露。
 
 ## 六、运维注记
 
-- RN dial bundle **周更动态化**：JS 侧组包逻辑随时漂移（proto 字段号 / WearPacket 封装方式），
-  仍属赌注，漂移时按日志缺判据行排查。
-- proto 字段号随宿主版本可能漂移：rewrite 有结构轻校验兜底（type/id 语义门 + verification
-  字段存在性 + 唯一性），结构不符一律放行原包——漂移的表现 = 判据 2 缺行 + 手表试用到期还原，
-  而非崩溃或其它包损坏。
+- RN dial bundle **周更动态化**：JS 侧业务逻辑随时漂移，仍属赌注，漂移时按日志缺判据行排查。
+- v3 持久目录 `<dataDir>/files/honorhook_face_payload/`：截获记录跨进程存活；排查时可看
+  `payload.json` 的 srcMd5/srcLen 与判据日志对账。
+- v1/v2 的 proto 字段号漂移防护（结构轻校验）逻辑仍在 `MiHealthHook.kt`（未挂载），供后续
+  变体实验复用。

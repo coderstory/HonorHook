@@ -4,44 +4,35 @@ import android.util.Base64
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import org.json.JSONObject
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
+import java.io.File
+import java.io.RandomAccessFile
+import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 小米运动健康 `com.mi.health` 表盘试用永久化（基线 3.59.1，逆向记录 `docs/reverse/mihealth-face.md`）。
  *
- * 数据链（实证）：表盘商店是 RN 应用。付费表盘试用授权 = JS 侧组装 protobuf `WearPacket`
- * （base64 字符串）→ `YRNBluetoothModule.sendRaw(requestData, options, callback)`（@ReactMethod，
- * 未混淆，jadx 复核：内部 base64 decode → `DeviceContact.call(did, 101, bytes)`）→ BT 推手表。
- * 试用包语义：type=4(WATCH_FACE) 且 id=4(PREPARE_INSTALL_WATCH_FACE) 的包带
- * `verification{info=license, sign, trialDuration}`；**抹空 verification（tag 保留 + len=0 的零长
- * 消息 = 全默认值）= 手表按免费安装收货 = 试用永不过期**。
+ * 控制通道手术 v1/v2 已死透（2026-10-13 真机双证）：v1 抹空 verification（tag+len=0）、v2 保
+ * info/sign 原字节改 trialDuration=36500，手表均拒收 ⇒ 手表校验 sign 覆盖全字段，**prepareInfo
+ * 一个字节都不能动**（v3 起不碰 prepareInfo；历史实证免费流手表不校验文件↔表盘绑定）。
  *
- * 响应层死路（实证，详见 doc §X）：download/list 响应是 Mi WUP 加密二进制，okhttp 链任何位置
- * （头插/尾插/消费式 body.string()）都只拿到 Base64 密文，解密在 JS/桥层——okhttp 拦截器/
- * 缓存/免费化三件套已整体删除，不再走响应层。
+ * 现行 v3「试用截获 → 免费流装载」（文件层，零协议字节改动）：
+ * - 截获：试用付费表盘时 `YRNBluetoothModule.sendFileToDevice(did, type, detailType, path,
+ *   segmentLength, options, callback)`（@ReactMethod 未混淆，jadx 复核 path=待传文件本地路径）
+ *   被调用，临时文件安装后即删——此刻把文件字节抄进持久目录。
+ * - 装载：同一挂载点，持久目录有截获文件且本次传输文件 md5 ≠ 截获记录 md5（= 免费表盘安装）
+ *   时，用截获文件覆写 path 处临时文件再原样 proceed——参数零改动，文件在盘上被换，传输层照常读。
+ * - 判别：付费/免费流从参数不可分、临时文件路径含表盘 hash 不可靠，唯一可靠锚 = 文件内容
+ *   md5（重装同一付费表盘不自装载；装载不一次性消耗，每次非同 md5 安装都换）。
  *
- * 选点依据：唯一挂载点 `YRNBluetoothModule.sendRaw`——类与方法未混淆（jadx 复核），BT 通道
- * 收口点（所有 WearPacket 出手表必经），比 JS bundle 内锚点跨周更稳定。
- *
- * 顶层 tag 速查（protobuf wire format，schema 来自 common bundle 的 protobuf.js encoder，
- * 字段号已核对；详见 doc §Y）：
- * ```
- * WearPacket                  { 1: type(int32), 2: id(uint32), 6: watchFace(msg) }
- * WatchFace                   { 6: prepareInfo(msg) }
- * PrepareInfo                 { 1: id(string), 2: size, 3: versionCode, 5: verification(msg) }
- * PrepareInfo.Verification    { 1: info(string), 2: sign(string), 3: trialDuration(varint) }
- * ```
- * 顶层 tag：field1 varint=0x08 / field2 varint=0x10 / field6 len=0x32；
- * WatchFace 内 prepareInfo=0x32；PrepareInfo 内 verification=0x2A。
- *
- * 实验变量：手表端是否校验 sign 覆盖范围 = 黑箱（手表固件不可见），空 verification 是否被
- * 接受以真机为准（doc §Y 判据 3/4）。rewrite 带结构轻校验：字段号漂移/结构不符一律 null
- * 放行原包，绝不改坏其它协议包。
+ * v1/v2 的 wire 层级与 tag 速查（历史记录，工具函数仍在文末）：详见 [rewritePrepareInstall]
+ * 注释与 doc §Y。选点依据不变：YRNBluetoothModule 类与方法未混淆（jadx 复核）。
  */
 object MiHealthHook : TargetHook {
 
@@ -53,8 +44,20 @@ object MiHealthHook : TargetHook {
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "mih-face"
 
+    /** v1/v2 实验遗留：试用时长扩展值（天）。控制通道手术已死透（见类注释），仅供
+     *  [rewritePrepareInstall] 变体实验复用，v3 挂载链不再引用。 */
+    private const val TRIAL_DAYS_EXT = 36500L
+
     /** 判据日志节流（每 key 1 次）。 */
     private val loggedKeys: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** 宿主 dataDir（install 期写入，回调期只读成员，同旧模式）。 */
+    private var hostDataDir: String? = null
+
+    /** v3 截获文件持久目录（相对 dataDir）与其下 payload/元数据文件名。 */
+    private const val PAYLOAD_DIR = "files/honorhook_face_payload"
+    private const val PAYLOAD_BIN = "payload.bin"
+    private const val PAYLOAD_JSON = "payload.json"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_MIH_FACE_FREE)) {
@@ -62,44 +65,121 @@ object MiHealthHook : TargetHook {
             return
         }
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        hostDataDir = param.applicationInfo?.dataDir
         val loader = param.defaultClassLoader
         val task = object : MountEngine.Task {
             override val className = "com.xiaomi.wearable.yrn.modules.bluetooth.YRNBluetoothModule"
-            override val methodName = "sendRaw"
-            override val paramCount = 3
+            override val methodName = "sendFileToDevice"
+            override val paramCount = 7
             override val returnType = "void"
-            override val id = "mih:bt.sendRaw"
-            override val description = "sendRaw BT 出包手术：PREPARE_INSTALL 包抹空 verification（免费安装收货）"
+            override val id = "mih:bt.sendFileToDevice"
+            override val description = "sendFileToDevice 文件层手术：试用文件截获 → 免费流装载（v3）"
         }
-        engine.attemptMount(listOf(task), module, loader) { t -> mountSendRaw(t, module, loader) }
+        engine.attemptMount(listOf(task), module, loader) { t -> mountSendFileToDevice(t, module, loader) }
     }
 
-    private fun mountSendRaw(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountSendFileToDevice(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         engine.mount(task, module, loader) { chain ->
-            // 就绪判定（每进程一次）：首个 sendRaw 调用即 hook 已挂载且通路被踩过
-            logThrottled(module, "ready", "$JUDGE_PREFIX: sendRaw hook 就绪")
+            // 就绪判定（每进程一次）：首个 sendFileToDevice 调用即 hook 已挂载且通路被踩过
+            logThrottled(module, "ready", "$JUDGE_PREFIX: sendFileToDevice hook 就绪")
             val args = chain.args
-            val b64 = args?.getOrNull(0) as? String
-            if (args == null || b64 == null) {
-                // 参数骨架不完整：无从判断包类型，原样放行（宁漏改不误改）
-                return@mount chain.proceed()
-            }
-            // 整体 runCatching：任何异常（含 base64 解码失败）= 原样 proceed，绝不 throw
-            // （okhttp 教训：回调抛非预期异常会打爆宿主线程；ReactMethod 异步线程同理）
+            val path = args?.getOrNull(3) as? String
+            val dataDir = hostDataDir
+            if (path == null || dataDir == null) return@mount chain.proceed()
+            // 文件手术整体 runCatching：任何异常（读/写/md5/JSON）= 不动文件、放行原文件，
+            // 绝不 throw（ReactMethod 异步线程，回调抛非预期异常会打爆宿主桥线程）。
             runCatching {
-                val bytes = Base64.decode(b64, Base64.DEFAULT)
-                val rewritten = rewritePrepareInstall(bytes)
-                if (rewritten != null) {
-                    val faceId = prepareFaceId(bytes)?.take(64) ?: ""
-                    logThrottled(module, "wipe:$faceId", "$JUDGE_PREFIX: PREPARE_INSTALL verification 已抹空 faceId=$faceId")
-                    chain.proceedWith(chain.thisObject, arrayOf(Base64.encodeToString(rewritten, Base64.NO_WRAP), args[1], args[2]))
-                } else {
-                    chain.proceed()
+                val src = File(path)
+                if (src.isFile && src.canRead()) {
+                    val dir = File(dataDir, PAYLOAD_DIR)
+                    val md5 = md5Hex(src)
+                    val meta = readPayloadMeta(dir)
+                    when {
+                        // 无截获记录 → 截获模式（临时文件安装后即删，此刻必须抄）
+                        meta == null -> capturePayload(src, dir, md5, module)
+                        // 同一份截获文件在重传（重装同一付费表盘）→ 不自装载，放行
+                        md5 == meta.srcMd5 -> Unit
+                        // 非同一份（= 免费表盘安装）→ 装载模式：截获文件覆写临时文件
+                        else -> injectPayload(dir, src, meta, module, path)
+                    }
                 }
-            }.getOrElse { chain.proceed() }
+            }.onFailure { e ->
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX: 文件手术异常（放行原文件）: ${e.message}")
+            }
+            // proceed 唯一出口（防二次调用；proceed 自身异常原样传播 = 宿主语义）
+            chain.proceed()
         }
 
-    // ---------------------------------------------------------------- wire 解析（纯 Kotlin，无反射）
+    // ---------------------------------------------------------------- 截获 / 装载（文件层）
+
+    /** 截获：复制文件字节到持久目录 + 写元数据。失败仅 WARN，不影响本次安装。 */
+    private fun capturePayload(src: File, dir: File, md5: String, module: XposedModule) {
+        runCatching {
+            dir.mkdirs()
+            src.copyTo(File(dir, PAYLOAD_BIN), overwrite = true)
+            File(dir, PAYLOAD_JSON).writeText(
+                JSONObject()
+                    .put("srcMd5", md5)
+                    .put("srcLen", src.length())
+                    .put("savedAt", System.currentTimeMillis())
+                    .toString(),
+            )
+            logThrottled(module, "capture", "$JUDGE_PREFIX: 付费表盘文件已截获 len=${src.length()} md5=${md5.take(8)}")
+        }.getOrElse { e ->
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX: 截获落盘失败（本次照常安装）: ${e.message}")
+        }
+    }
+
+    /**
+     * 装载：用截获文件覆写 path 处的临时文件（原样 proceed，参数零改动——传输层照常读盘上字节）。
+     * 覆写失败 → WARN + 放行（传输原文件）；装载不消耗元数据，可反复命中。
+     */
+    private fun injectPayload(dir: File, target: File, meta: PayloadMeta, module: XposedModule, path: String) {
+        val written = overwriteInPlace(File(dir, PAYLOAD_BIN), target)
+        if (written != null) {
+            logThrottled(module, "inject", "$JUDGE_PREFIX: 已装载截获文件 len=$written（原 len=${meta.srcLen}）")
+        } else {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX: 截获文件覆写失败（放行原文件传输）path=$path")
+        }
+    }
+
+    /**
+     * 原地覆写：payload 字节先整体读入内存，再 RandomAccessFile 清空重写（setLength(0) + write）。
+     * 不用 delete+create/rename——临时文件可能正被宿主持有写句柄，inode 变化会让句柄失效；
+     * 同 inode 清空重写则传输层照常读到新字节。任一步失败返回 null（调用方放行原文件）。
+     */
+    private fun overwriteInPlace(payload: File, target: File): Long? = runCatching {
+        val bytes = payload.readBytes()
+        RandomAccessFile(target, "rw").use { raf ->
+            raf.setLength(0)
+            raf.write(bytes)
+        }
+        bytes.size.toLong()
+    }.getOrNull()
+
+    /** payload 元数据（payload.json）；缺失/损坏 = 无截获记录（重新截获，良性自愈）。 */
+    private class PayloadMeta(val srcMd5: String, val srcLen: Long)
+
+    private fun readPayloadMeta(dir: File): PayloadMeta? = runCatching {
+        val json = JSONObject(File(dir, PAYLOAD_JSON).readText())
+        PayloadMeta(json.getString("srcMd5"), json.getLong("srcLen"))
+    }.getOrNull()
+
+    /** 文件 MD5（流式，表盘文件可能 >1MB）；读失败抛 IOException 由调用方统一兜底。 */
+    private fun md5Hex(file: File): String {
+        val md = MessageDigest.getInstance("MD5")
+        file.inputStream().use { ins ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = ins.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    // ---------------------------------------------------------------- wire 解析（v1/v2 历史工具，纯 Kotlin，无反射；v3 挂载链不再调用）
 
     /** 读 varint（protobuf，最多 10 字节），返回 (值, 下一位置)；越界/超长返回 null。 */
     private fun readVarint(b: ByteArray, pos: Int, end: Int): Pair<Long, Int>? {
@@ -155,10 +235,15 @@ object MiHealthHook : TargetHook {
     }
 
     /**
-     * BT wire 手术：识别 PREPARE_INSTALL_WATCH_FACE 试用包，抹空 verification。
-     * 重建方式 = 原包字节原位替换 `[verification.tagStart, valEnd)` 段为 `0x2A, 0x00`
-     * （tag 保留 + 零长消息 = verification 全默认值），其余字段零扰动。
-     * 任一步解析失败 / 字段不唯一 → null（放行原包，绝不改坏其它协议包）。
+     * **v3 起不再挂载（保留原因：判据日志历史与后续可能的变体实验）。**
+     * v1/v2 控制通道手术双证死透（2026-10-13 真机：v1 整段抹空、v2 保 info/sign 改
+     * trialDuration 均被手表拒收 ⇒ 手表校验 sign 覆盖全字段）；v3 不碰 prepareInfo，
+     * 一个字节都不动（历史实证免费流手表不校验文件↔表盘绑定）。
+     *
+     * 原逻辑（历史记录）：识别 PREPARE_INSTALL_WATCH_FACE 试用包，保 info/sign 原字节，
+     * 仅把 verification.field3(trialDuration) 改为 [TRIAL_DAYS_EXT]。
+     * 重建方式 = verification 内逐字段拷贝原字节，唯 field3 替换（无则追加）；外层 tag+len 重排，
+     * 包其余字段零扰动。任一步解析失败 / 字段不唯一 → null（放行原包，绝不改坏其它协议包）。
      */
     private fun rewritePrepareInstall(packet: ByteArray): ByteArray? {
         val packetFields = parseFields(packet, 0, packet.size) ?: return null
@@ -178,12 +263,48 @@ object MiHealthHook : TargetHook {
         // 结构轻校验：verification 必须含 field1(info) 或 field2(sign) 字符串字段——防误伤
         // 其它层级的 field5 消息（宿主 proto 字段号随版本可能漂移，不符即放行）
         if (verification.none { (it.no == 1 || it.no == 2) && it.wire == 2 }) return null
-        val out = ByteArray(packet.size - (verField.valEnd - verField.tagStart) + 2)
+        // 逐字段拷贝原字节，唯 field3(trialDuration) 换成扩展值（varint 重编）；field3 缺失则追加
+        val newVer = ArrayList<Byte>(verification.size + 8)
+        var durationPatched = false
+        for (f in verification) {
+            if (f.no == 3 && f.wire == 0) {
+                newVer.add(0x18.toByte())  // field3, wire0（tag 与原字段一致）
+                newVer.addAll(writeVarint(TRIAL_DAYS_EXT).toList())
+                durationPatched = true
+            } else {
+                for (i in f.tagStart until f.valEnd) newVer.add(packet[i])
+            }
+        }
+        if (!durationPatched) {
+            newVer.add(0x18.toByte())
+            newVer.addAll(writeVarint(TRIAL_DAYS_EXT).toList())
+        }
+        val verBytes = newVer.toByteArray()
+        // 外层重排：prefix + tag(0x2A) + len(varint) + 新 verification + suffix
+        val out = ByteArray(verField.tagStart + 1 + writeVarint(verBytes.size.toLong()).size + verBytes.size + (packet.size - verField.valEnd))
         System.arraycopy(packet, 0, out, 0, verField.tagStart)
-        out[verField.tagStart] = 0x2A // field5, wire2（tag 与原字段一致）
-        out[verField.tagStart + 1] = 0x00 // len=0：零长消息 = verification 全默认值 = 免费安装
-        System.arraycopy(packet, verField.valEnd, out, verField.tagStart + 2, packet.size - verField.valEnd)
+        var p = verField.tagStart
+        out[p++] = 0x2A
+        for (b in writeVarint(verBytes.size.toLong())) out[p++] = b
+        System.arraycopy(verBytes, 0, out, p, verBytes.size)
+        p += verBytes.size
+        System.arraycopy(packet, verField.valEnd, out, p, packet.size - verField.valEnd)
         return out
+    }
+
+    /** 写 varint（protobuf，无符号；值 ≤ 0 视为 0）。 */
+    private fun writeVarint(value: Long): ByteArray {
+        var v = if (value > 0) value else 0L
+        val out = ArrayList<Byte>(5)
+        while (true) {
+            val b = (v and 0x7F).toInt()
+            v = v ushr 7
+            if (v == 0L) {
+                out.add(b.toByte())
+                return out.toByteArray()
+            }
+            out.add((b or 0x80).toByte())
+        }
     }
 
     /** 判据日志用 faceId：PrepareInfo.Verification.1(info) 的 UTF-8 字符串；结构不符返回 null。 */
