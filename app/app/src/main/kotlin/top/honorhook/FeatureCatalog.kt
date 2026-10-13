@@ -150,7 +150,7 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_OTA_BLOCK, R.string.feature_ota_block_title, R.string.feature_ota_block_desc),
             ),
-            baselineVersion = "18.0.3.206",  // aapt2 实证（HnOUC.apk 拉自真机 2026-10-12）
+            baselineVersion = "18.0.3.230",  // 2026-10-13 荣耀 OTA（真机日志 dumpsys 实证）；挂载点 11/11 全活（manifest 稳定组件名）
         ),
         Target(
             "com.hihonor.android.upgradeguide", R.string.target_name_upgradeguide,
