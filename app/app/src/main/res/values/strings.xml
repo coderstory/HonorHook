@@ -116,6 +116,6 @@
     <string name="feature_xhs_video_save_title">视频直链保存</string>
     <string name="feature_xhs_video_save_desc">视频帖保存不再被服务端拒绝，直接取最高画质原始视频流。重启小红书后生效</string>
     <string name="feature_xhs_batch_save_title">批量保存</string>
-    <string name="feature_xhs_batch_save_desc">图片画廊页三击=保存全部：多图帖画廊内连续快速三击即可逐张保存全部图片（含去水印与原图），结束时弹「已保存 N/M」。重启小红书后生效</string>
+    <string name="feature_xhs_batch_save_desc">图片笔记长按菜单点「保存」时弹窗选择：保存本张（原图）或保存全部；批量逐张走原图直链，结束弹「已保存 N/M」。重启小红书后生效</string>
 
 </resources>

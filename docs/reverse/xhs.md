@@ -52,7 +52,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 | X2c | no_watermark | ImageBean disable_ai getter → true | 未混淆类·运行时注解定位 | jm7 期 ImageBean.u()，9.49.1=v()，**方法号漂移实证** |
 | X3 | hd_save | `qc8.i.i(...)` args[3] 图 url → token 重建直链 | 混淆·串锚 DexKit | jm7.i 系 |
 | X4 | video_save | `okhttp3.OkHttpClient$Builder.build()` 注入 Interceptor 代理 | 公开 API | 同 |
-| X5 | batch_save | 基类 `ag9.b.onAttach(Bundle)` 注入三击（回调按子类 `AsyncImageGalleryController` 类名过滤）→ 遍历存全部 | 混淆基类·paramTypes+串锚 DexKit | — |
+| X5 | batch_save | `mh9.b` 保存点击拦截弹窗（本张/全部） | 混淆·双日志串锚 DexKit | — |
 
 ### 每点重定位备注
 
@@ -114,13 +114,14 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 - 重定位：okhttp3 类名公开；`interceptors` 字段名公开源码。工程意义上无需重定位。
 - 失败分级：FAILED（okhttp 缺失说明目标结构大改）。
 
-**X5 `com.xingin.matrix.notedetail.imagecontent.imagegallery.AsyncImageGalleryController`**
-- 类名未混淆（partial 产物实证）。批量触发 = gallery 内三击。
-- **首装真机实证（2026-10-14）：onAttach(Bundle) 声明在抽象基类 `ag9.b`（ag9/b.java:118），子类未覆写**——挂子类名时 declaredMethods 直连落空，DexKit 兜底解析到别处（installed 1/1 但全程零触发）。定案：挂基类 `ag9.b.onAttach`（paramTypes `android.os.Bundle` + 同类 FunctionReferenceImpl 调试串 `handleNoteDetailActions`/`handleNoteDetailActionsAfterPresenterActive` 双锚，ag9/b.java:42/56 实证），回调内按 `thisObject.javaClass.name == AsyncImageGalleryController` 过滤（基类被多 controller 子类共享）。
-- 实现：hook 其 view attach 通路（builder 实读该类定具体点：onAttachedToWindow 或构造后 view 获取处）→ view 上挂 GestureDetector（三击判定）→ 从 controller 持有的 note model 取 ImageBean 列表 → 逐张（≥300ms 间隔）经 ServiceLoader 取 ISaveImageProxy 调 `a.a(...)`（参数语义照 sb9/y：fileid, 头像 L0(), 图 url, 滤镜 url, k()），X3 的 qc8.i.i 替换对每张同样生效 = 批量也是高清。
-- 防重：同 note 会话内批量一次；进行中再触发忽略；开关关 = 零注入。
-- 重定位：类名未混淆；类若改名 → 按 gallery 包名 `imagegallery` + 类名 AsyncImageGalleryController 字面量 DexKit。
-- 失败分级：FAILED（不阻断其余功能）。
+**X5 `mh9.b`（图片长按面板「保存」点击 lambda）→ 弹窗 [保存本张（原图）/ 保存全部 N 张]**
+- 混淆 lambda 类（classes7），逻辑体 `invoke(Object)` 含日志串 `"download blocked, disableSaveMedia=true"` / `"onDownloadClick, noteId="`（jadx mh9/b.java:55/63 实证）——双串 DexKit 锚。类另有 0 参 invoke 委托，挂 1 参逻辑体即覆盖。
+- 弹窗规则（2026-10-14 二版，用户拍板「一律弹窗」）：**不预检张数**——图集数量移到按「保存全部」时现查（图搜空 → toast「未取到图片列表」+ WARN）；首版「≤1 张静默直通」路径已删（无日志静默路径 = 观测盲区，真机排查实锤教训）。视频面板不拦（X4 已把原生视频保存改写为直链）。Activity 取不到直通 + WARN。
+- 「本张」= 重入门闩（AtomicBoolean）下 `chain.executable` 手动重放原方法；「全部」= 逐张 300ms 原生 SPI（X3 直链替换逐张生效）。
+- 图片列表数据源 = **运行期类型图搜**：从点击 controller 出发 BFS ≤3 层扫字段，找「元素全为 ImageBean 的非空 List」——不赌 NoteFeed/ta9.g/presenter 任一具体结构（结构不变式混淆绑定，类型不变式稳）。
+- 首版画廊三击已否决（400ms 窗口苛刻 + 双击缩放冲突，2026-10-14 用户拍板）；onAttach 挂 ag9.b 方案随之废弃（记录：onAttach 声明在基类，子类直连必落空——教训保留）。
+- 重定位：双日志串 + invoke(Object) 签名；controller 提取按「lambda 首个非 null 字段值」。
+- 失败分级：NOT_RESOLVED（DexKit 零命中 = 点击链改版，X5 整体失活不影响其余）。
 
 ## 四、注册与开关
 
