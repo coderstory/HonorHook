@@ -139,6 +139,36 @@ object MailMasterHook : TargetHook {
             tasks += listOf(taskV1, taskV2, taskV3)
         }
 
+        // W1-W3: 易盾反制探针（诊断期恒挂，与开关无关）——实证（2026-10-13 EXIT_SELF status=28）：
+        // libnesec 加载后 ~358ms 自杀；模块关则存活 ⇒ 检测对象 = 注入痕迹。拦 Java 层三个出口：
+        // 命中即打调用栈 + 吞掉。吞掉后活 = Java 路径反制成功；仍死 = native exit()/kill（栈缺失本身即判据）。
+        tasks += listOf(
+            MountEngine.SimpleTask(
+                id = "mm:nesec.systemExit",
+                className = "java.lang.System",
+                methodName = "exit",
+                paramCount = 1,
+                returnType = "void",
+                description = "易盾反制探针：System.exit 吞掉+打栈",
+            ),
+            MountEngine.SimpleTask(
+                id = "mm:nesec.runtimeExit",
+                className = "java.lang.Runtime",
+                methodName = "exit",
+                paramCount = 1,
+                returnType = "void",
+                description = "易盾反制探针：Runtime.exit 吞掉+打栈",
+            ),
+            MountEngine.SimpleTask(
+                id = "mm:nesec.runtimeHalt",
+                className = "java.lang.Runtime",
+                methodName = "halt",
+                paramCount = 1,
+                returnType = "void",
+                description = "易盾反制探针：Runtime.halt 吞掉+打栈",
+            ),
+        )
+
         engine.attemptMount(tasks, module, loader) { task ->
             when (task.id) {
                 "mm:splash.finish" -> mountFramework(task, module, loader)
@@ -148,6 +178,9 @@ object MailMasterHook : TargetHook {
                 "mm:vip.isDashiVip" -> mountVip(task, module, loader)
                 "mm:vip.isVip" -> mountVip(task, module, loader)
                 "mm:vip.isPlusVip" -> mountVip(task, module, loader)
+                "mm:nesec.systemExit" -> mountNesecProbe(task, module, loader)
+                "mm:nesec.runtimeExit" -> mountNesecProbe(task, module, loader)
+                "mm:nesec.runtimeHalt" -> mountNesecProbe(task, module, loader)
                 else -> MountEngine.Result.FAILED
             }
         }
@@ -189,6 +222,16 @@ object MailMasterHook : TargetHook {
                 engine.judge(module, task, VIP_JUDGE_PREFIX, "会员判定已恒真")
             }
             true   // boolean 方法：替换返回值，不调 chain.proceed()
+        }
+
+    /** task W1-W3: 易盾反制探针——Java 层退出出口拦截（hookBefore 吞掉 + 打调用栈）。
+     *  诊断性质：定位 EXIT_SELF status=28 的调用方；若栈缺失 = native 出口，转 native 侧对策。 */
+    private fun mountNesecProbe(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        engine.mount(task, module, loader) { chain ->
+            val code = (chain.args?.getOrNull(0) as? Number)?.toInt()
+            val stack = Throwable().stackTrace.take(12).joinToString(" <- ") { "${it.className}.${it.methodName}" }
+            engine.judge(module, task, JUDGE_PREFIX, "exit($code) 已拦截（栈: $stack）")
+            null   // void 方法：不 proceed = 吞掉本次退出
         }
 
     /** 侦察探针：反射枚举 16 个业务类的 declaredMethods + Constructors 全签名打 `[mm-scout]` 日志。

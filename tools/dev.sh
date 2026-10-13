@@ -309,8 +309,11 @@ EOF
     "$ADB" shell "su 0 $LSPCTL module show io.github.coderstory.honorhook" 2>&1 | tr -d '\r' | grep -E 'User'
     # 包名清单直接读 scope.list（单一事实源，跳过空行/注释行）——漏强停的宿主会出现
     # "部署报成功但该目标 hook 没生效"的假成功。
+    # scope set 全量替换：卸载重装会抹掉作用域绑定（2026-10-13 实证，静态 scope 不会自动恢复），
+    # 每次启用按 scope.list 重铺 = 幂等自愈。
     SCOPE_PKGS="$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | grep -vE '^[[:space:]]*(#|$)' || true)"
     [ -n "$SCOPE_PKGS" ] || die "scope.list 读取为空（$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list）"
+    "$ADB" shell "su 0 $LSPCTL scope set --user=0 io.github.coderstory.honorhook $(printf '%s ' $SCOPE_PKGS)" 2>&1 | tr -d '\r' | tail -1
     for pkg in $SCOPE_PKGS; do
       "$ADB" shell "am force-stop $pkg" >/dev/null 2>&1
     done
