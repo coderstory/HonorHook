@@ -6,6 +6,7 @@
 > 2026-10-11 · 新增 U2 隐藏 5G 标 / U3 双卡信号合并（见 §七）；U1 副卡隐藏实现不变。
 > 2026-10-12 · 新增 U6 双排信号（移植 DualSignal 3.3，§7.11）；U3 已废弃（§7.9）。
 > 2026-10-12 · 新增 U4 系统通知隐藏 ×3（§八）/ U5 手电筒低电量放行（§九）。
+> 2026-10-13 · U6 对上游 3.3.4 校准（§7.11 末）；新增 U7 状态栏图标替换（§7.12）。
 
 ## 一、需求
 
@@ -293,6 +294,42 @@ U4/U4b/U5 已被通知隐藏系列占用）。用户随后停用 DualSignal，�
 
 **已真机验证（2026-10-12）**：`installed 3/3` 全绿；双排视觉生效，与 DualSignal 插件
 先到退避 / 后到自愈双向实证（18:42 轮）。
+
+**3.3.4 校准（2026-10-13，未真机验证）**：上游 jadx 源更新至 3.3.4（VERSION 实证），实读比对
+同步两处——① maintain margin 动态左边距：右侧固定 2dp，左侧按 host 前第一个可见兄弟判定
+（TextView 或类名含 "speed" → 0dp，否则 2dp，找不到保持 2dp；原 3.3 静态双侧 1.5f）；
+② moveBeforeWifi 触发条件 `hi != wi-1`（原 3.3 为 `hi > wi`，且去 VISIBLE 过滤改单循环）。
+其余逻辑零差异。
+
+### 7.12 U7 状态栏图标替换（2026-10-13，移植 DualSignal 3.3.4 hookWifiRes）
+
+**选点**（framework 层公开 API，未混淆，declaredMethods 直连，DualSignalHook.java L221-238）：
+
+| 点 | 签名 | 轨 |
+|---|---|---|
+| `Resources.getDrawable` | `(int, Resources.Theme) → Drawable` | Resources 轨 |
+| `Resources.getDrawableForDensity` | `(int, int, Resources.Theme) → Drawable` | Resources 轨 |
+| `TypedArray.getDrawable` | `(int) → Drawable` | TypedArray 轨（仅 wifi 目录） |
+
+状态栏所有图标 drawable 读取的必经点。after 语义：proceed 放行宿主原读取，命中内置资产
+改返回值 `BitmapDrawable(resources, bitmap)`（intercept 返回值即最终返回值）。
+
+**双 gate 回落链**（原 WifiPatch L94-110）：wifi 开关开 → 查 `wifi/<entry>.png`；
+miss 且 status 开关开 → 查 `icons/<entry>.png`。TypedArray 轨只查 wifi 目录、只受 wifi 门
+（原 WifiPatchTa L112-130）；该轨 args[0] 是 TypedArray 属性索引而非 resId，先
+`getResourceId(index, 0)` 转 resId，resId==0 放行。entry 名解析失败一律静默放行。
+
+**assets 来源**：`reference/dualsignal/base.apk`（3.3.4）解包 72 张原样入库模块
+`src/main/assets/`（wifi 59 + icons 13，路径 wifi/ 与 icons/ 原样）；运行期 ZipFile 懒开
+模块自身 APK（`XposedModule.getModuleApplicationInfo()?.sourceDir`，API 102 = 模块自身 info），
+`BitmapFactory.inDensity = 480` 原常量，按 entry 名缓存（wifi/icons 分两个 ConcurrentHashMap）。
+
+**与原插件差异（全部有意）**：无 toast、不写 Download 日志文件、无 maybeRestartForWifi 杀进程
+（本模块开关 = 下次注入才生效）；开关安装期读死（等价原插件"改配置须重启"）；wifi 与 status
+是两个独立开关，status miss 回落只在 wifi miss 时兜。
+
+**判据**（modlog-f 'SystemUiHook'）：`SystemUiHook·U7: installed 3/3` 汇总行；
+`SystemUiHook·U7 生效: systemui:iconRes.* — 替换 <entry>` 行。未真机验证，待用户自执行。
 
 ## 八、U4 系统通知隐藏（充电 / 热点共享 / USB 调试，2026-10-12）
 

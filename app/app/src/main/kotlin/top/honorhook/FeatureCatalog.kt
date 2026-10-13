@@ -38,6 +38,8 @@ object FeatureCatalog {
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
     const val KEY_SYSTEMUI_DUAL_SIGNAL = "systemui.dual_signal"
+    const val KEY_SYSTEMUI_ICON_WIFI = "systemui.icon_wifi"
+    const val KEY_SYSTEMUI_ICON_STATUS = "systemui.icon_status"
     const val KEY_SYSTEMUI_HIDE_CHARGE_NOTIF = "systemui.hide_charge_notif"
     const val KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF = "systemui.hide_hotspot_notif"
     const val KEY_SYSTEMUI_HIDE_ADB_NOTIF = "systemui.hide_adb_notif"
@@ -136,6 +138,8 @@ object FeatureCatalog {
                 Feature(KEY_SYSTEMUI_HIDE_SIM2, R.string.feature_systemui_hide_sim2_title, R.string.feature_systemui_hide_sim2_desc),
                 Feature(KEY_SYSTEMUI_HIDE_5G, R.string.feature_systemui_hide_5g_title, R.string.feature_systemui_hide_5g_desc),
                 Feature(KEY_SYSTEMUI_DUAL_SIGNAL, R.string.feature_systemui_dual_signal_title, R.string.feature_systemui_dual_signal_desc),
+                Feature(KEY_SYSTEMUI_ICON_WIFI, R.string.feature_systemui_icon_wifi_title, R.string.feature_systemui_icon_wifi_desc),
+                Feature(KEY_SYSTEMUI_ICON_STATUS, R.string.feature_systemui_icon_status_title, R.string.feature_systemui_icon_status_desc),
                 Feature(KEY_SYSTEMUI_HIDE_CHARGE_NOTIF, R.string.feature_systemui_hide_charge_notif_title, R.string.feature_systemui_hide_charge_notif_desc),
                 Feature(KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF, R.string.feature_systemui_hide_hotspot_notif_title, R.string.feature_systemui_hide_hotspot_notif_desc),
                 Feature(KEY_SYSTEMUI_HIDE_ADB_NOTIF, R.string.feature_systemui_hide_adb_notif_title, R.string.feature_systemui_hide_adb_notif_desc),

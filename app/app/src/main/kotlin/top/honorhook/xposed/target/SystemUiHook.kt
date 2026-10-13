@@ -107,6 +107,19 @@ object SystemUiHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook")
         }
 
+        // U7 状态栏图标替换（独立文件，移植自 com.mod.dualsignal 3.3.4 hookWifiRes）：两开关任一
+        // 开即装（wifi/status 是回落链的两道 gate，由 StatusBarIconFeature 回调内逐 key 判），
+        // 自带引擎与 installed 汇总行（SystemUiHook·U7），与本文件及 U6 的挂载互不计数。
+        val iconKeys = listOf(
+            FeatureCatalog.KEY_SYSTEMUI_ICON_WIFI,
+            FeatureCatalog.KEY_SYSTEMUI_ICON_STATUS,
+        )
+        if (iconKeys.any { RemoteConfig.isEnabled(it) }) {
+            StatusBarIconFeature.install(module, param)
+        } else {
+            iconKeys.forEach { logDisabled(module, it, "SystemUiHook") }
+        }
+
         val pending = mutableListOf<MountEngine.SimpleTask>()
 
         // U1 副卡隐藏（数据层：updateSubs 入参剔除 slotId==1）

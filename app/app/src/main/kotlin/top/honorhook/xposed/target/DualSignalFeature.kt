@@ -15,6 +15,7 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
@@ -25,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 /**
- * U6 状态栏双排信号（渲染方案移植自 com.mod.dualsignal 3.3，用户要求整合，私用）。
+ * U6 状态栏双排信号（渲染方案移植自 com.mod.dualsignal 3.3.4，用户要求整合，私用）。
  *
  * 移植源：system-files/DualSignal-jadx/…/DualSignalHook.java（872 行 jadx 实证读毕）。取舍：
  * - 保留：onAttachedToWindow（after）找 cluster root → 遍历找 mobile_combo 组 → 隐藏原生组 +
@@ -47,6 +48,9 @@ import kotlin.math.roundToInt
  *      挂 SignalClusterView.onAttachedToWindow 即覆盖两者。
  * - 与 DualSignal 插件二选一：冲突防护见 [hasForeignContainer]（容器 tag 探测，先到先得、
  *   后到退避，详见该注释）。
+ * - 2026-10-13 校准：对上游 3.3.4 实读比对（jadx 源现版本 VERSION=3.3.4），同步两处逻辑：
+ *   maintain margin 动态左边距（HOST_MARGIN_TEXT_DP）与 moveBeforeWifi 触发条件（hi != wi-1）；
+ *   其余逻辑零差异。
  */
 object DualSignalFeature {
 
@@ -77,7 +81,7 @@ object DualSignalFeature {
     private const val TAG_CONTAINER = "hh_dual_container"
     private const val TAG_SIGNAL = "hh_dual_signal"
 
-    // ---- 视觉常量（原样移植自 DualSignal 3.3，作者调好的参数；勿改）----
+    // ---- 视觉常量（原样移植自 DualSignal 3.3.4，作者调好的参数；勿改）----
 
     private const val BAR_W_DP = 3.1f
     private const val BAR_GAP_DP = 2.0f
@@ -85,7 +89,9 @@ object DualSignalFeature {
     private const val SINGLE_BAR_MAX_H_DP = 11.0f  // 单卡：不压扁
     private const val ROW_GAP_DP = 1.6f
     private const val DIM_ALPHA = 64               // 未点亮柱的透明度
-    private const val HOST_MARGIN_DP = 1.5f        // host（mobile_combo 外壳）左右 margin
+    // 3.3.4 校准（原 3.3 静态双侧 1.5f）：右侧固定 2dp；左侧动态，左邻是文本类时收紧 0dp
+    private const val HOST_MARGIN_DP = 2.0f
+    private const val HOST_MARGIN_TEXT_DP = 0.0f
     private val BAR_H_RATIO = floatArrayOf(0.48f, 0.6f, 0.79f, 1.0f)
 
     private const val LAYOUT_THROTTLE_MS = 250L
@@ -342,15 +348,38 @@ object DualSignalFeature {
 
         moveBeforeWifi(host)
 
+        // 3.3.4 校准：右侧固定 2dp；左侧按 host 前第一个可见兄弟动态——TextView 或类名小写含
+        // "speed"（网速显示）→ 0dp，否则 2dp；找不到可见兄弟保持 2dp。jadx 把上游 while 还原成
+        // 多出口伪码，实际语义 = 找到首个可见兄弟即定值停止。
+        var leftDp = HOST_MARGIN_DP
+        val row = host.parent as? ViewGroup
+        if (row != null) {
+            var i = row.indexOfChild(host) - 1
+            while (i >= 0) {
+                val pv = row.getChildAt(i)
+                if (pv.visibility != View.VISIBLE) {
+                    i--
+                    continue
+                }
+                leftDp =
+                    if (pv is TextView || pv.javaClass.name.lowercase().contains("speed")) {
+                        HOST_MARGIN_TEXT_DP
+                    } else {
+                        HOST_MARGIN_DP
+                    }
+                break
+            }
+        }
         val hp = host.layoutParams
         if (hp is ViewGroup.MarginLayoutParams) {
-            val want = dp(host, HOST_MARGIN_DP)
+            val wantR = dp(host, HOST_MARGIN_DP)
+            val wantL = dp(host, leftDp)
             if (hp.width != ViewGroup.LayoutParams.WRAP_CONTENT ||
-                hp.rightMargin != want || hp.leftMargin != want
+                hp.rightMargin != wantR || hp.leftMargin != wantL
             ) {
                 hp.width = ViewGroup.LayoutParams.WRAP_CONTENT
-                hp.rightMargin = want
-                hp.leftMargin = want
+                hp.rightMargin = wantR
+                hp.leftMargin = wantL
                 host.layoutParams = hp
             }
         }
@@ -470,29 +499,23 @@ object DualSignalFeature {
         var wifi: View? = null
         for (i in 0 until row.childCount) {
             val c = row.getChildAt(i)
-            if (c !== host && c.visibility == View.VISIBLE &&
-                c.javaClass.name.lowercase().contains("wifi")
+            // 3.3.4 校准：单循环、无 VISIBLE 过滤，类名含 wifi 或 ethernet_combo id 任一命中即 wifi
+            // （原 3.3 两段循环且带 VISIBLE 过滤）
+            if (c !== host &&
+                (c.javaClass.name.lowercase().contains("wifi") ||
+                    (idEthernetCombo != 0 && c.id == idEthernetCombo))
             ) {
                 wifi = c
                 break
             }
         }
-        if (wifi == null && idEthernetCombo != 0) {
-            // 原插件兜底：类名找不到 wifi 时按 id 找（aapt2 实证该 id 的 entry name 是 ethernet_combo）
-            for (i in 0 until row.childCount) {
-                val c = row.getChildAt(i)
-                if (c !== host && c.visibility == View.VISIBLE && c.id == idEthernetCombo) {
-                    wifi = c
-                    break
-                }
-            }
-        }
         if (wifi == null) return
         val wi = row.indexOfChild(wifi)
         val hi = row.indexOfChild(host)
-        if (hi >= 0 && wi >= 0 && hi > wi) {
+        // 3.3.4 触发条件 hi != wi-1（原 3.3 为 hi > wi）：host 已在 wifi 前一位时不做无谓 remove/add
+        if (hi >= 0 && wi >= 0 && hi != wi - 1) {
             row.removeView(host)
-            row.addView(host, wi)
+            row.addView(host, wi - 1)
         }
     }
 
