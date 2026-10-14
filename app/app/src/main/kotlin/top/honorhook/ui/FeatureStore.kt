@@ -26,7 +26,7 @@ object FeatureStore {
      * 开关状态的 **Compose 可观察镜像**（[init] 时从本地 prefs 灌入）。
      *
      * 直接读 `SharedPreferences` 不是 snapshot state，改开关不会让读它的组合失效——
-     * 「已启用 N/M」「运行中/待启用」这类计数就会一直停在旧值。所有读写都走这张表，
+     * 「已启用 N/M」「待启用」这类计数就会一直停在旧值。所有读写都走这张表，
      * 一处改动可同时刷新二级开关、二级页计数与一级列表标签。
      */
     private val states = mutableStateMapOf<String, Boolean>()

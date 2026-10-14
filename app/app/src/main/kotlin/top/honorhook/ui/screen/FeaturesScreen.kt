@@ -155,9 +155,8 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
         ) {
             item {
                 SwitchSemanticsCard(
-                    // 一级页只讲"开关到底下没下发到进程"，其余提示留给二级页
+                    // 只讲"开关到底下没下发到进程"（框架未激活＝假反馈）；生效时机提示卡已按用户要求全局删除
                     noticeWhenInactive = true,
-                    restartHint = false,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
@@ -377,17 +376,15 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
 
 /**
  * 顶部应用信息卡 —— 照抄 KernelSU 超级用户/模块详情页的头部：
- * 64dp 应用图标 + 应用名 + 包名 + 版本/UID + 右侧启用状态标签。
+ * 64dp 应用图标 + 应用名 + 包名 + 版本 + 右侧启用状态标签。
  */
 @Composable
 private fun AppHeaderCard(
     target: FeatureCatalog.Target,
     versionText: String?,
-    uid: Int?,
     enabledCount: Int,
     versionMismatch: Boolean,
     supportedText: String?,
-    installedVersionName: String?,
     modifier: Modifier = Modifier,
 ) {
     val isInDark = isInDarkTheme()
@@ -422,28 +419,31 @@ private fun AppHeaderCard(
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // 虚拟目标（iconKey 非空）不透出宿主 app 元信息：包名/版本/UID 对跨 app 开关无意义
+                // 虚拟目标（iconKey 非空）不透出宿主 app 元信息：包名/版本对跨 app 开关无意义
                 if (target.iconKey == null) {
-                    val meta = listOfNotNull(
-                        target.packageName,
-                        versionText?.let { "版本 $it" },
-                        uid?.let { "UID $it" },
+                    // 每行带色：版本适配行单独染色（颜色即语义），其余行维持弱化灰。
+                    val meta: List<Pair<String, Color>> = listOfNotNull(
+                        target.packageName to colorScheme.onSurfaceVariantSummary,
+                        versionText?.let { "版本 $it" to colorScheme.onSurfaceVariantSummary },
                         // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）。
-                        // R7 静态契约提示：宿主版本未收录时引擎按最新支持版本盲挂
-                        //（不查宿主实际版本——免 per-target pm 查询；错配红 tag 另行提示）。
+                        // 绿色判据 = 装机 versionName ∈ target.supportedVersions（含历史精确套）；红色 = 不在集合内。
+                        // 红字保留「仍会尝试」的依据：MountEngine.checkHostVersionOnce 版本不一致只打 WARN，
+                        // attemptMount 不跳过任何任务，故未适配仍会按基线表挂载——不写这半句用户会误读成「功能废了」。
+                        // 绿不加状态标签：绝大多数宿主即基线，恒真标签无信息量，且右侧已有「已启用/待启用」标签；
+                        // 亦不再重复打印装机版本号（meta 上一行「版本 X」已有）。
                         supportedText?.let {
                             if (versionMismatch) {
-                                "已适配 $it（当前 $installedVersionName；未适配按最新支持版本盲挂）"
+                                "未适配（需 $it，仍会尝试）" to VersionTagRed
                             } else {
-                                "已适配 $it（宿主版本未适配时按最新支持版本盲挂）"
+                                "已适配" to VersionTagGreen
                             }
                         },
                     )
-                    meta.forEach { line ->
+                    meta.forEach { (line, color) ->
                         Text(
                             text = line,
                             fontSize = 11.sp,
-                            color = colorScheme.onSurfaceVariantSummary,
+                            color = color,
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Ellipsis,
@@ -474,7 +474,7 @@ private fun AppHeaderCard(
                     )
                 }
                 StatusTag(
-                    label = if (enabledCount > 0) "运行中" else "待启用",
+                    label = if (enabledCount > 0) "已启用" else "待启用",
                     backgroundColor = if (enabledCount > 0) activeBg else idleBg,
                     contentColor = if (enabledCount > 0) activeFg else idleFg,
                     // 头部卡空间有限，用 11sp（原 13sp 偏大）；一级列表仍用 9sp
@@ -495,7 +495,7 @@ private fun FeatureListScreen(
     val scrollBehavior = MiuixScrollBehavior()
     val context = LocalContext.current
 
-    // 应用信息（版本名 / UID），拿不到就留 null 不显示该行。
+    // 应用信息（版本名），拿不到就留 null 不显示该行。
     // 注意：`ApplicationInfo.versionName/versionCode` 是 @hide 字段，SDK 里访问不到，
     // 必须走 `PackageInfo`。
     val pkgInfo: PackageInfo? = remember(target.packageName) {
@@ -510,11 +510,6 @@ private fun FeatureListScreen(
                 ?: @Suppress("DEPRECATION") { info.versionCode.toLong() }
             "${info.versionName} ($code)"
         }
-    }
-    val uid: Int? = remember(pkgInfo) {
-        runCatching {
-            context.packageManager.getApplicationInfo(target.packageName, 0).uid
-        }.getOrNull()
     }
     val enabledCount = target.features.count { FeatureStore.isEnabled(it.key) }
 
@@ -557,7 +552,6 @@ private fun FeatureListScreen(
             item {
                 SwitchSemanticsCard(
                     noticeWhenInactive = true,
-                    restartHint = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
@@ -570,12 +564,10 @@ private fun FeatureListScreen(
                 AppHeaderCard(
                     target = target,
                     versionText = versionText,
-                    uid = uid,
                     enabledCount = enabledCount,
                     versionMismatch = versionMismatch,
                     // 非 hostVersioned（无 baselineVersion 的目标）不透出版本适配行
                     supportedText = supportedText.takeIf { hostVersioned },
-                    installedVersionName = installedVersionName,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
@@ -636,29 +628,23 @@ private fun FeatureListScreen(
 }
 
 /**
- * 开关语义提示卡。
+ * 框架未激活提示卡 —— 唯一必须讲清楚、否则用户会误判的点：
+ * **框架未激活**时 [FeatureStore.setEnabled] 只写本地，hook 侧读不到 ⇒ 开关看起来生效了
+ * （UI 状态变了）而实际行为没变，属于最坏的一类"假反馈"。
  *
- * 两个必须讲清楚、否则用户会误判的点：
- * 1. **框架未激活**时 [FeatureStore.setEnabled] 只写本地，hook 侧读不到 ⇒ 开关看起来生效了
- *    （UI 状态变了）而实际行为没变，属于最坏的一类"假反馈"。
- * 2. 框架正常时，开关也要等**目标进程下次启动**才被读到（远端 prefs 是注入期一次性读取的）。
+ * 原「开关何时生效」提示卡（重启目标进程才生效）已按用户要求全局删除（2026-10-14）。
  */
 @Composable
 private fun SwitchSemanticsCard(
     noticeWhenInactive: Boolean,
-    restartHint: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val inactive = noticeWhenInactive && !FrameworkState.active
-    if (!inactive && !restartHint) return
-    val title = if (inactive) "LSPosed 未激活" else "开关何时生效"
-    val summary = if (inactive) {
-        "LSPosed 未连接，开关暂时不会生效。请先在 LSPosed 中启用本模块。"
-    } else {
-        "开关会在应用下次启动时生效。改完后请彻底关闭对应应用再重新打开。"
-    }
-    val bg = if (inactive) colorScheme.tertiaryContainer.copy(alpha = 0.6f) else colorScheme.secondaryContainer.copy(alpha = 0.6f)
-    val fg = if (inactive) colorScheme.onTertiaryContainer else colorScheme.onSecondaryContainer
+    if (!inactive) return
+    val title = "LSPosed 未激活"
+    val summary = "LSPosed 未连接，开关暂时不会生效。请先在 LSPosed 中启用本模块。"
+    val bg = colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+    val fg = colorScheme.onTertiaryContainer
     Card(modifier = modifier) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text(
@@ -706,6 +692,9 @@ private fun EmptyHint(text: String) {
 
 /** 「版本未适配」tag 红色（accentPalette 首色同值；Miuix colorScheme 无 error 槽，审计要求固定值）。 */
 private val VersionTagRed = Color(0xFFEF5350)
+
+/** 「已适配」文字绿色（= 下方 accentPalette 的「绿」同值，饱和度/亮度与红一致；同上，Miuix colorScheme 无 success 槽）。 */
+private val VersionTagGreen = Color(0xFF66BB6A)
 
 private val accentPalette = listOf(
     Color(0xFFEF5350), // 红
