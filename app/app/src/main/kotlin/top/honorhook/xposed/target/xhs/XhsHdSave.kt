@@ -63,6 +63,7 @@ object XhsHdSave {
         engine.mount(task, module, loader) { chain ->
             // before 语义：替换 args[3] 后按新参数 proceed；void 方法回调恒返回 null
             val original = runCatching { chain.getArg(ARG_URL_INDEX) as? String }.getOrNull()
+            // 粘性降级自动生效：q/100 被 X5 实证失败的 token，toOriginal 直接回裸链（XhsImageUrl.markQualityFailed）
             val rebuilt = XhsImageUrl.toOriginal(original)
             if (rebuilt != null && rebuilt != original) {
                 engine.judge(module, task, JUDGE_PREFIX, "解码源已换原图直链")

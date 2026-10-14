@@ -48,11 +48,35 @@ object XhsImageUrl {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean = size > 256
     }
 
-    /** 原图直链改写（token + 最高画质 query）；不适用返回 null。 */
+    /**
+     * q/100 已知失败 **token** 集合——**进程内、运行期**的粘性降级（**非持久化**，进程重启即清空）。
+     * 目的：X5（模块自下载）撞过的 q/100 失败点，X3（改宿主 Fresco 解码源、自身零兜底）不再撞——
+     * X3 只调 [toOriginal]，命中此表即自动降级为 [toBare] 裸链。
+     * 上限 [QUALITY_FAILED_MAX] 张 token，超过整表清空（简单粗暴：避免无界增长，宁可重试不可泄漏）。
+     */
+    private val qualityFailed = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>(),
+    )
+    private const val QUALITY_FAILED_MAX = 512
+
+    /**
+     * 记入「q/100 已知失败」表。[XhsBatchSave] 在**裸链回落成功**时才调（即确认该 token 的 q/100
+     * 非 200 / 错误页）；null / token 解析失败忽略。仅进程内有效，供 [toOriginal] 粘性降级。
+     */
+    fun markQualityFailed(raw: String?) {
+        val token = raw?.let { tokenOf(it) } ?: return
+        if (qualityFailed.size >= QUALITY_FAILED_MAX) qualityFailed.clear()
+        qualityFailed.add(token)
+    }
+
+    /** 原图直链改写（token + 最高画质 query）；不适用返回 null。命中 [qualityFailed] 则粘性降级为裸链。 */
     fun toOriginal(raw: String?): String? {
         if (raw == null) return null
-        synchronized(memo) { memo[raw] }?.let { return it }
+        // 先取 token 再查降级表（**先于 memo**：否则会命中「降级前缓存的 q/100 串」把降级吃掉）；
+        // 命中 = 该 token 的 q/100 已实证失败（X5 撞过）→ 直接回裸链，不再试 q/100。
         val token = tokenOf(raw) ?: return null
+        if (qualityFailed.contains(token)) return toBare(raw)
+        synchronized(memo) { memo[raw] }?.let { return it }
         val rebuilt = "https://$DEFAULT_CDN/$token$QUALITY_QUERY"
         synchronized(memo) { memo[raw] = rebuilt }
         return rebuilt

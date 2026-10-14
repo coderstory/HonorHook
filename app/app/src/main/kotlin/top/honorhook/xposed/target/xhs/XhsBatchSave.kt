@@ -354,7 +354,7 @@ object XhsBatchSave {
                 val quality = XhsImageUrl.toOriginal(raw)
                 val bare = XhsImageUrl.toBare(raw)
                 val url = quality ?: bare ?: raw
-                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", bare) }
+                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", bare, raw) }
                     .getOrDefault(0L)
                 if (saved > 0) { ok++; bytes += saved }
                 else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
@@ -439,15 +439,21 @@ object XhsBatchSave {
     /**
      * 直下单张：先抓 [url]；若命中「HTTP 非 200」或「错误页 Content-Type」两类失败，则改用
      * [bareFallback]（裸链，无 query）重下一次——**仅一次，不递归**。其余失败（超限/写盘异常）不重试。
+     * 裸链回落**成功**时以 [raw] 记入 [XhsImageUrl.markQualityFailed]（粘性降级，X3 不再撞该 token）。
      * 返回值 = 落盘字节数（>0 = 成功；0 = 失败），供完成卡合计体积。
      */
-    private fun downloadOne(activity: Activity, url: String, fileName: String, bareFallback: String? = null): Long {
+    private fun downloadOne(activity: Activity, url: String, fileName: String, bareFallback: String? = null, raw: String? = null): Long {
         val bytes = LongArray(1)
         when (fetchOne(activity, url, fileName, bytes)) {
             Fetch.OK -> return bytes[0]
             Fetch.RETRY_BARE -> if (bareFallback != null && bareFallback != url) {
                 val retry = LongArray(1)
-                return if (fetchOne(activity, bareFallback, fileName, retry) == Fetch.OK) retry[0] else 0L
+                if (fetchOne(activity, bareFallback, fileName, retry) == Fetch.OK) {
+                    // 裸链成 = 确认 q/100 对该 token 失败（非 200 / 错误页）→ 记入粘性降级表，
+                    // X3（改宿主解码源，无兜底）对该 token 不再撞 q/100。普通成功路径不记。
+                    XhsImageUrl.markQualityFailed(raw)
+                    return retry[0]
+                }
             }
             Fetch.FAIL -> Unit
         }
