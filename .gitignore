@@ -8,6 +8,14 @@ system-files/
 
 # reference/ 下手动放置的非 git 资产（外部项目一律以 submodule 引入）
 reference/Rain_1.1.5.apk
+# 2026-10-14 审计补：新增参考目录同样不入库（xhs 187M / dualsignal 272K；reference/ 只读）
+reference/xhs/
+reference/dualsignal/
+
+# AI 工具/IDE 本地状态：工作树副本（149M）、代码索引、IDE 配置——均非工程代码
+.claude/worktrees/
+.codegraph/
+.idea/
 
 # tools/ 下二进制目录与 jar（可重新下载/生成）
 tools/platform-tools/

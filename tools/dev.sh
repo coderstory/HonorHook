@@ -498,10 +498,19 @@ EOF
 
   launch)
     require "$ADB"
-    info "冷启动 io.github.coderstory.honorhook（明确 LAUNCHER intent，不用 monkey 避免干扰）"
-    "$ADB" shell am force-stop io.github.coderstory.honorhook 2>/dev/null || true
+    # 组件名从设备解析，不硬编码：applicationId（io.github.coderstory.honorhook）与 namespace
+    # （top.honorhook）不同，Activity 实际落在 namespace 包下，写死 "$pkg/.ui.MainActivity"
+    # 会 Error type 3「Activity class ... does not exist」（2026-10-14 审计 P3 修复）。
+    app_pkg=io.github.coderstory.honorhook
+    app_cmp=$("$ADB" shell cmd package resolve-activity --brief "$app_pkg" 2>/dev/null | tr -d '\r' | tail -1)
+    case "$app_cmp" in
+      */*) ;;
+      *) die "解析 ${app_pkg} 的 LAUNCHER Activity 失败（返回：${app_cmp}）——确认设备已装本模块" ;;
+    esac
+    info "冷启动 ${app_pkg}（LAUNCHER intent，不用 monkey 避免干扰；组件 ${app_cmp}）"
+    "$ADB" shell am force-stop "$app_pkg" 2>/dev/null || true
     "$ADB" shell am start -a android.intent.action.MAIN \
-      -c android.intent.category.LAUNCHER -n io.github.coderstory.honorhook/.ui.MainActivity 2>&1 | tr -d '\r'
+      -c android.intent.category.LAUNCHER -n "$app_cmp" 2>&1 | tr -d '\r'
     sleep 3
     "$0" top
     ;;

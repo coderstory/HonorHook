@@ -429,13 +429,17 @@ private fun AppHeaderCard(
                         // 绿色判据 = 装机 versionName ∈ target.supportedVersions（含历史精确套）；红色 = 不在集合内。
                         // 红字保留「仍会尝试」的依据：MountEngine.checkHostVersionOnce 版本不一致只打 WARN，
                         // attemptMount 不跳过任何任务，故未适配仍会按基线表挂载——不写这半句用户会误读成「功能废了」。
-                        // 绿不加状态标签：绝大多数宿主即基线，恒真标签无信息量，且右侧已有「已启用/待启用」标签；
-                        // 亦不再重复打印装机版本号（meta 上一行「版本 X」已有）。
+                        // 措辞用「最新支持 X」而非「需 X」（2026-10-14 审计 P4）：宿主 OTA 到比 X 更新时，
+                        // 「需」会被读成「需要降级到 X」；X = supportedVersions 升序末位，即本模块已适配的最新版本。
+                        // 绿行带版本号（同上 P4）：装机版本落在 extraVersions（历史精确套）时，本行是唯一说明
+                        // 「适配的是哪一套」的地方——与上一行「版本 Y」（本机版本）不等也说得清。
+                        // 绿不加状态标签：绝大多数宿主即基线，恒真标签无信息量，且右侧已有「已启用/待启用」标签。
+                        // 红也不再另给右上「版本未适配」tag（同上 P3）：同屏两处红表达同一事实，红字信息量更大。
                         supportedText?.let {
                             if (versionMismatch) {
-                                "未适配（需 $it，仍会尝试）" to VersionTagRed
+                                "未适配（最新支持 $it，仍会尝试）" to VersionTagRed
                             } else {
-                                "已适配" to VersionTagGreen
+                                "已适配 $it" to VersionTagGreen
                             }
                         },
                     )
@@ -460,19 +464,11 @@ private fun AppHeaderCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 右侧标签列：版本不适配时在状态 tag 上方多一行红 tag
+            // 右侧标签列：只剩启用状态一行（原「版本未适配」红 tag 已删——meta 行红字已表达同一事实）
             Column(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                if (versionMismatch) {
-                    StatusTag(
-                        label = "版本未适配",
-                        backgroundColor = VersionTagRed.copy(alpha = 0.15f),
-                        contentColor = VersionTagRed,
-                        fontSize = 11.sp,
-                    )
-                }
                 StatusTag(
                     label = if (enabledCount > 0) "已启用" else "待启用",
                     backgroundColor = if (enabledCount > 0) activeBg else idleBg,
@@ -690,11 +686,17 @@ private fun EmptyHint(text: String) {
  * 色板取饱和度/亮度一致的一组，颜色之间跳变明显且在浅色/深色背景下都能看清。
  */
 
-/** 「版本未适配」tag 红色（accentPalette 首色同值；Miuix colorScheme 无 error 槽，审计要求固定值）。 */
+/** 「未适配」文字红色（Miuix colorScheme 无 error 槽，审计要求固定值；色值与 accentPalette 首色相同 = 历史遗留）。 */
 private val VersionTagRed = Color(0xFFEF5350)
 
-/** 「已适配」文字绿色（= 下方 accentPalette 的「绿」同值，饱和度/亮度与红一致；同上，Miuix colorScheme 无 success 槽）。 */
-private val VersionTagGreen = Color(0xFF66BB6A)
+/**
+ * 「已适配」文字绿色（Miuix colorScheme 无 success 槽，同上固定值）。
+ *
+ * 刻意**不取** accentPalette 里的「绿」0xFF66BB6A（2026-10-14 审计 P4）：那支是左侧功能色条的
+ * 哈希调色板之一，两者同值会被连读成「某功能的色条」，且调色板改绿时本处"同值"承诺静默漂移。
+ * 选深一档的 Material Green 700：浅色背景对比度更高，文字 11sp 也看得清。
+ */
+private val VersionTagGreen = Color(0xFF43A047)
 
 private val accentPalette = listOf(
     Color(0xFFEF5350), // 红
