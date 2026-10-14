@@ -639,7 +639,7 @@ object XhsVideoSave {
                     }
                 }
                 card.addView(android.widget.TextView(activity).apply {
-                    text = "正在下载高清视频"
+                    text = "正在下载原版视频"
                     textSize = 16f
                     setTextColor(titleColor)
                     paint.isFakeBoldText = true
@@ -722,6 +722,76 @@ object XhsVideoSave {
         }
     }
 
+    /** 体积显示（单点实现）：<1 MiB 走整数 KB，其余 1024 进制一位小数 MiB（截断）。 */
+    private fun formatSize(bytes: Long): String {
+        if (bytes < 1024L * 1024L) return "${(bytes + 512L) / 1024L} KB"
+        val mi = bytes / 1048576L
+        val frac = (bytes % 1048576L) * 10L / 1048576L
+        return "$mi.$frac MiB"
+    }
+
+    /**
+     * 下载完成卡（用户定案 2026-10-14）：询问卡用动作态、完成卡才说「已下载」——本卡即直下成功后的完成态。
+     * 标题体积用实际落盘字节 [bytes]，正文落盘文件名 [name]，单按钮关闭。
+     * 主线程 + Activity 取不到时重试（同 [showProgressDialog] 那套），异常静默（绝不波及下载链路）。
+     */
+    private fun showDownloadedDialog(bytes: Long, name: String, attempt: Int = 0) {
+        mainHandler.post {
+            val activity = trackedActivity
+            if (activity == null) {
+                if (attempt < 16) mainHandler.postDelayed({ showDownloadedDialog(bytes, name, attempt + 1) }, 300)
+                return@post
+            }
+            runCatching {
+                val night = (activity.resources.configuration.uiMode and
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                    android.content.res.Configuration.UI_MODE_NIGHT_YES
+                val bg = if (night) 0xFF1E1E22.toInt() else 0xFFFFFFFF.toInt()
+                val titleColor = if (night) 0xFFF5F5F7.toInt() else 0xFF17171A.toInt()
+                val subColor = if (night) 0xFF98989D.toInt() else 0xFF8A8A8E.toInt()
+                val accent = 0xFFFF2E4D.toInt()
+                val dp = activity.resources.displayMetrics.density
+                fun d(v: Int) = (v * dp).toInt()
+
+                val card = android.widget.LinearLayout(activity).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    setPadding(d(24), d(22), d(24), d(18))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = d(22).toFloat(); setColor(bg)
+                    }
+                }
+                card.addView(android.widget.TextView(activity).apply {
+                    text = "已下载 ${formatSize(bytes)}"
+                    textSize = 17f; setTextColor(titleColor); paint.isFakeBoldText = true
+                })
+                card.addView(android.widget.TextView(activity).apply {
+                    text = name
+                    textSize = 14f; setTextColor(subColor); setPadding(0, d(8), 0, 0)
+                })
+                val dialog = android.app.Dialog(activity)
+                card.addView(android.widget.TextView(activity).apply {
+                    text = "好"
+                    textSize = 15f
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(d(18), d(11), d(18), d(11))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = d(18).toFloat(); setColor(accent)
+                    }
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setOnClickListener { dialog.dismiss() }
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = d(18) }
+                })
+                dialog.setContentView(card)
+                dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+                dialog.setCancelable(true)
+                dialog.show()
+            }
+        }
+    }
+
     private fun scheduleHdVideoDownload(url: String, body: String, module: XposedModule) {
         val noteId = queryParam(url, "note_id") ?: return
         // t0 = 本轮 save 拦截时刻，透传给 V-5 低画质清理的时间窗锚点
@@ -776,11 +846,11 @@ object XhsVideoSave {
                     }
                 }
                 card.addView(android.widget.TextView(activity).apply {
-                    text = "视频已保存"
+                    text = "下载高清原版视频"
                     textSize = 17f; setTextColor(titleColor); paint.isFakeBoldText = true
                 })
                 card.addView(android.widget.TextView(activity).apply {
-                    text = "客户端保存的是低画质版本，是否下载高清版？"
+                    text = "客户端已保存低画质版，是否改为下载原片？"
                     textSize = 14f; setTextColor(subColor); setPadding(0, d(8), 0, 0)
                 })
                 @Suppress("UNCHECKED_CAST")
@@ -804,7 +874,7 @@ object XhsVideoSave {
                 row.addView(pillBtn("取消", filled = false) { dialog.dismiss() }.apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = d(10) }
                 })
-                row.addView(pillBtn("下载高清视频", filled = true) {
+                row.addView(pillBtn("下载原版", filled = true) {
                     dialog.dismiss()
                     hdActive = true
                     showProgressDialog()
@@ -998,6 +1068,8 @@ object XhsVideoSave {
             put(android.provider.MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
         }, null, null)
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX HD直下完成 noteId=$noteId ${written / 1024}KB → Movies/小红书/$name")
+        // 完成态提示（仅成功路径；主线程自 post，失败静默）
+        showDownloadedDialog(written, name)
         deleteLowQuality(ctx, t0, finalUri, written, module)
         // 客户端低码文件可能晚于我们落盘：5s 后兜底再删一轮
         Thread.sleep(5_000)

@@ -298,8 +298,8 @@ object XhsBatchSave {
             setTextColor(color)
             if (bold) paint.isFakeBoldText = true
         }
-        card.addView(tv("已保存本张（原图）", 17, titleColor, bold = true))
-        card.addView(tv("检测到本篇还有 $count 张，要一起保存吗？", 14, subColor).apply {
+        card.addView(tv("下载本篇全部图片", 17, titleColor, bold = true))
+        card.addView(tv("已保存本张（原图）；本篇还有 $count 张，要一起下载吗？", 14, subColor).apply {
             setPadding(0, d(8), 0, 0)
         })
 
@@ -326,7 +326,7 @@ object XhsBatchSave {
         row.addView(pillBtn("不用了", filled = false) { dialog.dismiss() }.apply {
             layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = d(10) }
         })
-        row.addView(pillBtn("保存全部", filled = true) { dialog.dismiss(); onBatch() }.apply {
+        row.addView(pillBtn("全部下载", filled = true) { dialog.dismiss(); onBatch() }.apply {
             layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
         card.addView(row)
@@ -346,27 +346,124 @@ object XhsBatchSave {
         }
         Thread({
             var ok = 0
+            var bytes = 0L
             urls.forEachIndexed { i, raw ->
-                val url = XhsImageUrl.toOriginal(raw) ?: raw
-                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}") }
-                    .getOrDefault(false)
-                if (saved) ok++
+                // 主链 = 原图直链（token + 最高画质 query）；quality/bare 皆不适用时退回 raw 本身
+                // （保持原语义）。bare 作为「失败回落」，由 downloadOne 在 HTTP 非 200 / 错误页
+                // Content-Type 时用裸链重下一次（见 downloadOne）。
+                val quality = XhsImageUrl.toOriginal(raw)
+                val bare = XhsImageUrl.toBare(raw)
+                val url = quality ?: bare ?: raw
+                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", bare) }
+                    .getOrDefault(0L)
+                if (saved > 0) { ok++; bytes += saved }
                 else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
             }
+            // 完成态提示（替换旧 Toast「已保存 N/N」，用户定案 2026-10-14）；主线程 + 异常静默
             mainHandler.post {
-                runCatching {
-                    android.widget.Toast.makeText(activity, "已保存 $ok/${urls.size}", android.widget.Toast.LENGTH_SHORT).show()
-                }
+                runCatching { showBatchSavedDialog(activity, ok, urls.size, bytes) }
+                    .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 完成卡失败: ${it.message}") }
             }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}")
         }, "HonorHook-xhs-batch").start()
+    }
+
+    /** 体积显示（单点实现）：1024 进制一位小数 MB（截断）。 */
+    private fun fmtSize(bytes: Long): String {
+        val mi = bytes / 1048576L
+        val frac = (bytes % 1048576L) * 10L / 1048576L
+        return "$mi.$frac MB"
+    }
+
+    /**
+     * 批量下载完成卡（用户定案 2026-10-14）：询问卡用动作态、完成卡才说「已下载」。
+     * 标题 = 成功/总数，正文 = 合计落盘体积（有失败张数时追加「，N 张失败」），单按钮关闭。
+     * 复用本文件自绘风格（同 [showVideoSavedDialog]）；必须主线程调用。
+     */
+    private fun showBatchSavedDialog(activity: Activity, ok: Int, total: Int, bytes: Long) {
+        val failed = total - ok
+        val night = (activity.resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val bg = if (night) 0xFF1E1E22.toInt() else 0xFFFFFFFF.toInt()
+        val titleColor = if (night) 0xFFF5F5F7.toInt() else 0xFF17171A.toInt()
+        val subColor = if (night) 0xFF98989D.toInt() else 0xFF8A8A8E.toInt()
+        val accent = 0xFFFF2E4D.toInt()
+        val dp = activity.resources.displayMetrics.density
+        fun d(v: Int) = (v * dp).toInt()
+        val card = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(d(24), d(22), d(24), d(18))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = d(22).toFloat(); setColor(bg)
+            }
+        }
+        card.addView(android.widget.TextView(activity).apply {
+            text = "已下载 $ok/$total"
+            textSize = 17f
+            setTextColor(titleColor)
+            paint.isFakeBoldText = true
+        })
+        card.addView(android.widget.TextView(activity).apply {
+            text = if (failed > 0) "${fmtSize(bytes)}，$failed 张失败" else fmtSize(bytes)
+            textSize = 14f
+            setTextColor(subColor)
+            setPadding(0, d(8), 0, 0)
+        })
+        val dialog = android.app.Dialog(activity)
+        card.addView(android.widget.TextView(activity).apply {
+            text = "好"
+            textSize = 15f
+            gravity = android.view.Gravity.CENTER
+            setPadding(d(18), d(11), d(18), d(11))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = d(18).toFloat(); setColor(accent)
+            }
+            setTextColor(0xFFFFFFFF.toInt())
+            setOnClickListener { dialog.dismiss() }
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = d(18) }
+        })
+        dialog.setContentView(card)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+        dialog.setCancelable(true)
+        dialog.show()
     }
 
     private fun extOf(url: String): String =
         url.substringBefore('?').substringAfterLast('/').substringAfterLast('.')
             .takeIf { it.length in 2..5 && it.all(Char::isLetterOrDigit) } ?: "jpg"
 
-    private fun downloadOne(activity: Activity, url: String, fileName: String): Boolean {
+    /**
+     * 直下单张：先抓 [url]；若命中「HTTP 非 200」或「错误页 Content-Type」两类失败，则改用
+     * [bareFallback]（裸链，无 query）重下一次——**仅一次，不递归**。其余失败（超限/写盘异常）不重试。
+     * 返回值 = 落盘字节数（>0 = 成功；0 = 失败），供完成卡合计体积。
+     */
+    private fun downloadOne(activity: Activity, url: String, fileName: String, bareFallback: String? = null): Long {
+        val bytes = LongArray(1)
+        when (fetchOne(activity, url, fileName, bytes)) {
+            Fetch.OK -> return bytes[0]
+            Fetch.RETRY_BARE -> if (bareFallback != null && bareFallback != url) {
+                val retry = LongArray(1)
+                return if (fetchOne(activity, bareFallback, fileName, retry) == Fetch.OK) retry[0] else 0L
+            }
+            Fetch.FAIL -> Unit
+        }
+        return 0L
+    }
+
+    /** 单地址抓取结果：OK = 已落盘；RETRY_BARE = 非 200 / 错误页，可回落裸链重试；FAIL = 终局失败。 */
+    private enum class Fetch { OK, RETRY_BARE, FAIL }
+
+    /**
+     * 单地址抓取（302 跟随）+ MediaStore 落盘到 Pictures/小红书。
+     * 错误页识别走 Content-Type **黑名单**：只拒 JSON / XML / text 系说明页；
+     * `application/octet-stream` 是合法原图（XHS 原始档实测），**绝不拒收**。
+     * 成功时经 [bytesOut] 回传落盘字节数（供完成卡合计体积）。
+     */
+    private fun fetchOne(activity: Activity, url: String, fileName: String, bytesOut: LongArray): Fetch {
         var u = url
         var redirects = 0
         while (true) {
@@ -379,18 +476,26 @@ object XhsBatchSave {
             try {
                 when (val code = conn.responseCode) {
                     in 300..399 -> {
-                        if (++redirects > 5) return false
-                        u = conn.getHeaderField("Location") ?: return false
+                        if (++redirects > 5) return Fetch.FAIL
+                        u = conn.getHeaderField("Location") ?: return Fetch.FAIL
                         continue
                     }
                     200 -> {
+                        // 错误页类型（CDN 直链失效时常回说明页，如「图片不存在」JSON/HTML）；
+                        // 交给回落重试。octet-stream 是合法原图，不在黑名单内。
+                        val ctype = conn.getHeaderField("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
+                        if (ctype == "application/json" || ctype == "application/xml" ||
+                            ctype?.startsWith("text/") == true
+                        ) {
+                            return Fetch.RETRY_BARE
+                        }
                         val values = ContentValues().apply {
                             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                             put(MediaStore.Images.Media.MIME_TYPE, "image/${if (extOf(url) == "png") "png" else "jpeg"}")
                             put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/小红书")
                         }
                         val outUri = activity.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                            ?: return false
+                            ?: return Fetch.FAIL
                         activity.contentResolver.openOutputStream(outUri)?.use { out ->
                             conn.inputStream.use { input ->
                                 val buf = ByteArray(64 * 1024)
@@ -399,14 +504,16 @@ object XhsBatchSave {
                                     val n = input.read(buf)
                                     if (n < 0) break
                                     total += n
-                                    if (total > MAX_IMAGE_BYTES) return false
+                                    if (total > MAX_IMAGE_BYTES) return Fetch.FAIL
                                     out.write(buf, 0, n)
                                 }
+                                bytesOut[0] = total
                             }
-                        } ?: return false
-                        return true
+                        } ?: return Fetch.FAIL
+                        return Fetch.OK
                     }
-                    else -> return false
+                    // 其余状态（4xx/5xx 等非 200）＝ 主链失效 → 可回落裸链重试
+                    else -> return Fetch.RETRY_BARE
                 }
             } finally {
                 conn.disconnect()
