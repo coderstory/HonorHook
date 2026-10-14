@@ -163,6 +163,8 @@ object XhsVideoSave {
         // 采集探测仪表回调（X5 联调期；稳定后撤）
         logHook = { prio, tag, msg -> module.log(prio, tag, msg) }
         ensureActivityTracker()
+        // A2：进程被杀留下的 .pending- 半成品（IS_PENDING 态）后台清一次（每进程一次；年龄门槛见函数注释）
+        cleanupPendingOrphans(module)
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
 
         val pending = listOf(
@@ -593,10 +595,99 @@ object XhsVideoSave {
 
     // ---- 外挂高清直下（X4 内置，零新挂点；save 响应每次必经本拦截）----
 
-    /** HD 直下去重（noteId → 上次发起时刻 ms；同 note 5 分钟内不重复发起——save API 每次保存重试 3-4 次）。 */
+    /**
+     * HD 直下去重（noteId → 上次发起时刻 ms；同 note 5 分钟内不重复发起——save API 每次保存重试 3-4 次）。
+     * A1 起叠加**文件持久化**：宿主进程被系统回收/重注入后进程内表丢失 ⇒ 同一笔记重复弹询问卡
+     * （真机实证 E11：11 分钟内弹 5 次）。表落宿主 Application filesDir，落盘走 [ioExecutor] 异步，
+     * okhttp 拦截线程绝不碰磁盘。
+     */
     private val hdDedupe = ConcurrentHashMap<String, Long>()
     private const val HD_DEDUPE_MS = 5 * 60_000L
     private const val MAX_VIDEO_BYTES = 500L * 1024 * 1024
+
+    /** A3 **运行内**续传（非同次运行不算）：读取阶段 IOException 最多重试 3 次，退避 1s/2s/4s。 */
+    private const val HD_RESUME_MAX_RETRY = 3
+    private const val HD_RESUME_BACKOFF_BASE_MS = 1_000L
+
+    /** A1 持久化文件（宿主私有目录；每行 `noteId<TAB>epochMillis`）；上限 200 条，超窗口/超限的行写入时自然裁掉。 */
+    private const val HD_DEDUPE_FILE = "xhs_hd_dedupe.tsv"
+    private const val HD_DEDUPE_MAX = 200
+
+    /** X4 后台 IO 单线程（A1 去重表落盘 + A2 孤儿清理）：daemon，绝不占用 okhttp 拦截线程。 */
+    private val ioExecutor by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "HonorHook-xhs-io").apply { isDaemon = true }
+        }
+    }
+
+    /** A1 惰性加载守卫（首次用到时读一次盘并合并进内存表 [hdDedupe]）。 */
+    private val hdDedupeLoaded = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** 宿主 Application（filesDir / ContentResolver 载体）。ActivityThread.currentApplication 是唯一横切入口。 */
+    private fun currentApplication(): android.app.Application? = runCatching {
+        val loader = hostLoader
+        val cls = if (loader != null) Class.forName("android.app.ActivityThread", false, loader)
+        else Class.forName("android.app.ActivityThread")
+        cls.getMethod("currentApplication").invoke(null) as? android.app.Application
+    }.getOrNull()
+
+    /**
+     * A1：首次用到去重表时惰性读盘一次，把持久化条目合并进内存表（进程内已有的值更新，不被盘上旧值覆盖）。
+     * 只在 okhttp 拦截线程调用 ⇒ 这是本链路唯一的同步 IO，代价是一次 ≤200 行的小文件读；任何失败
+     * 只打一行 WARN 并退回纯内存行为，绝不抛、绝不阻塞。
+     */
+    private fun ensureHdDedupeLoaded(module: XposedModule) {
+        if (!hdDedupeLoaded.compareAndSet(false, true)) return
+        val now = System.currentTimeMillis()
+        val text = runCatching {
+            val dir = currentApplication()?.filesDir ?: return
+            val f = java.io.File(dir, HD_DEDUPE_FILE)
+            if (!f.isFile) return
+            f.readText()
+        }.getOrElse {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重表读取失败（退回纯内存）: ${it.message}")
+            return
+        }
+        var loaded = 0
+        for (line in text.lineSequence()) {
+            val tab = line.indexOf('\t')
+            if (tab <= 0) continue
+            val id = line.substring(0, tab).trim()
+            val ts = line.substring(tab + 1).trim().toLongOrNull() ?: continue
+            if (id.isEmpty() || now - ts >= HD_DEDUPE_MS) continue   // 超窗口行丢弃，下次写入时从盘上清掉
+            if ((hdDedupe[id] ?: 0L) < ts) hdDedupe[id] = ts
+            loaded++
+        }
+        if (loaded > 0) {
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重表已加载 $loaded 条（跨进程去重生效）")
+        }
+    }
+
+    /**
+     * A1：内存表变更后异步落盘（全量重写 ≤200 行的小文件，代价可忽略）。
+     * 快照在调用线程算（表小），写盘在 [ioExecutor] —— 失败只 WARN，绝不抛、绝不阻塞拦截线程。
+     */
+    private fun persistHdDedupe(module: XposedModule) {
+        val now = System.currentTimeMillis()
+        val rows = hdDedupe.entries
+            .filter { now - it.value < HD_DEDUPE_MS }
+            .sortedByDescending { it.value }
+            .take(HD_DEDUPE_MAX)
+        runCatching {
+            ioExecutor.execute {
+                runCatching {
+                    val dir = currentApplication()?.filesDir ?: return@runCatching
+                    val sb = StringBuilder(rows.size * 24)
+                    for (e in rows) sb.append(e.key).append('\t').append(e.value).append('\n')
+                    java.io.File(dir, HD_DEDUPE_FILE).writeText(sb.toString())
+                }.onFailure {
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重表写入失败（仅内存生效）: ${it.message}")
+                }
+            }
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重表落盘调度失败: ${it.message}")
+        }
+    }
 
     /** 主线程 Handler（进度弹窗必须主线程）。 */
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -704,6 +795,53 @@ object XhsVideoSave {
         })
     }
 
+    /** A2 孤儿清理守卫（每进程只跑一次）。 */
+    private val pendingCleanupRan = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** A2 `.pending-` 半成品视为孤儿的年龄阈值：10 分钟（在写的半成品 lastModified 就是当前时刻）。 */
+    private const val PENDING_ORPHAN_AGE_MS = 10 * 60_000L
+
+    /**
+     * A2 孤儿清理：宿主进程被杀时 [rollbackHd] 不执行，MediaStore 的 `IS_PENDING` 态半成品
+     * （落盘名 `.pending-<id>-<name>`，真机实测残留 102,759,493 B）会永久留在 `Movies/小红书`。
+     * 启动时后台扫一次，删「文件名以 `.pending-` 开头 **且** lastModified 早于 now-10min」的条目。
+     * **年龄门槛绝不能省**：正在下载的半成品 mtime 就是刚刚，删了等于毁掉正在跑的下载。
+     * 目录不存在 / listFiles 返回 null = 用户从没下过原片，属正常，静默返回（不打 WARN）。
+     */
+    private fun cleanupPendingOrphans(module: XposedModule) {
+        if (!pendingCleanupRan.compareAndSet(false, true)) return
+        runCatching {
+            ioExecutor.execute {
+                runCatching {
+                    val dir = java.io.File(
+                        android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES),
+                        "小红书",
+                    )
+                    val files = dir.listFiles() ?: return@runCatching   // 目录不存在/无权限：正常，静默
+                    val cutoff = System.currentTimeMillis() - PENDING_ORPHAN_AGE_MS
+                    var deleted = 0
+                    var freed = 0L
+                    for (f in files) {
+                        if (!f.name.startsWith(".pending-")) continue
+                        if (f.lastModified() >= cutoff) continue   // 新近修改 = 正在下载，绝不能删
+                        val size = f.length()
+                        if (f.delete()) {
+                            deleted++
+                            freed += size
+                            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 清理孤儿半成品 ${f.name} (${size / 1024}KB)")
+                        }
+                    }
+                    // 汇总行删 0 个也打（判据：能区分「扫过没孤儿」与「没扫」）
+                    module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 孤儿清理完成 删除=${deleted}个 释放=${freed / 1024}KB")
+                }.onFailure {
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 孤儿清理异常: ${it.message}")
+                }
+            }
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 孤儿清理调度失败: ${it.message}")
+        }
+    }
+
     private fun updateProgress(pct: Int) {
         mainHandler.post {
             runCatching {
@@ -796,9 +934,11 @@ object XhsVideoSave {
         val noteId = queryParam(url, "note_id") ?: return
         // t0 = 本轮 save 拦截时刻，透传给 V-5 低画质清理的时间窗锚点
         val t0 = System.currentTimeMillis()
+        ensureHdDedupeLoaded(module)   // A1：首次用到时读盘合并（跨进程去重；读失败退回纯内存）
         val last = hdDedupe[noteId] ?: 0L
         if (t0 - last < HD_DEDUPE_MS) return   // V-6：命中即连询问卡都不弹
         hdDedupe[noteId] = t0
+        persistHdDedupe(module)        // A1：变更后异步落盘，绝不阻塞本拦截线程
 
         // 候选集（体积探测选最大，物理判据）：采集链全部候选 + 响应 download_url
         val candidates = LinkedHashSet<String>()
@@ -881,7 +1021,10 @@ object XhsVideoSave {
                     Thread({
                         runCatching { pickBestAndDownload(app, noteId, candidates, t0, module) }
                             // V-6：HD 下载成功后再写一次去重锚，避免同 note 短时间反复弹卡（E11）
-                            .onSuccess { hdDedupe[noteId] = System.currentTimeMillis() }
+                            .onSuccess {
+                                hdDedupe[noteId] = System.currentTimeMillis()
+                                persistHdDedupe(module)   // A1：成功锚同样落盘
+                            }
                             .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下失败 noteId=$noteId: ${it.message}") }
                         hdActive = false
                         dismissProgress()
@@ -966,10 +1109,14 @@ object XhsVideoSave {
      *  → IS_PENDING=0 + DATE_ADDED/DATE_TAKEN；任何失败/异常回滚删 uri。
      * 注：IS_PENDING 只是写入正确性卫生——宿主自身落盘并不置它（idc/w.java:730-760），
      * 「文件消失」的实质修复是流式写 + 两份校验 + 失败回滚；目录/文件名维持原样。
+     *
+     * A3：读取阶段 IOException 走**运行内**续传（重发带 `Range: bytes=<已写>-` 的请求，206 追加 /
+     * 200 回落从头），最多 3 次；**不是跨进程续传**——宿主进程被杀仍从 0 重下（残片由 [cleanupPendingOrphans] 清）。
      */
     private fun downloadVideoHd(ctx: android.content.Context, noteId: String, startUrl: String, t0: Long, module: XposedModule) {
         var u = startUrl
         var redirects = 0
+        var resumeAttempt = 0   // A3 运行内续传已用次数（上限 HD_RESUME_MAX_RETRY）
         var total = 0L
         var written = 0L
         var contentType: String? = null
@@ -986,6 +1133,8 @@ object XhsVideoSave {
                 conn.instanceFollowRedirects = false
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Mobile Safari/537.36")
                 conn.setRequestProperty("Referer", "https://www.xiaohongshu.com/")
+                // A3 运行内续传：已写字节 > 0 才带 Range（首次请求不带）；服务端忽略它则回 200（见下分支）
+                if (written > 0) conn.setRequestProperty("Range", "bytes=$written-")
                 try {
                     when (val code = conn.responseCode) {
                         in 300..399 -> {
@@ -993,38 +1142,50 @@ object XhsVideoSave {
                             u = conn.getHeaderField("Location") ?: run { rollbackHd(ctx, ourUri); return }
                             continue
                         }
-                        200 -> {
-                            total = conn.contentLengthLong
-                            contentType = conn.contentType
-                            val ctLower = contentType?.lowercase()?.substringBefore(';')?.trim()
-                            val isMov = ctLower == "video/quicktime"
-                            name = if (isMov) "xhs_${noteId}_origin.mov" else "xhs_${noteId}_hd.mp4"
-                            val values = android.content.ContentValues().apply {
-                                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, name)
-                                put(android.provider.MediaStore.Video.Media.MIME_TYPE, if (isMov) "video/quicktime" else "video/mp4")
-                                put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/小红书")
-                                put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+                        // A3：206 = 带 Range 请求被接受（续传），按追加写续上剩余字节
+                        200, 206 -> {
+                            if (code == 200 && written > 0) {
+                                // 服务端不支持 Range（忽略它回 200 全量）：视为从头开始，written 归零重写
+                                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下 续传被拒（回 200），从头重下")
+                                written = 0
                             }
-                            val uri = ctx.contentResolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return
-                            ourUri = uri
-                            // 流式落盘（V-4）：边读边写，不再全量驻留内存；Content-Length 已知时按字节算进度
-                            ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                            // 首写才定 Content-Type/文件名并 insert（续传沿用同一 uri，不能再插一条）
+                            if (ourUri == null) {
+                                total = conn.contentLengthLong
+                                contentType = conn.contentType
+                                val ctLower = contentType?.lowercase()?.substringBefore(';')?.trim()
+                                val isMov = ctLower == "video/quicktime"
+                                name = if (isMov) "xhs_${noteId}_origin.mov" else "xhs_${noteId}_hd.mp4"
+                                val values = android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, name)
+                                    put(android.provider.MediaStore.Video.Media.MIME_TYPE, if (isMov) "video/quicktime" else "video/mp4")
+                                    put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/小红书")
+                                    put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+                                }
+                                ourUri = ctx.contentResolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return
+                            }
+                            val uri = ourUri   // 上面 insert 分支已保证非空
+                            // 流式落盘（V-4）：边读边写，不再全量驻留内存；Content-Length 已知时按字节算进度。
+                            // A3 模式：已写字节 > 0 用追加（"wa"），否则清空重写（"rwt"）——首写与「服务端不支持
+                            // Range」两条路径都落在 "rwt" 上，续传（206）落在 "wa" 上。
+                            ctx.contentResolver.openOutputStream(uri, if (written > 0) "wa" else "rwt")?.use { out ->
                                 conn.inputStream.use { input ->
                                     val buf = ByteArray(128 * 1024)
-                                    var done = 0L
+                                    var done = written   // A3：进度按累加字节续，不退回 0
                                     var lastPct = -1
                                     while (true) {
                                         val n = input.read(buf)
                                         if (n < 0) break
                                         out.write(buf, 0, n)
                                         done += n
+                                        // A3：逐块推进 written——读中断时 Range 起点/追加偏移必须等于已落盘字节
+                                        written = done
                                         if (total > 0) {
                                             val pct = ((done * 100) / total).toInt()
                                             if (pct != lastPct) { lastPct = pct; updateProgress(pct) }
                                         }
                                         if (done > MAX_VIDEO_BYTES) { rollbackHd(ctx, uri); return }
                                     }
-                                    written = done
                                 }
                             }
                             if (total <= 0) updateProgress(100)
@@ -1036,6 +1197,20 @@ object XhsVideoSave {
                             return
                         }
                     }
+                } catch (io: java.io.IOException) {
+                    // A3 **运行内**续传：只救本进程内的读中断（SocketTimeout / 连接被掐）；重试 = 外层循环重发
+                    // 一次带 Range 的请求。进程被杀不在此列（从 0 重下，残片交 A2 清）。
+                    if (resumeAttempt >= HD_RESUME_MAX_RETRY) {
+                        module.log(Log.WARN, MountEngine.TAG,
+                            "$JUDGE_PREFIX HD直下 续传重试耗尽（已写 ${written / 1024}KB / 共 ${total / 1024}KB）: ${io.message}")
+                        throw io   // 交外层 catch：rollbackHd + 抛（保持既有失败语义）
+                    }
+                    resumeAttempt++
+                    val delay = HD_RESUME_BACKOFF_BASE_MS shl (resumeAttempt - 1)   // 1s → 2s → 4s
+                    module.log(Log.WARN, MountEngine.TAG,
+                        "$JUDGE_PREFIX HD直下 读取中断，${delay}ms 后第 $resumeAttempt 次续传（Range: bytes=$written-）: ${io.message}")
+                    Thread.sleep(delay)
+                    continue
                 } finally {
                     conn.disconnect()
                 }
