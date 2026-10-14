@@ -11,7 +11,7 @@ import top.honorhook.FeatureCatalog
  *
  * - 本地 SharedPreferences：UI 即时读取显示（框架未连接也可用）；
  * - 远端 prefs（FeatureCatalog.REMOTE_GROUP）：hook 侧在目标进程只读此通道。
- * 默认全开；关闭某功能后需目标进程重启（下次注入读取）才生效（远端 prefs 语义）。
+ * 默认关（2026-10-14 产品规则：全新安装全关）；开关改动需目标进程重启（下次注入读取）才生效（远端 prefs 语义）。
  */
 object FeatureStore {
 
@@ -21,6 +21,11 @@ object FeatureStore {
 
     @Volatile
     private var prefs: SharedPreferences? = null
+
+    /** 目录索引：key → Feature（默认值 / 互斥查表用；targets 声明后不可变，lazy 建一次）。 */
+    private val featureIndex: Map<String, FeatureCatalog.Feature> by lazy {
+        FeatureCatalog.targets.flatMap { it.features }.associateBy { it.key }
+    }
 
     /**
      * 开关状态的 **Compose 可观察镜像**（[init] 时从本地 prefs 灌入）。
@@ -35,19 +40,21 @@ object FeatureStore {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         FeatureCatalog.targets.forEach { target ->
             target.features.forEach { feature ->
-                states[feature.key] = prefs?.getBoolean(feature.key, true) ?: true
+                states[feature.key] =
+                    prefs?.getBoolean(feature.key, feature.defaultEnabled) ?: feature.defaultEnabled
             }
         }
     }
 
-    /** 读开关（Compose 可观察；默认开）。 */
-    fun isEnabled(key: String): Boolean = states[key] ?: true
+    /** 读开关（Compose 可观察；默认关——2026-10-14 产品规则：全新安装全关）。 */
+    fun isEnabled(key: String): Boolean =
+        states[key] ?: featureIndex[key]?.defaultEnabled ?: false
 
     /**
      * 写开关：本地镜像 + 远端下发。
      *
      * @return 远端下发是否成功。`false` 表示框架未连接或写入抛异常 —— 此时 hook 侧读不到，
-     *   仍按默认全开运行，UI 必须如实告知用户（不能只改本地就当生效了）。
+     *   仍按默认关运行，UI 必须如实告知用户（不能只改本地就当生效了）。
      */
     data class PushResult(val sent: Int, val total: Int, val connected: Boolean)
 
@@ -77,16 +84,30 @@ object FeatureStore {
     fun setEnabled(key: String, enabled: Boolean): Boolean {
         states[key] = enabled
         prefs?.edit()?.putBoolean(key, enabled)?.apply()
+        // 互斥功能（2026-10-14 产品规则：清后台「直杀 / 管家广播」只能开一个）：开 A 强制关 B，关 A 不触发。
+        // 互斥对方同样本地 + 远端双写；直接写 states/prefs（不递归调 setEnabled，避免对方再触发互斥成环）。
+        // UI 各开关入口都经此处单点生效；对方行读 states（Compose 可观察镜像）→ 自动重组合刷新。
+        val excludedNow = if (enabled) {
+            featureIndex[key]?.excludesWith?.takeIf { it != key && isEnabled(it) }
+        } else {
+            null
+        }
+        if (excludedNow != null) {
+            states[excludedNow] = false
+            prefs?.edit()?.putBoolean(excludedNow, false)?.apply()
+        }
         val service = FrameworkState.current() ?: run {
-            Log.w(TAG, "LSPosed 未连接，开关只写入本地（hook 侧保持默认开）: $key")
+            Log.w(TAG, "LSPosed 未连接，开关只写入本地（hook 侧保持默认关）: $key")
             return false
         }
         return runCatching {
-            service.getRemotePreferences(FeatureCatalog.REMOTE_GROUP)
-                .edit().putBoolean(key, enabled).apply()
+            val editor = service.getRemotePreferences(FeatureCatalog.REMOTE_GROUP).edit()
+            editor.putBoolean(key, enabled)
+            excludedNow?.let { editor.putBoolean(it, false) }
+            editor.apply()
             true
         }.getOrElse { t ->
-            Log.w(TAG, "远端 prefs 下发失败（本地已生效，hook 侧保持默认开）: $key", t)
+            Log.w(TAG, "远端 prefs 下发失败（本地已生效，hook 侧保持默认关）: $key", t)
             false
         }
     }

@@ -51,43 +51,31 @@ val LAUNCHER_POINTS_18_0_0_234 = listOf(
         feature = FeatureCatalog.KEY_LAUNCHER_KEEP_FOLDER_OPEN,
         description = "R2 回到桌面后自动重开该文件夹（走系统自身开文件夹路径，动画与遮罩完整）",
     ),
-    // K1 垃圾桶捕获：ClearAllButton onClick → RecentsView.dismissAllTasks(View)（RecentsView.java:3717，
-    // 全工程唯一调用方）——垃圾桶清后台的专属入口，进 hook 时 recents 里还留着清后台前的全部任务。
-    // 逆向依据 docs/reverse/launcher-recents-keepcurrent.md §一/§二。
+    // N1 垃圾桶捕获（荣耀 ClearBox 链路）：onClick 是 clear_all_recents_image_button 的唯一 listener
+    // （HnRecentsClearBox.onFinishInflate :366-374 绑定）。feature 留空 = 载体点，运行时由
+    // keepAtmsEnabled/keepManagerEnabled 组合门控（两开关全关则零干预）。
     HookPoint(
-        id = "launcher:RecentsView.dismissAllTasks",
+        id = "launcher:HnRecentsClearBox.onClick",
         kind = "ARM_KEEP_CURRENT",
-        className = "com.android.quickstep.views.RecentsView",
-        methodName = "dismissAllTasks",
+        className = "com.hihonor.android.launcher.quickstep.views.HnRecentsClearBox",
+        methodName = "onClick",
         paramCount = 1,
         returnType = "void",
-        feature = FeatureCatalog.KEY_LAUNCHER_RECENTS_KEEP_CURRENT,
-        description = "K1 垃圾桶入口捕获：记下前台任务（保留集）与其余任务（移除集），供 K2/K3 消费",
+        feature = "",
+        description = "N1 荣耀垃圾桶捕获：记保留集（运行任务）与移除集（其余卡片 ids+Task 对象），供 N2 消费",
     ),
-    // K2 全杀收口替换：动画 onEnd → ActivityManagerWrapperEx.removeAllRecentTasks()（:3634，
-    // UI_HELPER_EXECUTOR 线程）。最终 binder ActivityTaskManager.removeAllVisibleRecentTasks() 无排除参数
-    // ⇒ 只能在调用侧替换：flag 有效时改为逐个 removeTask(id)（与单卡划走同 API，:87），不 proceed。
+    // N2 全杀收口替换：removeHwAllTask 是荣耀清后台唯一收口（RemoveTaskThread → 广播系统管家，
+    // ActivityManagerWrapperEx.java:124）。flag 有效时整条替换（A=ATMS 逐个 removeTask / B=逐个
+    // sendRemoveTaskToSystemManager 广播），随后反射 countDown sCountDownLatch（public static，
+    // 不放行会卡 await 20s），不 proceed；无效透传原生。
     HookPoint(
-        id = "launcher:ActivityManagerWrapperEx.removeAllRecentTasks",
-        kind = "REMOVE_ALL_KEEP_CURRENT",
+        id = "launcher:ActivityManagerWrapperEx.removeHwAllTask",
+        kind = "REMOVE_HW_ALL_KEEP_CURRENT",
         className = "com.hihonor.android.systemuisharedlib.systemui.shared.system.ActivityManagerWrapperEx",
-        methodName = "removeAllRecentTasks",
+        methodName = "removeHwAllTask",
         paramCount = 0,
         returnType = "void",
-        feature = FeatureCatalog.KEY_LAUNCHER_RECENTS_KEEP_CURRENT,
-        description = "K2 全杀收口替换：flag 有效时逐个 removeTask（保住保留集），无效透传原生全杀",
-    ),
-    // K3 回桌面步替换：RecentsView.startHome() 无参（:2696）。注意它还有别的调用方
-    // （点 overview 空白回桌面 :1674/:1676）⇒ 必须 flag 门控，只在垃圾桶 flow 置位后替换为
-    // startActivityFromRecents(保留id, null)（recents 点卡片回 app 同一条路）。
-    HookPoint(
-        id = "launcher:RecentsView.startHome",
-        kind = "START_TASK_INSTEAD_HOME",
-        className = "com.android.quickstep.views.RecentsView",
-        methodName = "startHome",
-        paramCount = 0,
-        returnType = "void",
-        feature = FeatureCatalog.KEY_LAUNCHER_RECENTS_KEEP_CURRENT,
-        description = "K3 回桌面步替换：flag 有效时热回保留任务，失败/无效透传原生回桌面",
+        feature = "",
+        description = "N2 全杀收口替换：flag 有效时按开关 A/B 逐个移除移除集并放行 latch，无效透传原生",
     ),
 )

@@ -1,100 +1,113 @@
-# 最近任务「清后台保留当前 app」— 逆向分析与方案（待实现）
+# 最近任务「清后台保留当前 app」— 逆向分析与方案（荣耀 ClearBox 链路，已重构实现）
 
 > 需求：垃圾桶清后台时，保留清后台前的前台 app（热回原任务，不杀不冷启）。
 > 拍板（2026-10-12）：**热保留** + **仅垃圾桶按钮生效**。
-> 状态：**已实现**（K1-K3 三点，1013c45）；2026-10-13 修复初版缺陷（§二·2）后待真机回归。
+> 状态：**已实现**。v1（1013c45）挂 quickstep 三点 K1/K2/K3——**真机实测全落空，已删**
+> （§一·1）；2026-10-14 重构为荣耀 ClearBox 链路 N1/N2 两点 + A/B 互斥开关（本 commit，§四）。
 
 ## 一、真机链路实证（launcher 18.0.0.234，AAK-AN00 MagicOS）
 
-垃圾桶按钮 UI 实证：UI dump `.buildtmp/ui_20261012-223550.xml`，
-`resource-id=com.hihonor.android.launcher:id/clear_all_recents_image_button`，
-容器 `recents_bottom_area`（overview_panel2_container 内）。
+### 1. quickstep 链路作废声明
 
-点击链（jadx，`HnLauncher6.apk` classes.dex，类名方法名全部未混淆）：
+v1 方案假设的链路（`RecentsView.dismissAllTasks` → `removeAllRecentTasks` → `startHome`）
+在荣耀上**永不触发**：真机 dump `.buildtmp/ui_rc.xml` 中垃圾桶按钮
+`resource-id=com.hihonor.android.launcher:id/clear_all_recents_image_button`（ClearBox 布局），
+listener 绑定在 `HnRecentsClearBox`；quickstep 侧 `overview_clear_all_button_launcher3` 计数 **0**
+（不在视图树，AOSP 原生垃圾桶入口被荣耀替换）。故 K1（`RecentsView.dismissAllTasks`）、
+K2（`ActivityManagerWrapperEx.removeAllRecentTasks`）、K3（`RecentsView.startHome`）三点
+hook 全部删除。
+
+### 2. 荣耀真实链路（反编译直证，行号均在 jadx 产物内核对）
+
+UI 实证：`.buildtmp/ui_rc.xml`，`clear_all_recents_image_button` 在视图树（ClearBox 布局）。
 
 ```
-ClearAllButton onClick
-  → RecentsView.dismissAllTasks(View)                    com/android/quickstep/views/RecentsView.java:3717
-    → createAllTasksDismissAnimation(300)                 // 卡片飞走动画（:3604）
-      → 动画 onEnd
-        → finishRecentsAnimation(true,false)              // :3621 lambda$createAllTasksDismissAnimation$29
-        → ActivityManagerWrapperEx.removeAllRecentTasks() // ★ 全杀收口 :3634 —— post 到 UI_HELPER_EXECUTOR（后台线程，晚于下行执行）
-        → removeTasksViewsAndClearAllButton()
-        → RecentsView.startHome()                         // ★ 回桌面 :3645
+HnRecentsClearBox.onClick(View)                          HnRecentsClearBox.java:406（public @Override，
+  → startRemoveTask()                                    :841   onFinishInflate :366-374 绑定 = 唯一 listener）
+    → 内部类 RemoveTaskThread.run()
+      → removeTaskProcess()
+        → ActivityManagerWrapperEx.removeHwAllTask()      ActivityManagerWrapperEx.java:124（shlib，public 无参 void）
+          → HwRecentsTaskUtils.sendRemoveAllTask(context) 发广播给 com.hihonor.systemmanager
+        → HnRecentsClearBox.sCountDownLatch.await(20000)  latch public static :158，初始 count=1；
+                                                           唯一 countDown 在管家「清后台回执」广播 receiver :174
 ```
 
-关键事实：
+shlib 辅证（`.buildtmp/shlib-jadx`，HnSystemUISharedLib）：
 
-1. **kill 收口无参**：`ActivityManagerWrapper#removeAllRecentTasks()`
-   （`com.android.systemui.shared.system.ActivityManagerWrapper`，在
-   `/system/framework/HnSystemUISharedLib.jar`，已拉取 `.buildtmp/HnSystemUISharedLib.jar`），
-   最终 `ActivityTaskManager.getService().removeAllVisibleRecentTasks()`（Honor 扩展 binder，无排除参数）。
-   ⇒ 过滤只能在调用侧（launcher 进程）做。
-2. **回 app 现成 API**：`ActivityManagerWrapper.startActivityFromRecents(taskId, options)`
-   → ATMS.startActivityFromRecents —— recents 点卡片回 app 就是它，launcher 进程有权限，不需新造启动逻辑。
-3. **保留对象**：`RecentsView.getRunningTaskView()`（:2779）/ `mRunningTaskViewId`
-   —— quickstep 原生维护"进 overview 前的前台任务"，语义正好是需求里的"当前 app"。
-4. **system_server 侧过滤死路**：api 102 fork 无 `onSystemServerLoaded`（docs/reverse/README.md §三 已判"放弃勿重评"）。
-5. **单卡划走** 走 `removeTask(taskId)` → `ATMS.removeTask(taskId)`（ActivityManagerWrapperEx.java:87），
-   与垃圾桶路径不同入口，不受本方案影响。
+1. **单卡划走通道**：`ActivityManagerWrapperEx.removeTask(int)`（:87）→ 基类 :172 → ATMS binder。
+2. **回 app 通道**：`ActivityManagerWrapperEx.startActivityFromRecents(int, ActivityOptions)`（:79）
+   → 基类 :142 → ATMS binder，返回 boolean——recents 点卡片回 app 同一条路。
+3. **单任务广播**：`HwRecentsTaskUtils.sendRemoveTaskToSystemManager(Context, Task)`（:178，
+   public static；Task = `com.hihonor.android.systemuisharedlib.systemui.shared.recents.model.Task`，
+   从 `TaskView.getTask()` 拿，可能 null）——荣耀原生单卡清卡就是它。
+4. **回桌面原生自动**：`HnLauncherRecentsView.onAllTasksRemoved`（:152）→
+   `goToState(LauncherState.NORMAL)`，无需 hook。
+5. **关键 public 面**：`HnRecentsClearBox.mRecentsView`（:139，public 字段，运行时类型
+   `HnLauncherRecentsView`，继承 quickstep `RecentsView`：`getRunningTaskView()` :2779、
+   `getTaskViewCount()` :2233、`requireTaskViewAt(int)` :3896 全 public）；
+   `TaskView.getTaskIds()`（TaskView.java:575，可能含 -1 要过滤）与 `getTask()`（可能 null）。
 
-## 二、方案（3 hook 点，全直连轨，零 DexKit）
+## 二、方案（N1/N2 两点 + A/B 互斥开关，全直连轨，零 DexKit）
 
 | # | 挂点 | 位置 | 行为 |
 |---|---|---|---|
-| 1 | `RecentsView#dismissAllTasks(View)` | launcher base | 进 hook 记 runningTaskId 到模块侧 flag（垃圾桶专属入口，全局仅 `$$ExternalSyntheticLambda20` 一个调用方） |
-| 2 | `ActivityManagerWrapper#removeAllRecentTasks()` | HnSystemUISharedLib（framework jar，launcher 同 classloader） | flag 有效时替换：除保留 id 外逐个 `removeTask(id)`；flag 无效透传原逻辑 |
-| 3 | `RecentsView#startHome()` | launcher base | flag 有效时替换为 `startActivityFromRecents(保留id, null)`，成功后清 flag；失败/无效回落原 startHome |
+| N1 | `HnRecentsClearBox#onClick(View)` | launcher base | 垃圾桶捕获：keep = `getRunningTaskView().getTaskIds()` 过滤 -1（quickstep 原生维护"进 overview 前的前台任务"）；kill = 其余卡片 `getTaskIds()` 过滤 -1 且不在 keep 集 + 同卡 `getTask()` 非 null 收 shlib Task 对象（B 路径广播入参）。两开关全关时不捕获（零反射）。 |
+| N2 | `ActivityManagerWrapperEx#removeHwAllTask()` | HnSystemUISharedLib | 全杀收口替换：flag 有效时整条替换、不 proceed——A = 逐个 `removeTask(id)`（ATMS，单卡划走同 API）/ B = 逐个 `sendRemoveTaskToSystemManager(Context, Task)` 广播管家；随后反射 countDown `sCountDownLatch`；无效透传原生。 |
 
-### 门控与边界（实现必读）
+**A/B 开关语义**：`launcher.recents_keep_current_atms`（直杀）与
+`launcher.recents_keep_current_manager`（管家广播）互斥，**同开时 A 生效**（运行时 WARN 留痕）。
+feature 字段留空 = 载体点，两开关全关则零干预。
 
-- **flag 生命周期**：#1 置位 → #2/#3 消费后清。`RecentsView.startHome()` 还有别的调用方
-  （点 overview 空白处回桌面，RecentsView.java:1674/1676）——无 flag 一律透传，不影响原行为。
-  异常路径（动画被中断、flag 残留）需要兜底清（如 #3 消费即清 + 超时清）。
-- **`startHome()` 挂点选择**：`HnRecentsView`（abstract）无无参 `startHome()` override，
-  concrete 只有 `RecentsView.startHome()` 一处（:2696），挂它即可。
-- **保留 id 取法**：`getRunningTaskView().getTaskViewId()`/task id，避免反射字段
-  `mRunningTaskViewId`（方法比字段稳）。具体 getter 由实现子任务从反编译产物再核对。
-- **锁定任务**：`removeAllVisibleRecentTasks()` 原生语义未逆向（可能豁免 locked task）；
-  逐个 `removeTask` 会绕过。实现时须过滤 `RecentTaskInfo` locked/不可移除项，真机验证。
-- **回落路径**：保留 id 无效（task 已死/分身异常）→ 原逻辑全杀 + 回桌面，功能静默降级。
+**latch 放行（必做）**：A 移除与 B 广播都不产生管家那条 REPLY_TRIM_ALL 回执
+（原生唯一 countDown 在广播 receiver，:174）⇒ 不手动 countDown 宿主线程卡 `await(20000ms)`。
+无论 removed 成败都放行；拿不到 latch 只 WARN（宿主 20s 自行超时，可接受降级）。
+
+**600ms 热回**：dismiss 动画 300ms + `resetAfterDismiss` 收尾（清卡片视图/退出 overview），
+太早 `startActivityFromRecents` 会被收尾顶掉。主线程 `Handler.postDelayed(600ms)` 后遍历
+保留 id 逐个热回，第一个成功即停；**热回失败不补任何动作**——原生
+`onAllTasksRemoved → goToState(NORMAL)` 的回桌面已在跑，回落 = 停在桌面，可接受。
+
+**语义代价**：管家负责的「已清理缓存/释放内存」toast 不再发生（A 完全绕过管家；B 走单任务
+通道，管家不聚合播报）。清后台的卡片清理本身不受影响。
+
+**消费模型**：N2 是唯一消费方、单点同步执行（RemoveTaskThread），消费即全清（先接局部变量
+再置空字段，热回 600ms 后不读字段）；10s 超时兜底残留脏标记。v1 的「K2/K3 拆分消费」
+缺陷修复随 quickstep 链路一并作废。
 
 ## 三、风险
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
-| shlib/quickstep 类名跨 MagicOS 大版本混淆 | 中 | 现基线 kept（keep 名单）；可配 DexKit 兜底锚点：`removeAllVisibleRecentTasks` 调用特征 + `clear_all_recents_image_button` 资源 id |
-| 逐个 removeTask 与原生全杀语义差异（动画/窗口清理） | 中 | 与单卡划走同 API，行为可预期；真机验证观感 |
-| 锁定任务被误杀 | 中 | 过滤 locked + 验证清单覆盖 |
-| `removeAllRecentTasks` 还有其他调用方被误过滤 | 低 | flag 只在垃圾桶 flow 置位；grep 全调用方见 §二 |
-| 分身/多用户 task id | 低 | task id 全局唯一；验证清单覆盖 |
+| 热回时序（600ms 不够/过早） | 中 | 首个成功即停 + 失败静默回落桌面；真机验证观感，必要时调 [HOT_RETURN_DELAY_MS] |
+| B 广播无回执（管家不回 REPLY_TRIM_ALL） | 中 | N2 主动 countDown latch，不依赖回执；latch 反射失败也只 WARN |
+| `onClick` @Override 必保名 | 低 | 覆写 `View.OnClickListener.onClick`，接口方法 R8/宿主不可混淆改名；shlib 类（HnRecentsClearBox 依赖的 ActivityManagerWrapperEx/HwRecentsTaskUtils）全未混淆 |
+| 运行卡 Task 被误广播（B） | 低 | N1 只收「贡献了移除 id」的卡的 Task，运行卡（保留集）贡献 0 个移除 id ⇒ Task 不进移除对象集 |
+| `removeHwAllTask` 出现其他调用方 | 低 | flag 只在 N1（onClick）置位 + 10s 超时；收口语义上垃圾桶 flow 独占 |
+| 锁定任务被误杀 | 中 | 逐个移除绕过原生全杀的锁定豁免（若有）；验证清单覆盖 |
+| 分屏合并卡 B 路径杀不全（已知缺口） | 低 | 合并卡一卡双 id，B 只广播 `task.key.id` 一个（A 路径按 ids 全杀不受影响）；分屏场景建议用 A，后续需要时 N1 改为按 Task 逐 id 构造广播 |
+| shlib/launcher 类跨 MagicOS 大版本漂移 | 中 | 现基线 18.0.0.234 全 public 直连零混淆面；失效走 `installed N/M` + NOT_RESOLVED 常态兜底 |
 
 ## 四、实现归属
 
-- FeatureCatalog：launcher 目标下新 key（`launcher.recents_keep_current`，默认开），UI 文案两条（title/desc）。
-- Hook 侧：`LauncherHook` 目标内新挂载任务（shlib 类属 framework classloader，launcher 进程内直挂）。
-- 按项目纪律：编码派独立子任务，先出变更清单。
+- 本 commit（2026-10-14 重构）：删 K1/K2/K3 三点与 `REMOVE_ALL_KEEP_CURRENT`/
+  `START_TASK_INSTEAD_HOME` 两 kind；增 `HnRecentsClearBox.onClick`（ARM_KEEP_CURRENT）与
+  `ActivityManagerWrapperEx.removeHwAllTask`（REMOVE_HW_ALL_KEEP_CURRENT）两点；
+  `LauncherHook` 增 `removeTasksViaManager`/`countDownLatchForRemoveTask`/`postHotReturn`
+  三函数与 `killTaskObjs` 字段。
+- FeatureCatalog：`launcher.recents_keep_current` 一 key 拆二
+  （`launcher.recents_keep_current_atms` / `launcher.recents_keep_current_manager`），
+  strings.xml 对应四条文案。
+- 历史：v1 三点 1013c45；2026-10-13 K2/K3 拆分消费修复（随链路作废）；本重构依据
+  真机 dump + launcher/shlib 双 jadx 产物。
 
 ## 五、验证清单（用户自执行，AI 不代测）
 
-1. QQ 前台 → 上滑进 recents → 垃圾桶：其他卡消失，**自动回到 QQ 原界面**（热，非冷启）。
-2. 仅有 QQ 一个任务时点垃圾桶：不杀、回 QQ。
-3. 点 overview 空白处回桌面：行为不变（startHome 透传）。
-4. 单卡逐个划走（侧滑删卡）：行为不变。
-5. 三指清后台（若设备支持）：行为不变（仅垃圾桶生效）。
-6. 锁定任务（卡片锁图标）存在时点垃圾桶：锁定卡是否豁免。
-7. 分身应用（微信/QQ 分身）任务存在时点垃圾桶：正常清、保留逻辑不串。
-8. 判据：modlog `installed N/M` 新挂载点全绿 + 上述场景观察。
-
-## 六、初版缺陷与修复（2026-10-13）
-
-**症状**：真机实测无效果（垃圾桶清后台后回到桌面，未热回原任务）。
-
-**根因（launcher 18.0.0.234 反编译实证）**：`lambda$createAllTasksDismissAnimation$28`
-把 `removeAllRecentTasks()` **post 到 UI_HELPER_EXECUTOR**，随后 `startHome()` 在主线程
-立即执行——真实顺序 **K3 先、K2 后**，与初版实现的「K2 先清 flag、K3 后消费」假设相反。
-初版 K3 消费时清空全部三个共享 flag ⇒ 几毫秒后 K2 读空透传原生全杀 ⇒ 刚热回去的保留任务
-被一并杀掉。
-
-**修复**：K2 只消费 `killTaskIds`、K3 只消费 `keepTaskIds`（互不清对方集合），时间戳双方
-都消费完才清，10s 超时兜底保留。两种执行顺序均正确。
+1. 判据：modlog `installed 5/5`（launcher 目标五点：L1 + R1/R2 + N1/N2 全绿）。
+2. 开 A（直杀）开关：QQ 前台 → 上滑进最近任务 → 点垃圾桶：其他卡消失、**QQ 不退**，
+   ~0.6s 后自动热回 QQ 原界面（热，非冷启）；原「已清理」类 toast 不再出现。
+3. 关 A 开 B（管家广播）：同场景同预期（逐卡消失，当前 app 保留并热回）。
+4. 两开关全关：垃圾桶行为与原生完全一致（全杀 + 回桌面 + 管家 toast 照常）。
+5. A+B 同开：行为走 A（直杀），日志有 `RECENTS-KEEP 两开关同开，按直杀(A)执行` WARN。
+6. 仅一个任务时点垃圾桶：不杀、正常回该任务（移除集为空 = 仅热回）。
+7. 回归：文件夹 R1/R2（从文件夹开应用返回桌面自动重开）与卡片标题 L1 不受影响。
+8. 逐卡划走、点 overview 空白回桌面：行为不变（不在这两个挂点的干预范围）。

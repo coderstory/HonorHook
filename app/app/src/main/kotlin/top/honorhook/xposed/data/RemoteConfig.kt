@@ -10,8 +10,9 @@ import top.honorhook.FeatureCatalog
  * - 宿主 App 经 `XposedService.getRemotePreferences(FeatureCatalog.REMOTE_GROUP)` 写开关；
  * - 本对象经 HookEntry 注入的 `getRemotePreferences` 只读，不依赖宿主进程存活。
  *
- * 默认开：读不到（未连接/框架未下发/异常）一律回 true，与历史「功能恒开」行为一致——
- * 关闭某功能仅在宿主显式写入 false 后生效（下次目标进程注入时读取）。
+ * 默认关（2026-10-14 产品规则：全新安装全关）：读不到（未连接/框架未下发/异常）一律回 false。
+ * 与 UI 侧 FeatureStore 默认关对齐（2026-10-14 产品规则：全新安装全关）——
+ * 开启某功能需宿主显式写入 true 后生效（下次目标进程注入时读取）。
  */
 object RemoteConfig {
 
@@ -27,7 +28,7 @@ object RemoteConfig {
         this.prefs = prefs
     }
 
-    /** 读功能开关；默认开（true）。 */
+    /** 读功能开关；默认关（2026-10-14 产品规则：全新安装全关，与 UI 侧 FeatureStore 默认关对齐）。 */
     fun isEnabled(key: String): Boolean =
-        runCatching { prefs?.getBoolean(key, true) ?: true }.getOrDefault(true)
+        runCatching { prefs?.getBoolean(key, false) ?: false }.getOrDefault(false)
 }

@@ -33,7 +33,8 @@ object FeatureCatalog {
 
     const val KEY_LAUNCHER_HIDE_TITLE = "launcher.hide_card_title"
     const val KEY_LAUNCHER_KEEP_FOLDER_OPEN = "launcher.keep_folder_open"
-    const val KEY_LAUNCHER_RECENTS_KEEP_CURRENT = "launcher.recents_keep_current"
+    const val KEY_LAUNCHER_RECENTS_KEEP_ATMS = "launcher.recents_keep_current_atms"
+    const val KEY_LAUNCHER_RECENTS_KEEP_MANAGER = "launcher.recents_keep_current_manager"
 
     const val KEY_SYSTEMUI_HIDE_SIM2 = "systemui.hide_sim2"
     const val KEY_SYSTEMUI_HIDE_5G = "systemui.hide_5g"
@@ -64,7 +65,15 @@ object FeatureCatalog {
     const val KEY_TRACK_BLOCK = "tracking.block"
     const val KEY_OTA_BLOCK = "ota.block"
 
-    data class Feature(val key: String, val titleRes: Int, val descRes: Int)
+    data class Feature(
+        val key: String,
+        val titleRes: Int,
+        val descRes: Int,
+        /** 默认开关态（全新安装落盘值）；全插件产品规则 = 默认关（2026-10-14），显式传 true 才默认开。 */
+        val defaultEnabled: Boolean = false,
+        /** 互斥功能 key：本开关被打开时该 key 强制落盘 false（UI 与 store 单点实现，见 FeatureStore.setEnabled）。 */
+        val excludesWith: String? = null,
+    )
 
     /**
      * [iconKey] 虚拟目标（非真实 app）的内置图标提示，UI 侧据此画 vector 而非 PackageManager 图标。
@@ -135,7 +144,14 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_LAUNCHER_HIDE_TITLE, R.string.feature_launcher_hide_card_title_title, R.string.feature_launcher_hide_card_title_desc),
                 Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, R.string.feature_launcher_keep_folder_open_title, R.string.feature_launcher_keep_folder_open_desc),
-                Feature(KEY_LAUNCHER_RECENTS_KEEP_CURRENT, R.string.feature_launcher_recents_keep_current_title, R.string.feature_launcher_recents_keep_current_desc),
+                Feature(
+                    KEY_LAUNCHER_RECENTS_KEEP_ATMS, R.string.feature_launcher_recents_keep_atms_title,
+                    R.string.feature_launcher_recents_keep_atms_desc, excludesWith = KEY_LAUNCHER_RECENTS_KEEP_MANAGER,
+                ),
+                Feature(
+                    KEY_LAUNCHER_RECENTS_KEEP_MANAGER, R.string.feature_launcher_recents_keep_manager_title,
+                    R.string.feature_launcher_recents_keep_manager_desc, excludesWith = KEY_LAUNCHER_RECENTS_KEEP_ATMS,
+                ),
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
         ),
