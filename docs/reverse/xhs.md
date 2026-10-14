@@ -38,7 +38,7 @@
 ```
 
 清晰度差距根源：`qc8.i.i` 拿显示 URL（`sns-webpic-*` 带 `!` 裁剪后缀）进 Fresco，存的就是压缩位图。
-XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `https://sns-img-bd.xhscdn.com/{token}` 原图直链。
+XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `https://sns-img-bd.xhscdn.com/{token}?imageView2/2/format/jpg/q/100` 原图直链（**必须带 q/100 参数**：只剥参数不加回会拿到同尺寸高压缩重编码，见 §六 X5 实证）。
 
 ## 三、挂载点总表
 
@@ -89,7 +89,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 - 替换规则（XHS-Downloader image.py 实证移植）：
   1. url 非 http/https 或 host 不含 `xhscdn.com`/`xiaohongshu.com` → 原样
   2. host 已是 `sns-img-bd.xhscdn.com` 且 path 无 `!` → 原样（防重入）
-  3. token = path 全段重组（等价 `split("/")[5:].join("/")`）后截到第一个 `!` → `https://sns-img-bd.xhscdn.com/{token}`
+  3. token = path 全段重组（等价 `split("/")[5:].join("/")`）后截到第一个 `!` → `https://sns-img-bd.xhscdn.com/{token}?imageView2/2/format/jpg/q/100`（**q/100 不可省**：2026-10-14 实测同尺寸下裸链 1,727,058 B vs q/100 11,114,503 B；`toBare()` 为不带参数的回落用裸链）
   4. 每 note 运行期 LRU 记忆已替换 url，省重复串操作
 - 覆盖面：笔记图（SPI 路径）+ 评论图（iu4/l 直调 qc8.i.h，h 是 i 的桥）——**一处 hook 双覆盖**。
 - 边界：live photo（vivo/oppo 双文件 zip 分支，iu4/l 内）不走 i.i 的单图解码，不覆盖；Fresco 缓存 miss 会走网络拉原图（正常路径）。
@@ -140,7 +140,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
   3. app 内存找图集（controller 图搜/adapter.setItems 快照）——sheet 图里图集实证为空；MultiTypeAdapter.setItems 真机不存在
   4. **外挂解析（定稿）**：X4 interceptor 旁路 `/api/sns/v1/note/imagefeed`（逐图 feed，进图浏览必发）+ `/note/detailfeed`，收 `images_list[]` 的 `original` 直链（优先）/`url`；noteId 三轨 = body `"note_id"` → URL query `note_id` → 沿用最近值；触发端点**精确匹配**（宽前缀 /note/ 会收进 user/posted 污染；homefeed 会灌整条信息流——实测 62 张污染）；单笔记 >30 张护栏丢弃。
   5. 直下：模块自己 HttpURLConnection（UA+Referer+302 跟随）→ MediaStore `Pictures/小红书`；URL 原图化 = 剥 `?`/`!` 参数，**换 host 已实证安全**（见下）。
-- **换 host + 剥 query 实证（2026-10-14，三条真机 URL）**：token 取 3 例——根级 `1040g0083269625nml6105pou5a8jchgaphip3tg`、`notes_pre_post/1040g3k0325ubij8hk64g5nlvfu908d75654m610`、`spectrum/1040g34o32617jo6fk6105qh81qbgfs01n02n15g`。同一 token 对 `sns-na-i6` / `sns-img-bd` / `ci.xiaohongshu.com` / `sns-img-qc` 四 host **返回字节完全相同**（644,430B / 1,956,636B / 159,039B）⇒ 换 host 无损，原「未实证」作废。剥 query 即原图：`notes_pre_post/…` 无参 1,956,636B vs 签名预览 644,430B。**注意 Content-Type**：原图可能回 `application/octet-stream`（非 `image/*`）⇒ 下载端**禁按 Content-Type 白名单拒收**（改用黑名单拒 `text/*` 错误页）。落地实现 `XhsImageUrl.kt`（host 固定 `sns-img-bd.xhscdn.com`）。
+- **换 host + 剥 query 实证（2026-10-14，三条真机 URL）**：token 取 3 例——根级 `1040g0083269625nml6105pou5a8jchgaphip3tg`、`notes_pre_post/1040g3k0325ubij8hk64g5nlvfu908d75654m610`、`spectrum/1040g34o32617jo6fk6105qh81qbgfs01n02n15g`。同一 token 对 `sns-na-i6` / `sns-img-bd` / `ci.xiaohongshu.com` / `sns-img-qc` 四 host **返回字节完全相同**（644,430B / 1,956,636B / 159,039B）⇒ 换 host 无损，原「未实证」作废。剥 query 即原图：`notes_pre_post/…` 无参 1,956,636B vs 签名预览 644,430B。**但只剥 query 不够——必须补回 `?imageView2/2/format/jpg/q/100`（2026-10-14 订正，真机 curl 实测）**：只保 token 时 CDN 回**同尺寸但高压缩重编码**（画质损失大），同一张 4284x5712 图：token A 裸链 1,727,058B / 加该 query（`w/4284` 同结果）= 11,114,503B；token B 裸链 4,917,390B / 加该 query = 12,014,146B；客户端自存同张 10,186,338B ⇒ `XhsImageUrl` AUTO 分支恒在 token 后追加该 query（`toOriginal`），裸链另存 `toBare` 供下载失败回落。**注意 Content-Type**：原图可能回 `application/octet-stream`（非 `image/*`）⇒ 下载端**禁按 Content-Type 白名单拒收**（改用黑名单拒 `text/*` 错误页）。落地实现 `XhsImageUrl.kt`（host 固定 `sns-img-bd.xhscdn.com`）。
 - **X5 真机实录（2026-10-14，4 图笔记）**：长按图片 →「保存」命中 `mh9.b` → 原生保存本张（客户端落 `/sdcard/DCIM/Camera_XHS_<ts><token路径>.jpg` 1,228,638B，**1728x2304**，X3 原图直链生效）→ 追加卡「检测到本篇还有 4 张」（采集自 `imagefeed`，首张 host 实测 `sns-na-i1.xhscdn.com`，改写后走 `sns-img-bd`）→「保存全部」→ 模块直下 **4/4** 落 `Pictures/小红书`（4.77/2.87/2.83/3.08 MB；首张 1728x2304 = 与客户端同分辨率，但为 CDN **原始字节**，远大于客户端重压的 1.23MB）。
 - 弹窗 Activity 来源：controller 图搜（Lazy 主动 getValue 解包 + Dialog 轨——LCBBottomSheetDialog.context）。
 - 边界：当前张会与原生保存重复一张（无现图 fileid 判定链路，接受重存）；视频笔记不弹（X4 已直链）。
@@ -181,7 +181,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 | XhsHook·X2 | no_watermark | MediaSaveConfig.c / qc8.j.b（DexHint classStrings=["disableAiWaterMark is ","SaveImagesHelper"]）/ ImageBean disable_ai getter（运行时注解反射） | `XhsHook·X2: installed N/3` |
 | XhsHook·X3 | hd_save | qc8.i.i（11 参，DexHint 四串锚）before 改 args[3] | `XhsHook·X3: installed N/1` |
 | XhsHook·X4 | video_save | okhttp3.OkHttpClient$Builder.build() before 注 Interceptor 代理 | `XhsHook·X4: installed N/1` |
-| XhsHook·X5 | batch_save | AsyncImageGalleryController.onAttach(Bundle) after 挂三击 | `XhsHook·X5: installed N/1` |
+| XhsHook·X5 | batch_save | `mh9.b#invoke`（图片长按面板「保存」点击 lambda）+ `d49.q#invoke`（视频保存发起） | `XhsHook·X5: installed N/2` |
 
 ### 实读偏差（与 §三 表述不一致处，以 jadx 实读为准）
 
@@ -199,7 +199,7 @@ X2c 无静态挂载点（运行时注解反射解析）⇒ 本 target 脚本核�
 ### 状态
 
 - ✅ 编译通过（`bash tools/dev.sh build`，2026-10-13）
-- ⏳ 未真机验证：判据 = modlog-f XhsHook 五行 `installed N/M`（X1 3 点/X2 3 点/X3 1 点/X4 1 点/X5 1 点）+ 各生效行；验证清单（保存受限帖/水印帖/AIGC 帖/评论图/视频帖/画廊三击）待用户自测
+- ✅ **真机验证通过（2026-10-14）**：判据 = modlog `XhsHook·X1: installed 3/3 · X2 3/3 · X3 1/1 · X4 1/1 · X5 2/2` 全绿（APK 1.1.0 / 宿主 9.49.1）；各功能端到端实证见 §三 与 `xhs-hd-fix-plan.md` §五/§六。原「未真机验证 + 验证清单（含画廊三击）」条目作废——画廊三击是已被否决的 v1 设计。
 
 ### 评审修复（2026-10-13，同轮 9 处）
 
