@@ -21,10 +21,11 @@
 | E12 | **`VideoInfoV2.b()` 全量收流** | `media.stream.{h264,h265,h266}` 三组全进 `VariableVideo` 列表，`d()==1`（default_stream）置 index 0；`videoInfoJson` 存原始 media JSON |
 | E13 | **客户端视频落 `DCIM`，文件名不含 noteId（源码级）** | 落盘收口 `idc/w.java:730-760` `h0(file, dir, displayName, move, mime)`：API29+ 仅 `dir==DCIM/MOVIES` 才作 relative_path，否则强制 `DCIM`；mime 以 `video` 开头 → `MediaStore.Video`；写入 `m0(uri, FileInputStream)`，**宿主自身不置 `IS_PENDING`**。视频保存三处调用点 `r01/p.java:27` / `w01/r.java:26` / `f65/n.java:39` 均 `h0(file, DIRECTORY_DCIM, "Camera/"+file.getName(), …, "video/mp4")` ⇒ `DISPLAY_NAME LIKE '%noteId%'` **源码级铁定 0 命中** |
 
-**【已决，2026-10-14 真机 V-8 取证】**：**有**。同一 note 响应体采出候选 8 个，最大档 `_533` = **6122KB**，落盘后 MP4 box 解析 = **1440x1920 hvc1(HEVC) 8.685s**，与 app 自报 `height:1920` 吻合 ⇒ **真原始档在网络响应体内，无需 WebView 会话**。旧打分法只到 `_258`/`_4610` 是漏档 bug，非服务端限制。回答完毕，见 `docs/reverse/xhs.md` §三 X4。
+**【已解决，2026-10-14 真机验收】**：真原始档 = **116,714,755 B（111.3 MiB）MOV，tkhd 3336x4448**，与 app 自报 `video.width/height=3336x4448` 完全一致。路线 = **移动版网页 `__INITIAL_STATE__.…video.consumer.originVideoKey`**（camelCase），拼 `https://sns-video-bd.xhscdn.com/{key}`；token 取自 app 响应的 `share_info.link`/`xsec_token`，取页必须**手机 UA + `xsec_source=app_share`**，且值需还原 `\uXXXX` 转义。全程**不需要登录 Cookie**。落地链见 `docs/reverse/xhs.md` §三 X4。
+副产物：`candidatesOf` 的 6000 字符固定窗口曾截断 `video_info_v2` 区段（7 档只采到 5 档、漏 4K `_532`=2160x2880 10,165,101B），已改为以「下一个 `video_info_v2`」为右界。**梯子再高也不是原片**（原片 3336x4448 永远大于梯子最大分辨率）。
 
-### V-9（**已作废，不启动**）—— 进程内 WebView 会话取真原始档
-- **作废依据（2026-10-14 真机）**：`_533` 已是 1440x1920 HEVC 原始档，取自普通响应体（无 sec 墙、无登录态依赖）。下面路线不需启动，留档仅备将来「原始档不在响应体」的版本变化。
+### V-9（**不再需要**）—— 进程内 WebView 会话取真原始档
+- **结论**：进程内 WebView **不需要**。同一目标（网页 state 的 `consumer.originVideoKey`）用**普通 `HttpURLConnection` + 手机 UA** 即可取到，无 sec 墙、无登录态依赖。下面 WebView 路线仅存历史备查。
 - 第三方取数链（`reference/xhs/XHS_Downloader_Android/.../XhsNoteParser.kt:172-182` 原文）：
   `key = video.consumer.originVideoKey ?? video.originVideoKey`；`isHttp(key) ? key : "https://sns-video-bd.xhscdn.com/${key.trimStart('/')}"`；
   同注释明写 **"stream/video IDs are not interchangeable with CDN keys"** —— 即我们试的 32 位 file id / 24 位 hex 都**不是** key（与 E4/E7 一致）。
@@ -116,3 +117,20 @@
 | T-1 | `dev.sh install` | 两段弹窗自动点掉，装后版本 1.1.0 |
 
 **残留风险（未解决，非本轮范围）**：V-6 跨进程去重仍是进程内 map，宿主进程重注入后会丢失 ⇒ 重启后同一 note 仍可能重复弹卡。
+
+## 六、原片路线验证（2026-10-14 11:02 真机，noteId 6acc41710000000002011d20）
+
+目标：第三方独立下载器对同一笔记拿到 117MB，模块此前最高只有 6.2MB 转码档。
+
+| 环节 | 真机判据 | 结果 |
+|---|---|---|
+| 窗口截断修复 | `选档 … 候选=15个`（修复前 8 个） | ✅ 7 档全采到，含 4K `_532` 2160x2880 10,165,101B |
+| 原片解析 | `原片解析成功 … https://sns-video-bd.xhscdn.com/spectrum/1040g0jg3267570r7ka005ps82fq22gu41b0t0eg` | ✅ 模块自解析（非外部工具） |
+| 选档 | `选档 … 原片=yes 选中=113979KB`（=116,714,755 B） | ✅ |
+| 落盘 | `HD直下完成 … 113979KB → Movies/小红书/xhs_…_origin.mov`，文件 116,714,755 B | ✅ 约 34s |
+| 内容正确性 | 拉回本机解析 MOV box：`tkhd 3336x4448`、`mvhd 8.685s` | ✅ 与 app 自报 `video.width/height=3336x4448` 一致 ⇒ 真原片非转码 |
+| 低画质清理 | `已删低画质文件 Camera_xhs_1791946912165.mp4 (1607KB < 113979KB)`；二扫 `无可删` | ✅ |
+
+对比：客户端自存 1,646,277 B ／ 修复前模块最佳 6,269,525 B ／ 4K 转码档 10,165,101 B ／ **原片 116,714,755 B**。
+
+**新发现的残留问题（仅记录，未改码）**：宿主进程被系统回收时 `rollbackHd()` 不执行，`IS_PENDING` 态的 `.pending-<id>-<name>` 半成品残留（实测一次残留 102,759,493 B）。根治需模块启动时扫 `.pending-*` 清理。

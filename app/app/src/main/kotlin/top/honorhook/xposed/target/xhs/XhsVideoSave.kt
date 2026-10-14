@@ -79,7 +79,6 @@ object XhsVideoSave {
     /** backup_urls 数组首元素（video.py backupUrls[0] 优先语义；实体序在 master_url 前）。 */
     private val P_BACKUP_URLS: Pattern = Pattern.compile("\"backup_urls\"\\s*:\\s*\\[\\s*\"([^\"]+)\"")
 
-    private const val REGION_MASTER_WINDOW = 6000
     private const val REGION_NOTE_ID_BACK = 8000
     private const val MAX_BODY = 524288L
     private const val URL_MAP_LIMIT = 500
@@ -108,6 +107,45 @@ object XhsVideoSave {
     }
 
     private val videoSources = ConcurrentHashMap<String, VideoSource>()
+
+    /**
+     * noteId → 分享页线索（share_info.link 或同级 xsec_token）。真原始档不在 app API 梯子里（E6/E7），
+     * 只在**移动版网页** `www.xiaohongshu.com/discovery/item/{id}` 的 `__INITIAL_STATE__` 里（camelCase
+     * `originVideoKey`）；取该页须带 fresh xsec_token——桌面 UA 抓同一页没有，且 `xsec_source=pc_feed`
+     * 会 302 到登录页（须 `app_share`）。link 是 app 侧已拼好的整条 URL（含 token），优先原样用。
+     */
+    private class NoteShare(val link: String?, val token: String?)
+
+    private val noteShares = ConcurrentHashMap<String, NoteShare>()
+
+    /**
+     * share_info.link（例：`https://www.xiaohongshu.com/discovery/item/<id>?…&xsec_source=app_share&xsec_token=…`）。
+     * app JSON 标准转义（非 web 的 `\/`），但仍走 [unescapeJson] 兜底。
+     */
+    private val P_SHARE_LINK: Pattern = Pattern.compile("\"link\"\\s*:\\s*\"([^\"]+)\"")
+
+    /** 从 share link 路径取 noteId（`.../discovery/item/<16-32hex>`）。 */
+    private val P_SHARE_LINK_ID: Pattern = Pattern.compile("discovery/item/([0-9a-f]{16,32})")
+
+    /** 同级 xsec_token（与 `"id"` 同级；noteId 就近取，见 harvestNoteShare）。 */
+    private val P_XSEC_TOKEN: Pattern = Pattern.compile("\"xsec_token\"\\s*:\\s*\"([^\"]+)\"")
+
+    /**
+     * 移动版网页 `__INITIAL_STATE__` 里的原始档 key（camelCase；XHS-Downloader XhsNoteParser.kt:175
+     * `video.consumer.originVideoKey` / `video.originVideoKey` 同源）。值形如 `spectrum/1040g0jg…`，
+     * `/` 在 web JSON 里被转义 ⇒ 必须 [unescapeJson] 还原再拼 URL，否则 404。
+     */
+    private val P_ORIGIN_VIDEO_KEY_CAMEL: Pattern = Pattern.compile("\"originVideoKey\"\\s*:\\s*\"([^\"]+)\"")
+
+    /** 解析原片用的移动 UA——**结尾 `xiaohongshu` 后缀 + Chrome Mobile 缺一不可**（桌面 UA 无 originVideoKey）。 */
+    private const val XHS_WEB_UA =
+        "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 xiaohongshu"
+
+    /** 网页读取上限 1MB（`__INITIAL_STATE__` 远小于此；护栏防异常页拉爆内存）。 */
+    private const val MAX_PAGE_BYTES = 1 shl 20
+
+    /** 解析网页连接/读取超时（网页比 CDN 慢，给宽一点）。 */
+    private const val RESOLVE_TIMEOUT_MS = 15_000
 
     /**
      * 宿主 ClassLoader（install 期写入）：okhttp3 只在宿主 classpath（本模块编译期也无 okhttp3），
@@ -210,6 +248,7 @@ object XhsVideoSave {
             return patched
         }
         harvestVideoSources(body)
+        harvestNoteShare(body)
         harvestNoteImages(body, url)
         return null
     }
@@ -284,7 +323,13 @@ object XhsVideoSave {
     private fun harvestVideoSources(body: String) {
         var idx = body.indexOf("\"video_info_v2\"")
         while (idx >= 0) {
-            val regionEnd = minOf(body.length, idx + REGION_MASTER_WINDOW)
+            // 区段上界 = 同 body 内下一个 "video_info_v2" 起点（无则 body.length）。旧固定窗口
+            // REGION_MASTER_WINDOW=6000 会把本 note 的 video_info_v2 区段截断——真机实证 4K `_532`
+            // 档位落在 6000 字符之外，candidatesOf 只采到 5 档、漏掉 4K。video_info_v2 每 note 恰一个，
+            // 以下一个为界即精确圈住本 note 的媒体块，且不会串到下一个 note（换窗为界同时也解除
+            // 窗口大小这一隐式耦合，新增档位/元数据不再挤掉尾部流）。
+            val nextIdx = body.indexOf("\"video_info_v2\"", idx + 1)
+            val regionEnd = if (nextIdx < 0) body.length else nextIdx
             val originKey = P_ORIGIN_KEY.matcher(body).region(idx, regionEnd).let { if (it.find()) it.group(1) else null }
             val candidates = candidatesOf(body, idx, regionEnd)
             if (originKey != null || candidates.isNotEmpty()) {
@@ -336,6 +381,138 @@ object XhsVideoSave {
             out += m.group(1)
         }
         return out.toList()
+    }
+
+    /**
+     * 采集分享页线索（与 [harvestVideoSources] 同源同响应）：`share_info.link` 优先——app 已把
+     * noteId + fresh xsec_token 拼成整条 URL（`xsec_source=app_share`），原样用最省事；link miss
+     * 时收同级 `xsec_token`（noteId 就近 lookback 同 harvestVideoSources）。二者皆无则不入表。
+     */
+    private fun harvestNoteShare(body: String) {
+        // share_info.link 优先（值须含 xsec_token 才算分享链——普通 "link" 字段多，先过滤）
+        var lm = P_SHARE_LINK.matcher(body)
+        while (lm.find()) {
+            val value = unescapeJson(lm.group(1) ?: continue)
+            if (!value.contains("xiaohongshu.com") || !value.contains("xsec_token=")) continue
+            val idm = P_SHARE_LINK_ID.matcher(value)
+            if (!idm.find()) continue
+            val nid = idm.group(1) ?: continue
+            if (noteShares.size > URL_MAP_LIMIT) noteShares.clear()
+            val old = noteShares[nid]
+            noteShares[nid] = NoteShare(value, old?.token)
+        }
+        // 同级 xsec_token 兜底（link 缺失的响应形态）
+        var tm = P_XSEC_TOKEN.matcher(body)
+        while (tm.find()) {
+            val tok = unescapeJson(tm.group(1) ?: continue)
+            val idMatcher = P_NOTE_ID.matcher(body).region(maxOf(0, tm.start() - REGION_NOTE_ID_BACK), tm.start())
+            var nid: String? = null
+            while (idMatcher.find()) nid = idMatcher.group(1)
+            if (nid == null) continue
+            val old = noteShares[nid]
+            if (old == null || (old.link.isNullOrEmpty() && old.token == null)) {
+                if (noteShares.size > URL_MAP_LIMIT) noteShares.clear()
+                noteShares[nid] = NoteShare(null, tok)
+            }
+        }
+    }
+
+    /**
+     * 解析真原始档 URL（任务1.2）：GET 移动版网页 → 正则取 `originVideoKey` → 拼 CDN。
+     * **任何失败（无 token / 非 200 / 取不到 key / 异常）恒返回 null 并打一行日志**，绝不影响既有梯子链。
+     * 只在后台线程调用（pickBestAndDownload 的下载线程），不阻塞 okhttp 拦截线程。
+     */
+    private fun resolveOriginVideoUrl(noteId: String, share: NoteShare, module: XposedModule): String? {
+        val pageUrl = (share.link?.takeIf { it.contains("xsec_token=") })
+            ?: share.token?.let { "https://www.xiaohongshu.com/discovery/item/$noteId?xsec_source=app_share&xsec_token=$it" }
+            ?: run {
+                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 原片解析跳过 noteId=$noteId：无 xsec_token/share link")
+                return null
+            }
+        val html = runCatching { fetchNotePageHtml(pageUrl) }.getOrNull()
+        if (html == null) {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 原片解析失败 noteId=$noteId：网页不可取（$pageUrl）")
+            return null
+        }
+        val m = P_ORIGIN_VIDEO_KEY_CAMEL.matcher(html)
+        if (!m.find()) {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 原片解析失败 noteId=$noteId：网页无 originVideoKey（token 过期/非视频页）")
+            return null
+        }
+        val key = unescapeJson(m.group(1) ?: "").trim()
+        if (key.isEmpty()) return null
+        val url = if (key.startsWith("http")) key else "https://$VIDEO_CDN/${key.trimStart('/')}"
+        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 原片解析成功 noteId=$noteId ${url.take(120)}")
+        return url
+    }
+
+    /**
+     * GET 移动版网页（手机 UA + Accept），手动跟随 302（≤5 跳）；非 200 返 null，读取上限
+     * [MAX_PAGE_BYTES]（[readCapped]）。UA / `xsec_source=app_share` 是取到 originVideoKey 的前提（实证）。
+     */
+    private fun fetchNotePageHtml(pageUrl: String): String? {
+        var u = pageUrl
+        var redirects = 0
+        while (true) {
+            val conn = java.net.URL(u).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = RESOLVE_TIMEOUT_MS
+            conn.readTimeout = RESOLVE_TIMEOUT_MS
+            conn.instanceFollowRedirects = false
+            conn.setRequestProperty("User-Agent", XHS_WEB_UA)
+            conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            try {
+                when (val code = conn.responseCode) {
+                    in 300..399 -> {
+                        if (++redirects > 5) return null
+                        u = conn.getHeaderField("Location") ?: return null
+                    }
+                    200 -> return conn.inputStream.use { readCapped(it, MAX_PAGE_BYTES) }
+                    else -> return null
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }
+    }
+
+    /** 读流上限 cap 字节为 UTF-8 字符串（防异常页拉爆内存）。 */
+    private fun readCapped(input: java.io.InputStream, cap: Int): String {
+        val buf = ByteArray(64 * 1024)
+        val out = java.io.ByteArrayOutputStream()
+        var total = 0
+        while (total < cap) {
+            val n = input.read(buf)
+            if (n < 0) break
+            val w = minOf(n, cap - total)
+            out.write(buf, 0, w)
+            total += w
+        }
+        return out.toString("UTF-8")
+    }
+
+    /** 还原 JSON 字符串转义：`\/`→`/`、`\\`、`\"`、`\uXXXX`（web `__INITIAL_STATE__` 的 key/链接必有 `\/`）。 */
+    private fun unescapeJson(s: String): String {
+        if (s.indexOf('\\') < 0) return s
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '\\' && i + 1 < s.length) {
+                when (val n = s[i + 1]) {
+                    '/' -> { sb.append('/'); i += 2 }
+                    '\\' -> { sb.append('\\'); i += 2 }
+                    '"' -> { sb.append('"'); i += 2 }
+                    'u', 'U' -> if (i + 6 <= s.length) {
+                        val code = s.substring(i + 2, i + 6).toIntOrNull(16)
+                        if (code != null) { sb.append(code.toChar()); i += 6 } else { sb.append(c); i++ }
+                    } else { sb.append(c); i++ }
+                    else -> { sb.append(c); i++ }
+                }
+            } else {
+                sb.append(c); i++
+            }
+        }
+        return sb.toString()
     }
 
     /**
@@ -653,23 +830,29 @@ object XhsVideoSave {
 
     /**
      * 体积探测选最大候选（物理判据，不赌档位名）：HEAD/Range 探 Content-Length → 最大者全量下。
-     * V-8 取证日志（临时，本轮必须留）：打候选全量 + 每候选实测体积，回答「app 网络层是否存在
-     * > `_258`(4.05MB) 的档」；取证后撤或降 DEBUG（TODO 2026-10-14）。
-     * V-2：撤 web 页取原始档（E8），候选只来自采集链 + 响应 download_url。
+     * 原片 URL（若解析到）与梯子候选**同表选最大**——不写死「原片优先」，仍按实测字节判定。
+     * V-8 取证行已撤，改常驻「选档」一行（原片=yes/no + 选中体积 + 候选数 + URL 前 120 字符）。
      */
     private fun pickBestAndDownload(app: android.content.Context, noteId: String, candidates: List<String>, t0: Long, module: XposedModule) {
+        // 真原始档不在 app API 梯子里（E6/E7），只在移动版网页 __INITIAL_STATE__ 的 camelCase
+        // originVideoKey。解析失败恒 null ⇒ 回落梯子，行为与原状一致。
+        val originUrl = noteShares[noteId]?.let { resolveOriginVideoUrl(noteId, it, module) }
+        val all = LinkedHashSet<String>()
+        originUrl?.let { all += it }
+        all += candidates
         val measured = LinkedHashMap<String, Long>()
         var bestUrl: String? = null
         var bestSize = -1L
-        for (c in candidates) {
+        for (c in all) {
             val size = probeSize(c)
             measured[c] = size
             if (size > bestSize) { bestSize = size; bestUrl = c }
         }
+        val toFetch = bestUrl ?: all.firstOrNull() ?: return
+        val selKB = (measured[toFetch] ?: -1L).coerceAtLeast(0L) / 1024
         module.log(Log.INFO, MountEngine.TAG,
-            "$JUDGE_PREFIX 视频候选全量 noteId=$noteId n=${measured.size} " +
-                measured.entries.joinToString(",") { "${it.key}@${it.value / 1024}KB" })
-        val toFetch = bestUrl ?: candidates.firstOrNull() ?: return
+            "$JUDGE_PREFIX 选档 noteId=$noteId 原片=${if (toFetch == originUrl) "yes" else "no"} " +
+                "选中=${selKB}KB 候选=${all.size}个 ${toFetch.take(120)}")
         downloadVideoHd(app, noteId, toFetch, t0, module)
     }
 
@@ -720,14 +903,11 @@ object XhsVideoSave {
         var total = 0L
         var written = 0L
         var contentType: String? = null
-        val name = "xhs_${noteId}_hd.mp4"
-        val values = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, name)
-            put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/小红书")
-            put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
-        }
-        val ourUri = ctx.contentResolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return
+        // 文件名/MediaStore uri 在拿到响应 Content-Type 后才定（insert 因此移入 200 分支）：
+        // 原片 = video/quicktime（MOV，实测 116.7MB/quicktime）→ `_origin.mov`；其余梯子档
+        // （video/mp4 / octet-stream）→ `_hd.mp4`。
+        var ourUri: android.net.Uri? = null
+        var name = "xhs_${noteId}_hd.mp4"
         try {
             while (true) {
                 val conn = java.net.URL(u).openConnection() as java.net.HttpURLConnection
@@ -746,8 +926,19 @@ object XhsVideoSave {
                         200 -> {
                             total = conn.contentLengthLong
                             contentType = conn.contentType
+                            val ctLower = contentType?.lowercase()?.substringBefore(';')?.trim()
+                            val isMov = ctLower == "video/quicktime"
+                            name = if (isMov) "xhs_${noteId}_origin.mov" else "xhs_${noteId}_hd.mp4"
+                            val values = android.content.ContentValues().apply {
+                                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, name)
+                                put(android.provider.MediaStore.Video.Media.MIME_TYPE, if (isMov) "video/quicktime" else "video/mp4")
+                                put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, android.os.Environment.DIRECTORY_MOVIES + "/小红书")
+                                put(android.provider.MediaStore.Video.Media.IS_PENDING, 1)
+                            }
+                            val uri = ctx.contentResolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return
+                            ourUri = uri
                             // 流式落盘（V-4）：边读边写，不再全量驻留内存；Content-Length 已知时按字节算进度
-                            ctx.contentResolver.openOutputStream(ourUri)?.use { out ->
+                            ctx.contentResolver.openOutputStream(uri)?.use { out ->
                                 conn.inputStream.use { input ->
                                     val buf = ByteArray(128 * 1024)
                                     var done = 0L
@@ -761,7 +952,7 @@ object XhsVideoSave {
                                             val pct = ((done * 100) / total).toInt()
                                             if (pct != lastPct) { lastPct = pct; updateProgress(pct) }
                                         }
-                                        if (done > MAX_VIDEO_BYTES) { rollbackHd(ctx, ourUri); return }
+                                        if (done > MAX_VIDEO_BYTES) { rollbackHd(ctx, uri); return }
                                     }
                                     written = done
                                 }
@@ -798,22 +989,24 @@ object XhsVideoSave {
             rollbackHd(ctx, ourUri)
             throw t
         }
+        val finalUri = ourUri
         // 成功路径放在 try 外：避免下面的 5s sleep 被打断时误删已写好的文件。
         // 关 IS_PENDING + 写时间戳（DATE_ADDED 秒 / DATE_TAKEN 毫秒）
-        ctx.contentResolver.update(ourUri, android.content.ContentValues().apply {
+        ctx.contentResolver.update(finalUri, android.content.ContentValues().apply {
             put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
             put(android.provider.MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
             put(android.provider.MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
         }, null, null)
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX HD直下完成 noteId=$noteId ${written / 1024}KB → Movies/小红书/$name")
-        deleteLowQuality(ctx, t0, ourUri, written, module)
+        deleteLowQuality(ctx, t0, finalUri, written, module)
         // 客户端低码文件可能晚于我们落盘：5s 后兜底再删一轮
         Thread.sleep(5_000)
-        deleteLowQuality(ctx, t0, ourUri, written, module)
+        deleteLowQuality(ctx, t0, finalUri, written, module)
     }
 
-    /** V-4 失败回滚：删掉半成品 uri（IS_PENDING 残留会占坑）。 */
-    private fun rollbackHd(ctx: android.content.Context, uri: android.net.Uri) {
+    /** V-4 失败回滚：删掉半成品 uri（IS_PENDING 残留会占坑）；uri 为 null（insert 前失败）时 no-op。 */
+    private fun rollbackHd(ctx: android.content.Context, uri: android.net.Uri?) {
+        if (uri == null) return
         runCatching { ctx.contentResolver.delete(uri, null, null) }
     }
 

@@ -106,7 +106,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
       `com/xingin/arch/adapter/model/NoteDetailArgumentsExtensionsKt.java:176-180`，形态是
       **Bundle extra**（`h.c(yVar, "origin_video_key", strA)`，`strA = VideoInfo.A()` = `VideoInfo.id`）；
       app API 实体（`entities/video/Consumer.java`）无此字段，`originVideoKey` 全 dex 0 命中
-      ⇒ 本分支**恒 miss**；V-9（进程内 web 会话取原始档）已因 `_533` 实证作废，此处仅存分支占位，无调用价值
+      ⇒ 本分支**恒 miss**（app 网络层无此字段）；原始档已改由「移动版网页 `__INITIAL_STATE__`」路线取得（见本节下方），此处仅存分支占位，无调用价值
     - **候选全量采集（2026-10-14 真机定稿，取代旧 bestStreamOf 打分）**：`video_info_v2` 区段内收集**全部** `master_url`（覆盖 `MediaStream{h264[],h265[],h266[]}` 多编解码多档位）+ 同流首个 `backup_urls[]`，去重成候选表，交给下载前 `probeSize`（HEAD / `Range: bytes=0-0` 读 `Content-Length`）**按实测字节选最大**。旧法（height 主序 + avg_bitrate 的 1200 字节窗口打分）真机漏档：只拿到 `_258`/`_4610`，漏 `_533`/`_526`
     - `video_info_v2` 区段 h264 `"master_url"`（savefix 原版 P_MASTER_MP4 门限）已并入上面的候选全量采集，不再单独占一档
     - noteId = 同区段最近 `"(?:id|note_id)"\s*:\s*"([0-9a-f]{16,32})"`（savefix 同款）；map 上限 500 清空
@@ -116,8 +116,16 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
     - `ResponseBody.create` 三轨重建（Kotlin Companion → create(MediaType,String) → create(String,MediaType)，savefix 同款容错）
   - XHS-Downloader 的多 stream 按 bitrate/resistance 排序**不搬**：选档交给 `probeSize` 实测字节数（旧 height/bitrate 窗口打分法定档实错，见上条）。
   - **客户端不吃 `download_url`（2026-10-14 真机实证，覆盖此前全部推断）**：01:17 日志 `视频响应已换链 … → ..._258.mp4`，用户实测客户端仍落 ~2.9MB（= 服务器原 `_4610`）⇒ 响应改写对客户端保存档位**无影响**。X4 响应改写的有效语义**只剩 `disable` 解锁**，换链为死路径（`swapUrl()` 依赖的 originKey 恒 null）。
-  - **`_533` 就是真原始档（2026-10-14 真机实证 ⇒ V-9 不需要）**：同 note 响应体采出候选 **8 个** = `_258`(4148KB) / **`_533`(6122KB)** / `_331`(1607KB) / `_526`(4455KB) / `_4610`(2859KB) + 各自 `sns-bak-v6` 镜像。取最大 `_533` 落盘后 MP4 box 解析 = **1440x1920 hvc1(HEVC) 8.685s**，与 app 自报 `height:1920` / `bbox 1080x1920` 吻合；客户端自存那份只 1607KB（≈`_331` 档）。⇒ 原始档就在**网络响应体**里，进程内 web 会话（V-9）可撤。
-  - 「裸 key 直链 `sns-video-bd.xhscdn.com/{32hex}` → 404」与「`seg×type` 矩阵除 `seg=110`+`type=258/4610` 外全 404」**结论作废**：`{fileid}` 每档不同，只替换 type 段无法构造有效 URL；档位清单只能来自响应体采集。旧的「`_258`(4.05MB,8.700s) 与 `_4610`(2.79MB,11.184s) 均 720x960 avc1 且时长不同」是**另一个 note** 的低档观测，非本 note 结论（本 note 各档时长一致 8.6~8.7s）。
+  - **`_533` 只是最高「转码」档，不是原始档（2026-10-14 用户实证修正）**：本 note 响应体采出候选 **8 个** = `_258`(4148KB) / **`_533`(6122KB)** / `_331`(1607KB) / `_526`(4455KB) / `_4610`(2859KB) + 各自 `sns-bak-v6` 镜像，取最大落盘 = 1440x1920 hvc1(HEVC) 8.685s。**但第三方独立下载器对同一笔记拿到 117MB**（≈109 Mbps，8.6s）⇒ 真原始档存在且远大于梯子最大值，**不在 app API 的 `media.stream` 梯子里**。上一轮据此写下的「原始档就在响应体内 / V-9 作废」**作废，V-9 类路线重新回到候选**。
+  - **原始档路线已解决并真机验收（2026-10-14，本 note 真机落盘 116,714,755 B）**：原始档 = 作者上传原片，**只在移动版网页** `__INITIAL_STATE__` 的 `originVideoKey`（camelCase），URL = `https://sns-video-bd.xhscdn.com/{key}`。模块落地链：
+    1. **token 采集** `harvestNoteShare`：从 app 响应里按 noteId 收 `share_info.link`（已含 token 的完整 URL，优先原样用）/ 同级 `xsec_token`。
+    2. **取页** `resolveOriginVideoUrl`：GET `discovery/item/{noteId}?xsec_source=app_share&xsec_token=…`，UA 必须**手机版**且结尾带 `xiaohongshu` 后缀（桌面 UA 的 state **无 `consumer`/无 `originVideoKey`**）；`xsec_source=pc_feed` 会 302 到登录页。**不需要登录 Cookie**。
+    3. 正则取 `"originVideoKey":"…"` → **还原 `\uXXXX` 转义**（HTML 里是 `spectrum/1040g…`）→ 拼 URL。实测 key 前缀有 `spectrum/` 与 `pre_post/` 两种，**不得假设前缀**。
+    4. 原片 URL 并入候选表，仍由 `probeSize` 按实测字节选（不写死优先）。
+    - 真机判据：`原片解析成功 … https://sns-video-bd.xhscdn.com/spectrum/1040g0jg…` + `选档 … 原片=yes 选中=113979KB 候选=15个` + `HD直下完成 … 113979KB → Movies/小红书/xhs_…_origin.mov`；落盘文件 `tkhd 3336x4448` / `mvhd 8.685s`，与 app 自报 `video.width/height = 3336x4448` **完全一致** ⇒ 是真原片非转码（客户端自存那份仅 1,646,277 B）。
+  - **梯子最大档是 4K，不是原片（修正上一轮结论）**：`candidatesOf` 旧实现用 `REGION_MASTER_WINDOW = 6000` 固定窗口，把 `video_info_v2` 区段**截断**，7 档只采到 5 档、漏掉 4K。完整梯子（本 note）：`532`=2160x2880 UHD 10,165,101B / `533`=1440x1920 QHD / `526`=1080x1440 FHD / `258`=720x960 HD h264 / `332` / `331` / `334`=vvc。已改为**以「下一个 `video_info_v2`」为区段右界**（常量删除）。无论梯子多高都不是原片——`video.width/height`(3336x4448) 永远大于梯子最大分辨率。
+  - 反面证据（别再走）：camelCase `originVideoKey` / snake_case `origin_video_key` 在 **app 响应体**里**全 case 零命中**（落盘 3 份完整 body 验证）；宿主 dex 里**没有** `sns-video-bd` 这个 host（只 `sns-video-chapter`）；裸 fileid 直链恒 404（`{fileid}` 每档不同，且都不是 origin key）。
+  - **进程被杀会留孤儿**：`IS_PENDING` 态的 `.pending-<id>-<name>` 文件在宿主进程被系统回收时不会走 `rollbackHd()`（实测残留 102,759,493 B 半成品）。根治需在模块启动时扫 `.pending-*`——**未做，待拍板**。
   - **交付链修复（V-4/V-5，2026-10-14）**：`downloadVideoHd` 改 `IS_PENDING=1` 占位 → 流式写 → 字节数 == `Content-Length` 校验 → `IS_PENDING=0`；失败 `rollbackHd()` 删占位。此前无 IS_PENDING 生命周期 ⇒ 产物在 `Movies/小红书` 消失。Content-Type **黑名单**（只拒 `text/*`/`application/xml`/`application/json`；`application/octet-stream` 合法放行——CDN 对原始档常回此类型）。`deleteLowQuality` 改时间窗（`DATE_ADDED >= t0-10s` + 非本 uri + `SIZE < ourSize`，走 `Video.EXTERNAL_CONTENT_URI` 覆盖 DCIM）。真机实证：`HD直下完成 … 6122KB → Movies/小红书/xhs_…_hd.mp4`（落盘 6,269,525B 存活）+ `已删低画质文件 Camera_xhs_1791916085784.mp4 (1607KB < 6122KB)`。
   - **伪 originKey 采集是 bug**：扫 `"video":{` 后 3000 字符窗口内首个 `"id"` 作 origin key —— 实测命中两类垃圾：24 位 hex（= 别的 note id，`sns-video-bd/<hex>` → 404）与 `http://..._258.mp4`（窗口内其他对象的 id）。**已删（V-1，2026-10-14）**。
 - 不搬 savefix `wh8.o1.a` 分支兜底（9.49.1 名已漂）：download_url 注入后客户端下载分支自愈（改数据源优于改参数；少一个漂移点）。
