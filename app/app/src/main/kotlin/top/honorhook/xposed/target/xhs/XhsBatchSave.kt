@@ -13,6 +13,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -49,6 +50,11 @@ object XhsBatchSave {
     private const val MAX_IMAGE_BYTES = 50L * 1024 * 1024
     private const val CONNECT_TIMEOUT = 10_000
     private const val READ_TIMEOUT = 30_000
+
+    /** 提案 1 重试阶梯（基准 ResumableTransfer.kt:42-58 语义）：同一 URL 最多 3 次尝试，仅瞬时失败重试。 */
+    private const val FETCH_MAX_ATTEMPTS = 3
+    private const val FETCH_BACKOFF_BASE_MS = 500L
+    private const val FETCH_BACKOFF_CAP_MS = 15_000L
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -438,7 +444,8 @@ object XhsBatchSave {
                 // fetch() 按列表顺序逐个试）。toBare 不适用（null）时退回 raw 本身；裸链失败（非 200 /
                 // 错误页 Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
                 val url = XhsImageUrl.toBare(raw) ?: raw
-                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", raw) }
+                // 文件名扩展名仅占位：落盘 MIME/扩展名由 fetchOne 首块魔数定（提案 3，认内容不认 URL）
+                val saved = runCatching { downloadOne(activity, module, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", raw) }
                     .getOrDefault(0L)
                 if (saved > 0) { ok++; bytes += saved }
                 else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
@@ -517,38 +524,56 @@ object XhsBatchSave {
         url.substringBefore('?').substringAfterLast('/').substringAfterLast('.')
             .takeIf { it.length in 2..5 && it.all(Char::isLetterOrDigit) } ?: "jpg"
 
+    /** 提案 1 退避：500ms << (attempt-1) 封顶 15s（基准 ResumableTransfer.kt:54 `500ms shl attempt` 封顶 15s，本插件 1 基换算）。 */
+    private fun backoffMs(attempt: Int): Long =
+        (FETCH_BACKOFF_BASE_MS shl (attempt - 1).coerceAtMost(5)).coerceAtMost(FETCH_BACKOFF_CAP_MS)
+
     /**
      * 直下单张：先抓 [url]；若命中「HTTP 非 200」或「错误页 Content-Type」两类失败，则改用
      * [rawFallback]（采集原串，含 query）重下一次——**仅一次，不递归**。其余失败（超限/写盘异常）不重试。
      * （2026-10-15 基准切换：回落目标由裸链改 raw 原样，NoteOutput.kt:34-45 列表序语义；旧的
-     * markQualityFailed 粘性降级随 q/100 主链一并删除。）
+     * markQualityFailed 粘性降级随 q/100 主链一并删除。单 URL 内的瞬时失败重试阶梯在 [fetchOne]
+     * 内部——基准 ResumableTransfer.kt:42-58 = 逐候选 × maxRetries 双层，候选间各走一轮阶梯。）
      * 返回值 = 落盘字节数（>0 = 成功；0 = 失败），供完成卡合计体积。
      */
-    private fun downloadOne(activity: Activity, url: String, fileName: String, rawFallback: String? = null): Long {
+    private fun downloadOne(activity: Activity, module: XposedModule, url: String, fileName: String, rawFallback: String? = null): Long {
         val bytes = LongArray(1)
-        when (fetchOne(activity, url, fileName, bytes)) {
+        when (fetchOne(activity, module, url, fileName, bytes)) {
             Fetch.OK -> return bytes[0]
             Fetch.RETRY_FALLBACK -> if (rawFallback != null && rawFallback != url) {
                 val retry = LongArray(1)
-                if (fetchOne(activity, rawFallback, fileName, retry) == Fetch.OK) return retry[0]
+                if (fetchOne(activity, module, rawFallback, fileName, retry) == Fetch.OK) return retry[0]
             }
             Fetch.FAIL -> Unit
         }
         return 0L
     }
 
-    /** 单地址抓取结果：OK = 已落盘；RETRY_FALLBACK = 非 200 / 错误页，可回落 raw 原样重试一次；FAIL = 终局失败。 */
+    /** 单地址抓取结果：OK = 已落盘；RETRY_FALLBACK = 非 200（瞬时码耗尽）/ 错误页 / 魔数非图片，可回落 raw 原样重试一次；FAIL = 终局失败。 */
     private enum class Fetch { OK, RETRY_FALLBACK, FAIL }
 
     /**
      * 单地址抓取（302 跟随）+ MediaStore 落盘到 Pictures/小红书。
      * 错误页识别走 Content-Type **黑名单**：只拒 JSON / XML / text 系说明页；
-     * `application/octet-stream` 是合法原图（XHS 原始档实测），**绝不拒收**。
+     * `application/octet-stream` 是合法原图（XHS 原始档实测），**绝不拒收**——其内容真实性
+     * 由提案 3 魔数探测兜底。
+     *
+     * 提案 1 重试阶梯（基准 ResumableTransfer.kt:42-58 语义）：同一 URL 最多 [FETCH_MAX_ATTEMPTS]
+     * 次尝试，仅「瞬时失败」（IOException / HTTP 5xx / 408 / 429）重试，退避见 [backoffMs]；重试只
+     * 发生在「连接 + 收响应头」阶段——Content-Type 校验通过即进入写盘阶段，此后任何失败维持原
+     * 语义（上抛 / 返回值，交外层 bare→raw 候选链），**不在此层重试**（MediaStore insert 不可重复）。
+     * 401/403/404/410 等 4xx = 基准 Access 失败码同类（ResumableTransfer.kt:111-113），非瞬时，不重试。
+     * 提案 3 魔数探测（基准 ResumableTransfer.kt:171-174 + MediaFileType.kt:8-28）：200 后先读首块
+     * （64B）判内容，仅图片类继续；null / 视频类 = 可能错误页/串流 → RETRY_FALLBACK（尚未 insert，
+     * 不留半成品）。落盘 MIME/扩展名以 magic 为准。
+     * 提案 4 空间预检（基准 ResumableTransfer.kt:137-139 NO_SPACE）：Content-Length 已知且可用
+     * 空间 < 需求 + 1MB ⇒ 判 FAIL；长度未知跳过检查（不发明阈值）。
      * 成功时经 [bytesOut] 回传落盘字节数（供完成卡合计体积）。
      */
-    private fun fetchOne(activity: Activity, url: String, fileName: String, bytesOut: LongArray): Fetch {
+    private fun fetchOne(activity: Activity, module: XposedModule, url: String, fileName: String, bytesOut: LongArray): Fetch {
         var u = url
         var redirects = 0
+        var attempt = 1   // 提案 1：同一 URL 第几次尝试（1 基，上限 FETCH_MAX_ATTEMPTS）
         while (true) {
             val conn = URL(u).openConnection() as HttpURLConnection
             conn.connectTimeout = CONNECT_TIMEOUT
@@ -556,8 +581,21 @@ object XhsBatchSave {
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", UA)
             conn.setRequestProperty("Referer", "https://www.xiaohongshu.com/")
+            // 响应码阶段（连接 + 收响应头）单独 try：只有这里的 IOException 算「瞬时失败」可重试
+            val code = try {
+                conn.responseCode
+            } catch (io: IOException) {
+                conn.disconnect()
+                if (attempt >= FETCH_MAX_ATTEMPTS) throw io   // 全耗尽 = 原失败语义（上抛，downloadAll 记失败）
+                val delay = backoffMs(attempt)
+                module.log(Log.WARN, MountEngine.TAG,
+                    "$JUDGE_PREFIX 直下 瞬时失败（${io.javaClass.simpleName}: ${io.message}），${delay}ms 后第 $attempt 次重试: ${u.take(80)}")
+                Thread.sleep(delay)
+                attempt++
+                continue
+            }
             try {
-                when (val code = conn.responseCode) {
+                when (code) {
                     in 300..399 -> {
                         if (++redirects > 5) return Fetch.FAIL
                         u = conn.getHeaderField("Location") ?: return Fetch.FAIL
@@ -565,26 +603,55 @@ object XhsBatchSave {
                     }
                     200 -> {
                         // 错误页类型（CDN 直链失效时常回说明页，如「图片不存在」JSON/HTML）；
-                        // 交给回落重试。octet-stream 是合法原图，不在黑名单内。
+                        // 非瞬时，不重试，交给回落。octet-stream 是合法原图，不在黑名单内。
                         val ctype = conn.getHeaderField("Content-Type")?.substringBefore(';')?.trim()?.lowercase()
                         if (ctype == "application/json" || ctype == "application/xml" ||
                             ctype?.startsWith("text/") == true
                         ) {
                             return Fetch.RETRY_FALLBACK
                         }
+                        // 提案 4 空间预检（基准 ResumableTransfer.kt:137-139 NO_SPACE）：长度已知才查
+                        val len = conn.contentLengthLong
+                        if (len > 0) {
+                            val dir = java.io.File(
+                                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "小红书")
+                            val usable = dir.usableSpace
+                            if (usable < len + 1024L * 1024) {
+                                module.log(Log.WARN, MountEngine.TAG,
+                                    "$JUDGE_PREFIX 直下 空间不足（需 ${len / 1048576}MB，可用 ${usable / 1048576}MB），放弃")
+                                return Fetch.FAIL
+                            }
+                        }
+                        // 提案 3：insert 之前先读首块（64B，读满或流尽为止）跑魔数——null / 视频类 =
+                        // 可能错误页/串流，交 raw 回落；此时尚未 insert，MediaStore 不留半成品
+                        val head = ByteArray(64)
+                        var headFill = 0
+                        val input = conn.inputStream
+                        while (headFill < head.size) {
+                            val n = input.read(head, headFill, head.size - headFill)
+                            if (n < 0) break
+                            headFill += n
+                        }
+                        val kind = XhsMediaFileType.detect(if (headFill == head.size) head else head.copyOf(headFill))
+                        if (kind == null || kind !in XhsMediaFileType.IMAGE_KINDS) {
+                            return Fetch.RETRY_FALLBACK
+                        }
+                        // 落盘 MIME/扩展名以 magic 为准（基准认内容不认 URL/Content-Type；extOf 初值仅占位）
                         val values = ContentValues().apply {
-                            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                            put(MediaStore.Images.Media.MIME_TYPE, "image/${if (extOf(url) == "png") "png" else "jpeg"}")
+                            put(MediaStore.Images.Media.DISPLAY_NAME, fileName.substringBeforeLast('.') + "." + kind)
+                            put(MediaStore.Images.Media.MIME_TYPE, XhsMediaFileType.mimeTypeOf(kind))
                             put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/小红书")
                         }
                         val outUri = activity.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                             ?: return Fetch.FAIL
                         activity.contentResolver.openOutputStream(outUri)?.use { out ->
-                            conn.inputStream.use { input ->
+                            // 首块先写入（不能丢），再续读剩余
+                            out.write(head, 0, headFill)
+                            input.use { rest ->
                                 val buf = ByteArray(64 * 1024)
-                                var total = 0L
+                                var total = headFill.toLong()
                                 while (true) {
-                                    val n = input.read(buf)
+                                    val n = rest.read(buf)
                                     if (n < 0) break
                                     total += n
                                     if (total > MAX_IMAGE_BYTES) return Fetch.FAIL
@@ -595,8 +662,20 @@ object XhsBatchSave {
                         } ?: return Fetch.FAIL
                         return Fetch.OK
                     }
-                    // 其余状态（4xx/5xx 等非 200）＝ 主链失效 → 可回落 raw 原样重试
-                    else -> return Fetch.RETRY_FALLBACK
+                    // 其余状态码（提案 1）：仅 5xx / 408 / 429 算瞬时重试；其余 4xx（含基准 Access
+                    // 失败码 401/403/404/410，ResumableTransfer.kt:111-113）非瞬时直接回落。
+                    // 全耗尽返回原失败语义（RETRY_FALLBACK，仍可走 raw 回落）
+                    else -> {
+                        if ((code >= 500 || code == 408 || code == 429) && attempt < FETCH_MAX_ATTEMPTS) {
+                            val delay = backoffMs(attempt)
+                            module.log(Log.WARN, MountEngine.TAG,
+                                "$JUDGE_PREFIX 直下 瞬时失败（HTTP $code），${delay}ms 后第 $attempt 次重试: ${u.take(80)}")
+                            Thread.sleep(delay)
+                            attempt++
+                            continue
+                        }
+                        return Fetch.RETRY_FALLBACK
+                    }
                 }
             } finally {
                 conn.disconnect()

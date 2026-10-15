@@ -1252,6 +1252,10 @@ object XhsVideoSave {
      *
      * A3：读取阶段 IOException 走**运行内**续传（重发带 `Range: bytes=<已写>-` 的请求，206 追加 /
      * 200 回落从头），最多 3 次；**不是跨进程续传**——宿主进程被杀仍从 0 重下（残片由 [cleanupPendingOrphans] 清）。
+     *
+     * 提案 3/4（2026-10-15 基准传输链对齐，ResumableTransfer.kt:137-139/171-174 语义）：首写路径缓存
+     * 首块 64B，终检补魔数校验（仅 mov/mp4/webm 放行；206 续传无首块跳过）；首次拿到 total 后、
+     * insert 前空间预检，不足放弃（不 insert，不删宿主文件）。
      */
     private fun downloadVideoHd(ctx: android.content.Context, noteId: String, startUrl: String, t0: Long, module: XposedModule) {
         var u = startUrl
@@ -1260,6 +1264,8 @@ object XhsVideoSave {
         var total = 0L
         var written = 0L
         var contentType: String? = null
+        // 提案 3：首写路径缓存的首块（64B）——终检魔数校验用；206 续传路径无首块 ⇒ 终检跳过魔数
+        var firstBlock: ByteArray? = null
         // 文件名/MediaStore uri 在拿到响应 Content-Type 后才定（insert 因此移入 200 分支）：
         // 原片 = video/quicktime（MOV，实测 116.7MB/quicktime）→ `_origin.mov`；其余梯子档
         // （video/mp4 / octet-stream）→ `_hd.mp4`。
@@ -1292,6 +1298,21 @@ object XhsVideoSave {
                             // 首写才定 Content-Type/文件名并 insert（续传沿用同一 uri，不能再插一条）
                             if (ourUri == null) {
                                 total = conn.contentLengthLong
+                                // 提案 4 空间预检（基准 ResumableTransfer.kt:137-139 NO_SPACE）：首次拿到
+                                // total 后、insert 前；可用空间 < 需求 + 1MB ⇒ 放弃（不 insert；ourUri 仍为
+                                // null，无需回滚、不删宿主文件）。206 续传路径 ourUri 非空，不重查。
+                                if (total > 0) {
+                                    val dir = java.io.File(
+                                        android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES),
+                                        "小红书",
+                                    )
+                                    val usable = dir.usableSpace
+                                    if (usable < total + 1024L * 1024) {
+                                        module.log(Log.WARN, MountEngine.TAG,
+                                            "$JUDGE_PREFIX HD直下 空间不足（需 ${total / 1048576}MB，可用 ${usable / 1048576}MB），放弃")
+                                        return
+                                    }
+                                }
                                 contentType = conn.contentType
                                 val ctLower = contentType?.lowercase()?.substringBefore(';')?.trim()
                                 val isMov = ctLower == "video/quicktime"
@@ -1313,6 +1334,22 @@ object XhsVideoSave {
                                     val buf = ByteArray(128 * 1024)
                                     var done = written   // A3：进度按累加字节续，不退回 0
                                     var lastPct = -1
+                                    // 提案 3：首写路径（written==0，含「服务端拒 Range 回 200 从头重下」）先读
+                                    // 首块 64B 缓存供终检魔数（基准 ResumableTransfer.kt:171-174 写完探测；插件
+                                    // 改为缓存首块免重读落盘文件）。首块照常写入不丢；206 续传路径不读。
+                                    if (written == 0L) {
+                                        val head = ByteArray(64)
+                                        var fill = 0
+                                        while (fill < head.size) {
+                                            val n = input.read(head, fill, head.size - fill)
+                                            if (n < 0) break
+                                            fill += n
+                                        }
+                                        firstBlock = head.copyOf(fill)
+                                        out.write(head, 0, fill)
+                                        done += fill
+                                        written = done
+                                    }
                                     while (true) {
                                         val n = input.read(buf)
                                         if (n < 0) break
@@ -1369,6 +1406,17 @@ object XhsVideoSave {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下 字节数不符（写 $written / 期望 $total），回滚")
                 rollbackHd(ctx, ourUri)
                 return
+            }
+            // 校验 3（提案 3 魔数，基准 ResumableTransfer.kt:171-174 写完探测认不出 = NON_MEDIA 删件）：
+            // 用首写路径缓存的首块判内容，仅 mov/mp4/webm 放行；206 续传路径无首块则跳过（沿用校验 1/2）。
+            val fb = firstBlock
+            if (fb != null) {
+                val kind = XhsMediaFileType.detect(fb)
+                if (kind == null || kind !in XhsMediaFileType.VIDEO_KINDS) {
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下 魔数非视频（${kind ?: "未识别"}），回滚")
+                    rollbackHd(ctx, ourUri)
+                    return
+                }
             }
         } catch (t: Throwable) {
             rollbackHd(ctx, ourUri)
