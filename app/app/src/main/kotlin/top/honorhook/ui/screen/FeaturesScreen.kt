@@ -576,6 +576,15 @@ private fun FeatureListScreen(
                 // 直接读 FeatureStore 的可观察镜像：开关一变，本项、顶部「已启用 N/M」
                 // 与一级列表的计数标签同时重组（原先用 item 局部 remember，只有本项会刷新）。
                 val enabled = FeatureStore.isEnabled(feature.key)
+                // 硬门：5G 制式标画在 U6 自绘的双排容器里，双排信号关时 hook 侧 install 早退、
+                // 容器根本不存在 ⇒ 子开关无从生效。Miuix SwitchPreference 有原生 enabled 参数
+                // （AAR javap 实证：第 13 位 `enabled: Boolean`，透传给 Switch 的 toggleable），
+                // 直接用——置灰 + 不响应点击，无需自造拒绝落盘。
+                // 显示态一并按「有效态」（双排 AND 制式标）呈现：双排关时显示为关，避免「灰着的开」
+                // 误导（重开双排后回到落盘值，不是被清掉）。
+                val gatedOff = feature.key == FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL_LABEL &&
+                    !FeatureStore.isEnabled(FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL)
+                val effectiveOn = enabled && !gatedOff
                 // 整个 Row 统一带上/下边距，保证左侧色条与卡片同步留白
                 Row(
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -592,7 +601,7 @@ private fun FeatureListScreen(
                             .height(36.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(
-                                if (enabled) accent else accent.copy(alpha = 0.45f)
+                                if (effectiveOn) accent else accent.copy(alpha = 0.45f)
                             )
                     )
                     Card(
@@ -606,8 +615,9 @@ private fun FeatureListScreen(
                             title = stringResource(feature.titleRes),
                             // 用户要求：二级菜单每个选项都带功能说明
                             summary = stringResource(feature.descRes),
-                            checked = enabled,
+                            checked = effectiveOn,
                             onCheckedChange = { FeatureStore.setEnabled(feature.key, it) },
+                            enabled = !gatedOff,
                             // 卡片内边距：原来只设了 horizontal，内容贴着上下边缘很挤
                             insideMargin = PaddingValues(
                                 start = 9.dp,

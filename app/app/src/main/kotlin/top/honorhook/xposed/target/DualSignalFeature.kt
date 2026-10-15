@@ -5,9 +5,15 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
+import android.provider.Settings
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Log
+import android.util.TypedValue
 import android.view.Choreographer
 import android.view.Gravity
 import android.view.View
@@ -34,9 +40,15 @@ import kotlin.math.roundToInt
  *   TelephonyManager/SubscriptionManager（不依赖宿主 StateFlow——绕开 §7.9 U3 的档位采集死路）；
  *   OnGlobalLayout 节流（250ms）+ 2s 自续刷新 + Choreographer 每帧取色跟随反色；
  *   所有尺寸/偏移常量原样保留（作者调好的视觉参数）。
- * - 舍弃：5G/4G 类型标 TextView（label）及 getNetworkLabel/isWifiConnected/isMobileDataEnabled
- *   —— 类型标由本模块 U2/U2b/U2c native 收口负责，不双份；toast 与写 Download 目录的
- *   dump/日志文件不搬。
+ * - 舍弃：toast 与写 Download 目录的 dump/日志文件不搬。
+ * - 补回（2026-10-15，子开关 systemui.dual_signal_label）：5G/4G 制式标 TextView（上游配置键
+ *   `SHOW_LABEL`）。原「类型标由 U2/U2b/U2c native 收口、不双份」的取舍作废——原生 `mobile_combo`
+ *   整组被本功能设为 GONE（§7.11），5G 类型标就在该组内，视觉上随组消失，U2 收不到，只能自绘补回。
+ *   数据链 `getNetworkLabel` / `isWifiConnected` / `isMobileDataEnabled` 一并搬。
+ *   ⚠ 上游 jadx 产物的 `getNetworkLabel` **不可用**（packed-switch 的 case 表被吞成空
+ *   `switch (type) { }`，恒返回默认 "4G"）；映射以 apktool smali 为准，表见 §7.11b
+ *   「5G 制式标（子开关）」。门控：label 只在双排开启时可能生效（双排关 = install 早退），
+ *   UI 侧对应硬门见 FeaturesScreen（双排关时本行置灰不可开）。
  * - 改造（与原插件的三处偏差，均有实证）：
  *   1. 硬编码 id 2131364317/318/2131363001 → 运行时 getIdentifier。aapt2 实证（SystemUI.apk
  *      资源表）= mobile_combo / mobile_combo_card / ethernet_combo，防跨版本漂移。
@@ -80,6 +92,7 @@ object DualSignalFeature {
 
     private const val TAG_CONTAINER = "hh_dual_container"
     private const val TAG_SIGNAL = "hh_dual_signal"
+    private const val TAG_LABEL = "hh_dual_label"
 
     // ---- 视觉常量（原样移植自 DualSignal 3.3.4，作者调好的参数；勿改）----
 
@@ -93,6 +106,11 @@ object DualSignalFeature {
     private const val HOST_MARGIN_DP = 2.0f
     private const val HOST_MARGIN_TEXT_DP = 0.0f
     private val BAR_H_RATIO = floatArrayOf(0.48f, 0.6f, 0.79f, 1.0f)
+
+    // ---- 制式标视觉常量（上游 ensureContainer 原样；smali 实证 setTextSize(2, 13.0f)，2 = SP）----
+    private const val LABEL_OFFSET_Y_DP = 0.7f
+    private const val LABEL_MARGIN_LEFT_DP = 5.0f
+    private const val LABEL_TEXT_SIZE_SP = 13.0f
 
     private const val LAYOUT_THROTTLE_MS = 250L
     private const val REFRESH_INTERVAL_MS = 2000L
@@ -133,6 +151,12 @@ object DualSignalFeature {
     /** OnGlobalLayout 节流时间戳（原插件全局单值语义，跨 host 共享）。 */
     @Volatile private var lastLayoutMs = 0L
 
+    /**
+     * 子开关「5G 制式标」：install 期读一次（hook 侧只读，改了要重启 SystemUI 才生效，与全插件一致）。
+     * 为假时不注入 label 视图（连视图都不建，不是建了再藏）——省一次绘制与取色同步。
+     */
+    @Volatile private var labelEnabled = false
+
     /** DualSignal 插件包存在性探测（每进程一次，只做留痕，不做门）。 */
     private val pkgProbed = AtomicBoolean(false)
 
@@ -141,6 +165,7 @@ object DualSignalFeature {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook·U6")
             return
         }
+        labelEnabled = RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL_LABEL)
         val loader = param.defaultClassLoader
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(HOST_PACKAGE))
 
@@ -310,7 +335,7 @@ object DualSignalFeature {
     }
 
     /**
-     * 周期维护（原插件 maintain，去掉 label 分支）：保证原生组隐藏、容器存活、档位/取色新鲜、
+     * 周期维护（原插件 maintain，含 label 分支）：保证原生组隐藏、容器存活、档位/取色/制式标新鲜、
      * host 排到 wifi 前、宽度 margin 收紧。任何一步异常由外层吞掉（PROTECTIVE + try/catch）。
      */
     private fun maintain(host: FrameLayout, group: LinearLayout, module: XposedModule) {
@@ -329,6 +354,7 @@ object DualSignalFeature {
             container = findContainer(host) ?: return
         }
         val signal = findSignal(container)
+        val label = findLabel(container)
 
         val ctx = host.context
         val simCount = getSimCount(ctx).let { if (it < 0) 2 else it }
@@ -340,11 +366,14 @@ object DualSignalFeature {
 
         val color = pickTint(group, host) ?: Color.WHITE
         signal?.setColor(color)
+        label?.setTextColor(color)   // 制式标与信号格同色（上游 maintain 同款）
 
         val levels = getActiveLevels(ctx)
         val mainLevel = levels.getOrElse(0) { 4 }
         val subLevel = levels.getOrNull(1)
         signal?.setInfo(simCount, mainLevel, subLevel)
+
+        updateLabel(ctx, label)
 
         moveBeforeWifi(host)
 
@@ -430,7 +459,8 @@ object DualSignalFeature {
         )
     }
 
-    /** 注入自建容器：LinearLayout（tag hh_dual_container）内一枚自绘双排信号格。类型标不移植。 */
+    /** 注入自建容器：LinearLayout（tag hh_dual_container）内一枚自绘双排信号格；制式标开关开时，
+     *  在信号格之后补一枚 label TextView（tag hh_dual_label，视图参数原样移植上游 ensureContainer）。 */
     private fun ensureContainer(host: FrameLayout) {
         if (findContainer(host) != null) return
         val ctx = host.context
@@ -442,6 +472,20 @@ object DualSignalFeature {
         val signal = DualSignalBarsView(ctx)
         signal.tag = TAG_SIGNAL
         container.addView(signal, LinearLayout.LayoutParams(WRAP, WRAP))
+        if (labelEnabled) {
+            // 先 GONE：可见性由 updateLabel 按网络状态决定（WiFi / 移动数据关时不显示）
+            val label = TextView(ctx)
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, LABEL_TEXT_SIZE_SP)
+            label.typeface = Typeface.DEFAULT_BOLD
+            label.setIncludeFontPadding(false)
+            label.tag = TAG_LABEL
+            label.translationY = dp(host, LABEL_OFFSET_Y_DP).toFloat()
+            label.visibility = View.GONE
+            val llp = LinearLayout.LayoutParams(WRAP, WRAP)
+            llp.leftMargin = dp(host, LABEL_MARGIN_LEFT_DP)
+            llp.gravity = Gravity.CENTER_VERTICAL
+            container.addView(label, llp)
+        }
         val flp = FrameLayout.LayoutParams(WRAP, WRAP)
         flp.gravity = Gravity.END or Gravity.CENTER_VERTICAL
         host.addView(container, flp)
@@ -459,6 +503,15 @@ object DualSignalFeature {
         for (i in 0 until container.childCount) {
             val c = container.getChildAt(i)
             if (c is DualSignalBarsView) return c
+        }
+        return null
+    }
+
+    /** 按 tag 找制式标（上游 findLabel；labelEnabled 为假时容器里根本没这个孩子 → 恒 null）。 */
+    private fun findLabel(container: LinearLayout): TextView? {
+        for (i in 0 until container.childCount) {
+            val c = container.getChildAt(i)
+            if (c is TextView && (c.tag as? String) == TAG_LABEL) return c
         }
         return null
     }
@@ -542,6 +595,81 @@ object DualSignalFeature {
         }
     }.getOrDefault(emptyList())
 
+    // ---- 制式标数据链（上游 getNetworkLabel / isWifiConnected / isMobileDataEnabled，smali 实证）----
+
+    /**
+     * 制式文字（上游 getNetworkLabel）。**上游 jadx 产物此方法不可用**：packed-switch 的 case 表被吞，
+     * 反编译成空 `switch (type) { }`，恒返回默认 "4G"；映射以 apktool smali（`.packed-switch 0x1`
+     * 起 20 项）为准，表见 §7.11b。取值链：默认数据卡 `getDataNetworkType()`，为 0 时回落
+     * `getNetworkType()`；tm 取不到 → null（上游同款，调用方按「无文字」处理 = 隐藏）。
+     */
+    private fun getNetworkLabel(ctx: Context): String? = runCatching {
+        val tm = ctx.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return null
+        val dataSub = SubscriptionManager.getDefaultDataSubscriptionId()
+        val dtm = if (dataSub < 0) tm else tm.createForSubscriptionId(dataSub)
+        @Suppress("DEPRECATION")   // getNetworkType 仅在 getDataNetworkType 返回 0 时兜底（上游同款）
+        val type = dtm.dataNetworkType.let { if (it == 0) dtm.networkType else it }
+        // 用字面量而非 TelephonyManager 常量：19(LTE_CA) 是 @SystemApi、公开 android.jar 里没有；
+        // 值本身即 smali `.packed-switch 0x1` 的 case 键，逐条可对。
+        when (type) {
+            20 -> "5G"   // NR
+            13, 18, 19 -> "4G"   // LTE / IWLAN / LTE_CA
+            3, 8, 9, 10, 15, 17 -> "3G"   // UMTS / HSDPA / HSUPA / HSPA / HSPAP / TD_SCDMA
+            // GPRS / EDGE / CDMA / 1xRTT / EVDO_0 / EVDO_A / IDEN / EVDO_B / EHRPD / GSM
+            1, 2, 4, 5, 6, 7, 11, 12, 14, 16 -> "2G"
+            else -> "4G"   // 含 default / 未列出的新制式（上游同款：兜 4G 而不是空）
+        }
+    }.getOrDefault("4G")
+
+    /**
+     * 上游 isWifiConnected（smali 实证）：WifiManager 已启用且已连上某网络 → true；否则看默认网络的
+     * TRANSPORT_WIFI；异常 → false。两段各自 try/catch（上游同款：wifi 段抛异常仍继续看 connectivity）。
+     */
+    private fun isWifiConnected(ctx: Context): Boolean {
+        runCatching {
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            if (wm != null && wm.isWifiEnabled) {
+                @Suppress("DEPRECATION")   // getConnectionInfo 已废弃但仍是上游判据（networkId != -1）
+                val info = wm.connectionInfo
+                if (info != null && info.networkId != -1) return true
+            }
+        }
+        return runCatching {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            val net = cm.activeNetwork ?: return false
+            cm.getNetworkCapabilities(net)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 上游 isMobileDataEnabled（smali 实证）：`Settings.Global.getInt(cr, "mobile_data", 1) == 1`；
+     * 读不到（SecurityException 等）→ true（上游容错：宁可显示制式标，也不要静默消失）。
+     */
+    private fun isMobileDataEnabled(ctx: Context): Boolean = runCatching {
+        Settings.Global.getInt(ctx.contentResolver, "mobile_data", 1) == 1
+    }.getOrDefault(true)
+
+    /**
+     * 制式标显示判定（上游 updateLabel，smali 实证）：**非 WiFi 且有移动数据**时取制式文字并
+     * VISIBLE + setText；否则（WiFi 已连 / 移动数据关 / 文字为空）GONE。label 为 null
+     * （子开关关 → 未注入）时直接返回。
+     */
+    private fun updateLabel(ctx: Context, label: TextView?) {
+        if (label == null) return
+        val text = if (isWifiConnected(ctx) || !isMobileDataEnabled(ctx)) {
+            null
+        } else {
+            getNetworkLabel(ctx)
+        }
+        if (text.isNullOrEmpty()) {
+            if (label.visibility != View.GONE) label.visibility = View.GONE
+            return
+        }
+        label.text = text
+        if (label.visibility != View.VISIBLE) label.visibility = View.VISIBLE
+    }
+
     private fun dp(host: View, value: Float): Int =
         Math.round(host.resources.displayMetrics.density * value)
 
@@ -556,11 +684,13 @@ object DualSignalFeature {
             // firstTime），帧级取色跟随永久死亡——reattach 只重跑 maintain（档位刷新不受影响）。
             if (!host.isAttachedToWindow) return
             try {
-                val signal = findContainer(host)?.let { findSignal(it) } ?: return
+                val container = findContainer(host) ?: return
+                val signal = findSignal(container) ?: return
                 val color = tintFromRow(host)
                 if (color != null && color != lastColor) {
                     lastColor = color
                     signal.setColor(color)
+                    findLabel(container)?.setTextColor(color)   // 制式标同色（上游 doFrame 同款）
                 }
             } catch (_: Throwable) {
             }

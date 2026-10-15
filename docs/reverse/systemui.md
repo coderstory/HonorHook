@@ -301,6 +301,63 @@ U4/U4b/U5 已被通知隐藏系列占用）。用户随后停用 DualSignal，�
 ② moveBeforeWifi 触发条件 `hi != wi-1`（原 3.3 为 `hi > wi`，且去 VISIBLE 过滤改单循环）。
 其余逻辑零差异。
 
+### 7.11b 5G 制式标（子开关，2026-10-15）
+
+**因果**：U6 把原生 `mobile_combo` 整组设为 `GONE`（§7.11 正文），而状态栏的 5G/4G 制式标
+（`mobile_combo` 内的类型标 TextView）就在该组里 ⇒ 用户现象「开双排后 5G 标识没了」。
+U2 收口的是 native 类型标的**渲染**，组整体隐藏后它不再被画，收不到 ⇒ 必须自绘补回。
+本模块 U6 初版有意舍弃了这部分（上游配置键 `SHOW_LABEL`），本次作为**子开关
+`systemui.dual_signal_label`**（默认关）补回，与上游同名语义。
+
+**上游对应关系**：`Config.SHOW_LABEL` → `updateLabel` 的门；label 视图 = 自建容器内、
+信号格**之后**的一枚 `TextView`（tag 上游 `dual_signal_label` / 本模块 `hh_dual_label`）。
+视图参数原样移植（smali 实证，勿改）：`setTextSize(2, 13.0f)`（2 = `COMPLEX_UNIT_SP` ⇒ 13sp）、
+`Typeface.DEFAULT_BOLD`、`setIncludeFontPadding(false)`、`translationY = dp(0.7f)`、
+`LinearLayout.LayoutParams` 左边距 `dp(5.0f)` + `gravity = 0x10`(CENTER_VERTICAL)。
+
+**制式映射（`getNetworkLabel`）**：默认数据卡 `TelephonyManager.getDataNetworkType()`，
+为 0 时回落 `getNetworkType()`；tm 取不到 → null（= 不显示）。
+
+⚠ **上游 jadx 产物 `DualSignalHook.java` 的 `getNetworkLabel` 不可用**：jadx 把 `packed-switch`
+的 case 表吞了，反编译成空 `switch (type) { }`，恒返回默认 `"4G"`。下表以 apktool smali 为准
+（`system-files/DualSignal-apktool/…/DualSignalHook.smali`，`:pswitch_data_0 .packed-switch 0x1`
+起共 20 项；`pswitch_0="5G"`、`pswitch_1="4G"`、`pswitch_2="3G"`、`pswitch_3="2G"`，
+default/异常 → `"4G"`）：
+
+| type | 制式文字 | TelephonyManager 常量 |
+|---|---|---|
+| 20 | 5G | `NETWORK_TYPE_NR` |
+| 13 / 18 / 19 | 4G | `LTE` / `IWLAN` / `LTE_CA`（19 是 `@SystemApi`，公开 android.jar 无此常量） |
+| 3 / 8 / 9 / 10 / 15 / 17 | 3G | `UMTS` / `HSDPA` / `HSUPA` / `HSPA` / `HSPAP` / `TD_SCDMA` |
+| 1 / 2 / 4 / 5 / 6 / 7 / 11 / 12 / 14 / 16 | 2G | `GPRS` / `EDGE` / `CDMA` / `1xRTT` / `EVDO_0` / `EVDO_A` / `IDEN` / `EVDO_B` / `EHRPD` / `GSM` |
+| 其它 / default / 异常 | 4G | — |
+
+**显示条件（`updateLabel`，smali 实证）**：`labelEnabled && !(isWifiConnected(ctx) ||
+!isMobileDataEnabled(ctx)) && 文字非空` → `VISIBLE` + `setText`；否则 `GONE`。
+即「非 WiFi **且** 移动数据开着」才显示制式标（WiFi 下移动数据制式无意义）。
+- `isWifiConnected`：`WifiManager.isWifiEnabled()` 且 `getConnectionInfo().getNetworkId() != -1`
+  → true；否则 `ConnectivityManager.getActiveNetwork()` 的 `NetworkCapabilities
+  .hasTransport(TRANSPORT_WIFI)`；异常 → false。两段各自 try/catch（wifi 段抛异常仍看 connectivity）。
+- `isMobileDataEnabled`：`Settings.Global.getInt(cr, "mobile_data", 1) == 1`；异常 → true。
+
+**取色**：与信号格同源（`maintain` 里 `pickTint` 的同一结果 `setTextColor`），
+Choreographer 每帧取色的 `ColorSyncCallback.doFrame` 在 tint 变化时同步 label 颜色 ⇒
+深色模式/通知头压暗下自动跟随反色。
+
+**门控（硬门，双排关时本开关不可开）**：label 画在 U6 自绘容器里，双排关时
+`DualSignalFeature.install` 早退、容器不存在 ⇒ 子开关无从生效。UI 侧
+（`FeaturesScreen.kt`）用 Miuix `SwitchPreference` 的**原生 `enabled` 参数**
+（AAR javap 实证：第 13 位 `enabled: Boolean`，透传给 `Switch` 的 `toggleable`）：
+双排关 → `enabled = false`（置灰 + 不响应点击）+ 显示态按「有效态」呈现为关
+（落盘值不动，重开双排后回来）。hook 侧只读一次（改开关要重启 SystemUI 才生效，与全插件一致）。
+
+**判据**（用户自执行）：双排 + 制式标都开 → 状态栏双排信号格右侧出现 5G/4G 文字；
+连上 WiFi 或关掉移动数据 → 文字消失；关掉双排信号 → 制式标行在 UI 里置灰不可开。
+
+**未真机验证**：本次仅落码 + 构建通过，无设备验证。
+
+**交互记录（2026-10-15）**：`dual_signal_label`（本节 U7 制式标子开关）与 `KEY_SYSTEMUI_HIDE_5G`（U2）同开语义矛盾——hide_5g 承诺「状态栏信号旁不再显示 5G/4G 字样」（strings.xml `feature_systemui_hide_5g_desc`），label 功能重新画出 5G/4G 文字；当前实现两开关独立生效，未做互斥。**待拍板**：是否用 Feature.excludesWith 声明互斥（产品决策，未做）。
+
 ### 7.12 U7 状态栏图标替换（2026-10-13，移植 DualSignal 3.3.4 hookWifiRes）
 
 **选点**（framework 层公开 API，未混淆，declaredMethods 直连，DualSignalHook.java L221-238）：

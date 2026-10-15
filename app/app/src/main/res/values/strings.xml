@@ -75,6 +75,8 @@
     <string name="feature_systemui_hide_5g_desc">状态栏信号旁不再显示 5G/4G 字样</string>
     <string name="feature_systemui_dual_signal_title">双排信号</string>
     <string name="feature_systemui_dual_signal_desc">状态栏信号分上下两排显示（上排主卡、下排副卡）；与其他双排信号类插件二选一，不要同时开启</string>
+    <string name="feature_systemui_dual_signal_label_title">双排 5G 制式标</string>
+    <string name="feature_systemui_dual_signal_label_desc">双排信号右侧显示 5G/4G/3G/2G 制式文字（WiFi 或移动数据关闭时自动隐藏）；需先开启双排信号，双排关闭时本开关不可用</string>
     <string name="feature_systemui_icon_wifi_title">替换 WiFi 图标</string>
     <string name="feature_systemui_icon_wifi_desc">状态栏 WiFi 信号图标换成内置全套（含 WiFi5/WiFi6/6+ 按档位区分），改动重启 SystemUI 生效</string>
     <string name="feature_systemui_icon_status_title">替换状态图标</string>
