@@ -52,7 +52,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 | X2c | no_watermark | ImageBean disable_ai getter → true | 未混淆类·运行时注解定位 | jm7 期 ImageBean.u()，9.49.1=v()，**方法号漂移实证** |
 | X3 | hd_save | `qc8.i.i(...)` args[3] 图 url → token 重建直链 | 混淆·串锚 DexKit | jm7.i 系 |
 | X4 | video_save | `okhttp3.OkHttpClient$Builder.build()` 注入 Interceptor 代理 | 公开 API | 同 |
-| X5 | batch_save | `mh9.b` 保存点击 → 本张原生保存后弹追加卡片（自绘）→ **外挂直下**（imagefeed 采集 + HttpURLConnection + MediaStore） | 混淆·双日志串锚 DexKit | — |
+| X5 | batch_save | `mh9.b` 保存点击 → **模块全接管（不 proceed）+ 外挂直下**（imagefeed 采集 + HttpURLConnection + MediaStore）：1 张静默直下、≥2 张弹确认卡、采不到图集回落宿主原生保存 | 混淆·双日志串锚 DexKit | — |
 
 ### 每点重定位备注
 
@@ -146,6 +146,7 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 - 边界：当前张会与原生保存重复一张（无现图 fileid 判定链路，接受重存）；视频笔记不弹（X4 已直链）。
 - 重定位：双日志串 + invoke(Object) 签名；采集端点 `note/imagefeed` 路径字面量。
 - 失败分级：NOT_RESOLVED（零命中 = 点击链改版，X5 失活不影响其余）。
+- **2026-10-15 订正（路线 A）**：交互改为**模块全接管（不 proceed）+ 外挂直下**——上面「先 proceed 后弹窗」的交互描述与「当前张会与原生保存重复一张」的边界**双双作废**，新语义与取证见 §六末节。
 
 ## 四、注册与开关
 
@@ -207,3 +208,24 @@ X2c 无静态挂载点（运行时注解反射解析）⇒ 本 target 脚本核�
 - **X4**：createResponseBody 三轨 Class.forName 由模块 loader 改宿主 loader（`@Volatile hostLoader`，install 期存 `param.defaultClassLoader`；模块 classpath 无 okhttp3，模块 loader = 三轨全 ClassNotFoundException = 采集正常但 save 响应永不改写）；防重注入由 `interceptors.contains`（代理 equals 恒 false——Kotlin lambda InvocationHandler 内 this 指外层 object，判重必失效 → 重复注入 = 同请求双拦截 + download_url 重复插 JSON）改 `toString()` 标记判重（处理器恒返 `HonorHook-XhsVideoSave`）。
 - **X2**：X2cTask.resolveValue 补 `also { resolvedGetter = it }` 写回——resolveValue 只是就绪门（MountEngine.resolveTask 丢弃返回值、仍按 methodName 解析），不写回则 methodName 恒 "" → 直连 0 命中 → 无锚 DexKit → NOT_RESOLVED 空转；探针改**差分**（置 true→true 且置 false→false 两态都符合才认定），防「默认值恰为 true 的其它布尔字段 getter」误挂（实例本地新建可丢弃，不复位）。
 - **X5**：resolveSaveProxy 类加载由模块 loader 改宿主 loader（ISaveImageProxy/ServiceLoaderKtKt 是宿主类）；save 回调代理 loader 显式用 `activity.classLoader`（Function1 类身份必须宿主 kotlin-stdlib，模块侧同名类 ClassCastException）；三击监听不覆盖宿主——先取 `prev = view.onTouchListener`，尾部委托 `prev?.onTouch(v, event) ?: false`；collectImages 的 adapter 字段扫描补超类链（aj9.h2 系 presenter 字段可能落父类，同 findImageBeanValue 写法）。
+
+### 2026-10-15 接管路线 A + 真机取证
+
+**交互改版（路线 A = 模块全接管）**：图片点击不再 `chain.proceed()`——宿主原保存逻辑整段不执行，模块自己下全部原图（含当前张）。分流：图集空 → `proceed()` 回落宿主原生保存（否则用户点「保存」什么都不发生）；1 张 → 静默直下；≥2 张 → 确认卡后直下全部；卡上「不用了」= 什么都不保存（不加 Toast）。宿主那段被跳过时会顺带跳过面板关闭（`cVar.i.getValue().dismiss()`），模块改按**类型**从 lambda 找 `kotlin.Lazy` 字段自行 `dismiss()`（不按混淆字段名，字段名会漂）。
+
+**真机取证（2026-10-15，宿主 9.49.1）**：
+
+1. **宿主落盘命名实证**：`/sdcard/DCIM/Camera_XHS_<ts><token 的 `/` 换成 `_`>.jpg`——宿主链是「解码 → 合成 → 重编码」写盘，**不是原图**（对比模块外挂直下 `/sdcard/Pictures/小红书/xhs_<ts>_<i>.jpg` = CDN 原始字节）。
+2. **多图重复一张**：旧「先 proceed 本张原生保存 → 再追加剩余」⇒ 宿主存当前张 + 模块又下全部 N 张（含当前张）= 重复。接管后宿主那份不再产生。
+3. **单图零介入**：`maybeShowBatchDialog` 的 `urls.size < 2` 早退让单图笔记完全走宿主链，用户只拿到重编码图。改法 = 1 张静默直下原图（不弹卡）。
+4. **视频进度卡时序缺陷（缺陷③）**：`downloadVideoHd` 成功路径原先把第二次 `deleteLowQuality` 压在 `Thread.sleep(5_000)` 之后，`dismissProgress()` 被一起拖后 5~6 秒 ⇒ 进度卡（`setCancelable(false)`，用户关不掉）与完成卡并存。改法：`updateProgress(pct)` 里 `pct >= 100` 当场 `hdActive = false` + `dismissProgress()`（先落标记以中止 `showProgressDialog` 的 300ms×16 重试链，防收卡后又建回来；此刻读流循环已结束，续传重试只发生在读流 IOException 期间 ⇒ 不打断续传）；收尾顺序 = `hdActive=false` → `dismissProgress()` → 完成卡 → 首次低画质清理（同步）→ 5 秒后第二次清理改**独立延时线程**（`delayedExecutor`，不再 sleep 阻塞收尾）。`showProgressDialog` 建卡回填 `lastPct`（修「重试链晚于下载事件建卡 ⇒ 停在 0%」）。
+5. **完成卡 BadToken**：真机 `XhsHook·X5 完成卡失败: Unable to add window -- token android.os.BinderProxy@… is not valid; is your activity running?`——用 controller 图搜出的**历史 Activity** 建 Dialog。改法 = 弹窗一律走追踪的 resumed Activity + 取不到时 300ms × 16 重试（`showOnTrackedActivity`）；`findActivity`/`extractController` 保留作兜底。（2026-10-15 审计已删，作废——见判据节）
+6. **视频双卡（缺陷④）**：X5「已保存本视频」反馈卡与 X4「下载高清原版视频」询问卡同时弹。**改确定性握手**：X4 在真正弹询问卡前调 `XhsBatchSave.dismissVideoFeedbackCard()` 主动关掉 X5 反馈卡（后弹的关先弹的），X5 侧 `askShownAfter(t0)` 退化为**快路径**（命中则连反馈卡都不弹）。**时序假设已证不成立**：初版按「X4 写 `lastAskAtMs` 落在本轮 `proceed()` 之内/之前」设计——实际 X4 是在宿主 save API 的**网络响应**到达时才写（retrofit 异步，100~500ms 后），远晚于 X5 在 `proceed()` 返回处的判定点 ⇒ 该判定几乎恒 false，双卡照旧；故改为握手（不依赖任何时序）。
+7. **待办（2026-10-15 审计已修：currentNoteId 新鲜度门，缓存过期/护栏丢弃回落宿主兜底——见判据节过期回落条目）**：`图集护栏触发 31~247 张疑似污染，丢弃` 高频出现——护栏一触发就 `return`，**不更新** `noteImages[noteId]` 与 `lastImageNoteId` ⇒ `lastNoteImages()` 可能仍返回**上一篇笔记**的图集，接管后的弹窗/静默直下会下错图。修法方向：护栏触发时按 noteId 清空该条 + 复位 `lastImageNoteId`（或弹窗前校验 noteId 与当前笔记一致）。
+
+### 2026-10-15 X5 全接管判据（用户自执行，落码未验证）
+
+- **X5 全接管路线 A 判据（用户自执行，2026-10-15 落码未验证）**：①多图笔记长按保存 → 宿主面板被关 + 模块询问卡出现 → 全部原图落 `Pictures/小红书`；②单图长按保存 → 静默直下无弹卡；③连续浏览两篇图集笔记 A→B 后在 B 长按保存 → 下载的是 B 的图（过期回落：B 采不到时回落宿主原生保存，绝不下载 A 的图）；④飞行模式/断网长按保存 → 回落宿主原生行为。
+- **双卡握手判据**：视频保存后屏上只出现一张卡（X4 询问卡或 X5 反馈卡，不并存）。
+- **待实证项**：mountClick 不 proceed 时自造 kotlin.Unit 返回值——宿主调用方是否消费该返回值未实证；回归窗口 = 长按保存后宿主不闪退、后续交互正常。
+- **新鲜度门设计（审计 2026-10-15）**：护栏丢弃/换笔记时 `lastNoteImages` 返回空 ⇒ 回落宿主。

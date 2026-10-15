@@ -62,9 +62,18 @@ object XhsVideoSave {
     /** 最近一篇带图的笔记（用户正在看的），X5 批量取这里。 */
     @Volatile private var lastImageNoteId: String? = null
 
-    /** X5 取最近笔记图集（空列表 = 尚未采集到）。 */
-    fun lastNoteImages(): List<String> =
-        lastImageNoteId?.let { noteImages[it]?.toList() } ?: emptyList()
+    /** 当前浏览笔记（harvestNoteImages 响应 body/query 解析出的 noteId；与图集是否成功入库无关）。
+     *  2026-10-15 审计修复：护栏丢弃（>30 张判污染整包 return）不更新 [lastImageNoteId]，缓存停留
+     *  上一篇 ⇒ [lastNoteImages] 会把上一篇图集交给 X5 全接管，替用户下载错笔记的图且原生保存消失。
+     *  本字段只认 body/query 可归属的 noteId，「沿用最近值」的响应不可归属、不更新。 */
+    @Volatile private var currentNoteId: String? = null
+
+    /** X5 取当前笔记图集（空 = 未采到，或缓存已过期非当前浏览笔记——见 [currentNoteId]）。 */
+    fun lastNoteImages(): List<String> {
+        val cur = currentNoteId ?: return emptyList()
+        if (cur != lastImageNoteId) return emptyList()
+        return noteImages[cur]?.toList() ?: emptyList()
+    }
 
     /** 日志回调（install 期注入，模块 logger；采集探测仪表用）。 */
     @Volatile var logHook: ((Int, String, String) -> Unit)? = null
@@ -285,9 +294,11 @@ object XhsVideoSave {
         if (!url.contains("/note/imagefeed") && !url.contains("/note/detailfeed")) return
         // noteId 三轨：body 内 "note_id"（comment/detail 型）→ URL query note_id（imagefeed 型，
         // 2026-10-14 诊断实证 body 无 note_id 而 query 有）→ 沿用最近值
-        val noteId = P_NOTE_ID_PLAIN.matcher(body).takeIf { it.find() }?.group(1)
-            ?: queryParam(url, "note_id")
-            ?: lastImageNoteId
+        val fromBody = P_NOTE_ID_PLAIN.matcher(body).takeIf { it.find() }?.group(1)
+        val fromQuery = if (fromBody == null) queryParam(url, "note_id") else null
+        val noteId = fromBody ?: fromQuery ?: lastImageNoteId
+        // 归属更新必须在 found 为空早退与护栏 return 之前：图集采没采到不影响「用户在浏览本篇」这个事实
+        if (fromBody != null || fromQuery != null) currentNoteId = noteId
         val found = LinkedHashSet<String>()
         var m = P_ORIGINAL_URL.matcher(body)
         while (m.find()) found += m.group(1)
@@ -605,6 +616,22 @@ object XhsVideoSave {
     private const val HD_DEDUPE_MS = 5 * 60_000L
     private const val MAX_VIDEO_BYTES = 500L * 1024 * 1024
 
+    /**
+     * 本轮真正弹 HD 询问卡的时刻（ms；0 = 从未弹过）。供 X5 视频保存反馈卡判重（[askShownAfter]）：
+     * 同一次保存里 X4 已弹「下载高清原版视频」，X5 就不再弹「已保存本视频」（双卡并存，2026-10-15 真机实证）。
+     * **仅快路径**（响应到达晚于 X5 判定点 ⇒ 基本命中不了）；最终保障 = X4 弹卡前主动
+     * [XhsBatchSave.dismissVideoFeedbackCard] 关掉 X5 卡。
+     */
+    @Volatile private var lastAskAtMs = 0L
+
+    /**
+     * X5 反馈卡**快路径**判据（非唯一保障）：时刻 [t] 之后（含）弹过询问卡 ⇒ 本轮已有 X4 卡在屏上。
+     * 只在 X4 的询问卡早于 X5 判定点弹出时才命中——X4 写本值是在宿主 save API 的**网络响应**到达时
+     * （retrofit 异步，100~500ms 后），通常晚于 X5 在 proceed 返回处的判定 ⇒ 基本命中不了。
+     * 最终保障 = X4 弹卡前调 [XhsBatchSave.dismissVideoFeedbackCard] 主动关掉 X5 卡（确定性握手，2026-10-15）。
+     */
+    fun askShownAfter(t: Long): Boolean = lastAskAtMs >= t
+
     /** A3 **运行内**续传（非同次运行不算）：读取阶段 IOException 最多重试 3 次，退避 1s/2s/4s。 */
     private const val HD_RESUME_MAX_RETRY = 3
     private const val HD_RESUME_BACKOFF_BASE_MS = 1_000L
@@ -617,6 +644,16 @@ object XhsVideoSave {
     private val ioExecutor by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r ->
             Thread(r, "HonorHook-xhs-io").apply { isDaemon = true }
+        }
+    }
+
+    /**
+     * 延时收尾线程（2026-10-15，缺陷③）：低画质兜底二删排在 5 秒后。**独立于 [ioExecutor]**——那里
+     * 还排队着去重表落盘，用一个 sleep 占住单线程 5 秒会连带把它压住。daemon，绝不阻塞下载收尾。
+     */
+    private val delayedExecutor by lazy {
+        java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "HonorHook-xhs-delayed").apply { isDaemon = true }
         }
     }
 
@@ -697,6 +734,9 @@ object XhsVideoSave {
     @Volatile private var progressText: android.widget.TextView? = null
     @Volatile private var progressBar: android.widget.ProgressBar? = null
 
+    /** 末次进度百分比：建卡回填（[showProgressDialog]）+ 满格当场收卡（[updateProgress]）。 */
+    @Volatile private var lastPct = 0
+
     /** 下载进行中标记（弹窗重试循环据此中止；下载极快时防「完成后才弹出、永久停留」）。 */
     @Volatile private var hdActive = false
 
@@ -736,7 +776,9 @@ object XhsVideoSave {
                     paint.isFakeBoldText = true
                 })
                 progressText = android.widget.TextView(activity).apply {
-                    text = "0%"
+                    // 回填末次百分比（2026-10-15）：本函数可能晚于下载事件建卡（Activity 重试链），
+                    // 只写当前引用会让卡停在 0% 直到下一次进度回调。
+                    text = "$lastPct%"
                     textSize = 13f
                     setTextColor(if (night) 0xFF98989D.toInt() else 0xFF8A8A8E.toInt())
                     setPadding(0, d(6), 0, d(12))
@@ -744,7 +786,7 @@ object XhsVideoSave {
                 card.addView(progressText)
                 progressBar = android.widget.ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
                     max = 100
-                    progress = 0
+                    progress = lastPct
                 }
                 card.addView(progressBar, android.widget.LinearLayout.LayoutParams(
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT, d(6)))
@@ -843,6 +885,16 @@ object XhsVideoSave {
     }
 
     private fun updateProgress(pct: Int) {
+        lastPct = pct
+        // 满格当场收卡（2026-10-15，缺陷③）：收尾原先把第二次低画质清理压在 5s sleep 之后，dismiss 被
+        // 一起拖后 5~6 秒 ⇒ 进度卡（setCancelable(false)，关不掉）与完成卡并存。这里读到 100% 就立刻收。
+        // hdActive 先落：showProgressDialog 的 300ms×16 重试链据此中止，否则收卡后又被建回来；
+        // 此刻读流循环已结束（本函数 100% 只由循环末次推进或 total<=0 分支触发），而续传重试只发生在
+        // 读流 IOException 期间 ⇒ 置 false 不打断续传。
+        if (pct >= 100) {
+            hdActive = false
+            dismissProgress()
+        }
         mainHandler.post {
             runCatching {
                 progressBar?.progress = pct
@@ -956,6 +1008,10 @@ object XhsVideoSave {
             return
         }
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX HD询问 noteId=$noteId 候选 ${candidates.size} 个")
+        // 确定性让位：X4 卡后弹 ⇒ 主动关掉 X5 的「已保存本视频」反馈卡，不依赖时序（2026-10-15）
+        XhsBatchSave.dismissVideoFeedbackCard()
+        // 记本轮弹卡时刻（真正要弹才写：上面各 early-return 分支都不算）——X5 反馈卡快路径判据，见 askShownAfter
+        lastAskAtMs = System.currentTimeMillis()
         showAskDialog(noteId, candidates.toList(), app, t0, module)
     }
 
@@ -1235,7 +1291,9 @@ object XhsVideoSave {
             throw t
         }
         val finalUri = ourUri
-        // 成功路径放在 try 外：避免下面的 5s sleep 被打断时误删已写好的文件。
+        // 成功路径放在 try 外：try 内任何异常都已在 catch 里 rollbackHd 后 rethrow，收尾留在 try 外即
+        // 「收尾失败绝不回滚已写好的文件」。（原注释讲的是「避免下面的 5s sleep 被打断时误删」——
+        // 2026-10-15 起第二次低画质清理改独立线程、sleep 已删，理由换成本句，位置不动。）
         // 关 IS_PENDING + 写时间戳（DATE_ADDED 秒 / DATE_TAKEN 毫秒）
         ctx.contentResolver.update(finalUri, android.content.ContentValues().apply {
             put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
@@ -1243,12 +1301,21 @@ object XhsVideoSave {
             put(android.provider.MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
         }, null, null)
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX HD直下完成 noteId=$noteId ${written / 1024}KB → Movies/小红书/$name")
-        // 完成态提示（仅成功路径；主线程自 post，失败静默）
+        // 收尾顺序（2026-10-15，缺陷③）：先收进度卡再弹完成卡。原先 Thread.sleep(5_000) 卡在这一段之前，
+        // 把 dismissProgress 一起拖后 5~6 秒 = 进度卡与完成卡并存。
+        hdActive = false      // 先落标记：中止 showProgressDialog 的重试链，防收卡后又被建回来
+        dismissProgress()     // 幂等：兜住 total<=0（无进度更新）与失败回滚两条路径
         showDownloadedDialog(written, name)
         deleteLowQuality(ctx, t0, finalUri, written, module)
-        // 客户端低码文件可能晚于我们落盘：5s 后兜底再删一轮
-        Thread.sleep(5_000)
-        deleteLowQuality(ctx, t0, finalUri, written, module)
+        // 客户端低码文件可能晚于我们落盘：5s 后兜底再删一轮——专用延时线程，不再 sleep 阻塞收尾
+        runCatching {
+            delayedExecutor.schedule(
+                { deleteLowQuality(ctx, t0, finalUri, written, module) },
+                5, java.util.concurrent.TimeUnit.SECONDS,
+            )
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 延时低画质清理调度失败: ${it.message}")
+        }
     }
 
     /** V-4 失败回滚：删掉半成品 uri（IS_PENDING 残留会占坑）；uri 为 null（insert 前失败）时 no-op。 */
