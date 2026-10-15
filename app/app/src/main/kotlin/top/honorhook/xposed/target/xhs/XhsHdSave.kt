@@ -12,7 +12,7 @@ import top.honorhook.xposed.data.RemoteConfig
  * X3 高清保存（引擎 XhsHook·X3）：保存走原版无压缩图。
  *
  * 清晰度差距根源（doc §二）：`qc8.i.i` 拿显示 URL（`sns-webpic-*` 带 `!` 裁剪后缀）进 Fresco，
- * 存的是压缩位图。改写规则统一在 [XhsImageUrl]（权威源 XHS-Downloader `NoteOutput.imageUrls`）。
+ * 存的是压缩位图。改写规则统一在 [XhsImageUrl]（权威源 XHS_Downloader_Android `NoteOutput.imageUrls`）。
  *
  * 挂载点 `qc8.i.i`（11 参 `(Activity, String×4, boolean, Function1×2, boolean×3)`，jadx 实读）：
  * args[3] = str3 = `Uri.parse(args[3])` 进 Fresco 的解码源图 url——before 改参即改解码源。
@@ -63,7 +63,7 @@ object XhsHdSave {
         engine.mount(task, module, loader) { chain ->
             // before 语义：替换 args[3] 后按新参数 proceed；void 方法回调恒返回 null
             val original = runCatching { chain.getArg(ARG_URL_INDEX) as? String }.getOrNull()
-            // 粘性降级自动生效：q/100 被 X5 实证失败的 token，toOriginal 直接回裸链（XhsImageUrl.markQualityFailed）
+            // X3 专用 q/100 直链（X5 已改裸链优先；XhsImageUrl 无粘性降级表——2026-10-15 基准切换删除）
             val rebuilt = XhsImageUrl.toOriginal(original)
             if (rebuilt != null && rebuilt != original) {
                 engine.judge(module, task, JUDGE_PREFIX, "解码源已换原图直链")

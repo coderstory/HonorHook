@@ -20,7 +20,7 @@ import java.net.URL
  * X5 批量保存（引擎 XhsHook·X5）：图片笔记长按「保存」→ **模块全接管**，自己下全部原图（含当前张）。
  *
  * 架构（2026-10-14 四版定案，外挂解析）：不碰 app 内部结构——图集数据从 [XhsVideoSave] 的
- * okhttp 旁路采集（笔记 JSON images[].url_default，XHS-Downloader 同源），下载由模块自己
+ * okhttp 旁路采集（笔记 JSON images[].url_default，XHS_Downloader_Android 同源），下载由模块自己
  * HttpURLConnection + MediaStore 完成。零混淆依赖、零宿主反射（URL 重写走共享 [XhsImageUrl]，权威源 NoteOutput.imageUrls）。
  *
  * 前三版死因存档（勿复活）：
@@ -339,7 +339,8 @@ object XhsBatchSave {
 
     /** 追加询问（≥2 张）：图集来自 [XhsVideoSave.lastNoteImages]；确认后外挂直下。分流见 [mountClick]。 */
     private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule) {
-        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 " + urls.first().take(60) + "…）")
+        // 全量 URL 不截断（2026-10-15 原图链路诊断）：PC 端 curl 比对需完整 token/query
+        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 " + urls.first() + "）")
         runCatching {
             showStyledDialog(activity, urls.size) { downloadAll(activity, urls, module) }
         }.onFailure {
@@ -386,6 +387,7 @@ object XhsBatchSave {
                 text = label
                 textSize = 15f
                 gravity = android.view.Gravity.CENTER
+                maxLines = 1
                 setPadding(d(18), d(11), d(18), d(11))
                 background = android.graphics.drawable.GradientDrawable().apply {
                     cornerRadius = d(18).toFloat()
@@ -409,6 +411,11 @@ object XhsBatchSave {
         })
         card.addView(row)
         dialog.setContentView(card)
+        // 真机实测默认 wrap 宽度挤「全部下载」换行（2026-10-15）：定宽 90% 屏 + 按钮单行
+        dialog.window?.setLayout(
+            (activity.resources.displayMetrics.widthPixels * 0.9f).toInt(),
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+        )
         dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
         dialog.setCancelable(true)
         dialog.show()
@@ -426,13 +433,12 @@ object XhsBatchSave {
             var ok = 0
             var bytes = 0L
             urls.forEachIndexed { i, raw ->
-                // 主链 = 原图直链（token + 最高画质 query）；quality/bare 皆不适用时退回 raw 本身
-                // （保持原语义）。bare 作为「失败回落」，由 downloadOne 在 HTTP 非 200 / 错误页
-                // Content-Type 时用裸链重下一次（见 downloadOne）。
-                val quality = XhsImageUrl.toOriginal(raw)
-                val bare = XhsImageUrl.toBare(raw)
-                val url = quality ?: bare ?: raw
-                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", bare, raw) }
+                // 主链 = 裸链（token，无 query）；2026-10-15 基准切换逐语义移植 XHS_Downloader_Android
+                // domain/download/NoteOutput.kt:34-45（AUTO：preferred = sns-img-bd 裸链 → 回落 raw 原样，
+                // fetch() 按列表顺序逐个试）。toBare 不适用（null）时退回 raw 本身；裸链失败（非 200 /
+                // 错误页 Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
+                val url = XhsImageUrl.toBare(raw) ?: raw
+                val saved = runCatching { downloadOne(activity, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", raw) }
                     .getOrDefault(0L)
                 if (saved > 0) { ok++; bytes += saved }
                 else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
@@ -513,30 +519,26 @@ object XhsBatchSave {
 
     /**
      * 直下单张：先抓 [url]；若命中「HTTP 非 200」或「错误页 Content-Type」两类失败，则改用
-     * [bareFallback]（裸链，无 query）重下一次——**仅一次，不递归**。其余失败（超限/写盘异常）不重试。
-     * 裸链回落**成功**时以 [raw] 记入 [XhsImageUrl.markQualityFailed]（粘性降级，X3 不再撞该 token）。
+     * [rawFallback]（采集原串，含 query）重下一次——**仅一次，不递归**。其余失败（超限/写盘异常）不重试。
+     * （2026-10-15 基准切换：回落目标由裸链改 raw 原样，NoteOutput.kt:34-45 列表序语义；旧的
+     * markQualityFailed 粘性降级随 q/100 主链一并删除。）
      * 返回值 = 落盘字节数（>0 = 成功；0 = 失败），供完成卡合计体积。
      */
-    private fun downloadOne(activity: Activity, url: String, fileName: String, bareFallback: String? = null, raw: String? = null): Long {
+    private fun downloadOne(activity: Activity, url: String, fileName: String, rawFallback: String? = null): Long {
         val bytes = LongArray(1)
         when (fetchOne(activity, url, fileName, bytes)) {
             Fetch.OK -> return bytes[0]
-            Fetch.RETRY_BARE -> if (bareFallback != null && bareFallback != url) {
+            Fetch.RETRY_FALLBACK -> if (rawFallback != null && rawFallback != url) {
                 val retry = LongArray(1)
-                if (fetchOne(activity, bareFallback, fileName, retry) == Fetch.OK) {
-                    // 裸链成 = 确认 q/100 对该 token 失败（非 200 / 错误页）→ 记入粘性降级表，
-                    // X3（改宿主解码源，无兜底）对该 token 不再撞 q/100。普通成功路径不记。
-                    XhsImageUrl.markQualityFailed(raw)
-                    return retry[0]
-                }
+                if (fetchOne(activity, rawFallback, fileName, retry) == Fetch.OK) return retry[0]
             }
             Fetch.FAIL -> Unit
         }
         return 0L
     }
 
-    /** 单地址抓取结果：OK = 已落盘；RETRY_BARE = 非 200 / 错误页，可回落裸链重试；FAIL = 终局失败。 */
-    private enum class Fetch { OK, RETRY_BARE, FAIL }
+    /** 单地址抓取结果：OK = 已落盘；RETRY_FALLBACK = 非 200 / 错误页，可回落 raw 原样重试一次；FAIL = 终局失败。 */
+    private enum class Fetch { OK, RETRY_FALLBACK, FAIL }
 
     /**
      * 单地址抓取（302 跟随）+ MediaStore 落盘到 Pictures/小红书。
@@ -568,7 +570,7 @@ object XhsBatchSave {
                         if (ctype == "application/json" || ctype == "application/xml" ||
                             ctype?.startsWith("text/") == true
                         ) {
-                            return Fetch.RETRY_BARE
+                            return Fetch.RETRY_FALLBACK
                         }
                         val values = ContentValues().apply {
                             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
@@ -593,8 +595,8 @@ object XhsBatchSave {
                         } ?: return Fetch.FAIL
                         return Fetch.OK
                     }
-                    // 其余状态（4xx/5xx 等非 200）＝ 主链失效 → 可回落裸链重试
-                    else -> return Fetch.RETRY_BARE
+                    // 其余状态（4xx/5xx 等非 200）＝ 主链失效 → 可回落 raw 原样重试
+                    else -> return Fetch.RETRY_FALLBACK
                 }
             } finally {
                 conn.disconnect()

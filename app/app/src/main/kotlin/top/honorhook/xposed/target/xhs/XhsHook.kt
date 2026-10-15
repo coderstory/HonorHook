@@ -17,7 +17,7 @@ import top.honorhook.xposed.target.logDisabled
  *   X4 视频直链（[XhsVideoSave]）/ X5 批量保存（[XhsBatchSave]）。
  *
  * 逆向事实源：docs/reverse/xhs.md（§二保存链路 + §三挂载点总表，每点附重定位备注）。
- * 移植源：com.chekayo.xhssavefix 1.2.3 + JoeanAmier/XHS-Downloader（差异清单见 doc §五）。
+ * 移植源：com.chekayo.xhssavefix 1.2.3 + XHS_Downloader_Android（差异清单见 doc §五）。
  *
  * 边界（doc §一）：付费内容（PAID_IMAGE_DOWNLOAD）不绕过；live photo 双文件 zip 分支不覆盖。
  *
