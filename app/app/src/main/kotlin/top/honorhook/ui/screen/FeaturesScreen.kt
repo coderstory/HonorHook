@@ -345,15 +345,6 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
                     maxLines = 1,
                     softWrap = false,
                 )
-                Text(
-                    text = "${target.packageName} · ${target.features.size} 项",
-                    modifier = Modifier.basicMarquee(),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight(550),
-                    color = colorScheme.onSurfaceVariantSummary,
-                    maxLines = 1,
-                    softWrap = false,
-                )
             }
             Column(
                 modifier = Modifier.padding(start = 16.dp),
