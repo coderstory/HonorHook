@@ -229,3 +229,12 @@ X2c 无静态挂载点（运行时注解反射解析）⇒ 本 target 脚本核�
 - **双卡握手判据**：视频保存后屏上只出现一张卡（X4 询问卡或 X5 反馈卡，不并存）。
 - **待实证项**：mountClick 不 proceed 时自造 kotlin.Unit 返回值——宿主调用方是否消费该返回值未实证；回归窗口 = 长按保存后宿主不闪退、后续交互正常。
 - **新鲜度门设计（审计 2026-10-15）**：护栏丢弃/换笔记时 `lastNoteImages` 返回空 ⇒ 回落宿主。
+
+---
+
+## 七、2026-10-15 基准切换与对照设计
+
+> 用户拍板：下载策略**唯一基准** = `reference/xhs/XHS_Downloader_Android`（Kotlin 安卓版），禁止自创；Python 版 `reference/xhs/XHS-Downloader` 已删。
+> 全量业务逻辑对照（基准阶段全景 × 插件现状 × 设计提案 × 待拍板清单，含证据分级）= `docs/reverse/xhs-downloader-parity.md`。
+> 已落码对齐：视频选档（watermarked↑ → original↓ → w×h↓ 取首）、图片链（裸链优先 → raw 回落）、水印流标记（stream_type 259/309、WEB_LIVEPHOTO_19）。
+> 已知分叉：X3 仍用 q/100（2026-10-14 真机字节实证 vs 基准 AUTO 裸链，冲突待拍板，见 parity §四·1）。
