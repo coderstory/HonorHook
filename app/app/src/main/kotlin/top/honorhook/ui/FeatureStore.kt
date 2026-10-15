@@ -11,7 +11,7 @@ import top.honorhook.FeatureCatalog
  *
  * - 本地 SharedPreferences：UI 即时读取显示（框架未连接也可用）；
  * - 远端 prefs（FeatureCatalog.REMOTE_GROUP）：hook 侧在目标进程只读此通道。
- * 默认关（2026-10-14 产品规则：全新安装全关）；开关改动需目标进程重启（下次注入读取）才生效（远端 prefs 语义）。
+ * 默认随 FeatureCatalog（2026-10-15 产品规则：默认开，四个例外关）；开关改动需目标进程重启（下次注入读取）才生效（远端 prefs 语义）。
  */
 object FeatureStore {
 
@@ -46,7 +46,7 @@ object FeatureStore {
         }
     }
 
-    /** 读开关（Compose 可观察；默认关——2026-10-14 产品规则：全新安装全关）。 */
+    /** 读开关（Compose 可观察；默认随 FeatureCatalog——2026-10-15 产品规则：默认开，四个例外关）。 */
     fun isEnabled(key: String): Boolean =
         states[key] ?: featureIndex[key]?.defaultEnabled ?: false
 
@@ -54,7 +54,7 @@ object FeatureStore {
      * 写开关：本地镜像 + 远端下发。
      *
      * @return 远端下发是否成功。`false` 表示框架未连接或写入抛异常 —— 此时 hook 侧读不到，
-     *   仍按默认关运行，UI 必须如实告知用户（不能只改本地就当生效了）。
+     *   仍按目录默认运行，UI 必须如实告知用户（不能只改本地就当生效了）。
      */
     data class PushResult(val sent: Int, val total: Int, val connected: Boolean)
 
@@ -97,7 +97,7 @@ object FeatureStore {
             prefs?.edit()?.putBoolean(excludedNow, false)?.apply()
         }
         val service = FrameworkState.current() ?: run {
-            Log.w(TAG, "LSPosed 未连接，开关只写入本地（hook 侧保持默认关）: $key")
+            Log.w(TAG, "LSPosed 未连接，开关只写入本地（hook 侧保持目录默认）: $key")
             return false
         }
         return runCatching {
@@ -107,7 +107,7 @@ object FeatureStore {
             editor.apply()
             true
         }.getOrElse { t ->
-            Log.w(TAG, "远端 prefs 下发失败（本地已生效，hook 侧保持默认关）: $key", t)
+            Log.w(TAG, "远端 prefs 下发失败（本地已生效，hook 侧保持目录默认）: $key", t)
             false
         }
     }

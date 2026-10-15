@@ -70,8 +70,8 @@ object FeatureCatalog {
         val key: String,
         val titleRes: Int,
         val descRes: Int,
-        /** 默认开关态（全新安装落盘值）；全插件产品规则 = 默认关（2026-10-14），显式传 true 才默认开。 */
-        val defaultEnabled: Boolean = false,
+        /** 默认开关态（全新安装落盘值）；全插件产品规则 = 默认开（2026-10-15 用户拍板，取代 2026-10-14 全关规则），显式传 false 才默认关。 */
+        val defaultEnabled: Boolean = true,
         /** 互斥功能 key：本开关被打开时该 key 强制落盘 false（UI 与 store 单点实现，见 FeatureStore.setEnabled）。 */
         val excludesWith: String? = null,
     )
@@ -147,11 +147,13 @@ object FeatureCatalog {
                 Feature(KEY_LAUNCHER_KEEP_FOLDER_OPEN, R.string.feature_launcher_keep_folder_open_title, R.string.feature_launcher_keep_folder_open_desc),
                 Feature(
                     KEY_LAUNCHER_RECENTS_KEEP_ATMS, R.string.feature_launcher_recents_keep_atms_title,
-                    R.string.feature_launcher_recents_keep_atms_desc, excludesWith = KEY_LAUNCHER_RECENTS_KEEP_MANAGER,
+                    R.string.feature_launcher_recents_keep_atms_desc, defaultEnabled = false,
+                    excludesWith = KEY_LAUNCHER_RECENTS_KEEP_MANAGER,
                 ),
                 Feature(
                     KEY_LAUNCHER_RECENTS_KEEP_MANAGER, R.string.feature_launcher_recents_keep_manager_title,
-                    R.string.feature_launcher_recents_keep_manager_desc, excludesWith = KEY_LAUNCHER_RECENTS_KEEP_ATMS,
+                    R.string.feature_launcher_recents_keep_manager_desc, defaultEnabled = false,
+                    excludesWith = KEY_LAUNCHER_RECENTS_KEEP_ATMS,
                 ),
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
@@ -159,8 +161,8 @@ object FeatureCatalog {
         Target(
             "com.android.systemui", R.string.target_name_systemui,
             listOf(
-                Feature(KEY_SYSTEMUI_HIDE_SIM2, R.string.feature_systemui_hide_sim2_title, R.string.feature_systemui_hide_sim2_desc),
-                Feature(KEY_SYSTEMUI_HIDE_5G, R.string.feature_systemui_hide_5g_title, R.string.feature_systemui_hide_5g_desc),
+                Feature(KEY_SYSTEMUI_HIDE_SIM2, R.string.feature_systemui_hide_sim2_title, R.string.feature_systemui_hide_sim2_desc, defaultEnabled = false),
+                Feature(KEY_SYSTEMUI_HIDE_5G, R.string.feature_systemui_hide_5g_title, R.string.feature_systemui_hide_5g_desc, defaultEnabled = false),
                 Feature(KEY_SYSTEMUI_DUAL_SIGNAL, R.string.feature_systemui_dual_signal_title, R.string.feature_systemui_dual_signal_desc),
                 Feature(KEY_SYSTEMUI_DUAL_SIGNAL_LABEL, R.string.feature_systemui_dual_signal_label_title, R.string.feature_systemui_dual_signal_label_desc),
                 Feature(KEY_SYSTEMUI_ICON_WIFI, R.string.feature_systemui_icon_wifi_title, R.string.feature_systemui_icon_wifi_desc),
