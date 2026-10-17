@@ -84,10 +84,11 @@ object SystemUiHook : TargetHook {
     private const val PKG_ANDROID = "android"
     private const val HOTSPOT_NOTIF_GROUP = "TetheredNotification"
 
-    /** USB 调试通知 id（2026-10-13 探针+dumpsys 实证：pkg=android id=26 channel=DEVELOPER_IMPORTANT，
-     *  AOSP DevelopmentSettings 发帖；extras 里 usbdevicemanager.adb.tv 是 tv 扩展字段而非渠道 id，
-     *  静态推断「channelId 含 adb」据此落空——这就是 USB 调试通知隐藏不住的根因）。 */
-    private const val ADB_NOTIF_ID = 26
+    /** USB 调试通知主锚 = 渠道精确等值（2026-10-13 探针+dumpsys 实证：pkg=android id=26
+     *  channel=DEVELOPER_IMPORTANT，AOSP DevelopmentSettings 发帖；NMS 对渠道打码但 hook 回调
+     *  直读 Notification 字段可读）。2026-10-17 客户误杀反馈：裸 id==26 与 contains("adb") 宽匹配
+     *  均删，只留渠道等值——id 空间被 system_server 其他通知共用，宽匹配误杀。 */
+    private const val ADB_NOTIF_CHANNEL = "DEVELOPER_IMPORTANT"
 
     /** 手电筒低电量阈值（与宿主同款 5%，仅用于判据日志打点，不影响放行语义）。 */
     private const val LOW_BATTERY_THRESHOLD = 5
@@ -460,8 +461,8 @@ object SystemUiHook : TargetHook {
     /**
      * U4 身份匹配：返回「功能名(pkg/锚点)」用于判据日志，未命中返回 null。
      * 三条规则（dumpsys 实证 2026-10-12；渠道 id 被 NMS 强制打码，充电/热点故不用渠道做锚点）：
-     *   充电    pkg==系统管家 && id==200001（真机活跃条目 title「极速充电」；普通充电态可能同 id
-     *           换标题——探针日志运行期核对，见 probeNotifIdentity）
+     *   充电    pkg==系统管家 && id==200001（真机活跃条目 title「极速充电」；普通充电态「正在通过
+     *           USB 充电」2026-10-17 实证同 id——用户确认全档隐藏，同 id 全杀即预期语义）
      *   热点    pkg==android && group=="TetheredNotification"（AOSP framework 硬编码 group 串，最稳锚点）
      *   USB调试 pkg==android && channelId 含 "adb"（静态推断的宽匹配，探针拿到真实渠道 id 后收紧）
      */
@@ -471,6 +472,8 @@ object SystemUiHook : TargetHook {
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_CHARGE_NOTIF) &&
             pkg == CHARGE_NOTIF_PKG && (sbn.callOrNull("getId") as? Int) == CHARGE_NOTIF_ID
         ) {
+            // 全档隐藏（2026-10-17 用户确认）：快充「极速充电」与普通「正在通过 USB 充电」同发
+            // id=200001，均属隐藏需求，同 id 全杀是预期语义，勿当误杀收紧。
             return "充电通知($pkg/$CHARGE_NOTIF_ID)"
         }
         val group = sbn.callOrNull("getGroup") as? String
@@ -482,7 +485,10 @@ object SystemUiHook : TargetHook {
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_ADB_NOTIF) && pkg == PKG_ANDROID) {
             val id = sbn.callOrNull("getId") as? Int
             val channel = sbn.callOrNull("getNotification")?.callOrNull("getChannelId") as? String
-            if (id == ADB_NOTIF_ID || channel?.contains("adb", ignoreCase = true) == true) {
+            // 主锚 = 渠道精确等值（发帖方 AOSP DevelopmentSettings 硬编码常量，探针 2026-10-13 实证）。
+            // 2026-10-17 客户误杀反馈收紧：裸 id==26 OR 分支删除（pkg=android 的 id 空间被
+            // system_server 其他通知共用，裸 id 匹配误杀）。渠道名若变 = 隐藏不住（fail-open），不会误杀。
+            if (channel == ADB_NOTIF_CHANNEL) {
                 return "USB调试通知($pkg/id=$id/channel=$channel)"
             }
         }

@@ -427,12 +427,12 @@ U4 点保留的唯一实际职责 = wakeScreenOn 侧（屏灭时不为隐藏通�
 
 | 功能 | 规则 | 证据 |
 |---|---|---|
-| 充电 | `pkg==com.hihonor.systemmanager && id==200001` | 插充电器后真机活跃条目：title「极速充电」text「加速充电中，设备温度会升高」action「本次关闭」，ONGOING |
+| 充电 | `pkg==com.hihonor.systemmanager && id==200001` | 插充电器后真机活跃条目：title「极速充电」text「加速充电中，设备温度会升高」action「本次关闭」，ONGOING。**2026-10-17 实证**：普通「正在通过 USB 充电」同发 id=200001——用户确认全档隐藏，同 id 全杀即预期语义（勿当误杀收紧） |
 | 热点 | `pkg==android && group=="TetheredNotification"` | 热点开时真机活跃条目：title「1 台设备」text「已共享 275 MB」，group 为 AOSP framework 硬编码串 |
-| USB 调试 | `pkg==android && (id==26 \|\| channel 含 "adb")` | **探针+dumpsys 实证 2026-10-13**：id=26、channel=`DEVELOPER_IMPORTANT`（AOSP DevelopmentSettings 发帖）；extras 里 `usbdevicemanager.adb.tv` 是 tv 扩展字段**不是渠道 id**——静态推断「channelId 含 adb」据此落空（隐藏不住的根因）。⚠️ 过滤器只在 post/update 时跑，systemui 重启重绑阴影**不重判**老记录：改规则后需重发帖（切一次 USB 调试开关）才生效 |
+| USB 调试 | `pkg==android && channel=="DEVELOPER_IMPORTANT"` | **探针+dumpsys 实证 2026-10-13**：id=26、channel=`DEVELOPER_IMPORTANT`（AOSP DevelopmentSettings 发帖）；extras 里 `usbdevicemanager.adb.tv` 是 tv 扩展字段**不是渠道 id**——静态推断「channelId 含 adb」据此落空（隐藏不住的根因）。**2026-10-17 客户误杀反馈收紧**：裸 id==26 与 contains("adb") 宽匹配均删，只留渠道等值（id 空间被 system_server 其他通知共用；真机实证渠道锚独立命中，判据 `隐藏USB调试通知(android/id=26/channel=DEVELOPER_IMPORTANT)`）。⚠️ 过滤器只在 post/update 时跑，systemui 重启重绑阴影**不重判**老记录：改规则后需重发帖（切一次 USB 调试开关）才生效 |
 
 - NMS 对渠道 id 强制打码（`dumpsys --noredact` / `cmd notification get` 均为 `***`，隐私补丁）⇒ 充电/热点不用渠道做锚点；**渠道 id 唯一证据源 = 模块内建探针**（`probeNotifIdentity`，每 key 一条、封顶 40 条，打 pkg/id/group/channel/title）。
-- 充电发帖方是**系统管家**（非 powergenie，初判错误）；普通充电态可能同 id 换标题，探针运行期核对。
+- 充电发帖方是**系统管家**（非 powergenie，初判错误）；普通充电态「正在通过 USB 充电」同 id 已实证（2026-10-17），用户确认全档隐藏。
 - `id=2000 pkg=android` 是「LSPosed 已加载」框架通知，与上述规则均不符，不受影响。
 
 ### 8.3 排查备忘
