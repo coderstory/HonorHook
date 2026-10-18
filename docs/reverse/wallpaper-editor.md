@@ -490,7 +490,7 @@ keyguard 态只切模板段（`AVPlayer`=锁屏带 position / `AVPlayer_desk`=�
 | 点 | 进程 | 挂载 | 作用 |
 |---|---|---|---|
 | W16 | editor | mcs `VideoTranscoder#startTranscode(TranscodeConfig)`（类名不混淆） | 宿主 L() 组装 config **不设 bitrate**（=0 走 mcs 低默认 ⇒ 转码模糊）——按 0.2 bit/pixel@fps 补足（8–40 Mbps 封顶），不碰分辨率/裁剪 |
-| W17 | paradise | `n4.y#onPlayerCompleted()`（DexKit 锚点 `onPlayerCompleted goingToSleep`；listener 类按**字段类型 = n4.z** 过滤——z 用 `getCurJson keyguardLocked` 唯一定位） | 桌面态（KeyguardManager 直查，**不反射 z 的 AtomicBoolean**——z 同时持有 keyguardLocked/goingToSleep 两个同类型字段）吞掉回调 + `seekTo(0)`（引擎 seekCompleted 自动 start ⇒ 循环）；锁屏态保持原生（播完释放） |
+| W17 | paradise | ~~`n4.y#onPlayerCompleted()`（DexKit 锚点 + declaringClass 过滤）~~ **已被 v6 全变体挂载取代，终版规格见 §十一·4** | 桌面态（KeyguardManager 直查，**不反射 z 的 AtomicBoolean**——z 同时持有 keyguardLocked/goingToSleep 两个同类型字段）吞掉回调 + `seekTo(0)`（引擎 seekCompleted 自动 start ⇒ 循环）；锁屏态保持原生（播完释放） |
 
 开关：`wallpaper.video_enhance`（一个开关管两点）；进程 scope：editor（W16）+ paradise（W17）。
 
@@ -509,3 +509,114 @@ keyguard 态只切模板段（`AVPlayer`=锁屏带 position / `AVPlayer_desk`=�
 - modlog：`W16 已挂载`（editor 进程冷启后）、`W17 已挂载`（paradise 冷启后）；
 - 桌面壁纸播完一遍（≈16s）不停、继续播 = W17 生效；
 - 图库设壁纸转码产物清晰度对比 = W16 生效（modlog 有 `W16 bitrate 0 -> N` 行）。
+
+## 十一、W16 产物量化实证 + W18 时间轴去限（2026-10-18 晚）
+
+**现行壁纸业务全流程**（一张图串四点，逆向细节见各节）：
+
+```
+图库选视频 → 「设为壁纸」进编辑器（wallpapereditor, ThemeEditorActivity）
+  └─ 编辑页时间轴裁剪：SingleCutProgressView（10s clamp ← W18 解除）
+       左右柄 ms 写 CustomVideoPlayer.f7398y/f7399z（µs）
+  └─ 应用（mode 1 直接设桌面）→ mcs VideoTranscoder 转码
+       TranscodeConfig{startTime/endTime=y/z, bitrate=0 ← W16 补 0.3bpp}
+       实编：HEVC，CBR 欠供（18.6M 请求实编 ~7–10M），fps 直通（30→30）
+  └─ system_server WallpaperSetSession 写盘 → /data/themes/0/wallpaper/
+       live_photo/unlock_video.mp4（桌面实播文件，wp-probe 拉取量化）
+  └─ paradise（LivePaper 引擎）n4.z 单 player 播该文件
+       播完 onPlayerCompleted → 原生 release ← W17 桌面态吞掉 + seekTo(0) 续播
+       onVisibilityChanged(F) 原生只管 firstApply ← W19 按可见性 start/pause（300ms 去抖）
+       锁屏态两者均放行原生；隐藏久了系统回收进程，respawn 回桌面自动重建 ✓
+```
+
+> UI 入口：三开关挂「系统桌面」（launcher 卡）下——`wallpaper.transcode_quality` /
+> `wallpaper.timeline_unlimited` / `wallpaper.loop`；wallpapereditor/paradise 两个 Target
+> 转 `hidden`（留壳供 scope 页与 baselineVersionOf）。原 `wallpaper.video_enhance` 单键废弃。
+
+### 1. W16 产物 ffprobe 实证（推翻"编码器 fps/2"推断）
+
+验证工具链：`tools/dev.sh wp-probe`（拉 `/data/themes/0/wallpaper/live_photo/unlock_video.mp4`
+→ 本地 ffprobe；brew `/opt/homebrew/bin/ffmpeg` symlink 过期指旧 Cellar 目录，脚本走
+`/opt/homebrew/Cellar/ffmpeg/*/bin/ffprobe` 兜底）。
+
+20:42 产物（modlog 20:42:20 `W16 bitrate 0 -> 18662400, fps 30 -> 60` 同源）：
+
+| 参数 | hook 设置 | 实编 |
+|---|---|---|
+| codec/分辨率 | — | HEVC 1080x1920 |
+| fps | 60（30×2） | **60**（602 帧/10.03s，r=avg=60/1） |
+| bitrate | 18.66M | **9.96M**（疑似编码器 ~10M 封顶） |
+| 时长 | — | 10.03s（=时间轴 10s 上限的直接物证） |
+
+推论链（`MediaCodecUtils#createOutputFormat` 逐行）：
+- :35 源格式 frame-rate 缺失时 `integer = config.fps`；:68 directMode 下 `fps = integer*2`；
+  :71 编码器 frame-rate = `fps/2`。实测 config 60 → 实编 60 ⇒ **directMode=true 且源无
+  frame-rate metadata** ⇒ 原生（config 30）实编 30fps——此前"宿主 30 实编 15"是静态误读。
+- **fps×2 纯害**：码率被 ~10M 封顶时帧数翻倍 = 每帧比特减半。v2 已回退（fps 不动，保 30fps
+  集中码率）。10M 封顶未分离变量证实（是否 MediaCodec 上限 / mcs 内部 clamp 待验：下轮
+  wp-probe 若 30fps 产物仍 ~10M 即封顶坐实）。
+- bitrate=0 时 mcs 默认 3.1Mbps（:63 `3145728`），非"低默认"猜测值。
+
+### 2. W18 时间轴去 10s 上限（v1 已落码，待真机）
+
+- **执法点**（全部在 editor 进程，类名未混淆）：
+  `ui/SingleCutProgressView#setLeftCropPosition(long)` / `#setRightCropPosition(long)` 内
+  10000/1000 硬编码把选中窗口 clamp 到 [1s, 10s]（超窗拖动推走对侧柄；jadx :283-343）。
+  触摸层 `y7/g0.java` **先写字段后调方法**——期望位置已落 `f7262j/f7263k`。
+- **下游无二次校验**：`CustomVideoPlayer` 转码 `transcodeConfig.startTime/endTime = f7398y/f7399z`
+  （:361-362）直读；预览 `setTimeRange` 同源（:416）。初始选中 = `I()` 的
+  `min(时长, 10s)`（:295）+ 构造器默认 10s（:649）——v1 不碰，10s 起步拖右柄扩展。
+- **手法**：hook 两 set 方法，proceed 前存字段、后写回（clamp [0, 总时长]）+ 反射 `p()/r()`
+  重画。原生 clamp 只改这对字段 ⇒ 写回即全废。
+- **版本绑定**：`f7262j/f7263k/f7258f`、`p()/r()` 是混淆短名（editor 153.0.0.423）；
+  `setLeftCropPosition` 等方法名为 dex 真名（跨类调用可证）。
+- 判据：modlog `W18 已挂载: SingleCutProgressView.set*CropPosition`（editor 冷启后）+
+  `W18 已放行长选`（真拖出 >10s 选中时）；产物时长 >10s（wp-probe）。
+
+### 3. 杂项实证（本轮）
+
+- **app 在前台时桌面视频照播（W19 已修）**：21:14–21:15 实证隐藏照播——宿主 `n4.z/w#F(boolean)`
+  （onVisibilityChanged 实现）只处理 firstApply 无视可见性。W19 = 同串锚点全挂 F，proceed 后
+  桌面态按可见性补 `VisionController.start()/pause()`（锁屏不碰）；挂循环开关下。
+  真机双向实证（21:17–21:20）：隐藏 68s 零 tick；回桌面单条续播 + 15.2s 循环恢复。
+  已知噪声：锁屏/过渡态三变体（z/w/c0）同毫秒交替 start/pause，净效果碰巧正确，未加去抖。
+- **tools/dev.sh 失去执行位的假象**：`safe_write`（tmp+rename）会丢 x 位——此前两轮
+  "modlog 无输出"实为 `permission denied`，排查日志前先 `ls -l tools/dev.sh`。
+- **W18 第二轮真机验证通过（21:06）**：`W18 已放行长选 0..15168ms`，产物 duration 15.13s；
+  同批 W16 v2（去 fps×2）产物 = HEVC 1080x1920 **30fps / 7.31Mbps**（每帧比特 244k，
+  较 60fps 版 +47%）。CBR 欠供与 ~10M 封顶未分离证实；后续画质杠杆 = i-frame-interval
+  （现 1s，可放宽 2s）与 bitrate-mode（现 CBR=1）。
+
+### 4. 挂载点终版规格与稳健性结论（2026-10-18 复核，防重复分析）
+
+**规格速查**（细节在各自 hook 源码注释，此处只留逆向事实）：
+
+| 点 | 进程 | 挂载 | 手法 | 失败形态 |
+|---|---|---|---|---|
+| W16 | editor | `com.hihonor.mcs.media.codec.frameextractor.VideoTranscoder#startTranscode(TranscodeConfig)`（未混淆） | intercept 改参（bitrate 0.3bpp，fps 不动） | loadClass/签名失配 → WARN，hook off |
+| W17 | paradise | DexKit 串 `"onPlayerCompleted goingToSleep = %b, which = %d "` 全命中（n4.i/f/v/y listener 变体） | 吞回调 + 反射 listener→player→VisionController `seekTo(Int)` | 锚点失配 WARN；反射断 → 放行原生 |
+| W18 | editor | `SingleCutProgressView#setLeft/RightCropPosition(long)`（方法真名）；字段 j/k/f、重画 p()/r()（混淆短名） | pre 存字段 → proceed → post 写回 + p()/r() | 字段名失配 → `No field` WARN，整挂 off |
+| W19 | paradise | DexKit 串 `"onVisibilityChanged: v = %b, firstApply = %b"` 全命中（`F(boolean)`，n4.z 手机/w Pad/c0 折叠 三变体） | proceed 保 firstApply，再按可见性 `VisionController.start()/pause()`（锁屏态跳过） | 同 W17 |
+
+**逆向事实（后续选点直接用，别重挖）**：
+- n4 变体职责：`z`=手机、`w`=Pad、`c0`=折叠（引擎按设备形态实例化其一，但 DexKit 锚点串全类共享 ⇒ 永远全挂）
+- `F(boolean)` = AOSP onVisibilityChanged 的实现，宿主只处理 firstApply，**原生不随桌面隐藏暂停**
+- `l3.l`（VisionControllerImpl，pluginsdk 接口未混淆）API 全集：start/pause/stop/release/releaseAsync/
+  prepare/seekTo(**int**)/isPlaying/isPlayerReleased/getCurrentPosition/getVideoDuration/setTimeRange/
+  setPlaySpeed/setVolume/setSurface/setTemplateSource——后续壁纸引擎类 hook 从这里挑
+- 隐藏久了系统回收 paradise 进程（实测 pid 11633→18959），respawn 后回桌面自动重建并续播 ✓
+
+**稳健性判定（全部保持现选点，无一需要换）**：W16 高 > W17 ≈ W19 中高 > W18 中。
+备选全更差：W16 的 `CustomVideoPlayer.L()` 混淆短名；W18 的 `k(JJJ)` 共享 clamp 会误伤、
+`o(JJZ)` 只盖一支；W17/W19 的内容锚点+全挂+优雅失败即本仓最优解。
+
+**遗留两项（2026-10-18 已落）**：
+1. ~~W19 去抖~~ 已加：300ms postDelayed 后到覆盖 + 同值跳过（pendingVisible/appliedVisible），
+   三变体同毫秒 bust 收敛到最后一个值
+2. ~~adapt 校验纳管~~ 已加：`WALLPAPER_STATIC` 登记表入 `adapt_new_version.py`（extract_mounts
+   尾部，**改 wallpaper hook 时同步**）；两基线已跑绿——editor 3/3
+   （`adapt-report-wp-editor-baseline.md`）+ paradise 3/3（l3.l seekTo/start/pause，
+   `adapt-report-wp-paradise-baseline.md`）。W18 的 j/k/f 字段名不在校验范围（方法级工具），
+   字段漂移靠 modlog `No field` 兜底。宿主 OTA 后的核对入口 =
+   `python3 tools/adapt_new_version.py <新APK> --expect-pkg <包名>`（jadx rc=1 属正常，加
+   `--reuse .buildtmp/adapt_jadx_<名>` 复跑）

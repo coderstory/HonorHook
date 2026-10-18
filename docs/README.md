@@ -16,7 +16,7 @@
 | 内容 | 文件 |
 |---|---|
 | 6 目标总表 + 能力边界 + 已放弃目标结论 + 各 app 逆向记录 | [`reverse/README.md`](reverse/README.md) |
-| **壁纸编辑器**（功能已放弃；逆向记录：写链终局 / 引擎模型 / 各路线失败原因） | [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) |
+| **壁纸管线**（wallpapereditor + livewallpaper.paradise 两宿主合一文档。§一–八 = 已放弃路线「视频单独设桌面」W1–W8 留档；§九–十一 = 现行 W16–W19 四点——转码码率 / 时间轴去限 / 桌面循环 / 隐藏暂停，2026-10-18 全验证） | [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) |
 | 主题商店**设计**（需求 / 策略与理由 / 判据 / 未解决项） | [`theme-store.md`](theme-store.md) |
 | 挂载点**口径、已决删除决策、勿删观察项、真机回归教训** | [`hook-inventory-audit.md`](hook-inventory-audit.md) |
 

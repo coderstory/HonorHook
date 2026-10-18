@@ -205,6 +205,7 @@ HonorHook 开发工具
   aapt2 <参数...>          aapt2 透传（自动选 build-tools 里最高版本）
   apkinfo <apk>            aapt2 dump badging 摘要（包名/版本/权限）
   pull-apk <包名>          从设备拉取指定包的 APK（含 split）到 system-files/<包名>/
+  wp-probe          拉取当前桌面壁纸视频 → 本地 ffprobe 量化（码率/fps/时长；W16 画质验证闭环）
   exec <命令...>           带本项目工具链环境（PATH/JAVA_HOME/ANDROID_HOME）执行任意命令
 EOF
     ;;
@@ -786,6 +787,29 @@ EOF
     echo "— apkinfo 摘要（base）:"
     [ -f "$outdir/base.apk" ] && "$AAPT2" dump badging "$outdir/base.apk" 2>/dev/null | head -6 || true
     echo "输出目录: $outdir"
+    ;;
+
+  wp-probe)
+    # 桌面壁纸实播文件（LivePaper 引擎读 /data/themes/0/wallpaper/live_photo/）拉到本地 ffprobe
+    # 量化——W16 转码码率/fps 是否真吃到编码器，只认产物参数，不认 modlog 改参成功。
+    # ffprobe 解析：PATH → brew Cellar（/opt/homebrew/bin 的 symlink 常过期指旧版本目录）。
+    wp_dev=/data/themes/0/wallpaper/live_photo/unlock_video.mp4
+    out="$ROOT/.buildtmp/wp-probe"
+    mkdir -p "$out"
+    "$ADB" shell su -c "cp ${wp_dev} /sdcard/hh_wp_probe.mp4 && chmod 644 /sdcard/hh_wp_probe.mp4" \
+      || die "设备拷贝失败（su 不可用或文件未生成：先在编辑器把视频设为壁纸）"
+    "$ADB" pull /sdcard/hh_wp_probe.mp4 "$out/unlock_video.mp4" >/dev/null 2>&1 || die "adb pull 失败"
+    "$ADB" shell rm -f /sdcard/hh_wp_probe.mp4
+    ffprobe_bin="$(command -v ffprobe || true)"
+    if [ -z "$ffprobe_bin" ]; then
+      ffprobe_bin="$(ls /opt/homebrew/Cellar/ffmpeg/*/bin/ffprobe 2>/dev/null | tail -1)"
+    fi
+    [ -n "$ffprobe_bin" ] || die "未找到 ffprobe（brew install ffmpeg）"
+    size="$(stat -f%z "$out/unlock_video.mp4" 2>/dev/null || stat -c%s "$out/unlock_video.mp4")"
+    echo "产物: $out/unlock_video.mp4 (${size} bytes)"
+    "$ffprobe_bin" -v error -show_entries \
+      format=duration,bit_rate:stream=codec_name,width,height,r_frame_rate,avg_frame_rate,nb_frames \
+      -of default=noprint_wrappers=1 "$out/unlock_video.mp4"
     ;;
 
   *)

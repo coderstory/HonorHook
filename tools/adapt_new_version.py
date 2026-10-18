@@ -210,6 +210,24 @@ def extract_mounts() -> list:
                  method, pcount, unescape_kotlin_str(ret), id_m.group(0).strip('"') if id_m else '')
     if not mounts:
         raise SystemExit('挂载点提取结果为 0——Hook 源码里没有可识别的挂载调用，请检查书写格式')
+    # 壁纸系（W16/W17/W18/W19，2026-10-18）：loadClass/DexKit 运行时解析，两种既有格式都不认——
+    # 静态可比对的锚定点在此登记；**改 wallpaper hook 时同步此表**
+    # （docs/reverse/wallpaper-editor.md §十一·4）。W17/W19 目标方法是混淆名（运行时 DexKit
+    # 串锚点），退而校验其稳定受体 l3.l（VisionControllerImpl，pluginsdk 接口）的方法存活；
+    # W18 的 j/k/f 字段名本脚本不校验（方法级工具），字段漂移靠 modlog `No field` 兜底。
+    WALLPAPER_STATIC = [
+        ('com.hihonor.wallpapereditor', 'WallpaperTranscodeHook.kt',
+         'com.hihonor.mcs.media.codec.frameextractor.VideoTranscoder', 'startTranscode', 1),
+        ('com.hihonor.wallpapereditor', 'WallpaperTimelineHook.kt',
+         'com.hihonor.gallery.wallpaper.ui.SingleCutProgressView', 'setLeftCropPosition', 1),
+        ('com.hihonor.wallpapereditor', 'WallpaperTimelineHook.kt',
+         'com.hihonor.gallery.wallpaper.ui.SingleCutProgressView', 'setRightCropPosition', 1),
+        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'l3.l', 'seekTo', 1),
+        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'l3.l', 'start', 0),
+        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'l3.l', 'pause', 0),
+    ]
+    for wpkg, wfname, wcls, wmethod, wpcount in WALLPAPER_STATIC:
+        _add(mounts, seen, wfname, wpkg, wcls, wmethod, wpcount, '', 'wallpaper:static')
     return mounts
 
 def _add(mounts, seen, fname, pkg, cls, method, pcount, ret, mid):
@@ -462,7 +480,8 @@ def build_report(apk: Path, mounts: list, verdicts: list, sources_dir: Path, reu
                  + (f'，--expect-pkg 声明包名 `{expect_pkg}`' if expect_pkg else ''))
     lines.append(f'- 生成时间：{time.strftime("%Y-%m-%d %H:%M:%S")}')
     lines.append(f'- 挂载点提取：`app/.../xposed/target/*Hook.kt`（自动解析 CLS_* 常量 + addConst/'
-                 f'addForceArg/MountTask 调用，非硬编码清单）')
+                 f'addForceArg/MountTask 调用；壁纸系（W16-W19）为 loadClass/DexKit 运行时解析，'
+                 f'在 WALLPAPER_STATIC 登记表手工同步）')
     lines.append(f'- 反编译产物：`{sources_dir}`（jadx `--no-res`，{"复用既有目录" if reused else "本次生成"}）')
     lines.append('')
     lines.append('## 结论')
