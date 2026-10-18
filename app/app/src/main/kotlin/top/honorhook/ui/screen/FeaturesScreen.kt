@@ -91,12 +91,14 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 @Composable
 fun FeaturesScreen(bottomInnerPadding: Dp = 0.dp) {
     // Target 不是 Serializable 存不进 Bundle：rememberSaveable 只存选中索引（-1 = 未选中），
-    // 按FeatureCatalog.targets 的固定顺序还原，旋屏后停留在二级页
+    // 按固定顺序还原，旋屏后停留在二级页。列表用 visibleTargets（hidden 目标不出卡但保留
+    // 在 targets 里供 scope 页/版本查表），索引同样基于 visibleTargets，二者必须同源。
+    val visibleTargets = FeatureCatalog.targets.filterNot { it.hidden }
     var selectedTargetIndex by rememberSaveable { mutableStateOf(-1) }
-    val target = selectedTargetIndex.takeIf { it >= 0 }?.let { FeatureCatalog.targets.getOrNull(it) }
+    val target = selectedTargetIndex.takeIf { it >= 0 }?.let { visibleTargets.getOrNull(it) }
     BackHandler(enabled = target != null) { selectedTargetIndex = -1 }
     if (target == null) {
-        TargetListScreen(bottomInnerPadding) { selectedTargetIndex = FeatureCatalog.targets.indexOf(it) }
+        TargetListScreen(bottomInnerPadding) { selectedTargetIndex = visibleTargets.indexOf(it) }
     } else {
         // 二级页占满整个内容区，同样要避开悬浮底栏
         FeatureListScreen(
@@ -122,8 +124,10 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
         value = withContext(Dispatchers.IO) {
             val pm = context.packageManager
             FeatureCatalog.targets.filter { target ->
-                target.iconKey != null ||
-                    runCatching { pm.getApplicationInfo(target.packageName, 0) }.isSuccess
+                !target.hidden && (
+                    target.iconKey != null ||
+                        runCatching { pm.getApplicationInfo(target.packageName, 0) }.isSuccess
+                    )
             }
         }
     }

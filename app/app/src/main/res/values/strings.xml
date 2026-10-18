@@ -124,6 +124,10 @@
 
     <string name="target_name_wallpapereditor">壁纸视频增强（转码）</string>
     <string name="target_name_livewallpaper">壁纸视频增强（循环）</string>
-    <string name="feature_wallpaper_video_enhance_title">桌面视频循环播放与高画质转码</string>
-    <string name="feature_wallpaper_video_enhance_desc">桌面壁纸视频播完自动循环（锁屏播完停止保持原生行为）；设壁纸转码时按分辨率自动补足码率，消除压缩模糊。重启图库/壁纸引擎后生效</string>
+    <string name="feature_wallpaper_transcode_quality_title">视频壁纸高画质转码</string>
+    <string name="feature_wallpaper_transcode_quality_desc">设置壁纸时自动补足转码码率，减轻二次压缩带来的模糊</string>
+    <string name="feature_wallpaper_timeline_unlimited_title">视频壁纸去时长限制</string>
+    <string name="feature_wallpaper_timeline_unlimited_desc">编辑页时间轴不再限制最长 10 秒，可选完整视频</string>
+    <string name="feature_wallpaper_loop_title">视频壁纸循环播放</string>
+    <string name="feature_wallpaper_loop_desc">桌面壁纸视频播完自动从头续播，锁屏播完停止</string>
 </resources>

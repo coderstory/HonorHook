@@ -60,7 +60,9 @@ object FeatureCatalog {
     const val KEY_XHS_VIDEO_SAVE = "xhs.video_save"
     const val KEY_XHS_BATCH_SAVE = "xhs.batch_save"
 
-    const val KEY_WALLPAPER_VIDEO_ENHANCE = "wallpaper.video_enhance"
+    const val KEY_WALLPAPER_TRANSCODE_QUALITY = "wallpaper.transcode_quality"
+    const val KEY_WALLPAPER_TIMELINE_UNLIMITED = "wallpaper.timeline_unlimited"
+    const val KEY_WALLPAPER_LOOP = "wallpaper.loop"
 
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
@@ -93,6 +95,9 @@ object FeatureCatalog {
         val baselineVersion: String? = null,
         /** 基线之外额外适配的精确套版本（如 installer 旧版 14.0.22.326，与 InstallerHook.installerTables 联动，勿单侧改）。 */
         val extraVersions: Set<String> = emptySet(),
+        /** 仅从「功能」一级列表隐藏（功能入口归并到别的卡）；scope 页与版本查表仍走这里。
+         *  用于多宿主合一的功能：宿主 Target 留壳（baseline/包名），UI 不单独出卡。 */
+        val hidden: Boolean = false,
     ) {
         /** 全部受支持宿主版本（派生不落盘，UI「版本未适配」tag 用）。
          *  已按数字段升序排序（"14.0.37.301" > "9.9.9.9"），末位恒为最新——UI meta 行取 last 即最新，
@@ -157,6 +162,11 @@ object FeatureCatalog {
                     R.string.feature_launcher_recents_keep_manager_desc, defaultEnabled = false,
                     excludesWith = KEY_LAUNCHER_RECENTS_KEEP_ATMS,
                 ),
+                // 壁纸三开关（2026-10-18 拆分）：宿主是 wallpapereditor/paradise 两个隐藏 Target，
+                // 功能入口归到「系统桌面」卡——用户视角这是桌面能力，不是两个独立 app。
+                Feature(KEY_WALLPAPER_TRANSCODE_QUALITY, R.string.feature_wallpaper_transcode_quality_title, R.string.feature_wallpaper_transcode_quality_desc),
+                Feature(KEY_WALLPAPER_TIMELINE_UNLIMITED, R.string.feature_wallpaper_timeline_unlimited_title, R.string.feature_wallpaper_timeline_unlimited_desc),
+                Feature(KEY_WALLPAPER_LOOP, R.string.feature_wallpaper_loop_title, R.string.feature_wallpaper_loop_desc),
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
         ),
@@ -244,19 +254,19 @@ object FeatureCatalog {
             ),
             baselineVersion = "9.49.1",  // versionCode 9491803，真机拉取 2026-10-13（docs/reverse/xhs.md）
         ),
+        // 壁纸两宿主：功能入口已归并到「系统桌面」卡（见 launcher Target），此处留壳供
+        // scope 页与 baselineVersionOf 查表——hidden 且 features 为空，UI 不出卡。
         Target(
             "com.hihonor.wallpapereditor", R.string.target_name_wallpapereditor,
-            listOf(
-                Feature(KEY_WALLPAPER_VIDEO_ENHANCE, R.string.feature_wallpaper_video_enhance_title, R.string.feature_wallpaper_video_enhance_desc),
-            ),
+            listOf(),
             baselineVersion = "153.0.0.423",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
+            hidden = true,
         ),
         Target(
             "com.hihonor.livewallpaper.paradise", R.string.target_name_livewallpaper,
-            listOf(
-                Feature(KEY_WALLPAPER_VIDEO_ENHANCE, R.string.feature_wallpaper_video_enhance_title, R.string.feature_wallpaper_video_enhance_desc),
-            ),
+            listOf(),
             baselineVersion = "11.0.0.252",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
+            hidden = true,
         ),
     )
 
