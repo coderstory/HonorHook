@@ -36,8 +36,10 @@ object WallpaperLoopHook : TargetHook {
     private var controllerRef: Any? = null
 
     /** W19 去抖：三变体（z/w/c0）对同一事件各发一次 F()，同毫秒交替 start/pause——
-     *  300ms 后到覆盖 + 同值跳过，bust 收敛到最后一个可见性值。主线程 Handler 串行执行。 */
-    private val visibilityHandler = android.os.Handler(android.os.Looper.getMainLooper())
+     *  300ms 后到覆盖 + 同值跳过，bust 收敛到最后一个可见性值。主线程 Handler 串行执行。
+     *  lazy：Handler 不能在类加载期建（JVM 单测 Looper not-mocked，TargetRegistry 注册链会炸），
+     *  首次 F() 回调（主线程）才初始化。 */
+    private val visibilityHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
     private var pendingVisible: Boolean? = null
     private var appliedVisible: Boolean? = null
 
