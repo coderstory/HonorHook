@@ -482,3 +482,30 @@ keyguard 态只切模板段（`AVPlayer`=锁屏带 position / `AVPlayer_desk`=�
 > 引擎模型是本轮 40+ 轮真机取证的结论，仍然成立；v1–v5 各路线的失败/放弃原因见 §九·3 与下文各节。
 > 若未来重启：从 §九·3 的表格重建，优先评估「v5 极简形态」（原生 both + 引擎换源双挂点），并先解决
 > 验证难点（锁屏与桌面视频画面高度相似导致人工验证不可靠——需抽帧 diff 或更换差异明显的测试素材）。
+
+## 十、功能重启（2026-10-18）：桌面循环播放 + 转码画质（v5 拆除后按用户需求新增）
+
+> 用户仍要这两个能力（与「不同视频」解绑）。W 编号沿用历史序列。
+
+| 点 | 进程 | 挂载 | 作用 |
+|---|---|---|---|
+| W16 | editor | mcs `VideoTranscoder#startTranscode(TranscodeConfig)`（类名不混淆） | 宿主 L() 组装 config **不设 bitrate**（=0 走 mcs 低默认 ⇒ 转码模糊）——按 0.2 bit/pixel@fps 补足（8–40 Mbps 封顶），不碰分辨率/裁剪 |
+| W17 | paradise | `n4.y#onPlayerCompleted()`（DexKit 锚点 `onPlayerCompleted goingToSleep`；listener 类按**字段类型 = n4.z** 过滤——z 用 `getCurJson keyguardLocked` 唯一定位） | 桌面态（KeyguardManager 直查，**不反射 z 的 AtomicBoolean**——z 同时持有 keyguardLocked/goingToSleep 两个同类型字段）吞掉回调 + `seekTo(0)`（引擎 seekCompleted 自动 start ⇒ 循环）；锁屏态保持原生（播完释放） |
+
+开关：`wallpaper.video_enhance`（一个开关管两点）；进程 scope：editor（W16）+ paradise（W17）。
+
+**踩坑记录（本轮验证期）**：
+1. DexKit 按方法体字符串找 `w(boolean)`：n4 包有 z/c0/l/w/g 多个 Player 变体，命中顺序不稳定
+   （先后误中 c0 折叠机/g 变体）——正确做法 = 二次查询 `getCurJson keyguardLocked`（z 独有 J()）
+   定位 z 类，再按 declaringClass 过滤。
+2. z 同时持有两个 AtomicBoolean（keyguardLocked/goingToSleep），按类型反射会拿错——keyguard
+   状态改用 KeyguardManager 直查（引擎初始化同源，语义等价）。
+3. **LSPosed daemon 假死**：13:00 起 daemon 停止写全部模块日志（verbose/modules 双双止于 12:59）、
+   新起进程零注入（含 wallpapereditor/paradise；其它目标 12:59 前注入正常）。`lspctl module
+   disable/enable` 未愈。**处置 = 重启手机**（AI 禁 reboot，等用户执行）。若重启后挂载仍失败，
+   按 §九·4 逐点核对锚点。
+
+**验证清单（用户重启后）**：
+- modlog：`W16 已挂载`（editor 进程冷启后）、`W17 已挂载`（paradise 冷启后）；
+- 桌面壁纸播完一遍（≈16s）不停、继续播 = W17 生效；
+- 图库设壁纸转码产物清晰度对比 = W16 生效（modlog 有 `W16 bitrate 0 -> N` 行）。

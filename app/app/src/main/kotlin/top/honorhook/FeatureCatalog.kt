@@ -60,6 +60,8 @@ object FeatureCatalog {
     const val KEY_XHS_VIDEO_SAVE = "xhs.video_save"
     const val KEY_XHS_BATCH_SAVE = "xhs.batch_save"
 
+    const val KEY_WALLPAPER_VIDEO_ENHANCE = "wallpaper.video_enhance"
+
     const val KEY_IME_CODE_FREE = "ime.code_free"
 
     const val KEY_ADS_BLOCK = "ads.block"
@@ -241,6 +243,20 @@ object FeatureCatalog {
                 Feature(KEY_XHS_BATCH_SAVE, R.string.feature_xhs_batch_save_title, R.string.feature_xhs_batch_save_desc),
             ),
             baselineVersion = "9.49.1",  // versionCode 9491803，真机拉取 2026-10-13（docs/reverse/xhs.md）
+        ),
+        Target(
+            "com.hihonor.wallpapereditor", R.string.target_name_wallpapereditor,
+            listOf(
+                Feature(KEY_WALLPAPER_VIDEO_ENHANCE, R.string.feature_wallpaper_video_enhance_title, R.string.feature_wallpaper_video_enhance_desc),
+            ),
+            baselineVersion = "153.0.0.423",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
+        ),
+        Target(
+            "com.hihonor.livewallpaper.paradise", R.string.target_name_livewallpaper,
+            listOf(
+                Feature(KEY_WALLPAPER_VIDEO_ENHANCE, R.string.feature_wallpaper_video_enhance_title, R.string.feature_wallpaper_video_enhance_desc),
+            ),
+            baselineVersion = "11.0.0.252",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
         ),
     )
 
