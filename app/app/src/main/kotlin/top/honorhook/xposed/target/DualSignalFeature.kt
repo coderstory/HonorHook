@@ -6,9 +6,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.wifi.WifiManager
 import android.provider.Settings
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
@@ -44,7 +41,8 @@ import kotlin.math.roundToInt
  * - 补回（2026-10-15，子开关 systemui.dual_signal_label）：5G/4G 制式标 TextView（上游配置键
  *   `SHOW_LABEL`）。原「类型标由 U2/U2b/U2c native 收口、不双份」的取舍作废——原生 `mobile_combo`
  *   整组被本功能设为 GONE（§7.11），5G 类型标就在该组内，视觉上随组消失，U2 收不到，只能自绘补回。
- *   数据链 `getNetworkLabel` / `isWifiConnected` / `isMobileDataEnabled` 一并搬。
+ *   数据链 `getNetworkLabel` / `isMobileDataEnabled` 一并搬（上游的 `isWifiConnected` 门已按
+ *   2026-10-16 用户拍板去掉，见 `updateLabel`）。
  *   ⚠ 上游 jadx 产物的 `getNetworkLabel` **不可用**（packed-switch 的 case 表被吞成空
  *   `switch (type) { }`，恒返回默认 "4G"）；映射以 apktool smali 为准，表见 §7.11b
  *   「5G 制式标（子开关）」。门控：label 只在双排开启时可能生效（双排关 = install 早退），
@@ -595,7 +593,7 @@ object DualSignalFeature {
         }
     }.getOrDefault(emptyList())
 
-    // ---- 制式标数据链（上游 getNetworkLabel / isWifiConnected / isMobileDataEnabled，smali 实证）----
+    // ---- 制式标数据链（上游 getNetworkLabel / isMobileDataEnabled，smali 实证）----
 
     /**
      * 制式文字（上游 getNetworkLabel）。**上游 jadx 产物此方法不可用**：packed-switch 的 case 表被吞，
@@ -622,27 +620,6 @@ object DualSignalFeature {
     }.getOrDefault("4G")
 
     /**
-     * 上游 isWifiConnected（smali 实证）：WifiManager 已启用且已连上某网络 → true；否则看默认网络的
-     * TRANSPORT_WIFI；异常 → false。两段各自 try/catch（上游同款：wifi 段抛异常仍继续看 connectivity）。
-     */
-    private fun isWifiConnected(ctx: Context): Boolean {
-        runCatching {
-            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            if (wm != null && wm.isWifiEnabled) {
-                @Suppress("DEPRECATION")   // getConnectionInfo 已废弃但仍是上游判据（networkId != -1）
-                val info = wm.connectionInfo
-                if (info != null && info.networkId != -1) return true
-            }
-        }
-        return runCatching {
-            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                ?: return false
-            val net = cm.activeNetwork ?: return false
-            cm.getNetworkCapabilities(net)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-        }.getOrDefault(false)
-    }
-
-    /**
      * 上游 isMobileDataEnabled（smali 实证）：`Settings.Global.getInt(cr, "mobile_data", 1) == 1`；
      * 读不到（SecurityException 等）→ true（上游容错：宁可显示制式标，也不要静默消失）。
      */
@@ -651,17 +628,20 @@ object DualSignalFeature {
     }.getOrDefault(true)
 
     /**
-     * 制式标显示判定（上游 updateLabel，smali 实证）：**非 WiFi 且有移动数据**时取制式文字并
-     * VISIBLE + setText；否则（WiFi 已连 / 移动数据关 / 文字为空）GONE。label 为 null
-     * （子开关关 → 未注入）时直接返回。
+     * 制式标显示判定（上游 updateLabel 的**本模块变体**，2026-10-16 用户拍板改）：
+     * **移动数据开**就取制式文字并 VISIBLE + setText；移动数据关或文字为空 → GONE。
+     *
+     * 与上游的唯一差异 = 去掉 WiFi 门。上游是「非 WiFi 且有移动数据」才显示
+     * （`DualSignalHook.smali` .line 377-380：`if-nez isWifiConnected` + `if-eqz
+     * isMobileDataEnabled` 才取文字），代价是 **WiFi 一连 5G 标就消失**——真机 2026-10-16
+     * 用户报「双排 5G 没效果」，定位即此门（当时正连 WiFi）。原生状态栏是 WiFi 与移动制式同显，
+     * 本变体与之一致。`isWifiConnected` 因此**已删**（本文件内无第二处消费）。
+     *
+     * label 为 null（子开关关 → 未注入）时直接返回。
      */
     private fun updateLabel(ctx: Context, label: TextView?) {
         if (label == null) return
-        val text = if (isWifiConnected(ctx) || !isMobileDataEnabled(ctx)) {
-            null
-        } else {
-            getNetworkLabel(ctx)
-        }
+        val text = if (isMobileDataEnabled(ctx)) getNetworkLabel(ctx) else null
         if (text.isNullOrEmpty()) {
             if (label.visibility != View.GONE) label.visibility = View.GONE
             return
