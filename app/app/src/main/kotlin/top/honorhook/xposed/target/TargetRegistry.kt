@@ -8,6 +8,8 @@ import top.honorhook.xposed.target.jd.JdHook
 import top.honorhook.xposed.target.mfauth.MfaAuthHook
 import top.honorhook.xposed.target.mms.MmsHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
+import top.honorhook.xposed.target.wallpaper.WallpaperLoopHook
+import top.honorhook.xposed.target.wallpaper.WallpaperTranscodeHook
 import top.honorhook.xposed.target.tracking.HonorTrackingHook
 import top.honorhook.xposed.target.xhs.XhsHook
 
@@ -24,6 +26,9 @@ object TargetRegistry {
     init {
         // 静态注册（Rain va.<clinit> 硬编码单例的等价物）：新增目标 = 新建 TargetHook + 此处一行，HookEntry 零改动。
         // scope.list 须同步声明目标包名（targets 与 scope 不一致时 HookEntry 收不到该包的回调）。
+        // 壁纸视频增强（W16/W17，2026-10-18）：转码补码率 + 桌面循环；scope.list 已同步
+        register(WallpaperTranscodeHook)
+        register(WallpaperLoopHook)
         register(ThemeStoreHook)
         register(InstallerHook)
         register(SettingsHook)
