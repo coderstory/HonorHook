@@ -57,6 +57,7 @@
 
 - **表驱动 + 单一事实源**：功能 key 集中在 `FeatureCatalog`（双端共用，禁止任一侧手写 key 字符串）；加/改开关只动表。**默认开（2026-10-15 用户拍板）**语义：读不到/异常/未写入一律回 FeatureCatalog 目录默认（默认开；例外关 = hide_5g / hide_sim2 / 清后台 A/B 互斥对）；关某功能 = 宿主显式写 false，且**下次目标进程注入才生效**。
 - **双轨解析**：直连反射优先（不缓存——赌类稍后加载）→ DexKit 特征兜底。混淆目标必配**内容性锚点**（混淆不改字符串常量/参数类型序列）⇒ 无锚点就诚实跳过（`NOT_RESOLVED`），**不猜类名硬兜**。
+  ⚠️ 兜底轨只覆盖**实例方法**：`DexKitHelper.findMethodByFeatures` 硬过滤 `Modifier.isStatic`（`DexKitHelper.kt:140`）⇒ **静态挂载点（静态方法）的 DexKit 兜底整体失效**（直连轨失败即 `NOT_RESOLVED`）。判据：挂点是否 `static`（以设备包 smali 为准）；是则要么自带静态版查找，要么别把 DexKit 锚点当真兜底。先例：`target/wallpaper/WallpaperEditorHook.kt`（自带 `resolveStaticByFeatures`），详见 [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) §四·3。
 - **失败分级**：`FAILED` = 挂载抛异常，重试无意义；`NOT_RESOLVED` = 类/依赖未就绪，随类加载重试。
 - **挂载类型要分**：改返回值 / 条件短路（只对目标参数生效，避免误伤无关判定，如 `hasPrivilege(14)` 只短路特权位 14）/ 前置改写（PRE_PROCESS，proceed 前修状态、失败不动）/ 键值覆盖（KEY_OVERRIDE，表驱动云控）。
 - **幂等与防重装**：挂在注册表层保证；实现内不加 installed 标志；多包共享进程需对象级去重。

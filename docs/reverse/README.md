@@ -20,6 +20,7 @@
 | 京东 | `com.jingdong.app.mall` | 16.0.70 (102834) | 半可读：业务类名大量保留（SplashFragment/JDHomeManager），方法名 R8 单字母；开屏自研（无第三方广告 SDK） | [`jd.md`](jd.md) |
 | MFA身份验证器 | `com.aimazhishi.mfa.authenticator` | 1.0.5 (5) | **360 加固**（StubApp/libjiagu）：业务代码静态不可读，hook 走 manifest 类名 + classloader 捕获；广告 = 穿山甲开屏 | [`mfa-authenticator.md`](mfa-authenticator.md) |
 | 系统管家服务 | `com.hihonor.systemmanager` | 17.0.0.414 | 116MB 巨包；杀毒模块类名可读（`com.hihonor.antivirus.*` 未混淆）；自带 `msc.config.hide_virus` 总开关 | [`sysmgr.md`](sysmgr.md) |
+| 壁纸编辑器（功能已放弃，逆向记录） | `com.hihonor.wallpapereditor` | 153.0.0.423 | 类名/方法名/字段名都是**源码原名**（非 R8 产物，但无 keep）；**陷阱：jadx 把短字段名改写成 `f<hash><字母>`，运行时是字母本身 ⇒ 以 smali 为准**；共享 DexKit 兜底硬过滤 static，本目标三点静态 ⇒ 自带静态版 | [`wallpaper-editor.md`](wallpaper-editor.md) |
 
 > 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` §八 未解决项与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。
 
