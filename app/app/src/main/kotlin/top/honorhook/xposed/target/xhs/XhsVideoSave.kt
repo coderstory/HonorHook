@@ -496,6 +496,13 @@ object XhsVideoSave {
     @Volatile private var hdActive = false
 
     /**
+     * HD 下载取消旗标（2026-10-19 用户需求：进度+取消）：进度卡「取消」按钮置位，[downloadVideoHd]
+     * 写循环每次 read 前查——命中即回滚半成品、静默收场（不弹失败完成卡，取消是用户主动行为非失败）。
+     * 每轮下载发起时重置（showAskDialog「下载原版」onClick），上轮旗标不泄漏。
+     */
+    @Volatile private var videoCancelRequested = false
+
+    /**
      * 展示进度卡。Activity 取不到时每 300ms 重试（≤5s）——首次调用时追踪器可能刚注册、
      * 当前 Activity 的 onResume 已错过（2026-10-14 真机「没弹窗」实证根因）。
      */
@@ -514,6 +521,7 @@ object XhsVideoSave {
                     android.content.res.Configuration.UI_MODE_NIGHT_YES
                 val bg = if (night) 0xFF1E1E22.toInt() else 0xFFFFFFFF.toInt()
                 val titleColor = if (night) 0xFFF5F5F7.toInt() else 0xFF17171A.toInt()
+                val accent = 0xFFFF2E4D.toInt()
                 val dp = activity.resources.displayMetrics.density
                 fun d(v: Int) = (v * dp).toInt()
 
@@ -545,6 +553,24 @@ object XhsVideoSave {
                 }
                 card.addView(progressBar, android.widget.LinearLayout.LayoutParams(
                     android.view.ViewGroup.LayoutParams.MATCH_PARENT, d(6)))
+                // 取消按钮（2026-10-19 用户需求：视频下载可取消；pillBtn 同款样式照抄 showAskDialog），
+                // onClick 只置旗标，回滚/收卡全在下载循环的取消分支走既有路径
+                card.addView(android.widget.TextView(activity).apply {
+                    text = "取消"
+                    textSize = 15f
+                    gravity = android.view.Gravity.CENTER
+                    maxLines = 1
+                    setPadding(d(18), d(11), d(18), d(11))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = d(18).toFloat(); setColor(accent)
+                    }
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setOnClickListener { videoCancelRequested = true }
+                    layoutParams = android.widget.LinearLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = d(16) }
+                })
 
                 progressDialog = android.app.Dialog(activity).apply {
                     setContentView(card)
@@ -766,6 +792,8 @@ object XhsVideoSave {
      * ResolvedNote.videos[].candidates（MediaCandidate）逐条转 [VideoCandidate]，字段同名直译
      * （core/model/ResolvedNote.kt 的 MediaCandidate 即本类 VideoCandidate 的上游原型）。
      * note = null 或无候选 ⇒ WARN 后回落（无梯子候选可退——采集已删，静默跳过）。
+     * 2026-10-19「拦截默认」后点击轨两路都走本入口：拦截主路（链接可得，宿主保存已断，本卡 =
+     * 用户唯一保存出口）+ 回落路（链接 miss，宿主已存 720p，本卡仍可换下原片）。
      */
     fun offerHdDownloadFromNote(noteId: String, t0: Long, note: ResolvedNote?, module: XposedModule) {
         val streams = note?.videos?.flatMap { video ->
@@ -786,6 +814,9 @@ object XhsVideoSave {
      * 分享 sheet「保存到相册」入口永弹不出询问卡，用户实测实证）+
      * X5 视频保存点击轨（a59.q invoke → offerHdDownloadFromNote——覆盖播放缓存直拷、已存在短路两条
      * 不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿 720p）。
+     * 2026-10-19「拦截默认」拍板：点击轨在链接可得时不再 proceed——宿主 720p 不落盘，本卡成为
+     * 用户唯一保存出口（取消 = 什么都不存），省一次下载 + deleteLowQuality 一次删除；链接不可得
+     * 才放行宿主 720p，本卡退化为「换下原片」可选。
      * 流程：候选 → Application → 关 X5 反馈卡 → 弹询问卡；V-6 同笔记防骚扰去重已删
      * （2026-10-19 用户拍板），每次保存有候选即弹；两条 early-return 均有仪表日志。
      *
@@ -829,7 +860,10 @@ object XhsVideoSave {
         showAskDialog(noteId, streams, app, t0, module)
     }
 
-    /** 询问卡：客户端已保存低画质，问是否下载高清版（用户定案 2026-10-14）。 */
+    /**
+     * 询问卡：问是否下载原版（2026-10-19「拦截默认」拍板改文案——拦截模式下宿主未存任何文件，
+     * 旧「客户端已保存低画质版」前缀语义不再成立；按钮 下载原版/取消 保留，取消 = 什么都不存）。
+     */
     private fun showAskDialog(noteId: String, streams: List<VideoCandidate>, app: android.content.Context, t0: Long, module: XposedModule, attempt: Int = 0) {
         mainHandler.post {
             val activity = trackedActivity
@@ -860,7 +894,7 @@ object XhsVideoSave {
                     textSize = 17f; setTextColor(titleColor); paint.isFakeBoldText = true
                 })
                 card.addView(android.widget.TextView(activity).apply {
-                    text = "客户端已保存低画质版，是否改为下载原片？"
+                    text = "是否下载原片？"
                     textSize = 14f; setTextColor(subColor); setPadding(0, d(8), 0, 0)
                 })
                 @Suppress("UNCHECKED_CAST")
@@ -888,6 +922,7 @@ object XhsVideoSave {
                 row.addView(pillBtn("下载原版", filled = true) {
                     dialog.dismiss()
                     hdActive = true
+                    videoCancelRequested = false   // 2026-10-19 取消旗标每轮重置（上轮不泄漏）
                     showProgressDialog()
                     Thread({
                         runCatching { pickBestAndDownload(app, noteId, streams, t0, module) }
@@ -964,6 +999,10 @@ object XhsVideoSave {
      * 提案 3/4（2026-10-15 基准传输链对齐，ResumableTransfer.kt:137-139/171-174 语义）：首写路径缓存
      * 首块 64B，终检补魔数校验（仅 mov/mp4/webm 放行；206 续传无首块跳过）；首次拿到 total 后、
      * insert 前空间预检，不足放弃（不 insert，不删宿主文件）。
+     *
+     * 2026-10-19 取消（用户需求：进度+取消）：写循环每次 read 前查 [videoCancelRequested]，命中即
+     * [rollbackHd] 删半成品后 return——关流交给 use/finally，收尾走调用方既有路径（hdActive=false +
+     * dismissProgress，均幂等）；**不弹失败完成卡**（选「静默」：取消是用户主动行为非失败，注释为证）。
      */
     private fun downloadVideoHd(ctx: android.content.Context, noteId: String, startUrl: String, t0: Long, module: XposedModule) {
         var u = startUrl
@@ -1059,6 +1098,15 @@ object XhsVideoSave {
                                         written = done
                                     }
                                     while (true) {
+                                        // 2026-10-19 取消：每次 read 前查旗标——回滚半成品（基建 rollbackHd）
+                                        // 后 return，收尾走调用方既有路径（hdActive=false + dismissProgress 幂等）；
+                                        // 不弹失败完成卡（静默，取消是用户主动行为）
+                                        if (videoCancelRequested) {
+                                            rollbackHd(ctx, uri)
+                                            module.log(Log.INFO, MountEngine.TAG,
+                                                "$JUDGE_PREFIX 用户取消，已回滚半成品（已写 ${written / 1024}KB / 共 ${total / 1024}KB）")
+                                            return
+                                        }
                                         val n = input.read(buf)
                                         if (n < 0) break
                                         out.write(buf, 0, n)

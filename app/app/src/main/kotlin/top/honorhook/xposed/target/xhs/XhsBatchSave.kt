@@ -149,7 +149,7 @@ object XhsBatchSave {
                 paramCount = 1,
                 returnType = "java.lang.Object",
                 id = "xhs:batchSave.videoSaveClick.invoke",
-                description = "X5·视频保存发起（a59.q invoke default=saveVideo(noteFeed.u0())，a59/v.java:471 实证）→ 保存后弹反馈卡",
+                description = "X5·视频保存发起（a59.q invoke default=saveVideo(noteFeed.u0())，a59/v.java:471 实证）→ 链接可得拦截默认保存（不 proceed）弹 HD 询问；不可得放行宿主保存弹反馈卡",
                 // a59.q = Function1 双参 lambda（构造 (NoteFeed,int)，default 分支=saveVideo 组装；
                 // a59/q.java:16-53 jadx 实证，实例化点 a59/v.java:471 `new q(noteFeed, 1)`）。
                 // 方法体无字符串常量（只有 PatchProxy 数字 id）⇒ 串锚不可用，DexHint 改字段类型锚
@@ -165,16 +165,15 @@ object XhsBatchSave {
         when (task.id) {
             "xhs:batchSave.videoSaveClick.invoke" -> engine.mount(task, module, hostLoader!!) { chain ->
                 // a59.q 双分支：case1=分享引导（arg=Triple，rv9.a.CLOUD）default=saveVideo（arg=String）——只对
-                // String 轨弹反馈卡，分享路径静默放行
+                // String 轨做拦截/反馈，分享路径静默放行
                 val arg0 = runCatching { chain.getArg(0) }.getOrNull()
                 val isSave = arg0 is String
                 // 本轮起点（proceed 前）：X4 若在本轮保存里弹了询问卡，其 lastAskAtMs >= t0（见 askShownAfter）
                 val t0 = System.currentTimeMillis()
-                val result = chain.proceed()
-                if (!isSave) return@mount result
-                // X4 HD 询问触发搬迁（2026-10-19 缺陷修复）：播放缓存直拷 / 已存在短路两条保存路不发
-                // /note/video/save 请求，X4 原只挂 save 响应 ⇒ 询问卡永不弹、用户只拿 720p；本点击轨
-                // 每次保存必经，代为发起。noteId 三轨：
+                if (!isSave) return@mount chain.proceed()
+                // noteId 三轨判定提前到 proceed 前（2026-10-19「拦截默认」拍板：链接可得性判定必须先于
+                // 放行决策；纯反射 + 内存表，无网络，回调线程安全——同图片分支 availableShareLink 用法）。
+                // 三轨：
                 // ① arg0 String 仅 24hex 命中才采信——a59/q.java:52 cast 实证为 String，但值在 lambda
                 //   体内未消费（q.java:53 只透传 PatchProxy），语义静态不可证；
                 // ② miss 时反射取捕获的 NoteFeed 实例（字段序 (int, NoteFeed)，DexHint classFieldTypes
@@ -185,40 +184,51 @@ object XhsBatchSave {
                 // lastVideoNoteId 回落，历史/缓存进入的笔记不发 entry videofeed ⇒ 取到上一篇 id
                 // （2026-10-19 实证），错弹卡 = 下错片 + deleteLowQuality 删错文件，已弃用
                 // （XhsVideoSave.lastVideoNoteId 字段留作日志观测，本分支不再读）。
-                runCatching {
-                    val hex24 = Regex("^[0-9a-f]{24}$")
-                    val argNoteId = (arg0 as? String)?.takeIf { it.matches(hex24) }
-                    var feed: Any? = null
-                    val noteId = argNoteId ?: runCatching {
-                        feed = chain.thisObject.javaClass.declaredFields
-                            .firstOrNull { it.type.name == "com.xingin.entities.notedetail.NoteFeed" }
-                            ?.apply { isAccessible = true }
-                            ?.get(chain.thisObject)
-                        (feed?.javaClass?.getMethod("u0")?.apply { isAccessible = true }?.invoke(feed) as? String)
-                            ?.takeIf { it.matches(hex24) }
-                    }.getOrNull()
-                    if (noteId == null) {
-                        module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 视频保存点击：noteId 不可得，HD 询问跳过")
-                    } else {
-                        // 分享链接反射轨输入：arg 命中时 feed 未取，用对象图下钻补一次（XhsSavePivot.findFeedAndNoteId，
-                        // ji9/b 同款 u0 语义；根 = thisObject + invoke 入参 arg0）
+                val hex24 = Regex("^[0-9a-f]{24}$")
+                val argNoteId = (arg0 as? String)?.takeIf { it.matches(hex24) }
+                var feed: Any? = null
+                val noteId = argNoteId ?: runCatching {
+                    feed = chain.thisObject.javaClass.declaredFields
+                        .firstOrNull { it.type.name == "com.xingin.entities.notedetail.NoteFeed" }
+                        ?.apply { isAccessible = true }
+                        ?.get(chain.thisObject)
+                    (feed?.javaClass?.getMethod("u0")?.apply { isAccessible = true }?.invoke(feed) as? String)
+                        ?.takeIf { it.matches(hex24) }
+                }.getOrNull()
+                if (noteId == null) {
+                    // ③ WARN 路径（现状不变）：拦截判定无从做起，放行宿主原生保存
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 视频保存点击：noteId 不可得，HD 询问跳过")
+                } else {
+                    // feed 现场补取 + stash（availableShareLink 反射轨输入；arg 命中时 feed 未取，对象图
+                    // 下钻补一次——XhsSavePivot.findFeedAndNoteId，ji9/b 同款 u0 语义；根 = thisObject
+                    // + 入参 arg0）
+                    runCatching {
                         if (feed == null) feed = XhsSavePivot.findFeedAndNoteId(module, chain.thisObject, arg0)?.first
                         XhsSavePivot.stashFeed(feed)
-                        // HD 询问改走分享链接解析（2026-10-19 X5 重构）：网络在后台线程，
-                        // 解析结果（vendored ResolvedNote）映射候选后弹询问卡；解析失败 →
-                        // offerHdDownloadFromNote(null) = WARN 静默跳过（videoSources 采集已删，无回落）
-                        Thread({
-                            runCatching {
-                                val note = kotlinx.coroutines.runBlocking {
-                                    XhsSavePivot.resolveByShareLink(noteId, module)
-                                }
-                                XhsVideoSave.offerHdDownloadFromNote(noteId, t0, note, module)
-                            }.onFailure {
-                                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 HD 询问发起失败: ${it.message}")
-                            }
-                        }, "HonorHook-xhs-video-hd-ask").start()
+                    }.onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 feed 现场捕获失败: ${it.message}") }
+                }
+                // 拦截判定（2026-10-19「拦截默认」拍板，proceed 前同步内存判定）：链接可得 = 宿主默认保存
+                // 全断——网络 / 播放缓存直拷 / 已存在短路三路都从本 default 分支 saveVideo 发起（findings
+                // 已证），不 proceed = 宿主 720p 不落盘，只剩模块一次下载，替代旧「宿主先存 720p + 模块下
+                // 原片 + deleteLowQuality 删 720p」的两次下载一次删除。链接三轨 miss 才放行宿主 720p 保底。
+                noteId?.let { n ->
+                    val link = runCatching { XhsSavePivot.availableShareLink(n, module) }.getOrNull()
+                    if (link != null) {
+                        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX X5 拦截宿主默认保存（链接可得，不 proceed）noteId=$n")
+                        engine.judge(module, task, JUDGE_PREFIX, "拦截宿主默认保存（链接可得，不 proceed）")
+                        startHdAsk(n, t0, module)
+                        // 不 proceed ⇒ 返回值自给：宿主 invoke 返 kotlin.Unit（图片分支同款写法，
+                        // **宿主 loader** 取 INSTANCE——模块 loader 的同名类不保证同一 class 身份）
+                        return@mount runCatching {
+                            Class.forName("kotlin.Unit", true, hostLoader).getDeclaredField("INSTANCE").get(null)
+                        }.getOrNull()
                     }
-                }.onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 HD 询问发起失败: ${it.message}") }
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 链接不可得，放行宿主原生保存")
+                }
+                // ——回落路径（noteId 不可得 / 链接三轨 miss）：宿主原生 720p 照存，HD 询问与反馈卡照旧。
+                // 反馈卡段只在回落执行（拦截已提前 return）——拦截模式下宿主没存，「已保存本视频」是谎言。
+                val result = chain.proceed()
+                noteId?.let { n -> startHdAsk(n, t0, module) }
                 mainHandler.post {
                     // 判重（2026-10-15，缺陷④）：X4 本轮已弹「下载高清原版视频」就不再弹「已保存本视频」
                     // （真机实证两卡并存）。重复保存落在 X4 的 5 分钟去重窗口内时 X4 不弹卡 ⇒ lastAskAtMs
@@ -239,6 +249,24 @@ object XhsBatchSave {
             }
             else -> mountClick(task, module)
         }
+
+    /**
+     * 分享链接后台解析 → X4 HD 询问发起（a59.q 点击轨两路共用：拦截主路 + 回落路，2026-10-19）。
+     * 解析是网络操作，必须在后台线程；解析失败/无候选由 [XhsVideoSave.offerHdDownloadFromNote] →
+     * offerHdDownload 仪表 WARN 不弹卡（videoSources 采集已删，无回落）。
+     */
+    private fun startHdAsk(noteId: String, t0: Long, module: XposedModule) {
+        Thread({
+            runCatching {
+                val note = kotlinx.coroutines.runBlocking {
+                    XhsSavePivot.resolveByShareLink(noteId, module)
+                }
+                XhsVideoSave.offerHdDownloadFromNote(noteId, t0, note, module)
+            }.onFailure {
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 HD 询问发起失败: ${it.message}")
+            }
+        }, "HonorHook-xhs-video-hd-ask").start()
+    }
 
     /**
      * 图片保存点击：**模块全接管**——接管判定只看分享链接可得性（全内存，见 [XhsSavePivot.availableShareLink]），
@@ -524,31 +552,169 @@ object XhsBatchSave {
         dialog.show()
     }
 
-    /** 外挂直下：后台线程逐张 HttpURLConnection + MediaStore 落「Pictures/小红书」。 */
+    // ---- 图片批量进度卡（2026-10-19 用户需求：进度 + 取消 + 半成品删除）----
+
+    /** 取消旗标：downloadAll 每张开始前查，取消按钮置位；每轮 downloadAll 开头重置（上轮旗标不泄漏）。 */
+    @Volatile private var imageCancelRequested = false
+
+    /** 当前在写的 MediaStore uri（fetchOne insert 后持有、写完清空，每张开始前 downloadAll 再清一次）——
+     *  取消时删本张半成品，绝不误删上张成品。竞态注：取消落在本张写入期间 = 本张作废，刚写完被删
+     *  也符合「取消」语义（用户拍板）。 */
+    @Volatile private var currentImageUri: android.net.Uri? = null
+
+    /** 进度卡引用（对齐 XhsVideoSave.progressDialog 模式：持到字段，downloadAll 结束必关、dismiss 幂等）。 */
+    @Volatile private var imageProgressDialog: android.app.Dialog? = null
+    @Volatile private var imageProgressText: android.widget.TextView? = null
+
+    /**
+     * 图片批量进度卡（2026-10-19 用户需求）：自绘风格照抄 [showStyledDialog]（圆角卡/深色自适应/XHS 红），
+     * 内容 = 标题「正在下载原图」+ 大字「N/M」（N = 已处理张数，成功+失败；每张完成/失败后主线程更新）
+     * + 取消按钮（红 filled「取消」，pillBtn 同款）。取消 = 置 [imageCancelRequested] 并即时删本张半成品
+     * （[currentImageUri]；流占用删不掉时由 downloadAll 收尾补删）。必须主线程调用（downloadAll 两处
+     * 调用点都在主线程：单图静默直下 / 追加询问卡按钮 onClick）。
+     */
+    private fun showImageProgressDialog(activity: Activity, total: Int, module: XposedModule) {
+        runCatching {
+            imageProgressDialog?.dismiss()
+            val night = (activity.resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val bg = if (night) 0xFF1E1E22.toInt() else 0xFFFFFFFF.toInt()
+            val titleColor = if (night) 0xFFF5F5F7.toInt() else 0xFF17171A.toInt()
+            val accent = 0xFFFF2E4D.toInt()
+            val dp = activity.resources.displayMetrics.density
+            fun d(v: Int) = (v * dp).toInt()
+            val card = android.widget.LinearLayout(activity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(d(24), d(22), d(24), d(18))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = d(22).toFloat(); setColor(bg)
+                }
+            }
+            card.addView(android.widget.TextView(activity).apply {
+                text = "正在下载原图"
+                textSize = 17f
+                setTextColor(titleColor)
+                paint.isFakeBoldText = true
+            })
+            imageProgressText = android.widget.TextView(activity).apply {
+                text = "0/$total"
+                textSize = 22f
+                setTextColor(titleColor)
+                paint.isFakeBoldText = true
+                setPadding(0, d(8), 0, 0)
+            }
+            card.addView(imageProgressText)
+            val dialog = android.app.Dialog(activity)
+            card.addView(android.widget.TextView(activity).apply {
+                text = "取消"
+                textSize = 15f
+                gravity = android.view.Gravity.CENTER
+                maxLines = 1
+                setPadding(d(18), d(11), d(18), d(11))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = d(18).toFloat(); setColor(accent)
+                }
+                setTextColor(0xFFFFFFFF.toInt())
+                setOnClickListener {
+                    imageCancelRequested = true
+                    // 即时删本张半成品（流占用删不掉时由 downloadAll 收尾补删）；卡文本置「取消中…」
+                    currentImageUri?.let { uri ->
+                        runCatching { activity.contentResolver.delete(uri, null, null) }
+                    }
+                    imageProgressText?.text = "取消中…"
+                }
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = d(18) }
+            })
+            dialog.setContentView(card)
+            dialog.window?.setLayout(
+                (activity.resources.displayMetrics.widthPixels * 0.9f).toInt(),
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+            // 不可点外/返回关（同 XhsVideoSave 进度卡）：误关会失去取消入口；收卡只走 dismissImageProgress
+            dialog.setCancelable(false)
+            imageProgressDialog = dialog
+            dialog.show()
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 进度卡失败（不影响下载）: ${it.message}")
+        }
+    }
+
+    /** 进度大字更新（主线程 post；卡已收则空引用 no-op）。N = 已处理张数（成功+失败）。 */
+    private fun updateImageProgress(done: Int, total: Int) {
+        mainHandler.post {
+            runCatching { imageProgressText?.text = "$done/$total" }
+        }
+    }
+
+    /** 收进度卡（幂等；主线程 post，对齐 XhsVideoSave.dismissProgress）。downloadAll 完成/取消/异常都必调。 */
+    private fun dismissImageProgress() {
+        mainHandler.post {
+            runCatching { imageProgressDialog?.dismiss() }
+            imageProgressDialog = null
+            imageProgressText = null
+        }
+    }
+
+    /**
+     * 外挂直下：后台线程逐张 HttpURLConnection + MediaStore 落「Pictures/小红书」。
+     * 2026-10-19 进度+取消（用户需求）：开头重置取消旗标并弹进度卡（[showImageProgressDialog]，主线程）；
+     * 每张开始前查 [imageCancelRequested]（true 则停，剩余张不动、已下载完成的不处理），取消落在本张
+     * 写入期间 = 本张作废（onClick 即删 + 收尾补删半成品）；结束（完成/取消/异常）finally 必收卡
+     * （幂等）后弹既有完成卡（取消时文案带「已取消」）。
+     */
     private fun downloadAll(activity: Activity, urls: List<String>, module: XposedModule) {
+        imageCancelRequested = false
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下开始 ${urls.size} 张")
         mainHandler.post {
             runCatching {
+                showImageProgressDialog(activity, urls.size, module)
                 android.widget.Toast.makeText(activity, "开始下载 ${urls.size} 张…", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
         Thread({
             var ok = 0
             var bytes = 0L
-            urls.forEachIndexed { i, raw ->
-                // 主链 = 裸链（token，无 query）；2026-10-15 基准切换逐语义移植 XHS_Downloader_Android
-                // domain/download/NoteOutput.kt:34-45（AUTO：preferred = sns-img-bd 裸链 → 回落 raw 原样，
-                // fetch() 按列表顺序逐个试）。toBare 不适用（null）时退回 raw 本身；裸链失败（非 200 /
-                // 错误页 Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
-                val url = XhsImageUrl.toBare(raw) ?: raw
-                // 文件名扩展名仅占位：落盘 MIME/扩展名由 fetchOne 首块魔数定（提案 3，认内容不认 URL）
-                val saved = runCatching { downloadOne(activity, module, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", raw) }
-                    .getOrDefault(0L)
-                if (saved > 0) { ok++; bytes += saved }
-                else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
+            try {
+                for ((i, raw) in urls.withIndex()) {
+                    if (imageCancelRequested) break   // 取消：剩余张不动，已下载完成的不处理
+                    // 每张开始前清引用——取消删的是本张半成品，上张成品（fetchOne 写完已自清）不受波及
+                    currentImageUri = null
+                    // 主链 = 裸链（token，无 query）；2026-10-15 基准切换逐语义移植 XHS_Downloader_Android
+                    // domain/download/NoteOutput.kt:34-45（AUTO：preferred = sns-img-bd 裸链 → 回落 raw 原样，
+                    // fetch() 按列表顺序逐个试）。toBare 不适用（null）时退回 raw 本身；裸链失败（非 200 /
+                    // 错误页 Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
+                    val url = XhsImageUrl.toBare(raw) ?: raw
+                    // 文件名扩展名仅占位：落盘 MIME/扩展名由 fetchOne 首块魔数定（提案 3，认内容不认 URL）
+                    val saved = runCatching { downloadOne(activity, module, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", raw) }
+                        .getOrDefault(0L)
+                    if (imageCancelRequested) {
+                        // 取消落在本张写入期间：本张作废（计入失败侧，不 ok）。onClick 即删可能因流占用
+                        // 未成功，此处流已关补删一次；竞态下刚写完被删也符合「取消」语义（用户拍板）
+                        currentImageUri?.let { uri ->
+                            runCatching { activity.contentResolver.delete(uri, null, null) }
+                        }
+                        break
+                    }
+                    if (saved > 0) { ok++; bytes += saved }
+                    else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
+                    updateImageProgress(i + 1, urls.size)
+                }
+            } finally {
+                // 收尾必关（完成/取消/异常都到这）：清当前张引用 + 幂等 dismiss
+                currentImageUri = null
+                dismissImageProgress()
+            }
+            val canceled = imageCancelRequested
+            if (canceled) {
+                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下被用户取消 ok=$ok/${urls.size}（半成品已删）")
             }
             // 完成态提示（替换旧 Toast「已保存 N/N」，用户定案 2026-10-14）；走追踪 Activity（修 BadToken）
-            showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes) }
+            showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled) }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}")
         }, "HonorHook-xhs-batch").start()
     }
@@ -563,9 +729,11 @@ object XhsBatchSave {
     /**
      * 批量下载完成卡（用户定案 2026-10-14）：询问卡用动作态、完成卡才说「已下载」。
      * 标题 = 成功/总数，正文 = 合计落盘体积（有失败张数时追加「，N 张失败」），单按钮关闭。
+     * 2026-10-19 进度+取消：被取消轮次（[canceled]）正文改「，已取消」——剩余张未尝试不算失败；
+     * 被取消的当前张按取消语义计入失败侧（不 ok，不进「N 张失败」文案）。
      * 复用本文件自绘风格（同 [showVideoSavedDialog]）；必须主线程调用。
      */
-    private fun showBatchSavedDialog(activity: Activity, ok: Int, total: Int, bytes: Long) {
+    private fun showBatchSavedDialog(activity: Activity, ok: Int, total: Int, bytes: Long, canceled: Boolean = false) {
         val failed = total - ok
         val night = (activity.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
@@ -590,7 +758,11 @@ object XhsBatchSave {
             paint.isFakeBoldText = true
         })
         card.addView(android.widget.TextView(activity).apply {
-            text = if (failed > 0) "${fmtSize(bytes)}，$failed 张失败" else fmtSize(bytes)
+            text = when {
+                canceled -> "${fmtSize(bytes)}，已取消"
+                failed > 0 -> "${fmtSize(bytes)}，$failed 张失败"
+                else -> fmtSize(bytes)
+            }
             textSize = 14f
             setTextColor(subColor)
             setPadding(0, d(8), 0, 0)
@@ -741,6 +913,8 @@ object XhsBatchSave {
                         }
                         val outUri = activity.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                             ?: return Fetch.FAIL
+                        // 2026-10-19 进度+取消：insert 后持有（写完即清）——进度卡取消按钮据此删本张半成品
+                        currentImageUri = outUri
                         activity.contentResolver.openOutputStream(outUri)?.use { out ->
                             // 首块先写入（不能丢），再续读剩余
                             out.write(head, 0, headFill)
@@ -757,6 +931,8 @@ object XhsBatchSave {
                                 bytesOut[0] = total
                             }
                         } ?: return Fetch.FAIL
+                        // 写完即清：此后取消不得误删本张成品（已下载完成的不处理）
+                        currentImageUri = null
                         return Fetch.OK
                     }
                     // 其余状态码（提案 1）：仅 5xx / 408 / 429 算瞬时重试；其余 4xx（含基准 Access
