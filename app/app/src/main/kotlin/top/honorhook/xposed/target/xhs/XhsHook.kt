@@ -13,8 +13,10 @@ import top.honorhook.xposed.target.logDisabled
  * 小红书 `com.xingin.xhs`（基线 9.49.1，versionCode 9491803，2026-10-13 真机拉取）。
  *
  * 五个功能按组各自持引擎与 installed N/M 汇总（照 SystemUiHook 的独立文件分发模式）：
- *   X1 保存解锁（本文件）/ X2 去水印（[XhsWatermark]）/ X3 高清保存（[XhsHdSave]）/
- *   X4 视频直链（[XhsVideoSave]）/ X5 批量保存（[XhsBatchSave]）。
+ *   X1 保存解锁（本文件）/ X2 去水印（[XhsWatermark]）/
+ *   X4 视频直链（[XhsVideoSave]）/ X5 批量保存（[XhsBatchSave]，含 XhsSavePivot 适配层）。
+ *   X3 高清保存已删（2026-10-19 X5 重构）：nd8.i.i 解码源改写点随「分享链接解析原图直链」
+ *   路线退役——X5 管线直下原图直链，无需改宿主 Fresco 解码源。
  *
  * 逆向事实源：docs/reverse/xhs.md（§二保存链路 + §三挂载点总表，每点附重定位备注）。
  * 移植源：com.chekayo.xhssavefix 1.2.3 + XHS_Downloader_Android（差异清单见 doc §五）。
@@ -61,12 +63,6 @@ object XhsHook : TargetHook {
             XhsWatermark.install(module, param)
         } else {
             logDisabled(module, FeatureCatalog.KEY_XHS_NO_WATERMARK, "XhsHook")
-        }
-        // X3 高清保存
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_HD_SAVE)) {
-            XhsHdSave.install(module, param)
-        } else {
-            logDisabled(module, FeatureCatalog.KEY_XHS_HD_SAVE, "XhsHook")
         }
         // X4 视频直链
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_VIDEO_SAVE)) {

@@ -56,7 +56,6 @@ object FeatureCatalog {
 
     const val KEY_XHS_SAVE_UNLOCK = "xhs.save_unlock"
     const val KEY_XHS_NO_WATERMARK = "xhs.no_watermark"
-    const val KEY_XHS_HD_SAVE = "xhs.hd_save"
     const val KEY_XHS_VIDEO_SAVE = "xhs.video_save"
     const val KEY_XHS_BATCH_SAVE = "xhs.batch_save"
 
@@ -249,7 +248,6 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_XHS_SAVE_UNLOCK, R.string.feature_xhs_save_unlock_title, R.string.feature_xhs_save_unlock_desc),
                 Feature(KEY_XHS_NO_WATERMARK, R.string.feature_xhs_no_watermark_title, R.string.feature_xhs_no_watermark_desc),
-                Feature(KEY_XHS_HD_SAVE, R.string.feature_xhs_hd_save_title, R.string.feature_xhs_hd_save_desc),
                 Feature(KEY_XHS_VIDEO_SAVE, R.string.feature_xhs_video_save_title, R.string.feature_xhs_video_save_desc),
                 Feature(KEY_XHS_BATCH_SAVE, R.string.feature_xhs_batch_save_title, R.string.feature_xhs_batch_save_desc),
             ),

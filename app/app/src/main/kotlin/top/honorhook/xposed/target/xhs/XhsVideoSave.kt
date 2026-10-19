@@ -1,6 +1,7 @@
 package top.honorhook.xposed.target.xhs
 
 import android.util.Log
+import com.neoruaa.xhsdn.core.model.ResolvedNote
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
@@ -11,26 +12,25 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 
 /**
- * X4 视频直链（引擎 XhsHook·X4）：`/api/sns/v10/note/video/save` 响应改写 + 原生
- * origin_video_key 优先直链。
+ * X4 视频直链（引擎 XhsHook·X4）：`/api/sns/v10/note/video/save` 响应改写 + HD 外挂直下。
  *
  * 挂载点 `okhttp3.OkHttpClient$Builder.build()`（公开库 API，okhttp3 未 shade——dex 串池实证）。
  * before 反射读 `interceptors` 字段（okhttp 公开源码字段名，跨版稳定）注入动态代理 Interceptor。
- * okhttp3 不在编译期 classpath（模块只依赖 android.jar），请求/响应全走反射调用。
+ * okhttp3 不在编译期 classpath（compileOnly 仅供 vendored 件编译，运行期反射走宿主 loader），
+ * 请求/响应全走反射调用。
  *
  * 逻辑移植自 savefix XhsSaveFix.java（system-files/xhssavefix-jadx）+ 升级（doc §五）：
- *   - url 含 `/api/sns/` → peekBody(512KB) 采集：origin_video_key（VideoInfo @kd.c 实证，
- *     9.49.1 实体含此 JSON 字段）+ video_info_v2 区段逐流候选（每条流的 backup_urls 各元素与
- *     master_url 各成一候选，共享流元数据，见 [harvestStreams]）。noteId = 区段前最近
- *     `"(?:id|note_id)"` 十六进制串；map 上限 500 清空。
- *   - url 含 `/note/video/save` 且 body 含 `"disable"` → disable:false + status:2 +
- *     注 download_url（origin key 重建 `https://sns-video-bd.xhscdn.com/{key}`——
- *     XHS_Downloader_Android data/xhs/XhsNoteParser.kt 实证原始 key 最高画质）。ResponseBody
- *     三轨重建（Kotlin Companion → create(MediaType,String) → create(String,MediaType)）。
+ *   - url 含 `/note/video/save` 且 body 含 `"disable"` → disable:false + status:2（解锁语义，
+ *     有效负载只剩这条；换链分支随 videoSources 采集删除——见 patchVideoSaveResponse 注释）。
+ *   - ResponseBody 三轨重建（Kotlin Companion → create(MediaType,String) → create(String,MediaType)）。
  *   - 选档语义 **2026-10-15 基准切换**（用户拍板以 reference/xhs/XHS_Downloader_Android 为唯一
  *     抄写基准，逐语义移植 watermarked 升序 → original 降序 → w×h 降序取首个，见
- *     [pickBestAndDownload]）；savefix `wh8.o1.a` 分支兜底**不搬**（9.49.1 名已漂，
- *     download_url 注入后客户端分支自愈）。
+ *     [pickBestAndDownload]）。
+ *
+ * **2026-10-19 X5 重构**：video_info_v2/图集/分享三路**旁路采集**（harvestVideoSources /
+ * harvestStreams / harvestNoteImages 及其全部正则与缓存表）随「保存按钮 hook → 分享链接 →
+ * vendored 下载器管线」定案删除——视频候选只来自 X5 点击轨的分享链接解析（XhsSavePivot →
+ * [offerHdDownloadFromNote]），本类只留 [harvestNoteShare]（share_info 缓存，XhsSavePivot 链接轨①）。
  *
  * 防重：同一 Builder 实例不重复注入（interceptors.contains 判代理身份）。
  * 失败分级：FAILED（okhttp 缺失说明目标结构大改，重试无意义）。
@@ -44,95 +44,25 @@ object XhsVideoSave {
     private const val CLS_OKHTTP_BUILDER = "okhttp3.OkHttpClient\$Builder"
     private const val METHOD_BUILD = "build"
 
-    /** savefix P_NOTE_ID 同款。 */
+    /** savefix P_NOTE_ID 同款（harvestNoteShare 的 xsec_token 就近归属 lookback 用）。 */
     private val P_NOTE_ID: Pattern = Pattern.compile("\"(?:id|note_id)\"\\s*:\\s*\"([0-9a-f]{16,32})\"")
-
-    /** origin_video_key（VideoInfo @kd.c("origin_video_key") 实证字段）。 */
-    private val P_ORIGIN_KEY: Pattern = Pattern.compile("\"origin_video_key\"\\s*:\\s*\"([^\"]+)\"")
-
-    /**
-     * X5 图集采集（外挂解析，2026-10-14 定案）：笔记 JSON 的 images[].url_default 即
-     * XHS_Downloader_Android 的同源数据（imageList urlDefault），比在 app 内存里翻 adapter/实体图稳得多——混淆零依赖。
-     * 逐 `"images":[` 区段取 noteId 与 url_default 列表。
-     */
-    private val P_NOTE_ID_PLAIN: Pattern = Pattern.compile("\"note_id\"\\s*:\\s*\"([0-9a-f]{16,32})\"")
-
-    /** noteId → 图集 url 列表（外挂缓存，供 X5 批量直下）。 */
-    private val noteImages = ConcurrentHashMap<String, MutableList<String>>()
-
-    /** noteId → 载荷声明图集张数（成功采集时 max 累积；X5 防「漏采剩 1 张被当单图直存」用，2026-10-19）。 */
-    private val declaredImageCounts = ConcurrentHashMap<String, Int>()
-
-    /** 最近一篇带图的笔记（用户正在看的），X5 批量取这里。 */
-    @Volatile private var lastImageNoteId: String? = null
-
-    /** 当前浏览笔记（harvestNoteImages 响应 body/query 解析出的 noteId；与图集是否成功入库无关）。
-     *  2026-10-15 审计修复：护栏丢弃（>30 张判污染整包 return）不更新 [lastImageNoteId]，缓存停留
-     *  上一篇 ⇒ [lastNoteImages] 会把上一篇图集交给 X5 全接管，替用户下载错笔记的图且原生保存消失。
-     *  本字段只认 body/query 可归属的 noteId，「沿用最近值」的响应不可归属、不更新。 */
-    @Volatile private var currentNoteId: String? = null
-
-    /** 最近一篇视频笔记（videofeed 响应 query note_id，[rewriteVideoSave] 侧记录）。日志/观测用：
-     *  曾作 X5 点击轨（a59.q invoke）noteId 回落，2026-10-19 实证历史/缓存进入的笔记不发 entry
-     *  videofeed ⇒ 停留上一篇 id、错弹 HD 卡（下错片+删错文件），点击轨已改反射 NoteFeed.u0
-     *  + 24hex 门（见 XhsBatchSave），本字段仅供日志对照。 */
-    @Volatile var lastVideoNoteId: String? = null
-
-    /** X5 取当前笔记图集（空 = 未采到，或缓存已过期非当前浏览笔记——见 [currentNoteId]；
-     *  2026-10-19 起 save-hostile 笔记采集经张数一致性校验失败不入库，也走这里空回落）。 */
-    fun lastNoteImages(): List<String> {
-        val cur = currentNoteId ?: return emptyList()
-        if (cur != lastImageNoteId) return emptyList()
-        return noteImages[cur]?.toList() ?: emptyList()
-    }
-
-    /** X5 用：当前笔记载荷声明的图集张数（与 [lastNoteImages] 同 freshness 门；null = 载荷未声明）。
-     *  防「漏采剩 1 张被当单图直存」的判定输入（findings-x5b.md §2.3，2026-10-19）。 */
-    fun lastNoteDeclaredImageCount(): Int? {
-        val cur = currentNoteId ?: return null
-        if (cur != lastImageNoteId) return null
-        return declaredImageCounts[cur]
-    }
-
-    /** 日志回调（install 期注入，模块 logger；采集探测仪表用）。 */
-    @Volatile var logHook: ((Int, String, String) -> Unit)? = null
-
-    /**
-     * video_info_v2 区间内全部 master_url（覆盖 MediaStream{h264[],h265[],h266[]} 三编解码多档位，
-     * entities/video/MediaStream.java 实证）。2026-10-15 起仅作定位锚：每个命中经花括号回溯圈定
-     * 所属 VideoStream 对象逐流配对采集（见 [harvestStreams]），不再直接当候选 URL 用。
-     * mp4 限定保留：master_url 实测恒 mp4，过滤嵌套子对象里同名 URL 的噪声。
-     */
-    private val P_MASTER_ANY: Pattern = Pattern.compile("\"master_url\"\\s*:\\s*\"(http[^\"]+?\\.mp4[^\"]*?)\"")
-
-    /** backup_urls 数组开括号（取证实证 backup 紧随 master_url 之后；元素逐个提取见 [harvestStreams]）。 */
-    private val P_BACKUP_ARRAY: Pattern = Pattern.compile("\"backup_urls\"\\s*:\\s*\\[")
-
-    /** 带引号字符串（backup_urls 数组元素提取用）。 */
-    private val P_QUOTED: Pattern = Pattern.compile("\"([^\"]+)\"")
-
-    /** 流对象字段（VideoStream.java 实证；均取对象起点到 master_url 之间的**最后一个**命中）。 */
-    private val P_HEIGHT: Pattern = Pattern.compile("\"height\"\\s*:\\s*(\\d+)")
-    private val P_WIDTH: Pattern = Pattern.compile("\"width\"\\s*:\\s*(\\d+)")
-    private val P_BITRATE: Pattern = Pattern.compile("\"video_bitrate\"\\s*:\\s*(\\d+)")
-    private val P_SIZE: Pattern = Pattern.compile("\"size\"\\s*:\\s*(\\d+)")
-    private val P_STREAM_TYPE: Pattern = Pattern.compile("\"stream_type\"\\s*:\\s*(\\d+)")
-    private val P_STREAM_DESC: Pattern = Pattern.compile("\"stream_desc\"\\s*:\\s*\"([^\"]*)\"")
-
-    /** 所属编解码数组键（h264/h265/h266；codec 不参与本模块排序，采集失败无害）。 */
-    private val P_CODEC_KEY: Pattern = Pattern.compile("\"(h26[456])\"")
 
     private const val REGION_NOTE_ID_BACK = 8000
     private const val MAX_BODY = 524288L
     private const val URL_MAP_LIMIT = 500
     private const val VIDEO_CDN = "sns-video-bd.xhscdn.com"
 
+    /** 最近一篇视频笔记（videofeed 响应 query note_id，[rewriteVideoSave] 侧记录）。仅供日志对照：
+     *  2026-10-19 实证历史/缓存进入的笔记不发 entry videofeed ⇒ 停留上一篇 id，不可作归属依据
+     *  （曾致错弹 HD 卡，点击轨已改反射 NoteFeed.u0 + 24hex 门，见 XhsBatchSave）。 */
+    @Volatile var lastVideoNoteId: String? = null
+
     /**
-     * 单条视频候选 URL（逐语义移植 XHS_Downloader_Android core/model/ResolvedNote.kt MediaCandidate +
-     * data/xhs/XhsNoteParser.kt:172-204）：每条流（video_info_v2.media.stream.{h264,h265,h266}[] 元素）
-     * 的 backup_urls 各元素与 master_url **各成一候选**，共享所属流的 width/height/bitrate/size/codec。
-     * 原片候选（originVideoKey 重建）：width/height/bitrate/size = 0、watermarked = false、original = true
-     * （id 最高优先，排序见 [pickBestAndDownload]）。
+     * 单条视频候选 URL（逐语义移植 XHS_Downloader_Android core/model/ResolvedNote.kt MediaCandidate）：
+     * 每条流的 backup_urls 各元素与 master_url 各成一候选，共享流的 width/height/bitrate/size/codec。
+     * 原片候选：width/height/bitrate/size = 0、watermarked = false、original = true（排序见
+     * [pickBestAndDownload]）。2026-10-19 起实例只由 [offerHdDownloadFromNote] 从 vendored
+     * ResolvedNote（MediaCandidate）映射产生。
      */
     private class VideoCandidate(
         val url: String,
@@ -146,31 +76,15 @@ object XhsVideoSave {
     )
 
     /**
-     * noteId → 视频源：originKey（origin_video_key 原始档；V-1 后仅此一来源，且实测恒 null——
-     * E6/E7：该字段不在 app 网络层）+ candidates（video_info_v2 区段逐流逐 URL 采集，2026-10-15
-     * 基准切换，见 [harvestStreams]）。
-     */
-    private class VideoSource(val originKey: String?, val candidates: List<VideoCandidate>) {
-        /**
-         * 换链专用（2026-10-14 止损 → 降级为死分支）：**只信 origin_video_key**——bestStream 的
-         * height/bitrate lookback 曾全场 miss 导致首流（最低档 _258）胜出，换链反而降质。
-         * V-1 后唯一来源 P_ORIGIN_KEY 实测恒 null ⇒ 本方法恒 null ⇒ 换链分支自然死掉；
-         * 保留待「进程内 web 会话」路线复活（本轮不做，见 patchVideoSaveResponse 注释 E1/E7）。
-         */
-        fun swapUrl(): String? = originKey?.let { if (it.startsWith("http")) it else "https://$VIDEO_CDN/${it.trimStart('/')}" }
-    }
-
-    private val videoSources = ConcurrentHashMap<String, VideoSource>()
-
-    /**
      * noteId → 分享页线索（share_info.link 或同级 xsec_token）。真原始档不在 app API 梯子里（E6/E7），
      * 只在**移动版网页** `www.xiaohongshu.com/discovery/item/{id}` 的 `__INITIAL_STATE__` 里（camelCase
      * `originVideoKey`）；取该页须带 fresh xsec_token——桌面 UA 抓同一页没有，且 `xsec_source=pc_feed`
      * 会 302 到登录页（须 `app_share`）。link 是 app 侧已拼好的整条 URL（含 token），优先原样用。
+     * 2026-10-19 起消费方 = XhsSavePivot（链接接轨①）+ [pickBestAndDownload]（原片解析入参）。
      */
-    private class NoteShare(val link: String?, val token: String?)
+    internal class NoteShare(val link: String?, val token: String?)
 
-    private val noteShares = ConcurrentHashMap<String, NoteShare>()
+    internal val noteShares = ConcurrentHashMap<String, NoteShare>()
 
     /**
      * share_info.link（例：`https://www.xiaohongshu.com/discovery/item/<id>?…&xsec_source=app_share&xsec_token=…`）。
@@ -192,8 +106,9 @@ object XhsVideoSave {
      */
     private val P_ORIGIN_VIDEO_KEY_CAMEL: Pattern = Pattern.compile("\"originVideoKey\"\\s*:\\s*\"([^\"]+)\"")
 
-    /** 解析原片用的移动 UA——**结尾 `xiaohongshu` 后缀 + Chrome Mobile 缺一不可**（桌面 UA 无 originVideoKey）。 */
-    private const val XHS_WEB_UA =
+    /** 解析原片用的移动 UA——**结尾 `xiaohongshu` 后缀 + Chrome Mobile 缺一不可**（桌面 UA 无 originVideoKey）。
+     *  XhsSavePivot 抓分享页复用同一构造（internal，勿另抄字符串）。 */
+    internal const val XHS_WEB_UA =
         "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 xiaohongshu"
 
     /** 网页读取上限 1MB（`__INITIAL_STATE__` 远小于此；护栏防异常页拉爆内存）。 */
@@ -203,11 +118,14 @@ object XhsVideoSave {
     private const val RESOLVE_TIMEOUT_MS = 15_000
 
     /**
-     * 宿主 ClassLoader（install 期写入）：okhttp3 只在宿主 classpath（本模块编译期也无 okhttp3），
+     * 宿主 ClassLoader（install 期写入）：okhttp3 只在宿主 classpath（本模块 compileOnly），
      * ResponseBody 等类必须经宿主 loader 加载——用模块 loader 会全部 ClassNotFoundException，
      * 改写链整个失效（savefix appClassLoader 同语义）。
      */
     @Volatile private var hostLoader: ClassLoader? = null
+
+    /** 宿主 loader 访问器（XhsSavePivot 反射 kd.c 注解类用；install 前调用 = 编程错误，直接抛）。 */
+    internal fun hostLoaderOrThrow(): ClassLoader = hostLoader ?: error("XhsHook·X4 未 install，宿主 ClassLoader 不可用")
 
     /** 防重标记（toString 唯一身份，见 buildInterceptorProxy 注释）。 */
     private const val INTERCEPTOR_TAG = "HonorHook-XhsVideoSave"
@@ -215,8 +133,6 @@ object XhsVideoSave {
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         hostLoader = loader
-        // 采集探测仪表回调（X5 联调期；稳定后撤）
-        logHook = { prio, tag, msg -> module.log(prio, tag, msg) }
         ensureActivityTracker()
         // A2：进程被杀留下的 .pending- 半成品（IS_PENDING 态）后台清一次（每进程一次；年龄门槛见函数注释）
         cleanupPendingOrphans(module)
@@ -307,155 +223,8 @@ object XhsVideoSave {
         // X5 点击轨 noteId 回落锚：videofeed 响应 URL query 必带 note_id（harvest 入表回落同款口径），
         // 记录「当前视频笔记」——invoke 的 String 参数语义不可证时（见 XhsBatchSave 挂载处）唯一归属来源
         if (url.contains("/note/videofeed")) queryParam(url, "note_id")?.let { lastVideoNoteId = it }
-        harvestVideoSources(body, url, module)
         harvestNoteShare(body)
-        harvestNoteImages(body, url)
         return null
-    }
-
-    /**
-     * X5 图集采集：逐 `"images":[` 区段，noteId 取区段前最近十六进制串（视频同款启发式），
-     * 区段内收全部 url_default。**只认数组形 `"images":[`**——字符串形 `"images":"https…"`
-     * 是评论区头像字段（2026-10-14 探测实证），跳过。
-     * note 响应另配 key 探测（url 含 /note/ 时打 image 类 key 清单，定位图集真实字段名）。
-     */
-    /**
-     * X5 图集采集（外挂解析，2026-10-14 定案）：笔记图集数据在 `/api/sns/v1/note/imagefeed`
-     * 响应（探测实证 key=images_list；此前 "images" 命中的全是评论区头像字符串字段）。
-     * 不赌字段名——直接收响应里全部 `sns-img`/`sns-webpic` host 的 URL（头像=sns-avatar 天然排除），
-     * noteId 取响应内第一个 `"note_id"`（大图集分页多次响应累加去重）。
-     */
-    /**
-     * X5 图集采集（外挂解析，2026-10-14 流量探测定案）：图集字段 = `images_list[]`，元素含
-     * {fileid, height, width, url, original}，图床 host = sns-na-i6.xhscdn.com（url 带
-     * imageView2 压缩参数；videofeed 段直接带 `original` 原图直链）。
-     * 数据源端点：/note/detailfeed/preload（进笔记必发）+ /note/videofeed + homefeed。
-     * 采集规则：original 直链优先；miss 收 url（[toOriginal] 落盘时剥参数）。
-     * noteId 取响应内 `"note_id"`（homefeed 多笔记混包时沿用最近值——批量目标=当前浏览笔记）。
-     */
-    private val P_ORIGINAL_URL: Pattern = Pattern.compile("\"original\"\\s*:\\s*\"(https://sns-[^\"]+)\"")
-    private val P_NOTE_IMG_URL: Pattern = Pattern.compile("\"url\"\\s*:\\s*\"(https://sns-(?:na|img|webpic)[^\"]+)\"")
-
-    /** images_list 数组开括号（图集区段锚，2026-10-19 采集收窄用，findings-x5b.md）。 */
-    private val P_IMAGES_LIST: Pattern = Pattern.compile("\"images_list\"\\s*:\\s*\\[")
-
-    /** note 级声明张数（detail 型载荷；字段名属探测项，miss 退元素数口径，见 harvestNoteImages）。 */
-    private val P_IMAGE_COUNT: Pattern = Pattern.compile("\"image_count\"\\s*:\\s*(\\d+)")
-
-    private fun harvestNoteImages(body: String, url: String) {
-        // 触发端点收窄（2026-10-14 实测 62 张污染修正）：只认 imagefeed（逐图 feed，进图浏览必发）
-        // 与 detailfeed（笔记详情/预载）。宽前缀 /note/ 会把 user/posted（他人主页笔记列表）等
-        // 无关响应收进来；homefeed 直接整条信息流的图灌进单笔记缓存。
-        if (!url.contains("/note/imagefeed") && !url.contains("/note/detailfeed")) return
-        // noteId 三轨：body 内 "note_id"（comment/detail 型）→ URL query note_id（imagefeed 型，
-        // 2026-10-14 诊断实证 body 无 note_id 而 query 有）→ 沿用最近值
-        val fromBody = P_NOTE_ID_PLAIN.matcher(body).takeIf { it.find() }?.group(1)
-        val fromQuery = if (fromBody == null) queryParam(url, "note_id") else null
-        val noteId = fromBody ?: fromQuery ?: lastImageNoteId
-        val noteIdFrom = if (fromBody != null) "body" else if (fromQuery != null) "query" else "沿用"
-        // 归属更新必须在采集失败早退之前：图集采没采到不影响「用户在浏览本篇」这个事实
-        if (fromBody != null || fromQuery != null) currentNoteId = noteId
-        // 仪表①（findings-x5b.md §1：失败静默是排查最大成本，采集必须有痕）：端点 + noteId 来源
-        logHook?.invoke(Log.INFO, MountEngine.TAG,
-            "XhsHook·X4 图集采集进入 ${url.take(80)} noteId=$noteId 来源=$noteIdFrom")
-        // 采集收窄到 images_list 区段（2026-10-19，findings-x5b.md §1·A）：save-hostile 笔记
-        // （服务端 FunctionSwitch(image_download)=false，真机实证）载荷缺本图集直链，旧「全 body
-        // 兜底扫 P_NOTE_IMG_URL」会把 preload 封面/关联笔记的杂图扫进来当本图集（落错 1 张）。
-        // 区段须归属本次 noteId（前最近 "note_id"；lookback miss 归本 noteId——imagefeed 型 body 可无 note_id）。
-        var elements = 0
-        val found = LinkedHashSet<String>()
-        val r = P_IMAGES_LIST.matcher(body)
-        while (r.find()) {
-            val regionNoteId = nearestNoteIdBefore(body, r.start()) ?: noteId
-            if (noteId != null && regionNoteId != noteId) continue
-            val arrEnd = arrayEnd(body, r.end())
-            if (arrEnd < 0) continue
-            elements += harvestImagesListRegion(body, r.end(), arrEnd, found)
-        }
-        // 失败有痕：无可归属元素（视频笔记正常无图 / hostile 剥离）或 noteId 缺失 → 不入库，
-        // X5 走既有空回落 proceed（宿主原生保存；hostile 笔记宿主也存不了，属诚实失败）
-        if (noteId == null || elements == 0) {
-            logHook?.invoke(Log.WARN, MountEngine.TAG,
-                "XhsHook·X4 图集采集失败 noteId=$noteId：无可归属 images_list 元素（视频笔记正常无图 / save-hostile 剥离）")
-            return
-        }
-        // 张数一致性校验（2026-10-19 定案，findings-x5b.md §2.2）：元素数即载荷声明张数，采到的
-        // URL 条数不符 ⇒ 服务端剥离了部分/全部直链（残缺图集）——判采集失败不入库（返回空语义 =
-        // 调用方回落），宁回落宿主原生保存也别把残缺/杂图当图集下错图。
-        if (found.size != elements) {
-            logHook?.invoke(Log.WARN, MountEngine.TAG,
-                "XhsHook·X4 图集采集失败 noteId=$noteId：一致性不符 采到 ${found.size} / 声明 $elements（直链被剥离），不入库")
-            return
-        }
-        if (noteImages.size > URL_MAP_LIMIT) { noteImages.clear(); declaredImageCounts.clear() }
-        val merged = (noteImages[noteId] ?: mutableListOf()) + found
-        // 按 token 去重（2026-10-15 真机：单图笔记 original 直链与带参 url 并存 = 两串一图，整串
-        // distinct 去不掉 ⇒ 弹「2 张」下 2 张一模一样）。toBare 不适用（null）回退整串做键；
-        // LinkedHashSet 保序，首现优先（original 直链序不变）。
-        val distinct = merged.distinctBy { XhsImageUrl.toBare(it) ?: it }
-        // 单笔记张数护栏：多图笔记上限 ~20 张（9.49.1 图集极限），超 30 判定污染整包丢弃
-        if (distinct.size > 30) {
-            logHook?.invoke(Log.WARN, MountEngine.TAG, "XhsHook·X4 图集护栏触发 noteId=$noteId ${distinct.size} 张疑似污染，丢弃")
-            return
-        }
-        noteImages[noteId] = distinct.toMutableList()
-        lastImageNoteId = noteId
-        // 声明张数入库（note 级 image_count 优先、miss 用元素数；max 累积防分页小载荷拉低）：
-        // X5 单图分支防「漏采剩 1 张被当单图直存」的判定输入（findings-x5b.md §2.3）。
-        val declared = maxOf(P_IMAGE_COUNT.matcher(body).takeIf { it.find() }?.group(1)?.toIntOrNull() ?: 0, elements)
-        if (declared > 0) declaredImageCounts[noteId] = maxOf(declaredImageCounts[noteId] ?: 0, declared)
-        // 仪表②③：采到条数 + 首末 URL 截断 + 一致性校验结果
-        logHook?.invoke(Log.INFO, MountEngine.TAG,
-            "XhsHook·X4 图集采集成功 noteId=$noteId 采到 ${found.size} / 声明 $elements " +
-                "首=${found.first().take(60)} 末=${found.last().take(60)}")
-    }
-
-    /** [pos) 前最近的 `"note_id"`（images_list 区段归属判别用；无则 null）。 */
-    private fun nearestNoteIdBefore(body: String, pos: Int): String? {
-        val m = P_NOTE_ID_PLAIN.matcher(body).region(maxOf(0, pos - REGION_NOTE_ID_BACK), pos)
-        var id: String? = null
-        while (m.find()) id = m.group(1)
-        return id
-    }
-
-    /** 数组开括号后一位 [from) 起配对找闭括号下标（失配 -1）。字符串内裸括号未剥转义——
-     *  URL/字段值实测不含（与 harvestStreams 花括号回溯同前提）。 */
-    private fun arrayEnd(body: String, from: Int): Int {
-        var depth = 1
-        for (j in from until body.length) {
-            when (body[j]) {
-                '[' -> depth++
-                ']' -> if (--depth == 0) return j
-            }
-        }
-        return -1
-    }
-
-    /** images_list 区段 [from,to) 内逐元素（花括号配对圈对象；元素扁平、嵌套子对象配对同样正确），
-     *  返回元素数。每元素恰收一条 URL：original 直链优先、miss 收 url；两者皆无计元素不产 URL
-     *  （交调用方一致性校验判残缺）。 */
-    private fun harvestImagesListRegion(body: String, from: Int, to: Int, found: LinkedHashSet<String>): Int {
-        var count = 0
-        var i = from
-        while (i < to) {
-            if (body[i] != '{') { i++; continue }
-            var depth = 0
-            var end = -1
-            for (j in i until to) {
-                when (body[j]) {
-                    '{' -> depth++
-                    '}' -> if (--depth == 0) { end = j; break }
-                }
-            }
-            if (end < 0) break
-            count++
-            val element = body.substring(i, end + 1)
-            val picked = P_ORIGINAL_URL.matcher(element).takeIf { it.find() }?.group(1)
-                ?: P_NOTE_IMG_URL.matcher(element).takeIf { it.find() }?.group(1)
-            if (picked != null) found += picked
-            i = end + 1
-        }
-        return count
     }
 
     private fun peekBodyString(response: Any): String? = runCatching {
@@ -464,174 +233,10 @@ object XhsVideoSave {
     }.getOrNull()?.takeIf { it.isNotEmpty() }
 
     /**
-     * 采集：逐 `video_info_v2` 区段——origin_video_key（V-1 后唯一 originKey 来源，实测恒 null，E6）
-     * + candidates（[harvestStreams]：区段内逐流花括号回溯，每条 backup_urls 元素与 master_url 各一候选）。
-     * noteId 取区段前最近 `"(?:id|note_id)"` 十六进制串；map 上限 500 清空；首访不覆盖（!containsKey）。
-     * V-1 撤伪 originKey 采集（旧三版 `video:{` 窗口扫 id 产垃圾：24hex 裸键直链 404 / 窗口内其他对象
-     * 的 url，E7），也撤 web 页取原始档路线（E8，服务端 sec 墙）。
-     *
-     * 2026-10-15 基准切换（用户拍板以 XHS_Downloader_Android 为唯一抄写基准）：候选集/元数据/选档
-     * 全部逐语义移植 XhsNoteParser.kt:172-204 + NoteOutput.kt:47-56（见 [harvestStreams] /
-     * [pickBestAndDownload]）；旧「probeSize 实测字节选最大」作废——跨编码字节不可比（真机实证
-     * H264 _258 37808KB 胜 H265 高分档 ~10MB），且原片直链被字节比较挤掉。旧 E2/E5「窗口打分不可靠」
-     * 的教训指**固定字符窗口**，现用花括号配对 + 精确区段（下一 video_info_v2 为界），非窗口法复活。
-     */
-    private fun harvestVideoSources(body: String, url: String, module: XposedModule) {
-        // 仪表（2026-10-19 排查期引入，保留为正式观测）：v2 块数 / 归属 miss / 新入表数，videofeed 汇总行输出
-        var v2Blocks = 0
-        var attrMiss = 0
-        var inserted = 0
-        var idx = body.indexOf("\"video_info_v2\"")
-        while (idx >= 0) {
-            // 区段上界 = 同 body 内下一个 "video_info_v2" 起点（无则 body.length）。旧固定窗口
-            // REGION_MASTER_WINDOW=6000 会把本 note 的 video_info_v2 区段截断——真机实证 4K `_532`
-            // 档位落在 6000 字符之外，旧候选采集只采到 5 档、漏掉 4K。video_info_v2 每 note 恰一个，
-            // 以下一个为界即精确圈住本 note 的媒体块，且不会串到下一个 note（换窗为界同时也解除
-            // 窗口大小这一隐式耦合，新增档位/元数据不再挤掉尾部流）。
-            val nextIdx = body.indexOf("\"video_info_v2\"", idx + 1)
-            val regionEnd = if (nextIdx < 0) body.length else nextIdx
-            val originKey = P_ORIGIN_KEY.matcher(body).region(idx, regionEnd).let { if (it.find()) it.group(1) else null }
-            val candidates = harvestStreams(body, idx, regionEnd)
-            if (originKey != null || candidates.isNotEmpty()) {
-                val idMatcher = P_NOTE_ID.matcher(body).region(maxOf(0, idx - REGION_NOTE_ID_BACK), idx)
-                var noteId: String? = null
-                while (idMatcher.find()) noteId = idMatcher.group(1)
-                if (noteId == null) {
-                    attrMiss++   // lookback miss 照计（回落成功也计，仪表 miss 率不因回落失真）
-                    // 归属回落（2026-10-19 实证 videofeed 首块（当前笔记）noteId lookback miss，
-                    // 归属miss=1）：videofeed 型 URL query 必带 note_id，body 内采不到时用 query 值
-                    // 入表——不回落则当前笔记候选永远空，HD 询问必弹不了
-                    if (url.contains("/note/videofeed")) noteId = queryParam(url, "note_id")
-                }
-                if (noteId != null && !videoSources.containsKey(noteId)) {
-                    if (videoSources.size > URL_MAP_LIMIT) videoSources.clear()
-                    videoSources[noteId] = VideoSource(originKey, candidates)
-                    inserted++
-                } else if (noteId != null) {
-                    attrMiss++
-                }
-            }
-            v2Blocks++
-            idx = body.indexOf("\"video_info_v2\"", idx + "\"video_info_v2\"".length)
-        }
-        // origin_video_key 全响应扫（V-1 后唯一 originKey 来源；实测恒 null——E6，保留待 web 会话路线复活）
-        var oidx = body.indexOf("\"origin_video_key\"")
-        while (oidx >= 0) {
-            val om = P_ORIGIN_KEY.matcher(body).region(oidx, minOf(body.length, oidx + 400))
-            if (om.find()) {
-                val key = om.group(1)
-                val idMatcher = P_NOTE_ID.matcher(body).region(maxOf(0, oidx - REGION_NOTE_ID_BACK), oidx)
-                var nid: String? = null
-                while (idMatcher.find()) nid = idMatcher.group(1)
-                if (nid != null) {
-                    val old = videoSources[nid]
-                    if (old == null || old.originKey == null) {
-                        videoSources[nid] = VideoSource(key, old?.candidates ?: emptyList())
-                    }
-                }
-            }
-            oidx = body.indexOf("\"origin_video_key\"", oidx + 18)
-        }
-        // 仪表（2026-10-19 排查期引入，保留为正式观测）：videofeed/detailfeed 采集可见性
-        // ——HD 询问弹不弹的第一判据行（v2块/masterUrl数/归属miss/新入表）
-        if (url.contains("/note/videofeed") || url.contains("/note/detailfeed")) {
-            val masterCount = P_MASTER_ANY.matcher(body).results().count()
-            module.log(Log.INFO, MountEngine.TAG,
-                "$JUDGE_PREFIX 采集汇总 harvest url=${url.take(100)} len=${body.length} v2块=$v2Blocks masterUrl=$masterCount 归属miss=$attrMiss 新入表=$inserted")
-        }
-    }
-
-    /** 带水印流标记（XhsNoteParser.kt 语义）：stream_type ∈ 此集或 stream_desc = WEB_LIVEPHOTO_19（忽略大小写）。 */
-    private val WATERMARK_STREAM_TYPES = setOf(259, 309)
-    private const val WEB_LIVEPHOTO_DESC = "WEB_LIVEPHOTO_19"
-
-    /**
-     * video_info_v2 区间内逐流采集（2026-10-15 基准切换，花括号回溯法；逐语义移植
-     * XHS_Downloader_Android data/xhs/XhsNoteParser.kt:172-204）：每个 `"master_url"`（[P_MASTER_ANY]
-     * 定位）向左花括号回溯圈定所属 VideoStream JSON 对象——`}` 深度 +1、`{` 深度 -1，深度变 -1 的
-     * `{` 即对象起点（VideoStream 对象扁平，opaque1/vqa 子对象在其后，不影响向左回溯）。
-     * 流元数据 = 对象起点到 master_url 之间各字段**最后一个**命中（取证实证 width/height 等在对象
-     * 前半段）；取不到 height 的流整条丢弃（宁缺勿错配）。watermarked = stream_type ∈ {259,309} ||
-     * stream_desc == "WEB_LIVEPHOTO_19"（忽略大小写）。codec = regionStart→对象起点向前最近的
-     * "h264"/"h265"/"h266" 数组键；取不到仅置 null——codec 不参与本模块排序，丢失不影响结果。
-     * 每条流展开为**独立候选**：backup_urls 数组全部元素（master_url 之后、对象 `}` 之内第一个数组，
-     * 紧随 master_url 取证实证）逐个 + master_url 收尾；同流候选共享元数据，列表序即下载器序
-     * （选中流取 backup[0] = 其首个候选）。
-     */
-    private fun harvestStreams(body: String, regionStart: Int, regionEnd: Int): List<VideoCandidate> {
-        val out = ArrayList<VideoCandidate>()
-        val m = P_MASTER_ANY.matcher(body).region(regionStart, regionEnd)
-        while (m.find()) {
-            val masterUrl = m.group(1) ?: continue
-            // 向左花括号回溯：深度变 -1 的 `{` = 所属对象起点
-            var depth = 0
-            var objStart = -1
-            var i = m.start() - 1
-            while (i >= regionStart) {
-                when (body[i]) {
-                    '}' -> depth++
-                    '{' -> {
-                        depth--
-                        if (depth < 0) { objStart = i; break }
-                    }
-                }
-                i--
-            }
-            if (objStart < 0) continue
-            // 元数据：对象起点到 master_url 之间各字段取最后一个命中
-            fun lastNum(p: Pattern): Int {
-                val mm = p.matcher(body).region(objStart, m.start())
-                var v = -1
-                while (mm.find()) v = mm.group(1)?.toIntOrNull() ?: -1
-                return v
-            }
-            val height = lastNum(P_HEIGHT)
-            if (height <= 0) continue
-            val width = lastNum(P_WIDTH).coerceAtLeast(0)
-            val bitrate = lastNum(P_BITRATE).toLong().coerceAtLeast(0)
-            val size = lastNum(P_SIZE).toLong().coerceAtLeast(0)
-            val streamType = lastNum(P_STREAM_TYPE)
-            val dm = P_STREAM_DESC.matcher(body).region(objStart, m.start())
-            var streamDesc = ""
-            while (dm.find()) streamDesc = dm.group(1) ?: ""
-            val watermarked = streamType in WATERMARK_STREAM_TYPES ||
-                streamDesc.equals(WEB_LIVEPHOTO_DESC, ignoreCase = true)
-            // codec：regionStart→对象起点向前最近的编解码数组键（最后一次命中即最近）
-            var codec: String? = null
-            val cm = P_CODEC_KEY.matcher(body).region(regionStart, objStart)
-            while (cm.find()) codec = cm.group(1)
-            // 对象 `}` 位置：master_url 起向前数括号（起点 depth=1，子对象 opaque1/vqa 嵌套不影响计数）
-            var d2 = 1
-            var j = m.end()
-            while (j < regionEnd) {
-                when (body[j]) {
-                    '{' -> d2++
-                    '}' -> { d2--; if (d2 == 0) break }
-                }
-                j++
-            }
-            // backup_urls 数组全部元素（master_url 之后、对象 } 之内的第一个数组）；取不到 = 空
-            val urls = ArrayList<String>()
-            val bam = P_BACKUP_ARRAY.matcher(body).region(m.end(), minOf(j, regionEnd))
-            if (bam.find()) {
-                val arrStart = bam.end()
-                val hardEnd = minOf(j, regionEnd)
-                val arrEnd = body.indexOf(']', arrStart).let { if (it < 0) hardEnd else minOf(it, hardEnd) }
-                if (arrEnd > arrStart) {
-                    val em = P_QUOTED.matcher(body.substring(arrStart, arrEnd))
-                    while (em.find()) em.group(1)?.let { urls += it }
-                }
-            }
-            urls += masterUrl
-            for (u in urls) out += VideoCandidate(u, width, height, bitrate, size, codec, watermarked)
-        }
-        return out
-    }
-
-    /**
-     * 采集分享页线索（与 [harvestVideoSources] 同源同响应）：`share_info.link` 优先——app 已把
+     * 采集分享页线索（/api/sns/ 全响应旁路）：`share_info.link` 优先——app 已把
      * noteId + fresh xsec_token 拼成整条 URL（`xsec_source=app_share`），原样用最省事；link miss
-     * 时收同级 `xsec_token`（noteId 就近 lookback 同 harvestVideoSources）。二者皆无则不入表。
+     * 时收同级 `xsec_token`（noteId 就近 lookback，[P_NOTE_ID]）。二者皆无则不入表。
+     * 2026-10-19 起是本文件唯一的旁路采集（视频候选/图集采集已删，消费方 = XhsSavePivot 链接轨①）。
      */
     private fun harvestNoteShare(body: String) {
         // share_info.link 优先（值须含 xsec_token 才算分享链——普通 "link" 字段多，先过滤）
@@ -692,10 +297,11 @@ object XhsVideoSave {
     }
 
     /**
-     * GET 移动版网页（手机 UA + Accept），手动跟随 302（≤5 跳）；非 200 返 null，读取上限
-     * [MAX_PAGE_BYTES]（[readCapped]）。UA / `xsec_source=app_share` 是取到 originVideoKey 的前提（实证）。
+     * GET 移动版网页（手机 UA + Accept），手动跟随 302（≤5 跳，xhslink 短链即在此展开）；非 200 返
+     * null，读取上限 [MAX_PAGE_BYTES]（[readCapped]）。UA / `xsec_source=app_share` 是取到
+     * originVideoKey 的前提（实证）。XhsSavePivot 的 fetchHtml 注入复用本实现（internal，勿另抄）。
      */
-    private fun fetchNotePageHtml(pageUrl: String): String? {
+    internal fun fetchNotePageHtml(pageUrl: String): String? {
         var u = pageUrl
         var redirects = 0
         while (true) {
@@ -764,18 +370,15 @@ object XhsVideoSave {
      * 改写 /note/video/save 响应：disable:true→false、status 统一 2（无则插入）。命中返回新 Response，
      * 未命中/异常返回 null（原响应不动）。
      *
-     * **换链（download_url 替换）自 2026-10-14 起为死分支**（V-10）：实测 E1——换链日志出现（换上
-     * `_258`）但客户端仍落服务器原档 sizeof，即客户端根本不消费响应内 download_url；且唯一可信源
-     * origin_video_key 经 E6/E7 实证不在 app 网络层（伪采集仅产垃圾，裸 key 直链 404 = E4）⇒
-     * swapUrl() 恒 null。分支与 VideoSource.originKey 保留待「app 进程内 WebView 会话」路线复活（本轮不做）。
-     * 高清交付已改由外挂直下（scheduleHdVideoDownload）承担，别再指望「换链能救」。
+     * **换链（download_url 替换）分支已删**（2026-10-19，随 videoSources 采集删除）：实测 E1——换链
+     * 日志出现但客户端仍落服务器原档 sizeof，即客户端根本不消费响应内 download_url；且唯一可信源
+     * origin_video_key 经 E6/E7 实证不在 app 网络层 ⇒ swapUrl() 恒 null（V-10 起死分支）。
+     * 高清交付由外挂直下（scheduleHdVideoDownload / X5 点击轨）承担。
      */
     private fun patchVideoSaveResponse(url: String, body: String, response: Any, module: XposedModule): Any? {
         val hasDisableBlock = body.contains("\"disable\"")
         if (!hasDisableBlock && !body.contains("\"download_url\"")) return null
         val noteId = queryParam(url, "note_id")
-        // swapUrl() 恒 null（见函数注释 E1/E6/E7）——此分支保留但当前不生效
-        val better = noteId?.let { videoSources[it]?.swapUrl() }
         var patched = body
         if (hasDisableBlock) {
             patched = patched.replace(Regex("\"disable\"\\s*:\\s*true"), "\"disable\":false")
@@ -785,19 +388,11 @@ object XhsVideoSave {
                 patched.replace("\"disable\":false", "\"disable\":false,\"status\":2")
             }
         }
-        if (better != null && better != body) {
-            // 换链：服务器 download_url（转码档）→ 采集链最优源；带 ?sign 的原串整段替换
-            patched = patched.replaceFirst(
-                Regex("\"download_url\"\\s*:\\s*\"[^\"]*\""),
-                "\"download_url\":\"$better\"",
-            )
-        }
         if (patched == body) return null
         val newResponse = rebuildResponse(response, patched) ?: return null
         module.log(
             Log.INFO, MountEngine.TAG,
-            "$JUDGE_PREFIX 视频响应已改写 noteId=$noteId（${if (hasDisableBlock) "解锁" else "改写"}" +
-                "${if (better != null) " 换链→${better.take(90)}" else ""}）",
+            "$JUDGE_PREFIX 视频响应已改写 noteId=$noteId（${if (hasDisableBlock) "解锁" else "改写"}）",
         )
         return newResponse
     }
@@ -1139,24 +734,45 @@ object XhsVideoSave {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX save响应无note_id url=${url.take(140)}")
             return
         }
-        // t0 = 本轮 save 拦截时刻，透传给 V-5 低画质清理的时间窗锚点
-        offerHdDownload(noteId, System.currentTimeMillis(), module)
+        // t0 = 本轮 save 拦截时刻，透传给 V-5 低画质清理的时间窗锚点。
+        // 2026-10-19 X5 重构：save 响应轨无候选来源（videoSources 采集已删，恒空 = WARN 静默跳过），
+        // HD 询问只由 X5 点击轨（a59.q → 分享链接解析 → offerHdDownloadFromNote）发起。
+        offerHdDownload(noteId, System.currentTimeMillis(), emptyList(), module)
     }
 
     /**
-     * HD 询问卡唯一入口（2026-10-19 自 [scheduleHdVideoDownload] 抽取）：save 响应轨（仅覆盖网络
-     * `/note/video/save` 这条路）+ X5 视频保存点击轨（XhsBatchSave a59.q invoke——覆盖播放缓存直拷、
-     * 已存在短路两条不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿
-     * 720p）。流程：采集候选 → Application → 关 X5 反馈卡 → 弹询问卡；V-6 同笔记防骚扰去重已删
+     * X5 点击轨入口（2026-10-19 X5 重构）：XhsBatchSave a59.q invoke 点击轨把分享链接解析出的
+     * vendored [ResolvedNote]（可为 null = 解析失败）交进来，视频候选由此映射——
+     * ResolvedNote.videos[].candidates（MediaCandidate）逐条转 [VideoCandidate]，字段同名直译
+     * （core/model/ResolvedNote.kt 的 MediaCandidate 即本类 VideoCandidate 的上游原型）。
+     * note = null 或无候选 ⇒ WARN 后回落（无梯子候选可退——采集已删，静默跳过）。
+     */
+    fun offerHdDownloadFromNote(noteId: String, t0: Long, note: ResolvedNote?, module: XposedModule) {
+        val streams = note?.videos?.flatMap { video ->
+            video.candidates.map { c ->
+                VideoCandidate(
+                    url = c.url, width = c.width, height = c.height,
+                    bitrate = c.bitrate, size = c.size, codec = c.codec,
+                    watermarked = c.watermarked, original = c.original,
+                )
+            }
+        } ?: emptyList()
+        offerHdDownload(noteId, t0, streams, module)
+    }
+
+    /**
+     * HD 询问卡唯一入口：save 响应轨（2026-10-19 起恒空候选 = WARN 静默跳过，留作 URL 形态观测）+
+     * X5 视频保存点击轨（a59.q invoke → offerHdDownloadFromNote——覆盖播放缓存直拷、已存在短路两条
+     * 不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿 720p）。
+     * 流程：候选 → Application → 关 X5 反馈卡 → 弹询问卡；V-6 同笔记防骚扰去重已删
      * （2026-10-19 用户拍板），每次保存有候选即弹；两条 early-return 均有仪表日志。
      */
-    fun offerHdDownload(noteId: String, t0: Long, module: XposedModule) {
-        // 候选集（2026-10-15 基准切换）：采集链全部逐 URL 候选，选档在 pickBestAndDownload
+    private fun offerHdDownload(noteId: String, t0: Long, streams: List<VideoCandidate>, module: XposedModule) {
+        // 候选集（2026-10-15 基准切换）：全部逐 URL 候选，选档在 pickBestAndDownload
         // （逐语义移植 XHS_Downloader_Android NoteOutput.kt:47-56——响应 download_url 不参与选档）
-        val streams = videoSources[noteId]?.candidates ?: emptyList()
         if (streams.isEmpty()) {
-            // 仪表（2026-10-19 排查期引入）：发起已到但采集链无此 note 的候选
-            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 候选空 noteId=$noteId（videoSources miss）")
+            // 仪表：发起已到但无候选（点击轨 = 分享链接解析失败；save 响应轨 = 候选来源已删）
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 候选空 noteId=$noteId（分享链接解析未产候选），跳过")
             return
         }
 
@@ -1261,12 +877,12 @@ object XhsVideoSave {
     /**
      * 选档（2026-10-15 基准切换，用户拍板逐语义移植 XHS_Downloader_Android）：
      * 候选集 = 原片（移动版网页解析 originVideoKey 成功时置顶：width/height=0、watermarked=false、
-     * original=true，等价下载器 `original=true` id 最高优先）+ 采集链全部逐 URL 候选
-     * （data/xhs/XhsNoteParser.kt:172-204 语义）。排序照 domain/download/NoteOutput.kt:47-56
+     * original=true，等价下载器 `original=true` id 最高优先）+ 调用方给的逐 URL 候选
+     * （2026-10-19 起来自 vendored ResolvedNote——XhsNoteParser.kt:172-204 语义，经
+     * offerHdDownloadFromNote 映射）。排序照 domain/download/NoteOutput.kt:47-56
      * 默认 RESOLUTION 偏好：watermarked 升序 → original 降序 → w×h 降序；`sortedWith` 稳定排序 +
      * `first()` = 平手取排序后列表第一个（逐字对齐）。origin 解析成功即走置顶语义（等价直接用原片）；
-     * 候选集为空 WARN 一行后 return。选中流 URL = 其首个候选（backup_urls[0] 列表序，无 backup 则
-     * master_url——采集展开序已保证）。
+     * 候选集为空 WARN 一行后 return。
      * 旧「probeSize 实测字节选最大」已删：选择不再依赖实测字节——跨编码字节不可比（真机实证
      * H264 _258 37808KB 胜 H265 高分档 ~10MB），且原片直链被字节比较挤掉。
      */

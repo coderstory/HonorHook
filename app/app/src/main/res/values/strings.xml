@@ -115,8 +115,6 @@
     <string name="feature_xhs_save_unlock_desc">帖子被作者关闭「下载/保存」时仍可长按保存图片和视频；付费内容不绕过。重启小红书后生效</string>
     <string name="feature_xhs_no_watermark_title">保存无水印</string>
     <string name="feature_xhs_no_watermark_desc">保存图片不再带作者水印和 AI「生成」标签。重启小红书后生效</string>
-    <string name="feature_xhs_hd_save_title">保存原图</string>
-    <string name="feature_xhs_hd_save_desc">保存的是原始高清图而非页面压缩图（含评论图片），清晰度与页面显示一致或更高。首次保存需联网拉取原图。重启小红书后生效</string>
     <string name="feature_xhs_video_save_title">视频直链保存</string>
     <string name="feature_xhs_video_save_desc">视频帖保存时可直接下载作者上传的原始视频文件，体积与清晰度都远高于客户端默认保存的版本；下载完成会提示实际体积。重启小红书后生效</string>
     <string name="feature_xhs_batch_save_title">批量保存</string>

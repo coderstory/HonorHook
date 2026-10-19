@@ -80,6 +80,13 @@ object SystemUiHook : TargetHook {
     private const val CHARGE_NOTIF_PKG = "com.hihonor.systemmanager"
     private const val CHARGE_NOTIF_ID = 200001
 
+    /** USB 模式状态条发帖方 = 设置（2026-10-19 真机探针+截图实证：title「正在通过USB为此设备充电/USB连接仅用于充电」）。
+     *  settings-jadx（UsbSettingsService.java）实证 id=1000002 是充电/传输文件/USB音频共用的单槽（文案按 USB 功能切换），
+     *  故锚点三等值（pkg+channel+id），渠道-only 会连杀 tethering/手机助手（同渠道不同 id）。 */
+    private const val SETTINGS_USB_NOTIF_PKG = "com.android.settings"
+    private const val SETTINGS_USB_NOTIF_CHANNEL = "SETTINGS_USB"
+    private const val SETTINGS_USB_NOTIF_ID = 1000002
+
     /** 热点/USB 调试通知发帖方 pkg = system_server（android）；热点锚点用 AOSP 硬编码 group 串（比渠道 id 稳）。 */
     private const val PKG_ANDROID = "android"
     private const val HOTSPOT_NOTIF_GROUP = "TetheredNotification"
@@ -469,12 +476,16 @@ object SystemUiHook : TargetHook {
     private fun matchesHiddenNotif(sbn: Any, module: XposedModule): String? {
         probeNotifIdentity(module, sbn)
         val pkg = sbn.callOrNull("getPackageName") as? String ?: return null
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_CHARGE_NOTIF) &&
-            pkg == CHARGE_NOTIF_PKG && (sbn.callOrNull("getId") as? Int) == CHARGE_NOTIF_ID
+        val notifId = sbn.callOrNull("getId") as? Int
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_CHARGE_NOTIF) && notifId != null &&
+            (pkg == CHARGE_NOTIF_PKG && notifId == CHARGE_NOTIF_ID ||
+                // USB 模式状态条（充电/传输/音频共槽，2026-10-19 用户拍板档 1：三等值锚，整槽隐藏）
+                pkg == SETTINGS_USB_NOTIF_PKG && notifId == SETTINGS_USB_NOTIF_ID &&
+                    (sbn.callOrNull("getNotification")?.callOrNull("getChannelId") as? String) == SETTINGS_USB_NOTIF_CHANNEL)
         ) {
             // 全档隐藏（2026-10-17 用户确认）：快充「极速充电」与普通「正在通过 USB 充电」同发
             // id=200001，均属隐藏需求，同 id 全杀是预期语义，勿当误杀收紧。
-            return "充电通知($pkg/$CHARGE_NOTIF_ID)"
+            return "充电通知($pkg/$notifId)"
         }
         val group = sbn.callOrNull("getGroup") as? String
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF) &&

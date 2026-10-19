@@ -18,24 +18,28 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * X5 批量保存（引擎 XhsHook·X5）：图片笔记长按「保存」→ **模块全接管**，自己下全部原图（含当前张）。
+ * X5 批量保存（引擎 XhsHook·X5）：保存按钮 hook → 分享链接 → vendored 下载器管线（2026-10-19 定案）。
  *
- * 架构（2026-10-14 四版定案，外挂解析）：不碰 app 内部结构——图集数据从 [XhsVideoSave] 的
- * okhttp 旁路采集（笔记 JSON images[].url_default，XHS_Downloader_Android 同源），下载由模块自己
- * HttpURLConnection + MediaStore 完成。零混淆依赖、零宿主反射（URL 重写走共享 [XhsImageUrl]，权威源 NoteOutput.imageUrls）。
+ * 架构（2026-10-19 重构）：不碰 app 内部结构、不再旁路采集图集/视频流——两个保存点击点把
+ * hook 现场的 NoteFeed（含 noteId）交给 [XhsSavePivot]；Pivot 三轨取分享链接（noteShares /
+ * NoteFeed 反射 share_info），vendored `com.neoruaa.xhsdn.*`（XHS_Downloader_Android 原样复制）
+ * 解析分享页出 ResolvedNote：图片 → 本文件现有外挂直下管线（downloadAll/downloadOne）；
+ * 视频 → X4 HD 询问（offerHdDownloadFromNote 映射候选）。解析/选档逻辑全部 vendored，本文件只做接线。
  *
- * 前三版死因存档（勿复活）：
+ * 前几版死因存档（勿复活）：
  * 1. 画廊三击——400ms 窗口苛刻 + 双击缩放冲突（用户否决）
  * 2. 拦截-重放本张——dispatch token 一次性，事后重放被下游身份过滤静默丢弃
  * 3. app 内存找图集（controller 图搜 / adapter.setItems 快照）——sheet 控制器图里图集列表
  *    实证为空（三轮 census），MultiTypeAdapter.setItems 真机不存在（串池类名≠运行时类）
+ * 4. okhttp 旁路采集图集/视频流（imagefeed images_list / video_info_v2 逐流）——2026-10-14 定稿、
+ *    2026-10-19 删除：save-hostile 笔记服务端剥直链、归属 lookback 脆、采集正则与宿主载荷形态
+ *    耦合；分享页 __INITIAL_STATE__ 是唯一全量无剥离数据源（vendored XhsNoteParser 消费）
  *
  * 挂载点 `ji9.b`（图片长按面板「保存」点击 lambda；9.49.1 为 mh9.b，9.50.0 R8 迁名后旧类留
  * class_data_off=0 空壳——loadClass 成功但 declaredMethods 空 ⇒ 直连 0 候选 + 串锚随迁 ⇒ NOT_RESOLVED，
- * findings-x5 2026-10-19）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，
- * 自己下全部原图——1 张静默直下、≥2 张弹确认卡；图集采不到才 `proceed()` 回落宿主原生保存
- * （2026-10-15 定案，取代旧「先 proceed 本张原生保存再追加」：旧法多图必重复一张、单图 `urls.size < 2`
- * 早退导致模块零介入，只剩宿主重编码图）。
+ * findings-x5 2026-10-19）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，分享链接解析出
+ * 全部原图——1 张静默直下、≥2 张弹确认卡；链接三轨皆 miss 才 `proceed()` 回落宿主原生保存
+ * （2026-10-15 定案保留：先 proceed 本张原生保存再追加会重复一张、模块零介入，见 git 历史）。
  * 视频点 a59.q（9.49.1 为 d49.q）：9.50.0 真机「存活 1 点」实为 **DexKit 无锚点兜底误绑假阳性**
  * （d49 包已换语义为分享引导族，误绑其 invoke lambda，arg 非 String ⇒ isSave=false 静默放行，视频
  * 反馈卡实际失效）。误绑根因 = MethodResolver「pkg 非空即绕过无锚点闸门 + firstOrNull 即采纳」，
@@ -131,7 +135,7 @@ object XhsBatchSave {
                 paramCount = 1,
                 returnType = "java.lang.Object",
                 id = "xhs:batchSave.saveClick.invoke",
-                description = "X5 批量保存·图片长按面板「保存」点击 → 模块全接管（不 proceed）直下全部原图（图集采不到才回落宿主原生保存）",
+                description = "X5 批量保存·图片长按面板「保存」点击 → 模块全接管（不 proceed）分享链接解析直下全部原图（链接三轨皆 miss 才回落宿主原生保存）",
                 dex = DexHint(
                     strings = listOf(
                         "download blocked, disableSaveMedia=true",
@@ -184,8 +188,9 @@ object XhsBatchSave {
                 runCatching {
                     val hex24 = Regex("^[0-9a-f]{24}$")
                     val argNoteId = (arg0 as? String)?.takeIf { it.matches(hex24) }
+                    var feed: Any? = null
                     val noteId = argNoteId ?: runCatching {
-                        val feed = chain.thisObject.javaClass.declaredFields
+                        feed = chain.thisObject.javaClass.declaredFields
                             .firstOrNull { it.type.name == "com.xingin.entities.notedetail.NoteFeed" }
                             ?.apply { isAccessible = true }
                             ?.get(chain.thisObject)
@@ -195,7 +200,23 @@ object XhsBatchSave {
                     if (noteId == null) {
                         module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 视频保存点击：noteId 不可得，HD 询问跳过")
                     } else {
-                        XhsVideoSave.offerHdDownload(noteId, t0, module)
+                        // 分享链接反射轨输入：arg 命中时 feed 未取，用对象图下钻补一次（XhsSavePivot.findFeedAndNoteId，
+                        // ji9/b 同款 u0 语义）
+                        if (feed == null) feed = XhsSavePivot.findFeedAndNoteId(chain.thisObject)?.first
+                        XhsSavePivot.stashFeed(feed)
+                        // HD 询问改走分享链接解析（2026-10-19 X5 重构）：网络在后台线程，
+                        // 解析结果（vendored ResolvedNote）映射候选后弹询问卡；解析失败 →
+                        // offerHdDownloadFromNote(null) = WARN 静默跳过（videoSources 采集已删，无回落）
+                        Thread({
+                            runCatching {
+                                val note = kotlinx.coroutines.runBlocking {
+                                    XhsSavePivot.resolveByShareLink(noteId, module)
+                                }
+                                XhsVideoSave.offerHdDownloadFromNote(noteId, t0, note, module)
+                            }.onFailure {
+                                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 HD 询问发起失败: ${it.message}")
+                            }
+                        }, "HonorHook-xhs-video-hd-ask").start()
                     }
                 }.onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 HD 询问发起失败: ${it.message}") }
                 mainHandler.post {
@@ -220,36 +241,58 @@ object XhsBatchSave {
         }
 
     /**
-     * 图片保存点击：**模块全接管**——图集采不到才 `proceed()` 回落宿主原生保存，否则不 proceed
-     * （宿主原保存逻辑整段不执行），自己下全部原图：1 张静默直下、≥2 张弹确认卡。
+     * 图片保存点击：**模块全接管**——接管判定只看分享链接可得性（全内存，见 [XhsSavePivot.availableShareLink]），
+     * 链接可得 = 不 proceed（宿主原保存逻辑整段不执行），后台线程解析分享页（vendored 下载器管线）
+     * 拿全部原图直链：1 张静默直下、≥2 张弹确认卡；链接不可得才 `proceed()` 回落宿主原生保存。
+     *
+     * 与任务口径的偏差（2026-10-19，工程约束）：「解析也失败才 proceed()」不可行——libxposed 的
+     * `chain.proceed()` 必须在 hook 回调线程调用，而解析是网络操作（app 主线程上等 15s = ANR）；
+     * 故接管判定提前到「链接可得」（三轨内存判定），链接可得但网页解析失败 = WARN 诚实失败
+     * （宿主未保存）——与旧管线「接管后下载失败」同一失败语义，宁缺勿错（绝不替用户下错图）。
      */
     private fun mountClick(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         engine.mount(task, module, hostLoader!!) { chain ->
-            val urls = XhsVideoSave.lastNoteImages()
-            if (urls.isEmpty()) {
-                // 护栏（2026-10-15）：采不到图集（含缓存过期非本篇，见 XhsVideoSave.currentNoteId 新鲜度门）必须回落宿主——
-                // 否则用户点「保存」什么都不发生，或下载到上一篇的图。
-                // 2026-10-19 起 save-hostile 笔记（服务端 FunctionSwitch image_download=false，
-                // findings-x5b.md 真机实证）的采集经张数一致性校验失败也走这里：回落 proceed 宿主
-                // 原生保存——hostile 笔记宿主也存不了（toast），属诚实失败，绝不替用户下错图
-                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 图集未采到，回落宿主原生保存")
+            // noteId/feed 从 lambda 捕获对象图下钻：ji9/b.java:55 `cVar.Ta().u0()` 实证——feed 挂在
+            // controller（ji9.c）上、u0 是 9.50 混淆名（与宿主版本绑定，漂移即 miss → 回落宿主）
+            val found = XhsSavePivot.findFeedAndNoteId(chain.thisObject)
+            val noteId = found?.second
+            if (noteId == null) {
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX noteId 不可得（u0 反射 miss），回落宿主原生保存")
                 return@mount chain.proceed()
             }
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 接管图片保存，图集 ${urls.size} 张（不 proceed）")
+            XhsSavePivot.stashFeed(found.first)
+            val link = XhsSavePivot.availableShareLink(noteId, module)
+            if (link == null) {
+                // 三轨皆 miss（noteShares 无、NoteFeed 反射无 share_info）= 分享链不可得，回落宿主
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 分享链接三轨皆 miss noteId=$noteId，回落宿主原生保存")
+                return@mount chain.proceed()
+            }
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 接管图片保存（分享链接管线）noteId=$noteId（不 proceed）")
             // 宿主原实现末尾的 `cVar.i.getValue().dismiss()` 随 proceed 一起被跳过 ⇒ 面板得模块自己关
             dismissHostPanel(chain.thisObject, module)
-            val declared = XhsVideoSave.lastNoteDeclaredImageCount()
-            if (urls.size == 1 && (declared == null || declared <= 1)) {
-                // 单图：静默直下原图（不弹卡；旧版 `urls.size < 2` 早退让单图只剩宿主重编码图）。
-                // 防「漏采剩 1 张被当单图直存」（2026-10-19，findings-x5b.md §2.3）：载荷声明多图
-                // （拿得到且 >1）时改走询问卡让异常可见、可拒；声明拿不到才维持静默直下
-                showOnTrackedActivity(module, "单图静默直下") { downloadAll(it, urls, module) }
-            } else {
-                if (urls.size == 1) module.log(Log.WARN, MountEngine.TAG,
-                    "$JUDGE_PREFIX 采到 1 张但载荷声明 $declared 张（疑似漏采），走询问卡")
-                showOnTrackedActivity(module, "追加询问") { maybeShowBatchDialog(it, urls, module) }
-            }
-            engine.judge(module, task, JUDGE_PREFIX, "已接管图片保存，图集 ${urls.size} 张")
+            engine.judge(module, task, JUDGE_PREFIX, "已接管图片保存（分享链接管线）noteId=$noteId")
+            // 解析（网络）在后台线程；交互与旧采集管线一致（1 张静默 / ≥2 张确认卡）
+            Thread({
+                val urls = runCatching {
+                    val note = kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
+                    // 只取本笔记普通图（vendored NoteOutput.eligible 语义映射：封面/评论图排除），
+                    // originalUrl = 下载器确认的原图直链（imageList urlDefault 同源）
+                    note?.images
+                        ?.filterNot { it.cover || it.commentId != null }
+                        ?.map { it.originalUrl }
+                        .orEmpty()
+                }.getOrNull().orEmpty()
+                if (urls.isEmpty()) {
+                    module.log(Log.WARN, MountEngine.TAG,
+                        "$JUDGE_PREFIX 分享链接解析无可用图片 noteId=$noteId（接管已定，宿主未保存——诚实失败）")
+                    return@Thread
+                }
+                if (urls.size == 1) {
+                    showOnTrackedActivity(module, "单图静默直下") { downloadAll(it, urls, module) }
+                } else {
+                    showOnTrackedActivity(module, "追加询问") { maybeShowBatchDialog(it, urls, module) }
+                }
+            }, "HonorHook-xhs-batch").start()
             // 不 proceed ⇒ 返回值得自己给：宿主 invoke 返的是 kotlin.Unit（点击 lambda）。用**宿主 loader**
             // 取 Unit.INSTANCE（模块 loader 的同名类不保证同一 class 身份），取不到才回 null。
             runCatching {
@@ -396,7 +439,7 @@ object XhsBatchSave {
         dialog.show()
     }
 
-    /** 追加询问（≥2 张）：图集来自 [XhsVideoSave.lastNoteImages]；确认后外挂直下。分流见 [mountClick]。 */
+    /** 追加询问（≥2 张）：图集来自分享链接解析（XhsSavePivot → vendored ResolvedNote）；确认后外挂直下。分流见 [mountClick]。 */
     private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule) {
         // 全量 URL 不截断（2026-10-15 原图链路诊断）：PC 端 curl 比对需完整 token/query
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 " + urls.first() + "）")
