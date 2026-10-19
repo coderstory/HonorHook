@@ -60,6 +60,9 @@ object XhsVideoSave {
     /** noteId → 图集 url 列表（外挂缓存，供 X5 批量直下）。 */
     private val noteImages = ConcurrentHashMap<String, MutableList<String>>()
 
+    /** noteId → 载荷声明图集张数（成功采集时 max 累积；X5 防「漏采剩 1 张被当单图直存」用，2026-10-19）。 */
+    private val declaredImageCounts = ConcurrentHashMap<String, Int>()
+
     /** 最近一篇带图的笔记（用户正在看的），X5 批量取这里。 */
     @Volatile private var lastImageNoteId: String? = null
 
@@ -69,11 +72,20 @@ object XhsVideoSave {
      *  本字段只认 body/query 可归属的 noteId，「沿用最近值」的响应不可归属、不更新。 */
     @Volatile private var currentNoteId: String? = null
 
-    /** X5 取当前笔记图集（空 = 未采到，或缓存已过期非当前浏览笔记——见 [currentNoteId]）。 */
+    /** X5 取当前笔记图集（空 = 未采到，或缓存已过期非当前浏览笔记——见 [currentNoteId]；
+     *  2026-10-19 起 save-hostile 笔记采集经张数一致性校验失败不入库，也走这里空回落）。 */
     fun lastNoteImages(): List<String> {
         val cur = currentNoteId ?: return emptyList()
         if (cur != lastImageNoteId) return emptyList()
         return noteImages[cur]?.toList() ?: emptyList()
+    }
+
+    /** X5 用：当前笔记载荷声明的图集张数（与 [lastNoteImages] 同 freshness 门；null = 载荷未声明）。
+     *  防「漏采剩 1 张被当单图直存」的判定输入（findings-x5b.md §2.3，2026-10-19）。 */
+    fun lastNoteDeclaredImageCount(): Int? {
+        val cur = currentNoteId ?: return null
+        if (cur != lastImageNoteId) return null
+        return declaredImageCounts[cur]
     }
 
     /** 日志回调（install 期注入，模块 logger；采集探测仪表用）。 */
@@ -315,6 +327,12 @@ object XhsVideoSave {
     private val P_ORIGINAL_URL: Pattern = Pattern.compile("\"original\"\\s*:\\s*\"(https://sns-[^\"]+)\"")
     private val P_NOTE_IMG_URL: Pattern = Pattern.compile("\"url\"\\s*:\\s*\"(https://sns-(?:na|img|webpic)[^\"]+)\"")
 
+    /** images_list 数组开括号（图集区段锚，2026-10-19 采集收窄用，findings-x5b.md）。 */
+    private val P_IMAGES_LIST: Pattern = Pattern.compile("\"images_list\"\\s*:\\s*\\[")
+
+    /** note 级声明张数（detail 型载荷；字段名属探测项，miss 退元素数口径，见 harvestNoteImages）。 */
+    private val P_IMAGE_COUNT: Pattern = Pattern.compile("\"image_count\"\\s*:\\s*(\\d+)")
+
     private fun harvestNoteImages(body: String, url: String) {
         // 触发端点收窄（2026-10-14 实测 62 张污染修正）：只认 imagefeed（逐图 feed，进图浏览必发）
         // 与 detailfeed（笔记详情/预载）。宽前缀 /note/ 会把 user/posted（他人主页笔记列表）等
@@ -325,17 +343,42 @@ object XhsVideoSave {
         val fromBody = P_NOTE_ID_PLAIN.matcher(body).takeIf { it.find() }?.group(1)
         val fromQuery = if (fromBody == null) queryParam(url, "note_id") else null
         val noteId = fromBody ?: fromQuery ?: lastImageNoteId
-        // 归属更新必须在 found 为空早退与护栏 return 之前：图集采没采到不影响「用户在浏览本篇」这个事实
+        val noteIdFrom = if (fromBody != null) "body" else if (fromQuery != null) "query" else "沿用"
+        // 归属更新必须在采集失败早退之前：图集采没采到不影响「用户在浏览本篇」这个事实
         if (fromBody != null || fromQuery != null) currentNoteId = noteId
+        // 仪表①（findings-x5b.md §1：失败静默是排查最大成本，采集必须有痕）：端点 + noteId 来源
+        logHook?.invoke(Log.INFO, MountEngine.TAG,
+            "XhsHook·X4 图集采集进入 ${url.take(80)} noteId=$noteId 来源=$noteIdFrom")
+        // 采集收窄到 images_list 区段（2026-10-19，findings-x5b.md §1·A）：save-hostile 笔记
+        // （服务端 FunctionSwitch(image_download)=false，真机实证）载荷缺本图集直链，旧「全 body
+        // 兜底扫 P_NOTE_IMG_URL」会把 preload 封面/关联笔记的杂图扫进来当本图集（落错 1 张）。
+        // 区段须归属本次 noteId（前最近 "note_id"；lookback miss 归本 noteId——imagefeed 型 body 可无 note_id）。
+        var elements = 0
         val found = LinkedHashSet<String>()
-        var m = P_ORIGINAL_URL.matcher(body)
-        while (m.find()) found += m.group(1)
-        if (found.isEmpty()) {
-            m = P_NOTE_IMG_URL.matcher(body)
-            while (m.find()) found += m.group(1)
+        val r = P_IMAGES_LIST.matcher(body)
+        while (r.find()) {
+            val regionNoteId = nearestNoteIdBefore(body, r.start()) ?: noteId
+            if (noteId != null && regionNoteId != noteId) continue
+            val arrEnd = arrayEnd(body, r.end())
+            if (arrEnd < 0) continue
+            elements += harvestImagesListRegion(body, r.end(), arrEnd, found)
         }
-        if (noteId == null || found.isEmpty()) return
-        if (noteImages.size > URL_MAP_LIMIT) noteImages.clear()
+        // 失败有痕：无可归属元素（视频笔记正常无图 / hostile 剥离）或 noteId 缺失 → 不入库，
+        // X5 走既有空回落 proceed（宿主原生保存；hostile 笔记宿主也存不了，属诚实失败）
+        if (noteId == null || elements == 0) {
+            logHook?.invoke(Log.WARN, MountEngine.TAG,
+                "XhsHook·X4 图集采集失败 noteId=$noteId：无可归属 images_list 元素（视频笔记正常无图 / save-hostile 剥离）")
+            return
+        }
+        // 张数一致性校验（2026-10-19 定案，findings-x5b.md §2.2）：元素数即载荷声明张数，采到的
+        // URL 条数不符 ⇒ 服务端剥离了部分/全部直链（残缺图集）——判采集失败不入库（返回空语义 =
+        // 调用方回落），宁回落宿主原生保存也别把残缺/杂图当图集下错图。
+        if (found.size != elements) {
+            logHook?.invoke(Log.WARN, MountEngine.TAG,
+                "XhsHook·X4 图集采集失败 noteId=$noteId：一致性不符 采到 ${found.size} / 声明 $elements（直链被剥离），不入库")
+            return
+        }
+        if (noteImages.size > URL_MAP_LIMIT) { noteImages.clear(); declaredImageCounts.clear() }
         val merged = (noteImages[noteId] ?: mutableListOf()) + found
         // 按 token 去重（2026-10-15 真机：单图笔记 original 直链与带参 url 并存 = 两串一图，整串
         // distinct 去不掉 ⇒ 弹「2 张」下 2 张一模一样）。toBare 不适用（null）回退整串做键；
@@ -343,13 +386,67 @@ object XhsVideoSave {
         val distinct = merged.distinctBy { XhsImageUrl.toBare(it) ?: it }
         // 单笔记张数护栏：多图笔记上限 ~20 张（9.49.1 图集极限），超 30 判定污染整包丢弃
         if (distinct.size > 30) {
-            if (logHook != null) {
-                logHook!!(Log.WARN, MountEngine.TAG, "XhsHook·X4 图集护栏触发 noteId=$noteId ${distinct.size} 张疑似污染，丢弃")
-            }
+            logHook?.invoke(Log.WARN, MountEngine.TAG, "XhsHook·X4 图集护栏触发 noteId=$noteId ${distinct.size} 张疑似污染，丢弃")
             return
         }
         noteImages[noteId] = distinct.toMutableList()
         lastImageNoteId = noteId
+        // 声明张数入库（note 级 image_count 优先、miss 用元素数；max 累积防分页小载荷拉低）：
+        // X5 单图分支防「漏采剩 1 张被当单图直存」的判定输入（findings-x5b.md §2.3）。
+        val declared = maxOf(P_IMAGE_COUNT.matcher(body).takeIf { it.find() }?.group(1)?.toIntOrNull() ?: 0, elements)
+        if (declared > 0) declaredImageCounts[noteId] = maxOf(declaredImageCounts[noteId] ?: 0, declared)
+        // 仪表②③：采到条数 + 首末 URL 截断 + 一致性校验结果
+        logHook?.invoke(Log.INFO, MountEngine.TAG,
+            "XhsHook·X4 图集采集成功 noteId=$noteId 采到 ${found.size} / 声明 $elements " +
+                "首=${found.first().take(60)} 末=${found.last().take(60)}")
+    }
+
+    /** [pos) 前最近的 `"note_id"`（images_list 区段归属判别用；无则 null）。 */
+    private fun nearestNoteIdBefore(body: String, pos: Int): String? {
+        val m = P_NOTE_ID_PLAIN.matcher(body).region(maxOf(0, pos - REGION_NOTE_ID_BACK), pos)
+        var id: String? = null
+        while (m.find()) id = m.group(1)
+        return id
+    }
+
+    /** 数组开括号后一位 [from) 起配对找闭括号下标（失配 -1）。字符串内裸括号未剥转义——
+     *  URL/字段值实测不含（与 harvestStreams 花括号回溯同前提）。 */
+    private fun arrayEnd(body: String, from: Int): Int {
+        var depth = 1
+        for (j in from until body.length) {
+            when (body[j]) {
+                '[' -> depth++
+                ']' -> if (--depth == 0) return j
+            }
+        }
+        return -1
+    }
+
+    /** images_list 区段 [from,to) 内逐元素（花括号配对圈对象；元素扁平、嵌套子对象配对同样正确），
+     *  返回元素数。每元素恰收一条 URL：original 直链优先、miss 收 url；两者皆无计元素不产 URL
+     *  （交调用方一致性校验判残缺）。 */
+    private fun harvestImagesListRegion(body: String, from: Int, to: Int, found: LinkedHashSet<String>): Int {
+        var count = 0
+        var i = from
+        while (i < to) {
+            if (body[i] != '{') { i++; continue }
+            var depth = 0
+            var end = -1
+            for (j in i until to) {
+                when (body[j]) {
+                    '{' -> depth++
+                    '}' -> if (--depth == 0) { end = j; break }
+                }
+            }
+            if (end < 0) break
+            count++
+            val element = body.substring(i, end + 1)
+            val picked = P_ORIGINAL_URL.matcher(element).takeIf { it.find() }?.group(1)
+                ?: P_NOTE_IMG_URL.matcher(element).takeIf { it.find() }?.group(1)
+            if (picked != null) found += picked
+            i = end + 1
+        }
+        return count
     }
 
     private fun peekBodyString(response: Any): String? = runCatching {

@@ -14,10 +14,15 @@ import java.lang.reflect.Modifier
  *
  * 三个子点（doc §三 X2a/X2b/X2c）：
  *   - X2a `MediaSaveConfig.c()` → true：`@kd.c("disable_watermark")` getter，未混淆直连，
- *     9.33.4→9.49.1 方法号零漂移（jadx 双版本对照）。合成入口 qc8.j.a 的 z（作者水印）由此关。
- *   - X2b `qc8.j.b(Context, boolean)` → null：AI 水标位图构造（inflate→view→Bitmap）。
- *     混淆名，串锚 = 同类方法体日志串 "disableAiWaterMark is "（qc8.j.a 实读）+ tag
- *     "SaveImagesHelper"。NOT_RESOLVED 降级 = AIGC 帖仍画 AI 标签，可接受（作者水印走
+ *     9.33.4→9.49.1 方法号零漂移（jadx 双版本对照），9.50.0 仍存活零漂移（findings-x2b
+ *     实证：注解 :18、`public final boolean c()` :46）。合成入口 nd8.j.a 的 z（作者水印）由此关。
+ *   - X2b `nd8.j.b(Context, boolean)` → null：AI 水标位图构造（inflate→view→Bitmap）。
+ *     混淆名，9.50.0 R8 全量重命名 qc8.j→nd8.j（同 classes6.dex 内换包，方法名/签名/方法体
+ *     语义与 9.49.1 逐字节级对齐；dexdump c6.txt:901382 类头实证，b() 方法体 inflate id
+ *     0x7f0c0f79→0x7f0c1b79 平移、alpha 0.56 同旧，findings-x2b 2026-10-19）。串锚 = 同类
+ *     方法体日志串 "disableAiWaterMark is "（nd8.j.a 实读，全 APK 唯一）+
+ *     "andr_image_save_white_bg_optimized"（全 APK 唯一）+ tag "SaveImagesHelper"（跨类，
+ *     作 conjunction）。NOT_RESOLVED 降级 = AIGC 帖仍画 AI 标签，可接受（作者水印走
  *     X2a/X2c 不受影响）。
  *   - X2c ImageBean disable_ai getter → true：**方法号已实证漂移**（9.33.4 u() → 9.49.1 v()；
  *     savefix 1.2.3 裸挂 u() 在 9.49.1 会撞到 u0()（original String getter）类型炸）。故
@@ -32,7 +37,8 @@ object XhsWatermark {
     private val engine = MountEngine("XhsHook·X2", "com.xingin.xhs")
 
     private const val CLS_MEDIA_SAVE_CONFIG = "com.xingin.entities.MediaSaveConfig"
-    private const val CLS_QC8_J = "qc8.j"
+    /** X2b 载体：9.50.0 R8 重命名 qc8.j→nd8.j（同 classes6.dex 内换包；dexdump c6.txt:901382 类头实证，findings-x2b 2026-10-19）。 */
+    private const val CLS_ND8_J = "nd8.j"
 
     /** X2c 载体类（未混淆；方法号漂移实证，不做静态挂载点）。 */
     private const val CLS_IMAGE_BEAN = "com.xingin.entities.ImageBean"
@@ -59,13 +65,13 @@ object XhsWatermark {
             description = "X2a 去水印·MediaSaveConfig.c()→true（@kd.c(disable_watermark) getter）",
         )
         pending += MountEngine.SimpleTask(
-            className = CLS_QC8_J,
+            className = CLS_ND8_J,
             methodName = "b",
             paramCount = 2,
             returnType = "android.graphics.Bitmap",
             id = ID_AI_BITMAP,
-            description = "X2b 去水印·qc8.j.b(Context,boolean)→null（AI 水标位图构造，串锚 disableAiWaterMark is）",
-            dex = DexHint(classStrings = listOf("disableAiWaterMark is ", "SaveImagesHelper")),
+            description = "X2b 去水印·nd8.j.b(Context,boolean)→null（AI 水标位图构造，串锚 disableAiWaterMark is + andr_image_save_white_bg_optimized）",
+            dex = DexHint(classStrings = listOf("disableAiWaterMark is ", "andr_image_save_white_bg_optimized", "SaveImagesHelper")),
         )
         // X2c：动态发现任务——className/methodName 由 resolveValue 期注解反射填入（见 X2cTask）
         pending += X2cTask()

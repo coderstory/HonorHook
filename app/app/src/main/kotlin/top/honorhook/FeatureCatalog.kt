@@ -205,7 +205,7 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_MMS_AD_OFF, R.string.feature_mms_ad_off_title, R.string.feature_mms_ad_off_desc),
             ),
-            baselineVersion = "19.0.9.304",  // dumpsys 实证（sms-ads.md，设备 AAK-AN00；原 MmsHook 私有常量上提）
+            baselineVersion = "19.0.9.306",  // dumpsys 实证 2026-10-19（设备 AAK-AN00；原 MmsHook 私有常量上提）；304→306 挂载点零漂移，adapt 双侧核对（宿主+插件 10.0.41.308）
         ),
         Target(
             "com.sohu.inputmethod.sogou.honor", R.string.target_name_ime,
@@ -220,6 +220,7 @@ object FeatureCatalog {
                 Feature(KEY_ADS_BLOCK, R.string.feature_ads_block_title, R.string.feature_ads_block_desc),
                 Feature(KEY_TRACK_BLOCK, R.string.feature_tracking_block_title, R.string.feature_tracking_block_desc),
             ),
+            baselineVersion = "18.1.6.312",  // dumpsys 实证 2026-10-19（设备 AAK-AN00）；Tracking Ex 点在本版 SDK 无实现类属预期（a.d() return null），判据仍看 installed N/M
             iconKey = "shield",
         ),
         Target(
@@ -252,7 +253,7 @@ object FeatureCatalog {
                 Feature(KEY_XHS_VIDEO_SAVE, R.string.feature_xhs_video_save_title, R.string.feature_xhs_video_save_desc),
                 Feature(KEY_XHS_BATCH_SAVE, R.string.feature_xhs_batch_save_title, R.string.feature_xhs_batch_save_desc),
             ),
-            baselineVersion = "9.49.1",  // versionCode 9491803，真机拉取 2026-10-13（docs/reverse/xhs.md）
+            baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
         ),
         // 壁纸两宿主：功能入口已归并到「系统桌面」卡（见 launcher Target），此处留壳供
         // scope 页与 baselineVersionOf 查表——hidden 且 features 为空，UI 不出卡。

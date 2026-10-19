@@ -30,10 +30,16 @@ import java.net.URL
  * 3. app 内存找图集（controller 图搜 / adapter.setItems 快照）——sheet 控制器图里图集列表
  *    实证为空（三轮 census），MultiTypeAdapter.setItems 真机不存在（串池类名≠运行时类）
  *
- * 挂载点 `mh9.b`（图片长按面板「保存」点击 lambda）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，
+ * 挂载点 `ji9.b`（图片长按面板「保存」点击 lambda；9.49.1 为 mh9.b，9.50.0 R8 迁名后旧类留
+ * class_data_off=0 空壳——loadClass 成功但 declaredMethods 空 ⇒ 直连 0 候选 + 串锚随迁 ⇒ NOT_RESOLVED，
+ * findings-x5 2026-10-19）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，
  * 自己下全部原图——1 张静默直下、≥2 张弹确认卡；图集采不到才 `proceed()` 回落宿主原生保存
  * （2026-10-15 定案，取代旧「先 proceed 本张原生保存再追加」：旧法多图必重复一张、单图 `urls.size < 2`
  * 早退导致模块零介入，只剩宿主重编码图）。
+ * 视频点 a59.q（9.49.1 为 d49.q）：9.50.0 真机「存活 1 点」实为 **DexKit 无锚点兜底误绑假阳性**
+ * （d49 包已换语义为分享引导族，误绑其 invoke lambda，arg 非 String ⇒ isSave=false 静默放行，视频
+ * 反馈卡实际失效）。误绑根因 = MethodResolver「pkg 非空即绕过无锚点闸门 + firstOrNull 即采纳」，
+ * 本轮不改码（记录见 docs/reverse/xhs.md §9.50 适配，留拍板）。
  */
 object XhsBatchSave {
 
@@ -41,8 +47,11 @@ object XhsBatchSave {
 
     private val engine = MountEngine("XhsHook·X5", "com.xingin.xhs")
 
-    /** 图片长按面板「保存」点击 lambda（逻辑体 invoke(Object)，jadx mh9/b.java:41 实证）。 */
-    private const val CLS_SAVE_CLICK_LAMBDA = "mh9.b"
+    /** 图片长按面板「保存」点击 lambda（逻辑体 invoke(Object)，jadx ji9/b.java:42 实证；9.49.1 为 mh9/b.java:41，
+     *  9.50.0 迁名后旧 mh9/b 成 class_data_off=0 空壳类，findings-x5 2026-10-19）。 */
+    private const val CLS_SAVE_CLICK_LAMBDA = "ji9.b"
+    /** 视频保存发起 lambda（a59/q.java:16-53 jadx 实证；9.49.1 为 d49.q，逐行同构迁名）。 */
+    private const val CLS_VIDEO_SAVE_LAMBDA = "a59.q"
     private const val METHOD_INVOKE = "invoke"
 
     /** 直下参数：UA（xhscdn 对无 UA 请求可能 403）、单图体积上限 50MB、超时。 */
@@ -101,7 +110,8 @@ object XhsBatchSave {
     @Volatile private var hostLoader: ClassLoader? = null
 
     /**
-     * 宿主长按面板 Dialog 类（`mh9.c.i` 那个 Lazy 的值类型，jadx 实证），挂载期用宿主 loader 缓存一次：
+     * 宿主长按面板 Dialog 类（`ji9.c.i` 那个 Lazy 的值类型，jadx ji9/c.java:28,200 实证；9.49.1 为 mh9.c.i，
+     * 字段名 i 未漂），挂载期用宿主 loader 缓存一次：
      * [dismissHostPanel] 按**类型**认面板用（不赌混淆字段名）。
      */
     private const val CLS_PANEL_DIALOG = "com.xingin.foundation.core.v2.dialog.LCBBottomSheetDialog"
@@ -130,14 +140,18 @@ object XhsBatchSave {
                 ),
             ),
             MountEngine.SimpleTask(
-                className = "d49.q",
-                methodName = "invoke",
+                className = CLS_VIDEO_SAVE_LAMBDA,
+                methodName = METHOD_INVOKE,
                 paramCount = 1,
                 returnType = "java.lang.Object",
                 id = "xhs:batchSave.videoSaveClick.invoke",
-                description = "X5·视频保存发起（d49.q invoke default=saveVideo(noteFeed.F0())，d49/v.java:922 实证）→ 保存后弹反馈卡",
-                // d49.q = Function1 双参 lambda（构造 (NoteFeed,int)，case 2 分支=saveVideo 组装），
-                // d49/v.java:922 实证由保存点击链实例化；9.49.1 直连，锚弱跨版本靠 versionTables
+                description = "X5·视频保存发起（a59.q invoke default=saveVideo(noteFeed.u0())，a59/v.java:471 实证）→ 保存后弹反馈卡",
+                // a59.q = Function1 双参 lambda（构造 (NoteFeed,int)，default 分支=saveVideo 组装；
+                // a59/q.java:16-53 jadx 实证，实例化点 a59/v.java:471 `new q(noteFeed, 1)`）。
+                // 方法体无字符串常量（只有 PatchProxy 数字 id）⇒ 串锚不可用，DexHint 改字段类型锚
+                // （int + NoteFeed）收紧兜底轨——9.50.0 曾因无锚点兜底把 d49.q 误绑到换语义包的
+                // 分享引导 lambda（installed 假阳性，findings-x5 2026-10-19）。
+                dex = DexHint(classFieldTypes = listOf("int", "com.xingin.entities.notedetail.NoteFeed")),
             ),
         )
         engine.attemptMount(pending, module, hostLoader!!) { task -> mountOne(task, module) }
@@ -146,7 +160,7 @@ object XhsBatchSave {
     private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         when (task.id) {
             "xhs:batchSave.videoSaveClick.invoke" -> engine.mount(task, module, hostLoader!!) { chain ->
-                // d49.q 双分支：case1=分享引导（arg=Triple）default=saveVideo（arg=String）——只对
+                // a59.q 双分支：case1=分享引导（arg=Triple，rv9.a.CLOUD）default=saveVideo（arg=String）——只对
                 // String 轨弹反馈卡，分享路径静默放行
                 val isSave = runCatching { chain.getArg(0) is String }.getOrDefault(false)
                 // 本轮起点（proceed 前）：X4 若在本轮保存里弹了询问卡，其 lastAskAtMs >= t0（见 askShownAfter）
@@ -183,17 +197,25 @@ object XhsBatchSave {
             val urls = XhsVideoSave.lastNoteImages()
             if (urls.isEmpty()) {
                 // 护栏（2026-10-15）：采不到图集（含缓存过期非本篇，见 XhsVideoSave.currentNoteId 新鲜度门）必须回落宿主——
-                // 否则用户点「保存」什么都不发生，或下载到上一篇的图
+                // 否则用户点「保存」什么都不发生，或下载到上一篇的图。
+                // 2026-10-19 起 save-hostile 笔记（服务端 FunctionSwitch image_download=false，
+                // findings-x5b.md 真机实证）的采集经张数一致性校验失败也走这里：回落 proceed 宿主
+                // 原生保存——hostile 笔记宿主也存不了（toast），属诚实失败，绝不替用户下错图
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 图集未采到，回落宿主原生保存")
                 return@mount chain.proceed()
             }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 接管图片保存，图集 ${urls.size} 张（不 proceed）")
             // 宿主原实现末尾的 `cVar.i.getValue().dismiss()` 随 proceed 一起被跳过 ⇒ 面板得模块自己关
             dismissHostPanel(chain.thisObject, module)
-            if (urls.size == 1) {
-                // 单图：静默直下原图（不弹卡；旧版 `urls.size < 2` 早退让单图只剩宿主重编码图）
+            val declared = XhsVideoSave.lastNoteDeclaredImageCount()
+            if (urls.size == 1 && (declared == null || declared <= 1)) {
+                // 单图：静默直下原图（不弹卡；旧版 `urls.size < 2` 早退让单图只剩宿主重编码图）。
+                // 防「漏采剩 1 张被当单图直存」（2026-10-19，findings-x5b.md §2.3）：载荷声明多图
+                // （拿得到且 >1）时改走询问卡让异常可见、可拒；声明拿不到才维持静默直下
                 showOnTrackedActivity(module, "单图静默直下") { downloadAll(it, urls, module) }
             } else {
+                if (urls.size == 1) module.log(Log.WARN, MountEngine.TAG,
+                    "$JUDGE_PREFIX 采到 1 张但载荷声明 $declared 张（疑似漏采），走询问卡")
                 showOnTrackedActivity(module, "追加询问") { maybeShowBatchDialog(it, urls, module) }
             }
             engine.judge(module, task, JUDGE_PREFIX, "已接管图片保存，图集 ${urls.size} 张")
@@ -227,7 +249,7 @@ object XhsBatchSave {
     }
 
     /**
-     * 关宿主长按面板（2026-10-15）：宿主 `mh9.b#invoke` 原实现末尾会 `cVar.i.getValue().dismiss()`
+     * 关宿主长按面板（2026-10-15）：宿主 `ji9.b#invoke`（9.49.1 为 mh9.b）原实现末尾会 `cVar.i.getValue().dismiss()`
      * 收面板——图片分支不 proceed 后这段被一起跳过，面板会留在屏上。
      * 从 lambda（[chain.thisObject]）**按类型**找，不按字段名（混淆名会漂）：字段值是 `kotlin.Lazy`
      * 就先 `getValue()`，结果落在 Dialog 子类（或挂载期缓存的 [panelDialogClass]）就 dismiss；

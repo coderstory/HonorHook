@@ -4,8 +4,13 @@
 > jadx 产物 `system-files/xhssavefix-jadx/`）+ JoeanAmier/XHS-Downloader 图片/视频直链重建逻辑
 > （`reference/xhs/XHS-Downloader/`，application/image.py、video.py）+ 作者 9.33.4 期分析文档
 > `reference/xhs/reverse-notes.md`。
-> 目标宿主 9.49.1（versionCode 9491803，2026-10-13 真机拉取）；反编译：`system-files/xhs-jadx/`（全量）
-> + `system-files/xhs-partial/`（classes2/6/7/9/20 定向，链路分析基于后者）。
+> 目标宿主 **9.50.0**（dumpsys 实证 2026-10-19；9.49.1 versionCode 9491803 为上一基线）。反编译：
+> `system-files/xhs-jadx/`（9.49.1 全量，历史参考）+ `system-files/xhs-partial/`（9.49.1 classes2/6/7/9/20
+> 定向）+ `.buildtmp/xhs950-partial/`（9.50.0 同五 dex 定向）。
+> **禁止全量反编译 xhs**：183MB APK 全量 jadx 跑 40+ 分钟卡 65%（9.50.0 一轮 67% 崩溃实证）；
+> 只做定向——五 dex 单独 jadx 5 分钟出 40262 个 java，覆盖全部挂载链路（两版本实证）。命令：
+> `unzip -o .buildtmp/xhs-950.apk 'classes2.dex' 'classes6.dex' 'classes7.dex' 'classes9.dex' 'classes20.dex' -d .buildtmp/xhs950-dex/`
+> 然后 `jadx --no-res -j 8 -d .buildtmp/xhs950-partial .buildtmp/xhs950-dex/`（JDK 21）。
 > **每点附「重定位」**：新宿主版本适配时按备注锚点重找（混淆名必漂，锚点不改）。
 
 ## 一、需求
@@ -238,3 +243,51 @@ X2c 无静态挂载点（运行时注解反射解析）⇒ 本 target 脚本核�
 > 全量业务逻辑对照（基准阶段全景 × 插件现状 × 设计提案 × 待拍板清单，含证据分级）= `docs/reverse/xhs-downloader-parity.md`。
 > 已落码对齐：视频选档（watermarked↑ → original↓ → w×h↓ 取首）、图片链（裸链优先 → raw 回落）、水印流标记（stream_type 259/309、WEB_LIVEPHOTO_19）。
 > 已知分叉：X3 仍用 q/100（2026-10-14 真机字节实证 vs 基准 AUTO 裸链，冲突待拍板，见 parity §四·1）。
+
+---
+
+## 八、2026-10-19 适配 9.49.1 → 9.50.0（基线上移，原地换点不建 versionTables 新套）
+
+宿主已升 9.50.0（dumpsys 实证）。9.49.1 真机基线判据 X1 3/3 · X2 3/3 · X3 1/1 · X4 1/1 · X5 2/2；
+9.50.0 首测 X1 3/3、X4 1/1 活，X2 2/3、X3 0/1、X5 1/2。死因与重选如下（调研 findings
+`.buildtmp/findings-{x2b,x3,x5}.md`，2026-10-19）。
+
+### 死因定案
+
+- **qc8.i / qc8.j 消失**：R8 全量重命名换包 `qc8→nd8`（同 classes6.dex 内）。旧 `Lqc8/i;`/`Lqc8/j;`
+  在 9.50.0 全 24 个 dex 串池 0 命中（python zipfile grep + class def 全扫双实证）。
+- **mh9.b「在 dex 却解析失败」**：class def 存在但 `class_data_off=0`（零方法零字段空壳 marker，
+  还被 `Lmh9/a$b;#<init>` 当 Dagger 组件类型引用）⇒ `loadClass` 成功但 `declaredMethods` 空 ⇒
+  直连 0 候选；串锚随逻辑体迁走 ⇒ DexKit 亦 miss ⇒ NOT_RESOLVED。逻辑本体迁 `ji9.b`。
+- **d49.q「挂上」是假阳性**：`Ld49/q;` 全 22 dex 无 class def ⇒ CNFE 转 DexKit；task 无 DexHint，
+  `MethodResolver.kt:88-93`「pkg 非空即绕过无锚点闸门」照样开搜，`pkg=d49 + invoke(1,Object)Object`
+  的 `firstOrNull()` 即采纳——9.50.0 d49 包已换语义（分享引导控制器族），误绑 `d49/e`（或 f）。
+  arg 非 String ⇒ isSave=false ⇒ 静默放行：**视频反馈卡实际同样失效**，judge 只数 task 不识错绑。
+
+### 新挂载点对照（file:line 实证，产物 `.buildtmp/xhs950-partial/sources/`）
+
+| 引擎点 | 9.49.1 | 9.50.0 | 证据 | 其余签名 |
+|---|---|---|---|---|
+| X2b | `qc8.j.b(Context,boolean)→Bitmap` | `nd8.j.b` 同签名 | dexdump c6.txt:901382 类头；b() inflate id 0x7f0c0f79→0x7f0c1b79 平移、alpha 0.56 同旧 | 方法名/参数/返回全不变 |
+| X3 | `qc8.i.i`（11 参，args[3]=url） | `nd8.i.i` 同构 | nd8/i.java:240（签名）、:245（`Uri.parse(str3)`） | i/11 参/args[3] 不变；桥 h :164；SPI SaveImageProxyImpl 未换包 :38 `nd8.i.a.e` |
+| X5 图片 | `mh9.b#invoke(Object)` | `ji9.b#invoke(Object)` | ji9/b.java:45（invoke）；:55 "onDownloadClick, noteId="、:63 "download blocked, disableSaveMedia=true" 逐字存活 | 两串锚保留；面板 Lazy=ji9.c.i（ji9/c.java:28,200） |
+| X5 视频 | `d49.q#invoke(Object)` | `a59.q#invoke(Object)` | a59/q.java:16-53（default=saveVideo(noteFeed.u0())）；实例化 a59/v.java:471 `new q(noteFeed, 1)` | 字段 (int, NoteFeed)；方法体无串常量 ⇒ DexHint 用 classFieldTypes=["int","com.xingin.entities.notedetail.NoteFeed"] |
+| X1 / X4 | — | **零漂移**（未动） | X1 3/3、X4 1/1 真机活 | — |
+
+DexHint 更新：X2b classStrings 加 `"andr_image_save_white_bg_optimized"`（全 APK 唯一串，与
+"disableAiWaterMark is " 双唯一串兜底）；X3 四串原样（同在 nd8.i 方法体内 :258/:277/:279/:190）；
+X5 图片两串原样；X5 视频如上换字段类型锚。FeatureCatalog baselineVersion → 9.50.0。
+评论图直调链 iu4/l.java:112 → cv4/l.java:94（X3 覆盖面不变）；NoteFeed getter F0()→u0()、
+h1()→b1()、U1()→S1()；**短包名身份跨版本不可信，选点必须靠内容锚**（新旧混淆名总表见 findings-x5）。
+
+### 遗留（不改码，留拍板）
+
+`MethodResolver` 无锚点兜底的误绑坑（pkg 非空即开搜 + `firstOrNull()` 即采纳，命中类名 ≠ 声明类名
+不降级）：本案 d49.q 假阳性即实例。候选方案（基建改动，另行拍板）：混淆名 task 强制配锚点；或无锚点
+采纳时「DexKit 命中类名 ≠ 声明类名」降级 WARN。
+
+### 待用户真机验证
+
+装新包 → 开 xhs → 看 modlog：`X1 3/3 · X2 3/3 · X3 1/1 · X4 1/1 · X5 2/2`；功能现象：图片长按保存
+出「已接管图片保存，图集 N 张」judge 行 + 面板被关 + 询问/直下；视频保存出「视频保存完成，弹反馈卡」
+judge 行（9.50.0 现版本两点都出不来）。

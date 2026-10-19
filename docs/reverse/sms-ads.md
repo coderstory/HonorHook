@@ -1,6 +1,6 @@
 # 荣耀短信 `com.hihonor.mms` + 智能信息 `com.hihonor.intelligentmessage` — 去营销广告逆向
 
-> 基线 **mms 19.0.9.304 / intelligentmessage 10.0.41.308**（2026-10-12 真机 `dumpsys`/`pm path` 实证，设备 AAK-AN00）。
+> 基线 **mms 19.0.9.306 / intelligentmessage 10.0.41.308**（2026-10-19 真机 `dumpsys`/`pm path` 实证，设备 AAK-AN00；插件 10.0.41.308 不变）。306 适配核对记录在 `system-files/adapt-report-mms-19.0.9.306.md` 与 `system-files/adapt-report-imsg-10.0.41.308.md`（宿主/插件双侧，4 点全存活）。
 > 反编译产物：`system-files/honor-mms-19.0.9.304-jadx/`、`system-files/intelligentmessage-10.0.41.308-jadx/`（jadx `--show-bad-code`，28/10 个方法级 error 属正常）。
 > 状态：**调研期**——只有逆向实证，无任何 hook 代码。本文记录事实与候选挂载点，粒度决策见 grilling。
 
