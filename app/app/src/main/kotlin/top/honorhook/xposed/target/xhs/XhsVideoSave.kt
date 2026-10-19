@@ -735,9 +735,20 @@ object XhsVideoSave {
             return
         }
         // t0 = 本轮 save 拦截时刻，透传给 V-5 低画质清理的时间窗锚点。
-        // 2026-10-19 X5 重构：save 响应轨无候选来源（videoSources 采集已删，恒空 = WARN 静默跳过），
-        // HD 询问只由 X5 点击轨（a59.q → 分享链接解析 → offerHdDownloadFromNote）发起。
-        offerHdDownload(noteId, System.currentTimeMillis(), emptyList(), module)
+        // 2026-10-19 17:34 修复：X5 重构曾把本轨降为恒空候选观测桩，分享 sheet「保存到相册」入口
+        // 只触本轨 → HD 询问卡永弹不出（用户实测实证）。改回真解析：后台线程分享链接解析后
+        // offerHdDownloadFromNote（点击轨 XhsBatchSave 同款写法），解析异常只 WARN。
+        val t0 = System.currentTimeMillis()
+        Thread({
+            runCatching {
+                val note = kotlinx.coroutines.runBlocking {
+                    XhsSavePivot.resolveByShareLink(noteId, module)
+                }
+                offerHdDownloadFromNote(noteId, t0, note, module)
+            }.onFailure {
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX save响应轨 HD 询问发起失败: ${it.message}")
+            }
+        }, "HonorHook-xhs-video-hd-resp").start()
     }
 
     /**
@@ -761,7 +772,9 @@ object XhsVideoSave {
     }
 
     /**
-     * HD 询问卡唯一入口：save 响应轨（2026-10-19 起恒空候选 = WARN 静默跳过，留作 URL 形态观测）+
+     * HD 询问卡唯一入口：save 响应轨（scheduleHdVideoDownload → 后台线程分享链接解析 →
+     * [offerHdDownloadFromNote]，2026-10-19 17:34 起恢复真解析——曾降为恒空候选观测桩致
+     * 分享 sheet「保存到相册」入口永弹不出询问卡，用户实测实证）+
      * X5 视频保存点击轨（a59.q invoke → offerHdDownloadFromNote——覆盖播放缓存直拷、已存在短路两条
      * 不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿 720p）。
      * 流程：候选 → Application → 关 X5 反馈卡 → 弹询问卡；V-6 同笔记防骚扰去重已删

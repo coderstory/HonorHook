@@ -40,8 +40,11 @@ object XhsSavePivot {
     private fun shareUrlOf(noteId: String, token: String): String =
         "https://www.xiaohongshu.com/discovery/item/$noteId?xsec_source=app_share&xsec_token=$token"
 
-    /** 解析出的分享链接 memo（noteId → URL；hit 免重复反射/免重复落网页）。 */
-    private val linkCache = ConcurrentHashMap<String, String>()
+    /** 解析出的分享链接 memo（noteId → (URL, 来源轨)；hit 免重复反射/免重复落网页）。 */
+    private val linkCache = ConcurrentHashMap<String, Pair<String, String>>()
+
+    /** 最近一次 fetchHtml 诊断（url 前 80 字符 + body 长度；-1 = null），供「媒体全空」行回溯。 */
+    @Volatile private var lastFetchDiag: String = "无"
 
     /** hook 现场捕获的 NoteFeed 实例（[stashFeed]；只服务当次保存的反射轨，随下次保存覆盖）。 */
     @Volatile private var stashedFeed: Any? = null
@@ -165,14 +168,21 @@ object XhsSavePivot {
      * 内存三轨取分享链接（不发网络）：缓存 → noteShares → NoteFeed 反射。null = 三轨皆 miss。
      * 供点击轨在 hook 线程**同步**做接管判定（全内存、无阻塞），真正的网页解析走 [resolveByShareLink]。
      */
-    fun availableShareLink(noteId: String, module: XposedModule): String? {
+    fun availableShareLink(noteId: String, module: XposedModule): String? =
+        locateShareLink(noteId, module)?.first
+
+    /**
+     * [availableShareLink] 的带来源轨版本：second = 命中轨标签（缓存/noteShares/反射），
+     * 供解析日志行尾标注（分辨空候选出在哪一轨）。null = 三轨皆 miss。
+     */
+    private fun locateShareLink(noteId: String, module: XposedModule): Pair<String, String>? {
         linkCache[noteId]?.let { return it }
         // ① okhttp 旁路采集表
         XhsVideoSave.noteShares[noteId]?.let { share ->
             val link = share.link ?: share.token?.let { shareUrlOf(noteId, it) }
             if (link != null) {
-                linkCache[noteId] = link
-                return link
+                linkCache[noteId] = link to "noteShares"
+                return link to "noteShares"
             }
         }
         // ② NoteFeed 反射：share_info（kd.c("share_info")）→ link / xsec_token（kd.c 同法）
@@ -184,14 +194,14 @@ object XhsSavePivot {
         val link = (fieldByAlias(shareInfo, "link") as? String)
             ?.takeIf { it.contains("xiaohongshu.com") && it.contains("xsec_token=") }
         if (link != null) {
-            linkCache[noteId] = link
-            return link
+            linkCache[noteId] = link to "反射"
+            return link to "反射"
         }
         val token = fieldByAlias(shareInfo, "xsec_token") as? String
         if (!token.isNullOrBlank()) {
             val rebuilt = shareUrlOf(noteId, token)
-            linkCache[noteId] = rebuilt
-            return rebuilt
+            linkCache[noteId] = rebuilt to "反射"
+            return rebuilt to "反射"
         }
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 反射轨 miss：share_info 无 link/xsec_token noteId=$noteId")
         return null
@@ -203,19 +213,28 @@ object XhsSavePivot {
      * 解析失败 WARN 带原因。IO 在 Dispatchers.IO（vendored repository 默认 dispatcher）。
      */
     suspend fun resolveByShareLink(noteId: String, module: XposedModule): ResolvedNote? = withContext(Dispatchers.IO) {
-        val link = availableShareLink(noteId, module) ?: run {
-            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 分享链接三轨皆 miss noteId=$noteId，解析跳过")
+        val (link, source) = locateShareLink(noteId, module) ?: run {
+            module.log(Log.WARN, MountEngine.TAG,
+                "$JUDGE_PREFIX 分享链接三轨皆 miss noteId=$noteId（noteShares 无此 noteId 且反射无 share_info），解析跳过")
             return@withContext null
         }
         try {
-            val note = repository.resolve(link)
+            val note = repository(module).resolve(link)
+            if (note.videos.isEmpty() && note.images.isEmpty()) {
+                module.log(Log.WARN, MountEngine.TAG,
+                    "$JUDGE_PREFIX 解析成功但图/视频全空 noteId=$noteId 源=$source $lastFetchDiag")
+                return@withContext note
+            }
+            val candCount = note.videos.sumOf { it.candidates.size }
             module.log(Log.INFO, MountEngine.TAG,
-                "$JUDGE_PREFIX 分享链接解析成功 noteId=$noteId 图${note.images.size} 视频${note.videos.size} live${note.livePhotos.size}")
+                "$JUDGE_PREFIX 分享链接解析成功 noteId=$noteId 图${note.images.size} 视频${note.videos.size} live${note.livePhotos.size} 候选$candCount 源=$source")
             note
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (t: Throwable) {
-            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 分享链接解析失败 noteId=$noteId: ${t.message}")
+            val detail = t.cause?.run { "${javaClass.simpleName}: $message" } ?: t.message
+            module.log(Log.WARN, MountEngine.TAG,
+                "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId 源=$source ${t.javaClass.simpleName}: $detail")
             null
         }
     }
@@ -224,10 +243,30 @@ object XhsSavePivot {
      * 注入给 vendored repository 的抓取实现（[DefaultXhsContentRepository.fetchHtml]）。
      * 连接/请求头与 [XhsVideoSave.fetchNotePageHtml] 同一构造（手机 UA + Accept + 手动 302 ≤5 跳，
      * xhslink 短链在此展开）；失败抛异常交 vendored 侧归类（XhsResolveException.Network）。
+     * vendored 侧把 fetch null/空与「解析出但无 noteId」同归 RequiresWebView，分不开——
+     * 故在注入 lambda 处就地打 fetch 空/异常 WARN（url 前 80 字符 + body 长度/异常 message），
+     * 并记 [lastFetchDiag] 供「媒体全空」行回溯。无状态 facade，按次构建。
      */
-    private val repository: DefaultXhsContentRepository by lazy {
+    private fun repository(module: XposedModule): DefaultXhsContentRepository =
         DefaultXhsContentRepository(
-            fetchHtml = { url -> withContext(Dispatchers.IO) { XhsVideoSave.fetchNotePageHtml(url) } },
+            fetchHtml = { url ->
+                withContext(Dispatchers.IO) {
+                    try {
+                        XhsVideoSave.fetchNotePageHtml(url).also { body ->
+                            lastFetchDiag = "url=${url.take(80)} bodyLen=${body?.length ?: -1}"
+                            if (body.isNullOrEmpty()) {
+                                module.log(Log.WARN, MountEngine.TAG,
+                                    "$JUDGE_PREFIX fetchHtml 返回 null/空 url=${url.take(80)} bodyLen=-1")
+                            }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (t: Throwable) {
+                        module.log(Log.WARN, MountEngine.TAG,
+                            "$JUDGE_PREFIX fetchHtml 抛异常 url=${url.take(80)}: ${t.javaClass.simpleName}: ${t.message}")
+                        throw t
+                    }
+                }
+            },
         )
-    }
 }
