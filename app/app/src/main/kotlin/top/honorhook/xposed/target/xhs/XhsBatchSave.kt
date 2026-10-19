@@ -11,6 +11,7 @@ import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import java.io.IOException
@@ -128,9 +129,11 @@ object XhsBatchSave {
         ensureActivityTracker()
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
 
-        val pending = listOf(
-            MountEngine.SimpleTask(
-                className = CLS_SAVE_CLICK_LAMBDA,
+        // 版本坐标走 XhsPoints（9.49.x 旧坐标；9.50 专属点旧套缺席 = 跳过，走 videoClick 轨兜底）
+        val hostVersion = HostVersion.resolve(param.applicationInfo?.sourceDir)
+        val pending = mutableListOf<MountEngine.Task>()
+        XhsPoints.cls(hostVersion, "saveClick")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = METHOD_INVOKE,
                 paramCount = 1,
                 returnType = "java.lang.Object",
@@ -142,9 +145,9 @@ object XhsBatchSave {
                         "onDownloadClick, noteId=",
                     ),
                 ),
-            ),
-            MountEngine.SimpleTask(
-                className = CLS_VIDEO_SAVE_LAMBDA,
+        ) }
+        XhsPoints.cls(hostVersion, "videoClick")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = METHOD_INVOKE,
                 paramCount = 1,
                 returnType = "java.lang.Object",
@@ -156,9 +159,9 @@ object XhsBatchSave {
                 // （int + NoteFeed）收紧兜底轨——9.50.0 曾因无锚点兜底把 d49.q 误绑到换语义包的
                 // 分享引导 lambda（installed 假阳性，findings-x5 2026-10-19）。
                 dex = DexHint(classFieldTypes = listOf("int", "com.xingin.entities.notedetail.NoteFeed")),
-            ),
-            MountEngine.SimpleTask(
-                className = "b75.h",
+        ) }
+        XhsPoints.cls(hostVersion, "downloaderEntry")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = "e",
                 // 反射全参计数（MethodResolver.matchesParameters 用 parameterCount）：e(h,String,String,
                 // boolean,String,long,String,long,boolean,boolean,Function3,int,Object) = 13（h.java:227）
@@ -167,43 +170,44 @@ object XhsBatchSave {
                 id = "xhs:videoSave.downloader.entry",
                 description = "X5 保存下载总入口·b75.h#e（CommercialHorizonBridge_VideoDownloader 添加下载任务，h.java:227-330 反编译实证；save→e→XYDownloader 下载→n/fs2.b 拷贝 全链 head）→ 接管中不 proceed：宿主零下载零落盘零进度回调，模块弹卡直下原片",
                 dex = DexHint(strings = listOf("addDownloadTask 强制下载")),
-            ),
-            MountEngine.SimpleTask(
+        ) }
+        pending += MountEngine.SimpleTask(
                 className = "xec.w",
                 methodName = "h0",
                 paramCount = 5,
                 returnType = "boolean",
                 id = "xhs:videoSave.albumSink.h0",
                 description = "X5 视频落盘拷贝断根·公共工具 w.h0(File,relDir,name,delSrc,mime)（未混淆 public final，w.java:730 签名实证）→ DCIM+Camera/+video/mp4 三判据命中不 proceed 返 true 假成功，图片等其余落盘照常放行",
-            ),
-            MountEngine.SimpleTask(
+            )
+        pending += MountEngine.SimpleTask(
                 className = "xec.w",
                 methodName = "e0",
                 paramCount = 4,
                 returnType = "boolean",
                 id = "xhs:videoSave.albumSink.e0",
                 description = "X5 视频落盘拷贝断根·公共工具 w.e0(File,relDir,name,mime)（未混淆，w.java:619 签名实证，内部委托 h0(...,true,...) w.java:621）→ 同 h0 三判据拦截，两分支共用 mountAlbumSink",
-            ),
-            MountEngine.SimpleTask(
-                className = "mg4.b",
+            )
+        XhsPoints.cls(hostVersion, "aigcEditLaunch")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = "invoke",
                 paramCount = 1,
                 returnType = "java.lang.Object",
                 id = "xhs:videoSave.aigcEditLaunch",
                 description = "X5 AIGC 编辑保存发起断·mg4.b#invoke case10（VideoEditDownloadWidget lambda：弹 CapaProgressDialogFragment「正在保存到相册」→ startDownload=LightVideoEdit 转码+下载，mg4/b.java:33-70）→ 接管中不 proceed + 反射 dismiss 进度框：转码零启动、提示不弹",
                 dex = DexHint(strings = listOf("tag_video_edit_download_loading")),
-            ),
-            MountEngine.SimpleTask(
-                className = "ab9.r1",
+        ) }
+        XhsPoints.cls(hostVersion, "noteSaveEntry")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = "b",
                 paramCount = 9,
                 returnType = "void",
                 id = "xhs:videoSave.noteSaveEntry",
                 description = "X5 笔记视频保存总入口·ab9.r1#b(boolean,Activity,z0,NoteFeed,int,boolean,ViewGroup,Function1,Function0)（r1.java:189 起：网络检查→建 SaveProgressView「正在保存到相册」→postDelayed(1s)→r1.d→function1(noteFeed.u0())=save 请求+下载流，2026-10-20 00:03 实证笔记保存正主链）→ 链接可得：不 proceed（view 不弹+请求不发+下载不跑）+ 模块管线弹卡直下原片；链接 miss：proceed 宿主原生保底",
                 dex = DexHint(strings = listOf("save video failed:")),
-            ),
-        )
-        engine.attemptMount(pending, module, hostLoader!!) { task -> mountOne(task, module) }
+        ) }
+        // mountOne 按 SimpleTask 分派；全列表本就只含 SimpleTask（mutableListOf<Task> 只为 let-追加方便）
+        @Suppress("UNCHECKED_CAST")
+        engine.attemptMount(pending as List<MountEngine.SimpleTask>, module, hostLoader!!) { task -> mountOne(task, module) }
     }
 
     private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =

@@ -4,6 +4,7 @@ import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.data.RemoteConfig
@@ -37,8 +38,8 @@ object XhsWatermark {
     private val engine = MountEngine("XhsHook·X2", "com.xingin.xhs")
 
     private const val CLS_MEDIA_SAVE_CONFIG = "com.xingin.entities.MediaSaveConfig"
-    /** X2b 载体：9.50.0 R8 重命名 qc8.j→nd8.j（同 classes6.dex 内换包；dexdump c6.txt:901382 类头实证，findings-x2b 2026-10-19）。 */
-    private const val CLS_ND8_J = "nd8.j"
+    /** X2b 载体：9.50.0 R8 重命名 qc8.j→nd8.j（同 classes6.dex 内换包；dexdump c6.txt:901382 类头实证，findings-x2b 2026-10-19）。
+     *  版本坐标走 [XhsPoints]（"x2b"：9.49.x = qc8.j，2026-10-20 拍板旧宿主保持旧坐标）。 */
 
     /** X2c 载体类（未混淆；方法号漂移实证，不做静态挂载点）。 */
     private const val CLS_IMAGE_BEAN = "com.xingin.entities.ImageBean"
@@ -53,7 +54,9 @@ object XhsWatermark {
 
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
+        val sourceDir = param.applicationInfo?.sourceDir
+        engine.begin(sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
+        val clsX2b = XhsPoints.cls(HostVersion.resolve(sourceDir), "x2b")
 
         val pending = mutableListOf<MountEngine.Task>()
         pending += MountEngine.SimpleTask(
@@ -64,15 +67,17 @@ object XhsWatermark {
             id = ID_MSC_DISABLE_WM,
             description = "X2a 去水印·MediaSaveConfig.c()→true（@kd.c(disable_watermark) getter）",
         )
-        pending += MountEngine.SimpleTask(
-            className = CLS_ND8_J,
-            methodName = "b",
-            paramCount = 2,
-            returnType = "android.graphics.Bitmap",
-            id = ID_AI_BITMAP,
-            description = "X2b 去水印·nd8.j.b(Context,boolean)→null（AI 水标位图构造，串锚 disableAiWaterMark is + andr_image_save_white_bg_optimized）",
-            dex = DexHint(classStrings = listOf("disableAiWaterMark is ", "andr_image_save_white_bg_optimized", "SaveImagesHelper")),
-        )
+        if (clsX2b != null) {
+            pending += MountEngine.SimpleTask(
+                className = clsX2b,
+                methodName = "b",
+                paramCount = 2,
+                returnType = "android.graphics.Bitmap",
+                id = ID_AI_BITMAP,
+                description = "X2b 去水印·AI 水标位图构造→null（坐标见 XhsPoints x2b；串锚 disableAiWaterMark is + andr_image_save_white_bg_optimized）",
+                dex = DexHint(classStrings = listOf("disableAiWaterMark is ", "andr_image_save_white_bg_optimized", "SaveImagesHelper")),
+            )
+        }
         // X2c：动态发现任务——className/methodName 由 resolveValue 期注解反射填入（见 X2cTask）
         pending += X2cTask()
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
