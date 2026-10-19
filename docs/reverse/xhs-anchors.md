@@ -24,6 +24,7 @@
 | 视频落盘收口（未挂，V-5 清理锚） | `idc.w`（:730-760 区域） | 宿主视频 MediaStore insert 收口，三处调用 `r01/p.java:27` 等 | classes2 | 9.49.1 定位 |
 | 视频落盘拷贝断根 | `xec.w#h0` + `xec.w#e0`（未混淆 public final 公共工具，直连挂无 DexHint） | 无需串锚（未混淆跨版本稳，w.java:730/619 签名实证）；调方留档：`w.h0(file, DCIM, "Camera/"+name, false, "video/mp4")`（b75/n.java:35）、`w.e0(file, DCIM, "Camera/"+name, "video/mp4")`（fs2/b.java:51；e0 内部委托 h0 w.java:621） | xec.w 本体 dex 未记；调方 classes2（b75/n）/ classes20（fs2/b） | 9.50 |
 | 短链生成（分享链接单链） | `u2c.y`（ShareService 实现内） | `"getShortUrlObservableIfNeed success"`（u2c/y.java:70）；服务定位反射 `i3c.d` → `ShareService.getShortUrl` | 未记（运行时反射定位，类名经 `i3c.d` 服务表取） | 9.50 |
+| 保存下载总入口（v3 主断点） | `b75.h#e`（static void 13 参 Kotlin 顶层函数，h.java:227；CommercialHorizonBridge_VideoDownloader） | DexHint 串锚 `"addDownloadTask 强制下载"`（h.java:288）；链路 `e→k→j→m(CommonVideoDownload)→XYDownloader→l.onFinished→n(save_to_album)`（静态审计 2026-10-19 全程核实）。**Java 调用点为 0**（跨平台桥 JS 侧分发）——重定位只能靠 DexKit 串锚。拦截判据：url 精确匹配 savePending 登记 + xhscdn.com 域 | classes2（b75/h.java:227） | 9.50 |
 
 ## 已知非挂载但关键的宿主结构（业务图谱见 xhs.md §九）
 
