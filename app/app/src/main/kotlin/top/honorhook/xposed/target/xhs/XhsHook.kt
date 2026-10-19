@@ -58,23 +58,14 @@ object XhsHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
 
-        // X2 去水印（独立文件，自带引擎 SystemUiHook 式汇总）
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_NO_WATERMARK)) {
+        // 接管下载（一个开关 = X2 去水印 + X4 视频换链/直下 + X5 图片接管 + 落盘闸，
+        // 2026-10-19 用户拍板合并：xhs 只剩「去掉下载限制」+「接管下载」两个开关）
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_TAKEOVER_SAVE)) {
             XhsWatermark.install(module, param)
-        } else {
-            logDisabled(module, FeatureCatalog.KEY_XHS_NO_WATERMARK, "XhsHook")
-        }
-        // X4 视频直链
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_VIDEO_SAVE)) {
             XhsVideoSave.install(module, param)
-        } else {
-            logDisabled(module, FeatureCatalog.KEY_XHS_VIDEO_SAVE, "XhsHook")
-        }
-        // X5 批量保存
-        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_BATCH_SAVE)) {
             XhsBatchSave.install(module, param)
         } else {
-            logDisabled(module, FeatureCatalog.KEY_XHS_BATCH_SAVE, "XhsHook")
+            logDisabled(module, FeatureCatalog.KEY_XHS_TAKEOVER_SAVE, "XhsHook")
         }
 
         // X1 保存解锁（本文件内联；3 点同属一个开关组，任一未解析随类加载重试）

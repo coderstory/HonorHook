@@ -55,9 +55,7 @@ object FeatureCatalog {
     const val KEY_SYSMGR_ANTIVIRUS = "sysmgr.antivirus"
 
     const val KEY_XHS_SAVE_UNLOCK = "xhs.save_unlock"
-    const val KEY_XHS_NO_WATERMARK = "xhs.no_watermark"
-    const val KEY_XHS_VIDEO_SAVE = "xhs.video_save"
-    const val KEY_XHS_BATCH_SAVE = "xhs.batch_save"
+    const val KEY_XHS_TAKEOVER_SAVE = "xhs.takeover_save"
 
     const val KEY_WALLPAPER_TRANSCODE_QUALITY = "wallpaper.transcode_quality"
     const val KEY_WALLPAPER_TIMELINE_UNLIMITED = "wallpaper.timeline_unlimited"
@@ -247,9 +245,7 @@ object FeatureCatalog {
             "com.xingin.xhs", R.string.target_name_xhs,
             listOf(
                 Feature(KEY_XHS_SAVE_UNLOCK, R.string.feature_xhs_save_unlock_title, R.string.feature_xhs_save_unlock_desc),
-                Feature(KEY_XHS_NO_WATERMARK, R.string.feature_xhs_no_watermark_title, R.string.feature_xhs_no_watermark_desc),
-                Feature(KEY_XHS_VIDEO_SAVE, R.string.feature_xhs_video_save_title, R.string.feature_xhs_video_save_desc),
-                Feature(KEY_XHS_BATCH_SAVE, R.string.feature_xhs_batch_save_title, R.string.feature_xhs_batch_save_desc),
+                Feature(KEY_XHS_TAKEOVER_SAVE, R.string.feature_xhs_takeover_save_title, R.string.feature_xhs_takeover_save_desc),
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
         ),

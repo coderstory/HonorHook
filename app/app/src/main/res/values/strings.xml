@@ -113,12 +113,8 @@
     <string name="target_name_xhs">小红书</string>
     <string name="feature_xhs_save_unlock_title">解除保存限制</string>
     <string name="feature_xhs_save_unlock_desc">帖子被作者关闭「下载/保存」时仍可长按保存图片和视频；付费内容不绕过。重启小红书后生效</string>
-    <string name="feature_xhs_no_watermark_title">保存无水印</string>
-    <string name="feature_xhs_no_watermark_desc">保存图片不再带作者水印和 AI「生成」标签。重启小红书后生效</string>
-    <string name="feature_xhs_video_save_title">保存原画视频</string>
-    <string name="feature_xhs_video_save_desc">视频帖保存时直接下载作者上传的原始视频文件，体积与清晰度都远高于默认保存的版本；下载完成会提示实际体积。重启小红书后生效</string>
-    <string name="feature_xhs_batch_save_title">批量保存</string>
-    <string name="feature_xhs_batch_save_desc">图片笔记长按菜单点「保存」时弹窗选择：保存本张（原图）或下载全部；批量逐张下载原图，可中途取消，完成后提示已下载张数与总体积。重启小红书后生效</string>
+    <string name="feature_xhs_takeover_save_title">接管下载</string>
+    <string name="feature_xhs_takeover_save_desc">保存时接管：图片下载原图（实况只下静帧）、视频自动换链原片（作者关闭下载时弹卡由模块直下）、去水印；带进度与取消。重启小红书后生效</string>
 
     <string name="target_name_wallpapereditor">壁纸视频增强（转码）</string>
     <string name="target_name_livewallpaper">壁纸视频增强（循环）</string>
