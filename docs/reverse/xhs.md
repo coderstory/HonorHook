@@ -291,3 +291,52 @@ h1()→b1()、U1()→S1()；**短包名身份跨版本不可信，选点必须�
 装新包 → 开 xhs → 看 modlog：`X1 3/3 · X2 3/3 · X3 1/1 · X4 1/1 · X5 2/2`；功能现象：图片长按保存
 出「已接管图片保存，图集 N 张」judge 行 + 面板被关 + 询问/直下；视频保存出「视频保存完成，弹反馈卡」
 judge 行（9.50.0 现版本两点都出不来）。
+
+## 九、保存业务图谱（2026-10-19 全场景真机实证）
+
+> 来源：dbg 仪表日志 + 摘作用域对照实验 + MediaStore 取证（当日过程见 memory
+> `xhs-video-cache-save-blindspot`）。**只收代码读不出的运行时行为**；挂载点签名见 §八。
+
+### 9.1 用户入口矩阵（图片/视频 × 3 入口）
+
+| # | 用户操作 | 宿主流 | 模块点 | 实证行为（2026-10-19 本机） |
+|---|---|---|---|---|
+| V1 | 视频笔记 分享面板→保存 | 见 9.2 三路 | `a59.q` invoke + save 响应双触发 | ✅ 修复后全绿（13:43：18316KB 原片换 1219KB 720p） |
+| I1 | 图集笔记 **ji9.b 路径**（分享面板/长按，待 findings 定位具体 UI） | 宿主单张保存 | `ji9.b` 全接管 | ✅ 12:05「追加询问 6 张」+ 12:25 `Pictures/小红书/xhs_*.heic` 落盘 |
+| I2 | **笔记视图**长按图片→面板「保存」 | 宿主批量保存「已保存 1/4→4/4」 | ❌ ji9.b 不触发 | ❌ 假成功：4/4 toast + MediaStore 零文件 |
+| I3 | **大图浏览器**长按→「保存图片」 | 宿主单图保存 toast | ❌ ji9.b 不触发 | ❌ 假成功：toast + 零文件；同笔记二次保存按钮直接隐藏（已保存态） |
+
+### 9.2 视频保存三路（宿主侧，决定模块可见性）
+
+| 路 | 触发条件 | `/note/video/save` 请求 | 落盘 | X4 既单触发 | a59.q 触发（修复后） |
+|---|---|---|---|---|---|
+| ① 网络 API | 笔记未缓存（首存） | 有 v10 | DCIM `Camera_xhs_*.mp4`（转码 720p） | ✅ | ✅ |
+| ② 缓存直拷 | 播放过的笔记 | **无** | 同上（逐次新文件，md5 同） | ❌ 全盲 | ✅ |
+| ③ 已存短路 | 短时间内重复保存 | 无 | **不写**，仅 toast | ❌ | ✅（dedupe 5min 内第二单起静默，V-6 设计） |
+
+### 9.3 数据源图谱（端点 → 采集器 → 内存表 → 消费方）
+
+```
+edith…/api/sns/v1/note/detailfeed/preload ──→ harvestNoteImages（images_list 区段+护栏）──→ noteImages[noteId] ──→ X5 图片接管（I1）
+edith…/api/sns/v1/note/imagefeed          ──→ 同上（进图浏览必发；**历史/缓存进入不发**）  ↗
+rec…/api/sns/v4/note/videofeed            ──→ harvestVideoSources（video_info_v2→master_url 候选）──→ videoSources[noteId] ──→ HD 询问选档
+    · fetch_mode=0=进笔记，=1=保存后推荐流；响应首块（本笔记）noteId lookback miss ⇒ 回落 URL note_id（2026-10-19 修）
+edith…/api/sns/v10/note/video/save        ──→ patchVideoSaveResponse（disable:true→false）+ HD 触发（旧轨）
+xiaohongshu.com 网页 __INITIAL_STATE__     ──→ resolveOriginVideoUrl（originVideoKey→原片置顶候选）
+share_info.link / xsec_token（feed 响应） ──→ noteShares[noteId] ──→ 网页原片解析入参
+```
+
+### 9.4 失败/盲区总表（全部真机实证）
+
+| 现象 | 根因 | 状态 |
+|---|---|---|
+| 看过的视频保存只出 720p | 路②③无 save 请求，旧触发器挂响应上 | ✅ 已修（触发搬 a59.q + NoteFeed 反射 u0() 24hex 门） |
+| I2/I3 入口图片零产出 | 入口绕开 ji9.b；宿主原生管道本机静默失败 | ❌ 待 findings-x5img 定新触发点 |
+| hostile 图集「保存」4/4 假成功 | X1 解锁按钮，服务端剥离直链，宿主管道静默失败 | ❌ 同上（宿主侧无法救，模块接管才有解） |
+| 历史进入图集采不到 | imagefeed 不发 | ❌ 待数据源补口 |
+| videofeed 首块归属 miss | lookback 窗口内无 note_id | ✅ 已修（回落 URL note_id） |
+| AIGC preload 无 video_info_v2 | 载荷形态（非主因，videofeed 有货） | 观察项 |
+
+### 9.5 待补（findings-x5img.md 回填）
+宿主批量保存流内部链（handler→下载编排→MediaStore 收口→成败判定）、I2/I3 真实 handler、
+nd8.i.i 在新流调用形态、imagefeed 替代数据源。
