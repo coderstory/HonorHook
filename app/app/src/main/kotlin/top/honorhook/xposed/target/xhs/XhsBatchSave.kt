@@ -158,6 +158,17 @@ object XhsBatchSave {
                 dex = DexHint(classFieldTypes = listOf("int", "com.xingin.entities.notedetail.NoteFeed")),
             ),
             MountEngine.SimpleTask(
+                className = "b75.h",
+                methodName = "e",
+                // 反射全参计数（MethodResolver.matchesParameters 用 parameterCount）：e(h,String,String,
+                // boolean,String,long,String,long,boolean,boolean,Function3,int,Object) = 13（h.java:227）
+                paramCount = 13,
+                returnType = "void",
+                id = "xhs:videoSave.downloader.entry",
+                description = "X5 保存下载总入口·b75.h#e（CommercialHorizonBridge_VideoDownloader 添加下载任务，h.java:227-330 反编译实证；save→e→XYDownloader 下载→n/fs2.b 拷贝 全链 head）→ 接管中不 proceed：宿主零下载零落盘零进度回调，模块弹卡直下原片",
+                dex = DexHint(strings = listOf("addDownloadTask 强制下载")),
+            ),
+            MountEngine.SimpleTask(
                 className = "xec.w",
                 methodName = "h0",
                 paramCount = 5,
@@ -173,12 +184,33 @@ object XhsBatchSave {
                 id = "xhs:videoSave.albumSink.e0",
                 description = "X5 视频落盘拷贝断根·公共工具 w.e0(File,relDir,name,mime)（未混淆，w.java:619 签名实证，内部委托 h0(...,true,...) w.java:621）→ 同 h0 三判据拦截，两分支共用 mountAlbumSink",
             ),
+            MountEngine.SimpleTask(
+                className = "mg4.b",
+                methodName = "invoke",
+                paramCount = 1,
+                returnType = "java.lang.Object",
+                id = "xhs:videoSave.aigcEditLaunch",
+                description = "X5 AIGC 编辑保存发起断·mg4.b#invoke case10（VideoEditDownloadWidget lambda：弹 CapaProgressDialogFragment「正在保存到相册」→ startDownload=LightVideoEdit 转码+下载，mg4/b.java:33-70）→ 接管中不 proceed + 反射 dismiss 进度框：转码零启动、提示不弹",
+                dex = DexHint(strings = listOf("tag_video_edit_download_loading")),
+            ),
+            MountEngine.SimpleTask(
+                className = "ab9.r1",
+                methodName = "b",
+                paramCount = 9,
+                returnType = "void",
+                id = "xhs:videoSave.noteSaveEntry",
+                description = "X5 笔记视频保存总入口·ab9.r1#b(boolean,Activity,z0,NoteFeed,int,boolean,ViewGroup,Function1,Function0)（r1.java:189 起：网络检查→建 SaveProgressView「正在保存到相册」→postDelayed(1s)→r1.d→function1(noteFeed.u0())=save 请求+下载流，2026-10-20 00:03 实证笔记保存正主链）→ 链接可得：不 proceed（view 不弹+请求不发+下载不跑）+ 模块管线弹卡直下原片；链接 miss：proceed 宿主原生保底",
+                dex = DexHint(strings = listOf("save video failed:")),
+            ),
         )
         engine.attemptMount(pending, module, hostLoader!!) { task -> mountOne(task, module) }
     }
 
     private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         when (task.id) {
+            "xhs:videoSave.noteSaveEntry" -> mountNoteSaveEntry(task, module)
+            "xhs:videoSave.aigcEditLaunch" -> mountAigcEditLaunch(task, module)
+            "xhs:videoSave.downloader.entry" -> mountDownloadEntry(task, module)
             "xhs:batchSave.videoSaveClick.invoke" -> engine.mount(task, module, hostLoader!!) { chain ->
                 // a59.q 双分支：case1=分享引导（arg=Triple，rv9.a.CLOUD）default=saveVideo（arg=String）——只对
                 // String 轨做拦截/反馈，分享路径静默放行
@@ -269,6 +301,92 @@ object XhsBatchSave {
         }
 
     /**
+     * 笔记视频保存总入口断（v3.1 主断点，2026-10-20 00:15）：`ab9.r1#b` 是保存链最上游
+     * （网络检查 → 建 SaveProgressView「正在保存到相册」→ postDelayed(1s) → r1.d → save 请求 +
+     * 下载流 → moveToPublic）。**在 save 请求之前**，pending 登记不可用——改用 NoteFeed 参数反射
+     * u0() 取 noteId（ji9/b.java:55 锚串旁证 u0()=noteId；24hex 门防误绑）判 [XhsSavePivot.availableShareLink]：
+     * - 有链 → 不 proceed（view 不弹、save 请求不发、下载/转码不跑、零提示）+ [startHdAsk]
+     *   后台解析弹卡（failCard=true：拦截 = 模块是唯一出口）
+     * - 链接 miss/拉黑 → proceed 宿主原生保底
+     * 下游 b75.h.e / mg4.b / albumSink 全降级纯兜底（r1.b 拦住时它们无输入）。
+     */
+    private fun mountNoteSaveEntry(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        engine.mount(task, module, hostLoader!!) { chain ->
+            val noteId = runCatching {
+                val feed = chain.getArg(3) ?: return@runCatching null
+                val id = feed.javaClass.getMethod("u0").invoke(feed) as? String
+                // 24hex 门（findFeedAndNoteId 同款）：NoteFeed u0() 产物形如 6ad5d4d6000000002a00fa1b
+                id?.takeIf { Regex("^[0-9a-f]{24}$").matches(it) }
+            }.getOrNull()
+            if (noteId == null || XhsSavePivot.availableShareLink(noteId, module) == null) {
+                return@mount chain.proceed()
+            }
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX 笔记保存总入口已断（ab9.r1.b，宿主零提示零请求零下载）noteId=$noteId")
+            engine.judge(module, task, JUDGE_PREFIX, "笔记保存总入口已断（ab9.r1.b，链接可得不 proceed）")
+            startHdAsk(noteId, System.currentTimeMillis(), module, failCard = true)
+            null // r1.b 返回 void
+        }
+
+    /**
+     * AIGC 编辑保存发起断（2026-10-20 00:10）：`mg4.b#invoke` = VideoEditDownloadWidget 的下载
+     * lambda 分派（case10：弹 CapaProgressDialogFragment「正在保存到相册」→ startDownload（DebugMetadata
+     * `VideoEditDownloadWidget$startDownload$1`，mg4/l.java 注解实证）→ LightVideoEdit 转码+下载 →
+     * moveToPublic 拷贝）。**AIGC 笔记走此链，不走 b75.h.e**（2026-10-19 23:55 实证：e 断点零触发而
+     * 落盘判据为 fs2/e0）。
+     * 拦截（savePending 命中 + this.d==10）= 不 proceed（转码零启动、z4 下载零启动）+ 反射
+     * `widget.v`（CapaProgressDialogFragment，mg4/b.java:65 赋值，可能尚未 add——dismiss 幂等安全）
+     * 关掉「正在保存」框；返回 kotlin.Unit.INSTANCE（Function1 契约，跨 loader 反射取）。
+     * 模块弹卡直下原片（interceptVideoSave 主卡位已弹）。
+     */
+    private fun mountAigcEditLaunch(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        engine.mount(task, module, hostLoader!!) { chain ->
+            val case = runCatching {
+                chain.thisObject.javaClass.getDeclaredField("d").get(chain.thisObject) as? Int
+            }.getOrNull()
+            if (case != 10 || !XhsVideoSave.savePendingActive()) return@mount chain.proceed()
+            runCatching {
+                // dismiss「正在保存到相册」进度框（mg4/b.java:60-70：Dialog 先 add 后 z4，拦截点 v 已赋值）
+                val widget = chain.thisObject.javaClass.getDeclaredField("e").get(chain.thisObject)
+                val frag = widget?.javaClass?.getDeclaredField("v")?.get(widget)
+                frag?.javaClass?.getMethod("dismissAllowingStateLoss")?.invoke(frag)
+                    ?: frag?.javaClass?.getMethod("dismiss")?.invoke(frag)
+            }.onFailure {
+                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX AIGC 进度框 dismiss 失败（忽略）: ${it.message}")
+            }
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX AIGC 编辑保存发起已断（转码零启动+提示已关）")
+            engine.judge(module, task, JUDGE_PREFIX, "AIGC 编辑保存发起已断（mg4.b case10 不 proceed）")
+            // Function1.invoke 返 Unit：跨 loader 反射取 INSTANCE，失败退 null（返回值无人消费）
+            runCatching {
+                Class.forName("kotlin.Unit", true, hostLoader).getDeclaredField("INSTANCE").get(null)
+            }.getOrNull()
+        }
+
+    /**
+     * 保存下载总入口断（v3「视频图片化」主挂点，2026-10-19 23:50 定稿）：`b75.h#e` = 宿主保存链
+     * 的下载 head（save 请求登记 → **e 添加下载任务** → m/XYDownloader 下载 → l → n/fs2.b 拷贝）。
+     * 接管中不 proceed = 无下载、无落盘、无进度/完成回调（Function3 不触发，宿主 UI 干净）+
+     * [XhsVideoSave.rescueAskFromCache] 弹 HD 卡（resolveCache 60s 窗，save→e 间隔毫秒级）。
+     * 未接管（解析失败/拉黑）→ proceed 宿主原生保底。
+     * 四轮管道内手术全废弃（反例档案见 [mountAlbumSink]），入口断 = 图片 ji9.b 同款模式。
+     * e 为 void ⇒ 不 proceed 返 null 即可（U6 惯例）。
+     */
+    private fun mountDownloadEntry(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        engine.mount(task, module, hostLoader!!) { chain ->
+            // url 精确匹配 pending 登记（审计 H1 修复：A 笔记解析失败没登记 → e(A.url) 放行宿主保底；
+            // B 笔记早前登记不影响 A）。域判据（xhscdn.com）保留作第二道：e 的 Java 调用点为 0
+            // （跨平台桥 JS 分发，classes.dex 未 dump），非 xhscdn 域必有别的用途，登记表污染也放行。
+            val url = runCatching { chain.getArg(1)?.toString() }.getOrNull().orEmpty()
+            val noteId = XhsVideoSave.pendingDownloadHit(url)
+            if (noteId == null || !url.contains("xhscdn.com")) return@mount chain.proceed()
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX 保存下载入口已断（b75.h.e，宿主零下载零回调）noteId=$noteId url=${url.take(120)}")
+            engine.judge(module, task, JUDGE_PREFIX, "保存下载入口已断（b75.h.e，接管中不 proceed）")
+            XhsVideoSave.rescuePending(noteId, module)
+            null
+        }
+
+    /**
      * 视频落盘拷贝断根·公共工具挂（2026-10-19 改方案）：逐类挂 `b75.n#execute`（X5 3/3 挂上，21:35
      * 真机）断不了根——DCIM 仍落 `Camera_xhs_<ts>.mp4` 且无断根判据行 = 该批走了**另一拷贝路**
      * `fs2/b.java:51 w.e0(file, DCIM, "Camera/"+name, "video/mp4")`，逐类挂 = 打地鼠。改挂**公共
@@ -276,34 +394,42 @@ object XhsBatchSave {
      * 调方）与 `e0`（w.java:619，fs2/b.java:51 调方，内部委托 `h0(..., true, ...)` w.java:621 实证）
      * 同挂，两分支共用本 intercept。
      *
-     * 过滤语义（before 读 args，四判据**全满足**才拦，[isVideoAlbumCopy]）：args[1] 含 "DCIM"
-     * && args[2] 含 "Camera/" && 末参 == "video/mp4" && args[0] File ≤ 8MB → 不 proceed 返 true（假成功
-     * ——b75.n 拿到成功后回调 invoke(true)，宿主无感；e0 调方 fs2/b 只消费返回值不另作分支）。
-     * args[2] "Camera/" 是**防误伤边界**：宿主其他视频写盘（IM 下载 / 广告缓存 / 创作导出等）同走
-     * xec.w，但相对路径不同（Movies/、DCIM 其他子目录），判据收窄后只有「存相册 → DCIM/Camera」
-     * 语义命中；图片（image/jpeg 等）被 mime 判据天然放行；模块自下管线落 Pictures/小红书 走
-     * MediaStore 直插不经 xec.w，亦不受波及。未命中照常 proceed。
-     * 大小豁免（2026-10-19 C 方案换链后第四判据）：save 响应 download_url 已被换成原片 URL，
-     * 宿主自下的正是**原片**（实测量级 16–36MB）——>8MB 必须放行落盘，闸只断换链前/回落路的
-     * 720p（实测量级 ≤1.2MB）。阈值取 8MB ≈ 720p 上限的 5 倍以上，原片下限以下。
+     * 过滤语义（[isVideoAlbumCopy] 四判据全满足才拦）：args[1] 含 "DCIM" && args[2] 含 "Camera/"
+     * && 末参 == "video/mp4" && **无换链放行窗** → 不 proceed 返 true（假成功——b75.n 拿到成功后回调
+     * invoke(true)，宿主无感；e0 调方 fs2/b 只消费返回值不另作分支）。
+     * args[2] "Camera/" 是**防误伤边界**（其他视频写盘相对路径不同，天然放行）；图片被 mime 判据放行。
+     *
+     * **v3 纯兜底（2026-10-19 23:59 审计修订）**：主断点已上移 [mountDownloadEntry]（b75.h#e 下载
+     * head），本闸只兜漏网拷贝（e 挂载失败/非 e 拷贝路）：**savePending 非空（5min 窗，M3：慢下载
+     * 的迟到拷贝）→ 拦**（不弹卡——interceptVideoSave 正常路每单必弹主卡，此处再弹会在 10s 幂等
+     * 窗外重复叠卡，审计 M2）；pending 空（解析失败/拉黑）→ 放行宿主原生保底（失败卡
+     * 「再次点击保存将使用系统保存」的兑现路径，闸不得断保底）。
+     * 反例档案（23:11-23:30 四轮，全部废弃）：①纯三判据曾断掉换链原片；②8MB 豁免误杀小原片；
+     * ③60s 窗放行过 1.2MB 缓存 720p；④size>8MB 分流误放 AIGC 长缓存。教训 = 在拷贝层按文件
+     * 特征猜「宿主在下什么」必错；猜的活全交给入口断。
      */
     private fun mountAlbumSink(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         engine.mount(task, module, hostLoader!!) { chain ->
             val hit = runCatching { isVideoAlbumCopy(chain.args) }.getOrDefault(false)
             if (!hit) return@mount chain.proceed()
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX save_to_album 落盘已断（w.h0/e0 video 过滤）")
+            if (!XhsVideoSave.savePendingActive()) {
+                module.log(Log.INFO, MountEngine.TAG,
+                    "$JUDGE_PREFIX 未接管（解析失败/拉黑）→ 放行宿主原生保底")
+                return@mount chain.proceed()
+            }
+            val size = runCatching { (chain.args?.getOrNull(0) as? java.io.File)?.length() ?: -1L }.getOrDefault(-1L)
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX save_to_album 落盘已断（纯兜底，size=$size）")
             engine.judge(module, task, JUDGE_PREFIX, "save_to_album 落盘已断（w.h0/e0 video 过滤）")
             true // 假成功：h0/e0 返 boolean（java.lang.Boolean 自动装箱），宿主按「拷贝成功」消费
         }
 
-    /** 四判据全满足才拦（见 [mountAlbumSink] KDoc）：DCIM && Camera/ && video/mp4 && 文件 ≤ 8MB（原片豁免）。 */
+    /** 三判据全满足才拦（见 [mountAlbumSink] KDoc）：DCIM && Camera/ && video/mp4。 */
     private fun isVideoAlbumCopy(args: List<Any?>?): Boolean {
         if (args == null || args.size < 4) return false
         val dir = args.getOrNull(1) as? String ?: return false
         val name = args.getOrNull(2) as? String ?: return false
-        if (!(dir.contains("DCIM") && name.contains("Camera/") && args.last() == "video/mp4")) return false
-        val size = runCatching { (args.getOrNull(0) as? java.io.File)?.length() ?: 0L }.getOrDefault(0L)
-        return size <= 8_000_000L
+        return dir.contains("DCIM") && name.contains("Camera/") && args.last() == "video/mp4"
     }
 
     /**
