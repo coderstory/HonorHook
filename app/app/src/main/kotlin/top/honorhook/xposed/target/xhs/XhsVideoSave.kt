@@ -443,6 +443,15 @@ object XhsVideoSave {
      */
     @Volatile private var lastAskAtMs = 0L
 
+    /** 双轨幂等窗口（卡展示期量级）：见 [offerHdDownload] 闸注释。 */
+    private const val ASK_DEDUPE_MS = 10_000L
+
+    /**
+     * 末次弹卡所属笔记 id（与 [lastAskAtMs] **配对写**，同处赋值）：双轨幂等闸判据。
+     * 闸在读之后写（先到轨弹卡落值，后到轨读值跳过），不自吞。
+     */
+    @Volatile private var lastAskNoteId: String? = null
+
     /**
      * X5 反馈卡**快路径**判据（非唯一保障）：时刻 [t] 之后（含）弹过询问卡 ⇒ 本轮已有 X4 卡在屏上。
      * 只在 X4 的询问卡早于 X5 判定点弹出时才命中——X4 写本值是在宿主 save API 的**网络响应**到达时
@@ -779,6 +788,11 @@ object XhsVideoSave {
      * 不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿 720p）。
      * 流程：候选 → Application → 关 X5 反馈卡 → 弹询问卡；V-6 同笔记防骚扰去重已删
      * （2026-10-19 用户拍板），每次保存有候选即弹；两条 early-return 均有仪表日志。
+     *
+     * **双轨幂等**（2026-10-19 17:45 真机实证：一次保存弹 2 张「下载高清原版视频」卡——save 响应轨
+     * 与 a59.q 点击轨同单都走到本入口，无去重）：候选空判断后加 per-noteId 幂等闸，同笔记
+     * [ASK_DEDUPE_MS] 窗口内后到轨 INFO 一行跳过。窗口 = 卡展示期量级，只防同单双轨叠加：
+     * 不同笔记不受影响，连续重存同笔记 10s 外照常弹（与删 5min dedupe 的拍板语义不冲突）。
      */
     private fun offerHdDownload(noteId: String, t0: Long, streams: List<VideoCandidate>, module: XposedModule) {
         // 候选集（2026-10-15 基准切换）：全部逐 URL 候选，选档在 pickBestAndDownload
@@ -786,6 +800,15 @@ object XhsVideoSave {
         if (streams.isEmpty()) {
             // 仪表：发起已到但无候选（点击轨 = 分享链接解析失败；save 响应轨 = 候选来源已删）
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 候选空 noteId=$noteId（分享链接解析未产候选），跳过")
+            return
+        }
+
+        // 双轨幂等闸（2026-10-19 17:45 双卡实证）：同一次保存里 save 响应轨与 a59.q 点击轨同单
+        // 都 resolveByShareLink → 本入口，先到者弹卡、后到轨窗口内跳过。仅防同单双轨叠加——
+        // 不同笔记不受影响，连续重存同笔记 10s 外照常弹（2026-10-19 用户拍板删 5min dedupe，语义不变）。
+        // 先读后写：写入只在下方真正弹卡处，闸命中 return 不写，不自吞。
+        if (noteId == lastAskNoteId && System.currentTimeMillis() - lastAskAtMs < ASK_DEDUPE_MS) {
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 重复轨跳过 noteId=$noteId（ASK_DEDUPE_MS=${ASK_DEDUPE_MS} 窗口内已弹卡）")
             return
         }
 
@@ -799,8 +822,10 @@ object XhsVideoSave {
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX HD询问 noteId=$noteId 候选 ${streams.size} 个")
         // 确定性让位：X4 卡后弹 ⇒ 主动关掉 X5 的「已保存本视频」反馈卡，不依赖时序（2026-10-15）
         XhsBatchSave.dismissVideoFeedbackCard()
-        // 记本轮弹卡时刻（真正要弹才写：上面各 early-return 分支都不算）——X5 反馈卡快路径判据，见 askShownAfter
+        // 记本轮弹卡时刻+所属笔记（真正要弹才写：上面各 early-return 分支含幂等闸命中都不算）
+        // ——时刻 = X5 反馈卡快路径判据（askShownAfter），笔记 id = 双轨幂等闸判据
         lastAskAtMs = System.currentTimeMillis()
+        lastAskNoteId = noteId
         showAskDialog(noteId, streams, app, t0, module)
     }
 
