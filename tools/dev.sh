@@ -172,6 +172,8 @@ HonorHook 开发工具
   grep-log <正则>   按正则过滤当前 logcat 缓冲
   grep-logd <正则>  按正则过滤全 buffer（-b all）
   modlog [tag] [行数]   LSPosed 框架日志中匹配 tag 的最后 N 行（默认 HonorHook / 60）
+  modlog-grep <pattern> [行数]   模式查最新 lspd 模块日志（当天日志可能在旧日期文件里——ls -t 取正在写的）
+  xhs-judge               小红书保存链路判据三件套（模块日志 + MediaStore 近5min + 落盘目录）
   lspd-log         LSPosed 框架日志目录与最近内容（模块未被加载时先看这里）
   crash            抓取崩溃堆栈（一次性 dump，不阻塞）
   logcrash         读崩溃缓冲区（-b crash）头部
@@ -692,6 +694,44 @@ EOF
     lines="${3:-60}"
     info "LSPosed 框架日志（模块 log 输出落点）中匹配 $pat 的最后 $lines 行"
     "$ADB" shell su -c "grep -h '$pat' /data/adb/lspd/log/modules_*.log 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$lines" || true
+    ;;
+
+  modlog-grep)
+    # 模式查最新 lspd 模块日志：日志按 lspd 启动时刻轮转命名，当天日志可能追加在旧日期文件里
+    # ——按当天日期 glob 假阴性，ls -t 取正在写的文件（2026-10-19 真机实证）。
+    PAT="${2:-}"
+    [ -n "$PAT" ] || die "用法: tools/dev.sh modlog-grep <pattern> [行数]"
+    # 防注入（沿用 modlog-f 思路，放宽中文/竖线）：分号/反引号/\$(/引号黑名单，含即拒
+    case "$PAT" in
+      *';'*|*'`'*|*'$('*|*'"'*|*"'"*) die "pattern 禁含 ; 反引号 \$( 引号（防注入；中文与 | 允许）" ;;
+    esac
+    N="${3:-40}"
+    [[ "$N" =~ ^[0-9]+$ ]] || die "行数须为正整数: $N"
+    require "$ADB"
+    F="$("$ADB" shell "su 0 ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
+    [ -n "$F" ] || die "未取到 lspd 模块日志文件（设备未连 / su 不可用）"
+    info "最新日志文件: $F"
+    "$ADB" shell "su 0 grep -h -- '$PAT' \"$F\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$N" || true
+    ;;
+
+  xhs-judge)
+    # 小红书保存链路判据三件套一次性收集（2026-10-19 真机排查沉淀）；任一段失败不中断
+    require "$ADB"
+    F="$("$ADB" shell "su 0 ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
+    echo "== 模块判据（XhsHook 最近 80 行）=="
+    if [ -n "$F" ]; then
+      "$ADB" shell "su 0 grep -h XhsHook \"$F\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -80 || true
+    else
+      warn "未取到 lspd 模块日志（设备未连 / su 不可用）"
+    fi
+    echo "== MediaStore 近 5 分钟新增（images + video）=="
+    # \$(( \$(date +%s) )) 故意留给设备端展开：本机与设备时钟可能不同步（adb shell 内层 $() 须转义）
+    "$ADB" shell "content query --uri content://media/external/images/media --projection _display_name:_data:date_added --where \"date_added > \$(( \$(date +%s) - 300 ))\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -15 || true
+    "$ADB" shell "content query --uri content://media/external/video/media --projection _display_name:_data:date_added --where \"date_added > \$(( \$(date +%s) - 300 ))\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -15 || true
+    echo "== 落盘目录清单（小红书 Pictures/Movies + DCIM 近 10min）=="
+    "$ADB" shell "ls -t /sdcard/Pictures/小红书/ /sdcard/Movies/小红书/ 2>/dev/null | head -12" 2>&1 | tr -d '\r' || true
+    "$ADB" shell "find /sdcard/DCIM -name '*xhs*' -mmin -10 2>/dev/null" 2>&1 | tr -d '\r' || true
+    info "判据键：HD询问/接管/回落/HD直下完成/已删低画质"
     ;;
 
   grep-log)
