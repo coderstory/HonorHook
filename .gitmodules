@@ -1,33 +1,6 @@
-[submodule "reference/HonorMarketTamer"]
-	path = reference/HonorMarketTamer
-	url = https://github.com/mengwuzhuanshou/HonorMarketTamer.git
-[submodule "reference/HonorInstallerPurify"]
-	path = reference/HonorInstallerPurify
-	url = https://github.com/VoreulCH/HonorInstallerPurify.git
-[submodule "reference/HonorLiquidGlassRestore"]
-	path = reference/HonorLiquidGlassRestore
-	url = https://github.com/VoreulCH/HonorLiquidGlassRestore.git
-[submodule "reference/AI-lsposed-temlate"]
-	path = reference/AI-lsposed-temlate
-	url = https://github.com/bujianxingyun/AI-lsposed-temlate
-[submodule "reference/skills"]
-	path = reference/skills
-	url = https://github.com/android/skills
-[submodule "reference/HyperChanger（同类插件）"]
-	path = reference/HyperChanger（同类插件）
-	url = https://github.com/ColdP/HyperChanger
-[submodule "reference/LSPFRIDA（同类插件）"]
-	path = reference/LSPFRIDA（同类插件）
-	url = https://github.com/wzxwhxcz/LSPFRIDA
 [submodule "reference/LSPosed（框架源码）"]
 	path = reference/LSPosed（框架源码）
 	url = https://github.com/LSPosed/LSPosed
-[submodule "reference/fanqie-purify（AI开发插件实践）"]
-	path = reference/fanqie-purify（AI开发插件实践）
-	url = https://github.com/guoxpeng/fanqie-purify
-[submodule "reference/notification-guard（同类插件）"]
-	path = reference/notification-guard（同类插件）
-	url = https://github.com/SlightNekoQAQ/notification-guard
 [submodule "reference/xhs/XHS_Downloader_Android"]
 	path = reference/xhs/XHS_Downloader_Android
 	url = https://github.com/NEORUAA/XHS_Downloader_Android
