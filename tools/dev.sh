@@ -159,6 +159,7 @@ HonorHook 开发工具
   build-release    编译 release APK（混淆+收缩）
   install          安装 debug APK 到已连接设备（-r 覆盖；自动点 ROM 安装确认弹窗）
   install-release  安装 release APK
+  install-apk <apk...>    安装任意 APK 文件（-r 覆盖保数据，自动点 ROM 安装弹窗）
   enable-module    重装后重新启用 LSPosed 模块（lspctl CLI 通道，含作用域进程强停）
   deploy-release   一键全流程：build-release + install-release + enable-module
   connect <ip[:port]> 无线 adb 连接（省端口默认 5555）
@@ -371,6 +372,35 @@ EOF
     [ "$rc" -eq 0 ] || exit "$rc"
     info "校验已安装包版本："
     "$ADB" shell dumpsys package io.github.coderstory.honorhook 2>/dev/null | tr -d '\r' | grep -m1 versionName || true
+    ;;
+
+  install-apk)
+    # 装任意 APK 文件（第三方 app 更新/新装）：-r 覆盖保数据——模块本体的「先卸载」约定不适用。
+    # 复用 ROM 安装确认弹窗代点（tap_install_confirm）。用法: install-apk <apk...>
+    require "$ADB"
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh install-apk <apk 路径...>"
+    shift
+    for apk_path in "$@"; do
+      [ -f "$apk_path" ] || { warn "文件不存在，跳过: $apk_path"; continue; }
+      info "安装: $(basename "$apk_path")"
+      PARSER="$(pick_python || true)"
+      TAPPER=""
+      if [ -n "$PARSER" ]; then
+        tap_install_confirm "$PARSER" 60 &
+        TAPPER=$!
+      fi
+      rc=0
+      "$ADB" install -r "$apk_path" | tr -d '\r' || rc=$?
+      if [ -n "$TAPPER" ]; then
+        kill "$TAPPER" 2>/dev/null || true
+        wait "$TAPPER" 2>/dev/null || true
+      fi
+      if [ "$rc" -eq 0 ]; then
+        info "OK: $(basename "$apk_path")"
+      else
+        warn "失败(rc=$rc): $(basename "$apk_path")"
+      fi
+    done
     ;;
 
   install-release)
