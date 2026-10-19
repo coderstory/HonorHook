@@ -22,6 +22,8 @@
 | 图片保存权限门（未挂，候选⑤） | `nd8.i#g`（:232，jadx 失败体） | `ib2.q.a.a()` 条件 + `ib2.m.f(...)`（权限申请 helper，hx8/m.java:360 同签名实证） | classes6 | 9.50 |
 | 笔记级面板门（X1c 同族） | `ji9.e` / `ji9.g` | `"DownloadLinkerProvider", "enable: type="`（ji9/g.java:70） | classes7 | 9.50 |
 | 视频落盘收口（未挂，V-5 清理锚） | `idc.w`（:730-760 区域） | 宿主视频 MediaStore insert 收口，三处调用 `r01/p.java:27` 等 | classes2 | 9.49.1 定位 |
+| 视频落盘拷贝断根 | `xec.w#h0` + `xec.w#e0`（未混淆 public final 公共工具，直连挂无 DexHint） | 无需串锚（未混淆跨版本稳，w.java:730/619 签名实证）；调方留档：`w.h0(file, DCIM, "Camera/"+name, false, "video/mp4")`（b75/n.java:35）、`w.e0(file, DCIM, "Camera/"+name, "video/mp4")`（fs2/b.java:51；e0 内部委托 h0 w.java:621） | xec.w 本体 dex 未记；调方 classes2（b75/n）/ classes20（fs2/b） | 9.50 |
+| 短链生成（分享链接单链） | `u2c.y`（ShareService 实现内） | `"getShortUrlObservableIfNeed success"`（u2c/y.java:70）；服务定位反射 `i3c.d` → `ShareService.getShortUrl` | 未记（运行时反射定位，类名经 `i3c.d` 服务表取） | 9.50 |
 
 ## 已知非挂载但关键的宿主结构（业务图谱见 xhs.md §九）
 

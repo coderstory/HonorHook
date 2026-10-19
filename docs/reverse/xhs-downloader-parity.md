@@ -1,5 +1,11 @@
 # XHS_Downloader_Android（基准）业务逻辑全景 × 插件 xhs 系列对照
 
+> **销账（2026-10-19）**：基准已 vendored 为 submodule（`XHS_Downloader_Android` 1.4.1，7 件
+> byte-identical 进 `app/app/src/main/kotlin/com/neoruaa/xhsdn/`，零修改可直接同步上游）。
+> 插件侧取数链 = 本文档 §1.1 路径 A（短链 302 → __INITIAL_STATE__ → ResolvedNote），实况图集
+> livePhotos.image 静帧合并按用户拍板（livePhoto 只下静态图）。选档/下载语义 100% 对齐基准，
+> 本文全景分析留作维护参考，现行架构 = **`xhs-save-masterplan.md`**。
+>
 > 2026-10-15。基准 = `reference/xhs/XHS_Downloader_Android`（Kotlin 安卓版小红书下载器，**唯一抄写基准**）。
 > 插件 = 本模块 `app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/`（X1–X5）。
 > 路径缩写：`B/` = 基准 `app/src/main/java/com/neoruaa/xhsdn/`；`P/` = 插件 xhs 目录。

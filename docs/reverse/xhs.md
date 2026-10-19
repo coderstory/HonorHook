@@ -156,9 +156,9 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 ## 四、注册与开关
 
 - 新 TargetHook：`XhsHook`（`com.xingin.xhs`）注册 TargetRegistry；scope.list 加 `com.xingin.xhs`
-- FeatureCatalog：Target(baselineVersion = "9.49.1") + 5 Feature：
-  `xhs.save_unlock` / `xhs.no_watermark` / `xhs.hd_save` / `xhs.video_save` / `xhs.batch_save`
-- 判据：modlog-f XhsHook —— `XhsHook·U-X: installed N/M` 汇总 + 各生效行（保存解锁/水印/替换 url/视频改写/批量）
+- FeatureCatalog（2026-10-19 22:56 用户拍板收敛，仅两开关）：Target(baselineVersion = "9.50.0") + 2 Feature：
+  `xhs.save_unlock`（去掉下载限制）/ `xhs.takeover_save`（接管下载 = X2 去水印 + X4 换链 + X5 图片接管 + 落盘闸）
+- 判据：modlog-grep XhsHook —— `installed N/M` 汇总 + 各生效行（见 `xhs-save-masterplan.md` §五）
 
 ## 五、与 savefix 1.2.3 的差异清单
 
@@ -292,51 +292,40 @@ h1()→b1()、U1()→S1()；**短包名身份跨版本不可信，选点必须�
 出「已接管图片保存，图集 N 张」judge 行 + 面板被关 + 询问/直下；视频保存出「视频保存完成，弹反馈卡」
 judge 行（9.50.0 现版本两点都出不来）。
 
-## 九、保存业务图谱（2026-10-19 全场景真机实证）
+## 九、保存业务图谱（2026-10-19 22:50 终态，v2 换链架构）
 
-> 来源：dbg 仪表日志 + 摘作用域对照实验 + MediaStore 取证（当日过程见 memory
-> `xhs-video-cache-save-blindspot`）。**只收代码读不出的运行时行为**；挂载点签名见 §八。
+> 完整方案（入口矩阵/数据流/失败矩阵/判据速查/终验清单）= **`xhs-save-masterplan.md`**（唯一事实源）。
+> 本节只留代码读不出的运行时实证与历史结论。
 
-### 9.1 用户入口矩阵（图片/视频 × 3 入口）
+### 9.1 用户入口矩阵（现行）
 
-| # | 用户操作 | 宿主流 | 模块点 | 实证行为（2026-10-19 本机） |
+| # | 用户操作 | 宿主流 | 模块点 | 实证（2026-10-19） |
 |---|---|---|---|---|
-| V1 | 视频笔记 分享面板→保存 | 见 9.2 三路 | `a59.q` invoke + save 响应双触发 | ✅ 修复后全绿（13:43：18316KB 原片换 1219KB 720p） |
-| I1 | 图集笔记 **ji9.b 路径**（分享面板/长按，待 findings 定位具体 UI） | 宿主单张保存 | `ji9.b` 全接管 | ✅ 12:05「追加询问 6 张」+ 12:25 `Pictures/小红书/xhs_*.heic` 落盘 |
-| I2 | **笔记视图**长按图片→面板「保存」 | 宿主批量保存「已保存 1/4→4/4」 | ❌ ji9.b 不触发 | ❌ 假成功：4/4 toast + MediaStore 零文件 |
-| I3 | **大图浏览器**长按→「保存图片」 | 宿主单图保存 toast | ❌ ji9.b 不触发 | ❌ 假成功：toast + 零文件；同笔记二次保存按钮直接隐藏（已保存态） |
+| V1 | 视频保存（任意入口） | save API（路①）或缓存直拷（②）/已存短路（③） | X4 Interceptor 换链（①）+ w.h0/e0 落盘闸兜 ②③ | ✅ 22:50 拒绝路全绿（16.8MB 原片）；换链主路待验 |
+| I1 | 图集笔记长按面板「保存」 | 宿主单张压缩图 | `ji9.b` 全接管 | ✅ 22:39 图8 `外挂直下完成 8/8` |
+| I2/I3 | 笔记视图长按 / 大图浏览器 | 宿主管道本机静默失败 | 无挂载点 | ❌ 明示边界（masterplan §七） |
 
-### 9.2 视频保存三路（宿主侧，决定模块可见性）
+### 9.2 视频保存三路（宿主侧 → 模块对策）
 
-| 路 | 触发条件 | `/note/video/save` 请求 | 落盘 | X4 既单触发 | a59.q 触发（修复后） |
-|---|---|---|---|---|---|
-| ① 网络 API | 笔记未缓存（首存） | 有 v10 | DCIM `Camera_xhs_*.mp4`（转码 720p） | ✅ | ✅ |
-| ② 缓存直拷 | 播放过的笔记 | **无** | 同上（逐次新文件，md5 同） | ❌ 全盲 | ✅ |
-| ③ 已存短路 | 短时间内重复保存 | 无 | **不写**，仅 toast | ❌ | ✅（dedupe 5min 内第二单起静默，V-6 设计） |
+| 路 | 触发 | save 请求 | 对策 |
+|---|---|---|---|
+| ① 网络 API | 首存 | 有 v10 | X4 换链 download_url → 宿主自下原片（C 方案） |
+| ② 缓存直拷 | 播放过 | 无 | 落盘闸断 720p（≤8MB 四判据）+ HD 卡（a59.q 轨留档） |
+| ③ 已存短路 | 短时重复 | 无 | 同 ②；toast 照旧（无文件动作） |
 
-### 9.3 数据源图谱（端点 → 采集器 → 内存表 → 消费方）
+作者关闭下载（服务端 disable）：拒绝体 `{"result":0,"success":true,"msg":"","data":{"msg":"…","disable":true}}`
+——**保留 disable 只清 data.msg**（toast 消失）+ HD 卡直下原片。**禁伪造 success/disable 语义**
+（21:22、22:47 两轮假成功体均致宿主 fallback 自下载 = 双下载，反例档案见 masterplan §四）。
+
+### 9.3 数据流（现行，采集器已全删）
 
 ```
-edith…/api/sns/v1/note/detailfeed/preload ──→ harvestNoteImages（images_list 区段+护栏）──→ noteImages[noteId] ──→ X5 图片接管（I1）
-edith…/api/sns/v1/note/imagefeed          ──→ 同上（进图浏览必发；**历史/缓存进入不发**）  ↗
-rec…/api/sns/v4/note/videofeed            ──→ harvestVideoSources（video_info_v2→master_url 候选）──→ videoSources[noteId] ──→ HD 询问选档
-    · fetch_mode=0=进笔记，=1=保存后推荐流；响应首块（本笔记）noteId lookback miss ⇒ 回落 URL note_id（2026-10-19 修）
-edith…/api/sns/v10/note/video/save        ──→ patchVideoSaveResponse（disable:true→false）+ HD 触发（旧轨）
-xiaohongshu.com 网页 __INITIAL_STATE__     ──→ resolveOriginVideoUrl（originVideoKey→原片置顶候选）
-share_info.link / xsec_token（feed 响应） ──→ noteShares[noteId] ──→ 网页原片解析入参
+保存点击 ─→ noteId（X5 findFeedAndNoteId 多根+Lazy 解包）
+        ─→ shareLinkOf(noteShares 长链) → ShareService.getShortUrl → 短链
+        ─→ 302 展开（xsec_token 自带）→ vendored 下载器 parse → ResolvedNote
+        ─→ 视频: interceptVideoSave 换链 / HD 卡直下（Movies/小红书，同名覆盖）
+        ─→ 图片: downloadAll 原图+livePhotos 静帧（Pictures/小红书）
 ```
 
-### 9.4 失败/盲区总表（全部真机实证）
-
-| 现象 | 根因 | 状态 |
-|---|---|---|
-| 看过的视频保存只出 720p | 路②③无 save 请求，旧触发器挂响应上 | ✅ 已修（触发搬 a59.q + NoteFeed 反射 u0() 24hex 门） |
-| I2/I3 入口图片零产出 | 入口绕开 ji9.b；宿主原生管道本机静默失败 | ❌ 待 findings-x5img 定新触发点 |
-| hostile 图集「保存」4/4 假成功 | X1 解锁按钮，服务端剥离直链，宿主管道静默失败 | ❌ 同上（宿主侧无法救，模块接管才有解） |
-| 历史进入图集采不到 | imagefeed 不发 | ❌ 待数据源补口 |
-| videofeed 首块归属 miss | lookback 窗口内无 note_id | ✅ 已修（回落 URL note_id） |
-| AIGC preload 无 video_info_v2 | 载荷形态（非主因，videofeed 有货） | 观察项 |
-
-### 9.5 待补（findings-x5img.md 回填）
-宿主批量保存流内部链（handler→下载编排→MediaStore 收口→成败判定）、I2/I3 真实 handler、
-nd8.i.i 在新流调用形态、imagefeed 替代数据源。
+旧采集器（noteImages/videoSources/harvest*/imagefeed/videofeed 图谱）已随基准切换删除——
+解析单一事实源 = 分享链接，不再依赖宿主 feed 端点形态。历史设计见 git log 4e01b33^。

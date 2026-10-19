@@ -1,5 +1,10 @@
 # 小红书（com.xingin.xhs）版本兼容性与维护成本
 
+> **销账（2026-10-19 22:50）**：基线已上移 **9.50.0**（§四 9.49.1 记录为历史）；X3 已删（采集器随
+> 分享链接基准切换拆除）；X4 现职责 = save 响应换链 + 拒绝清 msg（`interceptVideoSave`）；新增最稳层
+> w.h0/e0 落盘闸（未混淆，四判据含 8MB 豁免）。重定位手段现行表 = **`xhs-save-masterplan.md` §五·
+> 版本迭代维护手册**——本文分层/概率分析留作方法论，点清单以 masterplan 为准。
+>
 > 维护导向文档：回答「宿主 OTA / 服务端改动后哪些点会碎、怎么重定位、要花多少工」。
 > 事实源：代码 `app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/*.kt` + `docs/reverse/xhs.md` +
 > `docs/reverse/xhs-hd-fix-plan.md` + `docs/hook-craft.md` + `CLAUDE.md`「跨版本兼容（hook 选点原则）」。
