@@ -103,3 +103,17 @@ N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**
 | UI 页面 / 开关项 | `ui/screen/` |
 | 逆向记录 | `docs/reverse/<app>.md` |
 | 设备操作 | `tools/dev.sh` 新增子命令 |
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on `coderstory/HonorHook`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.
