@@ -838,14 +838,6 @@ object XhsVideoSave {
 
     // ---- 外挂高清直下（X4 内置，零新挂点；save 响应每次必经本拦截）----
 
-    /**
-     * HD 直下去重（noteId → 上次发起时刻 ms；同 note 5 分钟内不重复发起——save API 每次保存重试 3-4 次）。
-     * A1 起叠加**文件持久化**：宿主进程被系统回收/重注入后进程内表丢失 ⇒ 同一笔记重复弹询问卡
-     * （真机实证 E11：11 分钟内弹 5 次）。表落宿主 Application filesDir，落盘走 [ioExecutor] 异步，
-     * okhttp 拦截线程绝不碰磁盘。
-     */
-    private val hdDedupe = ConcurrentHashMap<String, Long>()
-    private const val HD_DEDUPE_MS = 5 * 60_000L
     private const val MAX_VIDEO_BYTES = 500L * 1024 * 1024
 
     /**
@@ -868,11 +860,7 @@ object XhsVideoSave {
     private const val HD_RESUME_MAX_RETRY = 3
     private const val HD_RESUME_BACKOFF_BASE_MS = 1_000L
 
-    /** A1 持久化文件（宿主私有目录；每行 `noteId<TAB>epochMillis`）；上限 200 条，超窗口/超限的行写入时自然裁掉。 */
-    private const val HD_DEDUPE_FILE = "xhs_hd_dedupe.tsv"
-    private const val HD_DEDUPE_MAX = 200
-
-    /** X4 后台 IO 单线程（A1 去重表落盘 + A2 孤儿清理）：daemon，绝不占用 okhttp 拦截线程。 */
+    /** X4 后台 IO 单线程（A2 孤儿清理）：daemon，绝不占用 okhttp 拦截线程。 */
     private val ioExecutor by lazy {
         java.util.concurrent.Executors.newSingleThreadExecutor { r ->
             Thread(r, "HonorHook-xhs-io").apply { isDaemon = true }
@@ -880,81 +868,12 @@ object XhsVideoSave {
     }
 
     /**
-     * 延时收尾线程（2026-10-15，缺陷③）：低画质兜底二删排在 5 秒后。**独立于 [ioExecutor]**——那里
-     * 还排队着去重表落盘，用一个 sleep 占住单线程 5 秒会连带把它压住。daemon，绝不阻塞下载收尾。
+     * 延时收尾线程（2026-10-15，缺陷③）：低画质兜底二删排在 5 秒后。**独立于 [ioExecutor]**——
+     * 各走各的单线程，兜底清理不与孤儿清理互压。daemon，绝不阻塞下载收尾。
      */
     private val delayedExecutor by lazy {
         java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "HonorHook-xhs-delayed").apply { isDaemon = true }
-        }
-    }
-
-    /** A1 惰性加载守卫（首次用到时读一次盘并合并进内存表 [hdDedupe]）。 */
-    private val hdDedupeLoaded = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    /** 宿主 Application（filesDir / ContentResolver 载体）。ActivityThread.currentApplication 是唯一横切入口。 */
-    private fun currentApplication(): android.app.Application? = runCatching {
-        val loader = hostLoader
-        val cls = if (loader != null) Class.forName("android.app.ActivityThread", false, loader)
-        else Class.forName("android.app.ActivityThread")
-        cls.getMethod("currentApplication").invoke(null) as? android.app.Application
-    }.getOrNull()
-
-    /**
-     * A1：首次用到去重表时惰性读盘一次，把持久化条目合并进内存表（进程内已有的值更新，不被盘上旧值覆盖）。
-     * 只在 okhttp 拦截线程调用 ⇒ 这是本链路唯一的同步 IO，代价是一次 ≤200 行的小文件读；任何失败
-     * 只打一行 WARN 并退回纯内存行为，绝不抛、绝不阻塞。
-     */
-    private fun ensureHdDedupeLoaded(module: XposedModule) {
-        if (!hdDedupeLoaded.compareAndSet(false, true)) return
-        val now = System.currentTimeMillis()
-        val text = runCatching {
-            val dir = currentApplication()?.filesDir ?: return
-            val f = java.io.File(dir, HD_DEDUPE_FILE)
-            if (!f.isFile) return
-            f.readText()
-        }.getOrElse {
-            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重表读取失败（退回纯内存）: ${it.message}")
-            return
-        }
-        var loaded = 0
-        for (line in text.lineSequence()) {
-            val tab = line.indexOf('\t')
-            if (tab <= 0) continue
-            val id = line.substring(0, tab).trim()
-            val ts = line.substring(tab + 1).trim().toLongOrNull() ?: continue
-            if (id.isEmpty() || now - ts >= HD_DEDUPE_MS) continue   // 超窗口行丢弃，下次写入时从盘上清掉
-            if ((hdDedupe[id] ?: 0L) < ts) hdDedupe[id] = ts
-            loaded++
-        }
-        if (loaded > 0) {
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重表已加载 $loaded 条（跨进程去重生效）")
-        }
-    }
-
-    /**
-     * A1：内存表变更后异步落盘（全量重写 ≤200 行的小文件，代价可忽略）。
-     * 快照在调用线程算（表小），写盘在 [ioExecutor] —— 失败只 WARN，绝不抛、绝不阻塞拦截线程。
-     */
-    private fun persistHdDedupe(module: XposedModule) {
-        val now = System.currentTimeMillis()
-        val rows = hdDedupe.entries
-            .filter { now - it.value < HD_DEDUPE_MS }
-            .sortedByDescending { it.value }
-            .take(HD_DEDUPE_MAX)
-        runCatching {
-            ioExecutor.execute {
-                runCatching {
-                    val dir = currentApplication()?.filesDir ?: return@runCatching
-                    val sb = StringBuilder(rows.size * 24)
-                    for (e in rows) sb.append(e.key).append('\t').append(e.value).append('\n')
-                    java.io.File(dir, HD_DEDUPE_FILE).writeText(sb.toString())
-                }.onFailure {
-                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重表写入失败（仅内存生效）: ${it.message}")
-                }
-            }
-        }.onFailure {
-            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重表落盘调度失败: ${it.message}")
         }
     }
 
@@ -1228,20 +1147,10 @@ object XhsVideoSave {
      * HD 询问卡唯一入口（2026-10-19 自 [scheduleHdVideoDownload] 抽取）：save 响应轨（仅覆盖网络
      * `/note/video/save` 这条路）+ X5 视频保存点击轨（XhsBatchSave a59.q invoke——覆盖播放缓存直拷、
      * 已存在短路两条不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿
-     * 720p）。流程：dedupe 检查 → 写入 → 采集候选 → Application → 关 X5 反馈卡 → 弹询问卡；
-     * 三条 early-return 均有仪表日志。
+     * 720p）。流程：采集候选 → Application → 关 X5 反馈卡 → 弹询问卡；V-6 同笔记防骚扰去重已删
+     * （2026-10-19 用户拍板），每次保存有候选即弹；两条 early-return 均有仪表日志。
      */
     fun offerHdDownload(noteId: String, t0: Long, module: XposedModule) {
-        ensureHdDedupeLoaded(module)   // A1：首次用到时读盘合并（跨进程去重；读失败退回纯内存）
-        val last = hdDedupe[noteId] ?: 0L
-        if (t0 - last < HD_DEDUPE_MS) {
-            // 仪表（2026-10-19 排查期引入）：同 note 去重窗口内重复发起
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX dedupe命中 noteId=$noteId 距上次${t0 - last}ms")
-            return   // V-6：命中即连询问卡都不弹
-        }
-        hdDedupe[noteId] = t0
-        persistHdDedupe(module)        // A1：变更后异步落盘，绝不阻塞本拦截线程
-
         // 候选集（2026-10-15 基准切换）：采集链全部逐 URL 候选，选档在 pickBestAndDownload
         // （逐语义移植 XHS_Downloader_Android NoteOutput.kt:47-56——响应 download_url 不参与选档）
         val streams = videoSources[noteId]?.candidates ?: emptyList()
@@ -1328,11 +1237,6 @@ object XhsVideoSave {
                     showProgressDialog()
                     Thread({
                         runCatching { pickBestAndDownload(app, noteId, streams, t0, module) }
-                            // V-6：HD 下载成功后再写一次去重锚，避免同 note 短时间反复弹卡（E11）
-                            .onSuccess {
-                                hdDedupe[noteId] = System.currentTimeMillis()
-                                persistHdDedupe(module)   // A1：成功锚同样落盘
-                            }
                             .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下失败 noteId=$noteId: ${it.message}") }
                         hdActive = false
                         dismissProgress()
