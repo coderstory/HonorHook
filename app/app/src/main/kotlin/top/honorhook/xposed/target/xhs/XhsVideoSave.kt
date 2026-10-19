@@ -12,12 +12,20 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 
 /**
- * X4 视频直链（引擎 XhsHook·X4）：`/api/sns/v10/note/video/save` 响应改写 + HD 外挂直下。
+ * X4 视频直链（引擎 XhsHook·X4）：`/api/sns/v10/note/video/save` **请求级短路**（假 200，宿主零下载）+ HD 外挂直下。
  *
  * 挂载点 `okhttp3.OkHttpClient$Builder.build()`（公开库 API，okhttp3 未 shade——dex 串池实证）。
  * before 反射读 `interceptors` 字段（okhttp 公开源码字段名，跨版稳定）注入动态代理 Interceptor。
  * okhttp3 不在编译期 classpath（compileOnly 仅供 vendored 件编译，运行期反射走宿主 loader），
  * 请求/响应全走反射调用。
+ *
+ * **2026-10-19 C 方案：劫持宿主下载器**（用户拍板「少一次下载」）：url 含 `/note/video/save` →
+ * 同步解析分享链接（okhttp 线程阻塞 3-8s，宿主 UI 转圈属预期）→ proceed 真请求 → 响应
+ * `download_url` 替换为原片 URL → 宿主自己下载**原片**（它消费这字段）——一次下载、零弹卡、零假
+ * 响应（[interceptVideoSave]）。依据：a59.q 点击轨本机三天日志零记录（不触发），拦截只能在请求级做；
+ * 短路假响应方案 21:22 实测失败（假成功反而放行宿主本地拷贝 720p + 宿主 fallback 自下载）→ 本方案取代。
+ * 换链失败（解析 null/无候选/无字段/rebuild 失败）= proceed 原响应放行宿主下 720p（降级，可接受）+
+ * 失败卡或静默（拉黑命中静默）；落盘断根由 w.h0/e0 过滤（>8MB 原片豁免）双保险（XhsBatchSave.mountAlbumSink）。
  *
  * 逻辑移植自 savefix XhsSaveFix.java（system-files/xhssavefix-jadx）+ 升级（doc §五）：
  *   - url 含 `/note/video/save` 且 body 含 `"disable"` → disable:false + status:2（解锁语义，
@@ -30,7 +38,8 @@ import java.util.regex.Pattern
  * **2026-10-19 X5 重构**：video_info_v2/图集/分享三路**旁路采集**（harvestVideoSources /
  * harvestStreams / harvestNoteImages 及其全部正则与缓存表）随「保存按钮 hook → 分享链接 →
  * vendored 下载器管线」定案删除——视频候选只来自 X5 点击轨的分享链接解析（XhsSavePivot →
- * [offerHdDownloadFromNote]），本类只留 [harvestNoteShare]（share_info 缓存，XhsSavePivot 链接轨①）。
+ * [offerHdDownloadFromNote]），本类只留 [harvestNoteShare]（share_info 缓存，XhsSavePivot 单链输入
+ * [shareLinkOf]）。
  *
  * 防重：同一 Builder 实例不重复注入（interceptors.contains 判代理身份）。
  * 失败分级：FAILED（okhttp 缺失说明目标结构大改，重试无意义）。
@@ -80,11 +89,18 @@ object XhsVideoSave {
      * 只在**移动版网页** `www.xiaohongshu.com/discovery/item/{id}` 的 `__INITIAL_STATE__` 里（camelCase
      * `originVideoKey`）；取该页须带 fresh xsec_token——桌面 UA 抓同一页没有，且 `xsec_source=pc_feed`
      * 会 302 到登录页（须 `app_share`）。link 是 app 侧已拼好的整条 URL（含 token），优先原样用。
-     * 2026-10-19 起消费方 = XhsSavePivot（链接接轨①）+ [pickBestAndDownload]（原片解析入参）。
+     * 2026-10-19 起消费方 = XhsSavePivot（单链 [shareLinkOf]）+ [pickBestAndDownload]（原片解析入参）。
      */
     internal class NoteShare(val link: String?, val token: String?)
 
     internal val noteShares = ConcurrentHashMap<String, NoteShare>()
+
+    /**
+     * noteShares 查表返回 share_info 长链原文（XhsSavePivot 单链第 1 步输入）。无记录或仅 token 形态
+     * （link == null）= null，不重拼 token——getShortUrl 短链 302 展开自带 fresh xsec_token
+     * （2026-10-19 本地实证）。
+     */
+    internal fun shareLinkOf(noteId: String): String? = noteShares[noteId]?.link
 
     /**
      * share_info.link（例：`https://www.xiaohongshu.com/discovery/item/<id>?…&xsec_source=app_share&xsec_token=…`）。
@@ -145,7 +161,7 @@ object XhsVideoSave {
                 paramCount = 0,
                 returnType = "okhttp3.OkHttpClient",
                 id = "xhs:videoSave.okhttpBuilder.build",
-                description = "X4 视频直链·OkHttpClient\$Builder.build() 注入 Interceptor 动态代理（采集 origin_video_key/master_url + 改写 /note/video/save 响应）",
+                description = "X4 视频直链·OkHttpClient\$Builder.build() 注入 Interceptor 动态代理（/note/video/save 请求级短路假 200 宿主零下载 + share_info 旁路采集 + 回落改写）",
             ),
         )
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
@@ -190,11 +206,24 @@ object XhsVideoSave {
                     val chain = args?.firstOrNull()
                         ?: throw IllegalArgumentException("intercept chain null")
                     val request = chain.callMethod("request")
-                    val response = chain.callMethod("proceed", request)
-                    // 采集与改写任何异常都吞掉返回原响应（PROTECTIVE：绝不让视频直链炸宿主网络栈）
-                    runCatching { rewriteVideoSave(request, response, module) }
-                        .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 处理异常: ${it.message}") }
-                        .getOrNull() ?: response
+                    // 请求级短路（2026-10-19 用户拍板「干掉小红书下载逻辑」）：/note/video/save 不 proceed，
+                    // 假 200 响应返回 → 宿主零下载零落盘；构造失败（null）回落 proceed 原路（保底不炸宿主）。
+                    // a59.q 点击轨本机三天日志零记录（不触发），拦截只能在请求级做
+                    val reqUrl = runCatching { request?.callMethod("url")?.toString() }.getOrNull()
+                    val patched = if (reqUrl?.contains("/note/video/save") == true) {
+                        interceptVideoSave(chain, reqUrl, request, module)
+                    } else {
+                        null
+                    }
+                    if (patched != null) {
+                        patched
+                    } else {
+                        val response = chain.callMethod("proceed", request)
+                        // 采集与改写任何异常都吞掉返回原响应（PROTECTIVE：绝不让视频直链炸宿主网络栈）
+                        runCatching { rewriteVideoSave(request, response, module) }
+                            .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 处理异常: ${it.message}") }
+                            .getOrNull() ?: response
+                    }
                 }
                 "toString" -> INTERCEPTOR_TAG
                 "hashCode" -> System.identityHashCode(this)
@@ -204,9 +233,117 @@ object XhsVideoSave {
         }
     }
 
+    /** save 响应解析缓存（60s TTL）：宿主同单连发两次 save 请求，省一次全链解析。 */
+    @Volatile
+    private var resolveCache: HashMap<String, Pair<Long, ResolvedNote>> = HashMap()
+
+    private fun resolveCached(noteId: String, module: XposedModule): ResolvedNote? {
+        val cached = synchronized(resolveCache) {
+            resolveCache[noteId]?.takeIf { System.currentTimeMillis() - it.first < 60_000L }?.second
+        }
+        if (cached != null) return cached
+        val note = runCatching {
+            kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId: ${it.message}")
+        }.getOrNull()
+        if (note != null) synchronized(resolveCache) {
+            if (resolveCache.size > 16) resolveCache.clear()
+            resolveCache[noteId] = System.currentTimeMillis() to note
+        }
+        return note
+    }
+
+    /**
+     * save 请求换链（2026-10-19 C 方案，用户拍板「劫持宿主下载器」）：同步解析分享链接（本函数已在
+     * okhttp 工作线程，阻塞 3-8s 属预期，宿主 UI 转圈）→ proceed 真请求 → 响应 `download_url` 替换为
+     * 原片 URL → 宿主自己下载**原片**（它消费这字段）。全程一次下载、零弹卡、零假响应。
+     *
+     * 失败语义（都返回 proceed 原响应 = 宿主照下 720p 降级）：
+     * - noteId 缺失 / availableShareLink=false（拉黑，重试放行宿主）/ 解析 null → WARN 放行
+     * - 解析成功但无视频候选 / 响应无 download_url 字段 / rebuild 失败 → INFO 放行
+     * 拉黑命中不弹失败卡（失败卡只对「首次接管失败」语义）；放行宿主即「再次点击保存将使用系统保存」兑现。
+     *
+     * @return 换链后的 Response；null = 调用方 proceed 原路（rewriteVideoSave patch 分支照常解锁）。
+     */
+    private fun interceptVideoSave(chain: Any, url: String, request: Any?, module: XposedModule): Any? {
+        val noteId = queryParam(url, "note_id")
+        if (noteId == null) {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX save请求无note_id url=${url.take(140)}")
+            return null
+        }
+        if (XhsSavePivot.availableShareLink(noteId, module) == null) {
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 拉黑命中，放行宿主原生保存 noteId=$noteId")
+            return null
+        }
+        val note = resolveCached(noteId, module)
+        if (note == null) {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 分享链接解析失败 noteId=$noteId（放行宿主+失败卡）")
+            XhsBatchSave.showVideoParseFailCard(module)
+            return null
+        }
+        val best = note.videos.flatMap { video ->
+            video.candidates.map { c ->
+                VideoCandidate(
+                    url = c.url, width = c.width, height = c.height,
+                    bitrate = c.bitrate, size = c.size, codec = c.codec,
+                    watermarked = c.watermarked, original = c.original,
+                )
+            }
+        }.sortedWith(compareBy<VideoCandidate> { it.watermarked }
+            .thenByDescending { it.original }
+            .thenByDescending { it.width.toLong() * it.height }).firstOrNull()?.url
+        if (best.isNullOrBlank()) {
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 换链放弃：解析无视频候选 noteId=$noteId（放行宿主）")
+            return null
+        }
+        val response = chain.callMethod("proceed", request)
+        if (response == null) {
+            // okhttp proceed 实际必返 Response；防御 null 时回落调用方 proceed（不双 proceed 的代价更低）
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 换链异常：proceed 返回 null noteId=$noteId")
+            return null
+        }
+        val body = peekBodyString(response)
+        if (body == null || !body.contains("\"download_url\"")) {
+            // 宿主拒绝保存（作者关闭下载/风控）。22:47 dump 实证体形：
+            // {"result":0,"success":true,"msg":"","data":{"msg":"作者已关闭下载功能，可尝试其他分享方式","disable":true}}
+            // toast 文案 = data.msg 直显（串不在宿主资源里）。处置：**保留 disable:true 拒绝语义**
+            // （宿主拒绝路径零下载），只清 msg → 提示消失；弹 HD 卡让模块管线下原片（解析已成功，
+            // [offerHdDownloadFromNote]；同单二次 save 由 ASK_DEDUPE 幂等闸挡）。
+            // 22:47 反例（已回退）：整替假成功体（disable:false+status:2）令宿主当保存成功 → 走自己的
+            // fallback 下载+拷贝路 = 双下载（旧短路同款翻车）。rebuild 失败退原响应（toast 保留，无损）。
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX 换链放弃：save 响应无 download_url noteId=$noteId（宿主拒绝，清 msg+弹 HD 卡）")
+            offerHdDownloadFromNote(noteId, System.currentTimeMillis(), note, module)
+            val text = body ?: return response
+            val quiet = text.replace(Regex("\"msg\"\\s*:\\s*\"[^\"]*\""), "\"msg\":\"\"")
+            if (quiet == text) return response
+            return rebuildResponse(response, quiet) ?: response
+        }
+        val patched = body.replaceFirst(
+            Regex("\"download_url\"\\s*:\\s*\"[^\"]*\""),
+            "\"download_url\":\"$best\"",
+        )
+        if (patched == body) return response
+        val newResponse = rebuildResponse(response, patched)
+        if (newResponse == null) {
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 换链放弃：rebuild 失败（放行原响应）noteId=$noteId")
+            return response
+        }
+        module.log(Log.INFO, MountEngine.TAG,
+            "$JUDGE_PREFIX·X5 save 响应已换链为原片（宿主自下载，一次下载零弹卡）noteId=$noteId url=${best.take(120)}")
+        return newResponse
+    }
+
+    /** save 响应解析缓存常量区（换链链路见 [interceptVideoSave]）。 */
+
     /**
      * 入口分流：/note/video/save 改写响应（命中返回新 Response，未命中/异常返回 null = 原响应原样）；
-     * 其余 /api/sns/ 采集视频源（返回 null）。
+     * 其余 /api/sns/ 旁路采集 share_info 线索（返回 null）。
+     *
+     * **2026-10-19 请求级短路后**：save 分支仅假响应构造失败回落 proceed 时可达（请求被短路即无真
+     * 响应进来）——保留作回落保底（patchVideoSaveResponse 解锁 + scheduleHdVideoDownload 响应轨询问），
+     * 不删。
      */
     private fun rewriteVideoSave(request: Any?, response: Any?, module: XposedModule): Any? {
         if (request == null || response == null) return null
@@ -214,6 +351,7 @@ object XhsVideoSave {
         if (!url.contains("/api/sns/")) return null
         val body = peekBodyString(response) ?: return null
         if (url.contains("/note/video/save")) {
+            // 请求级短路后此分支仅「假响应构造失败回落原路」时可达（2026-10-19），保留作回落保底
             val patched = patchVideoSaveResponse(url, body, response, module)
             // 外挂直下（2026-10-14 用户定案）：客户端落盘的是播放缓存低码流、不消费响应 url——
             // 模块自己下高清（origin_video_key 优先，回落响应内 download_url），完成后删客户端低画质文件
@@ -763,6 +901,10 @@ object XhsVideoSave {
         }
     }
 
+    /**
+     * save 响应轨 HD 询问发起。C 方案换链（[interceptVideoSave]）后仅换链失败回落路可达（返回
+     * null → proceed 原路才有真响应）；换链主路的解析内联在 [interceptVideoSave]（[resolveCached] 缓存）。
+     */
     private fun scheduleHdVideoDownload(url: String, body: String, module: XposedModule) {
         val noteId = queryParam(url, "note_id") ?: run {
             // 仪表（2026-10-19 排查期引入）：save 响应无 note_id = URL 形态变化信号
@@ -794,6 +936,8 @@ object XhsVideoSave {
      * note = null 或无候选 ⇒ WARN 后回落（无梯子候选可退——采集已删，静默跳过）。
      * 2026-10-19「拦截默认」后点击轨两路都走本入口：拦截主路（链接可得，宿主保存已断，本卡 =
      * 用户唯一保存出口）+ 回落路（链接 miss，宿主已存 720p，本卡仍可换下原片）。
+     * C 方案换链（[interceptVideoSave]）后请求轨**不再入本入口**——换链成功 = 宿主自下原片，零弹卡；
+     * 仅换链失败回落路（save 响应轨真解析）与 X5 点击轨（缓存直拷/已存短路，不发 save 请求）入此。
      */
     fun offerHdDownloadFromNote(noteId: String, t0: Long, note: ResolvedNote?, module: XposedModule) {
         val streams = note?.videos?.flatMap { video ->
@@ -809,11 +953,12 @@ object XhsVideoSave {
     }
 
     /**
-     * HD 询问卡唯一入口：save 响应轨（scheduleHdVideoDownload → 后台线程分享链接解析 →
-     * [offerHdDownloadFromNote]，2026-10-19 17:34 起恢复真解析——曾降为恒空候选观测桩致
-     * 分享 sheet「保存到相册」入口永弹不出询问卡，用户实测实证）+
+     * HD 询问卡唯一入口（C 方案换链后**降级为回落出口**：换链成功 = 宿主自下原片零弹卡，本卡只剩
+     * 换链失败路）：save 响应轨回落路
+     * （scheduleHdVideoDownload → 后台线程分享链接解析 → [offerHdDownloadFromNote]——[interceptVideoSave]
+     * 返回 null → proceed 原路，2026-10-19 21:22 实证短路假响应失败后改换链）+
      * X5 视频保存点击轨（a59.q invoke → offerHdDownloadFromNote——覆盖播放缓存直拷、已存在短路两条
-     * 不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿 720p）。
+     * 不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿 720p；本机零触发）。
      * 2026-10-19「拦截默认」拍板：点击轨在链接可得时不再 proceed——宿主 720p 不落盘，本卡成为
      * 用户唯一保存出口（取消 = 什么都不存），省一次下载 + deleteLowQuality 一次删除；链接不可得
      * 才放行宿主 720p，本卡退化为「换下原片」可选。
@@ -834,8 +979,8 @@ object XhsVideoSave {
             return
         }
 
-        // 双轨幂等闸（2026-10-19 17:45 双卡实证）：同一次保存里 save 响应轨与 a59.q 点击轨同单
-        // 都 resolveByShareLink → 本入口，先到者弹卡、后到轨窗口内跳过。仅防同单双轨叠加——
+        // 双轨幂等闸（2026-10-19 17:45 双卡实证）：同一次保存里多轨（请求级短路轨/回落响应轨/a59.q
+        // 点击轨）同单都 resolveByShareLink → 本入口，先到者弹卡、后到轨窗口内跳过。仅防同单双轨叠加——
         // 不同笔记不受影响，连续重存同笔记 10s 外照常弹（2026-10-19 用户拍板删 5min dedupe，语义不变）。
         // 先读后写：写入只在下方真正弹卡处，闸命中 return 不写，不自吞。
         if (noteId == lastAskNoteId && System.currentTimeMillis() - lastAskAtMs < ASK_DEDUPE_MS) {
@@ -1064,6 +1209,27 @@ object XhsVideoSave {
                                 val ctLower = contentType?.lowercase()?.substringBefore(';')?.trim()
                                 val isMov = ctLower == "video/quicktime"
                                 name = if (isMov) "xhs_${noteId}_origin.mov" else "xhs_${noteId}_hd.mp4"
+                                // 2026-10-19 用户拍板：同名覆盖——相册同笔记永远一份，反复保存不留 (1)(2) 堆积。
+                                // insert 前按 DISPLAY_NAME 精确匹配查同名旧行，命中先删再插；deleteLowQuality 不受影响。
+                                runCatching {
+                                    ctx.contentResolver.query(
+                                        android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                        arrayOf(android.provider.MediaStore.Video.Media._ID),
+                                        "${android.provider.MediaStore.Video.Media.DISPLAY_NAME} = ?", arrayOf(name),
+                                        null,
+                                    )?.use { dup ->
+                                        val oldIdCol = dup.getColumnIndexOrThrow(android.provider.MediaStore.Video.Media._ID)
+                                        while (dup.moveToNext()) {
+                                            val oldUri = android.content.ContentUris.withAppendedId(
+                                                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, dup.getLong(oldIdCol))
+                                            val r = ctx.contentResolver.delete(oldUri, null, null)
+                                            if (r > 0) module.log(Log.INFO, MountEngine.TAG,
+                                                "$JUDGE_PREFIX 已覆盖同名旧文件 $name")
+                                        }
+                                    }
+                                }.onFailure {
+                                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 同名覆盖查询失败: ${it.message}")
+                                }
                                 val values = android.content.ContentValues().apply {
                                     put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, name)
                                     put(android.provider.MediaStore.Video.Media.MIME_TYPE, if (isMov) "video/quicktime" else "video/mp4")
@@ -1221,6 +1387,10 @@ object XhsVideoSave {
      * **时间窗**：`DATE_ADDED >= t0-10s` + 非本文件 + `SIZE < ourSize`。查询走
      * Video.EXTERNAL_CONTENT_URI（覆盖 DCIM/Pictures/Movies 全域）。不设 OWNER_PACKAGE_NAME 硬条件
      * （宿主经 ContentResolver 插入，owner 未必是 com.xingin.xhs）。
+     *
+     * 2026-10-19 请求级短路后：网络路宿主零下载 ⇒ 无 720p 可删，本清理对网络路自然空转（恒「无可删」
+     * 行）；播放缓存直拷路不发 save 请求 ⇒ 无短路，宿主仍落 720p（残留路径，由 a59.q 点击点/未来
+     * 点击点覆盖，本轮不扩）。
      */
     private fun deleteLowQuality(ctx: android.content.Context, t0: Long, ourUri: android.net.Uri, ourSize: Long, module: XposedModule) {
         runCatching {

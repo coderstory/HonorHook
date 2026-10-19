@@ -21,8 +21,8 @@ import java.net.URL
  * X5 批量保存（引擎 XhsHook·X5）：保存按钮 hook → 分享链接 → vendored 下载器管线（2026-10-19 定案）。
  *
  * 架构（2026-10-19 重构）：不碰 app 内部结构、不再旁路采集图集/视频流——两个保存点击点把
- * hook 现场的 NoteFeed（含 noteId）交给 [XhsSavePivot]；Pivot 三轨取分享链接（noteShares /
- * NoteFeed 反射 share_info），vendored `com.neoruaa.xhsdn.*`（XHS_Downloader_Android 原样复制）
+ * hook 现场的 NoteFeed（含 noteId）交给 [XhsSavePivot]；Pivot 单链取分享链接（noteShares 长链 →
+ * 宿主 getShortUrl 短链 → vendored resolve），vendored `com.neoruaa.xhsdn.*`（XHS_Downloader_Android 原样复制）
  * 解析分享页出 ResolvedNote：图片 → 本文件现有外挂直下管线（downloadAll/downloadOne）；
  * 视频 → X4 HD 询问（offerHdDownloadFromNote 映射候选）。解析/选档逻辑全部 vendored，本文件只做接线。
  *
@@ -38,7 +38,7 @@ import java.net.URL
  * 挂载点 `ji9.b`（图片长按面板「保存」点击 lambda；9.49.1 为 mh9.b，9.50.0 R8 迁名后旧类留
  * class_data_off=0 空壳——loadClass 成功但 declaredMethods 空 ⇒ 直连 0 候选 + 串锚随迁 ⇒ NOT_RESOLVED，
  * findings-x5 2026-10-19）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，分享链接解析出
- * 全部原图——1 张静默直下、≥2 张弹确认卡；链接三轨皆 miss 才 `proceed()` 回落宿主原生保存
+ * 全部原图——1 张静默直下、≥2 张弹确认卡；链接不可得才 `proceed()` 回落宿主原生保存
  * （2026-10-15 定案保留：先 proceed 本张原生保存再追加会重复一张、模块零介入，见 git 历史）。
  * 视频点 a59.q（9.49.1 为 d49.q）：9.50.0 真机「存活 1 点」实为 **DexKit 无锚点兜底误绑假阳性**
  * （d49 包已换语义为分享引导族，误绑其 invoke lambda，arg 非 String ⇒ isSave=false 静默放行，视频
@@ -157,6 +157,22 @@ object XhsBatchSave {
                 // 分享引导 lambda（installed 假阳性，findings-x5 2026-10-19）。
                 dex = DexHint(classFieldTypes = listOf("int", "com.xingin.entities.notedetail.NoteFeed")),
             ),
+            MountEngine.SimpleTask(
+                className = "xec.w",
+                methodName = "h0",
+                paramCount = 5,
+                returnType = "boolean",
+                id = "xhs:videoSave.albumSink.h0",
+                description = "X5 视频落盘拷贝断根·公共工具 w.h0(File,relDir,name,delSrc,mime)（未混淆 public final，w.java:730 签名实证）→ DCIM+Camera/+video/mp4 三判据命中不 proceed 返 true 假成功，图片等其余落盘照常放行",
+            ),
+            MountEngine.SimpleTask(
+                className = "xec.w",
+                methodName = "e0",
+                paramCount = 4,
+                returnType = "boolean",
+                id = "xhs:videoSave.albumSink.e0",
+                description = "X5 视频落盘拷贝断根·公共工具 w.e0(File,relDir,name,mime)（未混淆，w.java:619 签名实证，内部委托 h0(...,true,...) w.java:621）→ 同 h0 三判据拦截，两分支共用 mountAlbumSink",
+            ),
         )
         engine.attemptMount(pending, module, hostLoader!!) { task -> mountOne(task, module) }
     }
@@ -199,7 +215,7 @@ object XhsBatchSave {
                     // ③ WARN 路径（现状不变）：拦截判定无从做起，放行宿主原生保存
                     module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 视频保存点击：noteId 不可得，HD 询问跳过")
                 } else {
-                    // feed 现场补取 + stash（availableShareLink 反射轨输入；arg 命中时 feed 未取，对象图
+                    // feed 现场补取 + stash（落表保留调用点；arg 命中时 feed 未取，对象图
                     // 下钻补一次——XhsSavePivot.findFeedAndNoteId，ji9/b 同款 u0 语义；根 = thisObject
                     // + 入参 arg0）
                     runCatching {
@@ -216,7 +232,7 @@ object XhsBatchSave {
                     if (link != null) {
                         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX X5 拦截宿主默认保存（链接可得，不 proceed）noteId=$n")
                         engine.judge(module, task, JUDGE_PREFIX, "拦截宿主默认保存（链接可得，不 proceed）")
-                        startHdAsk(n, t0, module)
+                        startHdAsk(n, t0, module, failCard = true)
                         // 不 proceed ⇒ 返回值自给：宿主 invoke 返 kotlin.Unit（图片分支同款写法，
                         // **宿主 loader** 取 INSTANCE——模块 loader 的同名类不保证同一 class 身份）
                         return@mount runCatching {
@@ -228,7 +244,7 @@ object XhsBatchSave {
                 // ——回落路径（noteId 不可得 / 链接三轨 miss）：宿主原生 720p 照存，HD 询问与反馈卡照旧。
                 // 反馈卡段只在回落执行（拦截已提前 return）——拦截模式下宿主没存，「已保存本视频」是谎言。
                 val result = chain.proceed()
-                noteId?.let { n -> startHdAsk(n, t0, module) }
+                noteId?.let { n -> startHdAsk(n, t0, module, failCard = false) }
                 mainHandler.post {
                     // 判重（2026-10-15，缺陷④）：X4 本轮已弹「下载高清原版视频」就不再弹「已保存本视频」
                     // （真机实证两卡并存）。重复保存落在 X4 的 5 分钟去重窗口内时 X4 不弹卡 ⇒ lastAskAtMs
@@ -247,19 +263,66 @@ object XhsBatchSave {
                 }
                 result
             }
+            "xhs:videoSave.albumSink.h0" -> mountAlbumSink(task, module)
+            "xhs:videoSave.albumSink.e0" -> mountAlbumSink(task, module)
             else -> mountClick(task, module)
         }
 
     /**
-     * 分享链接后台解析 → X4 HD 询问发起（a59.q 点击轨两路共用：拦截主路 + 回落路，2026-10-19）。
-     * 解析是网络操作，必须在后台线程；解析失败/无候选由 [XhsVideoSave.offerHdDownloadFromNote] →
-     * offerHdDownload 仪表 WARN 不弹卡（videoSources 采集已删，无回落）。
+     * 视频落盘拷贝断根·公共工具挂（2026-10-19 改方案）：逐类挂 `b75.n#execute`（X5 3/3 挂上，21:35
+     * 真机）断不了根——DCIM 仍落 `Camera_xhs_<ts>.mp4` 且无断根判据行 = 该批走了**另一拷贝路**
+     * `fs2/b.java:51 w.e0(file, DCIM, "Camera/"+name, "video/mp4")`，逐类挂 = 打地鼠。改挂**公共
+     * 工具 `xec.w`**（public final 未混淆，所有落盘必经，跨版本稳）：`h0`（w.java:730，b75/n.java:35
+     * 调方）与 `e0`（w.java:619，fs2/b.java:51 调方，内部委托 `h0(..., true, ...)` w.java:621 实证）
+     * 同挂，两分支共用本 intercept。
+     *
+     * 过滤语义（before 读 args，四判据**全满足**才拦，[isVideoAlbumCopy]）：args[1] 含 "DCIM"
+     * && args[2] 含 "Camera/" && 末参 == "video/mp4" && args[0] File ≤ 8MB → 不 proceed 返 true（假成功
+     * ——b75.n 拿到成功后回调 invoke(true)，宿主无感；e0 调方 fs2/b 只消费返回值不另作分支）。
+     * args[2] "Camera/" 是**防误伤边界**：宿主其他视频写盘（IM 下载 / 广告缓存 / 创作导出等）同走
+     * xec.w，但相对路径不同（Movies/、DCIM 其他子目录），判据收窄后只有「存相册 → DCIM/Camera」
+     * 语义命中；图片（image/jpeg 等）被 mime 判据天然放行；模块自下管线落 Pictures/小红书 走
+     * MediaStore 直插不经 xec.w，亦不受波及。未命中照常 proceed。
+     * 大小豁免（2026-10-19 C 方案换链后第四判据）：save 响应 download_url 已被换成原片 URL，
+     * 宿主自下的正是**原片**（实测量级 16–36MB）——>8MB 必须放行落盘，闸只断换链前/回落路的
+     * 720p（实测量级 ≤1.2MB）。阈值取 8MB ≈ 720p 上限的 5 倍以上，原片下限以下。
      */
-    private fun startHdAsk(noteId: String, t0: Long, module: XposedModule) {
+    private fun mountAlbumSink(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        engine.mount(task, module, hostLoader!!) { chain ->
+            val hit = runCatching { isVideoAlbumCopy(chain.args) }.getOrDefault(false)
+            if (!hit) return@mount chain.proceed()
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX save_to_album 落盘已断（w.h0/e0 video 过滤）")
+            engine.judge(module, task, JUDGE_PREFIX, "save_to_album 落盘已断（w.h0/e0 video 过滤）")
+            true // 假成功：h0/e0 返 boolean（java.lang.Boolean 自动装箱），宿主按「拷贝成功」消费
+        }
+
+    /** 四判据全满足才拦（见 [mountAlbumSink] KDoc）：DCIM && Camera/ && video/mp4 && 文件 ≤ 8MB（原片豁免）。 */
+    private fun isVideoAlbumCopy(args: List<Any?>?): Boolean {
+        if (args == null || args.size < 4) return false
+        val dir = args.getOrNull(1) as? String ?: return false
+        val name = args.getOrNull(2) as? String ?: return false
+        if (!(dir.contains("DCIM") && name.contains("Camera/") && args.last() == "video/mp4")) return false
+        val size = runCatching { (args.getOrNull(0) as? java.io.File)?.length() ?: 0L }.getOrDefault(0L)
+        return size <= 8_000_000L
+    }
+
+    /**
+     * 分享链接后台解析 → X4 HD 询问发起（a59.q 点击轨两路共用：拦截主路 + 回落路，2026-10-19）。
+     * 解析是网络操作，必须在后台线程。[failCard] 只在拦截主路置 true——拦截 = 宿主保存已断，解析
+     * 失败即用户零所得，弹失败卡「下载原片失败，再次点击保存将使用系统保存」（[XhsSavePivot]
+     * parsedEmptyNotes 已记 → 下次点击 availableShareLink 返 null 放行宿主）；回落路宿主已存 720p
+     * 且反馈卡照旧，不弹（防误导）。解析成功但无候选仍由 offerHdDownload 仪表 WARN（既有）。
+     */
+    private fun startHdAsk(noteId: String, t0: Long, module: XposedModule, failCard: Boolean) {
         Thread({
             runCatching {
                 val note = kotlinx.coroutines.runBlocking {
                     XhsSavePivot.resolveByShareLink(noteId, module)
+                }
+                if (note == null && failCard) {
+                    showOnTrackedActivity(module, "原片解析失败卡") {
+                        showParseFailCard(it, "下载原片失败", module)
+                    }
                 }
                 XhsVideoSave.offerHdDownloadFromNote(noteId, t0, note, module)
             }.onFailure {
@@ -269,14 +332,35 @@ object XhsBatchSave {
     }
 
     /**
+     * 视频解析失败卡·公共入口（XhsVideoSave 请求级短路轨调用，2026-10-19）：宿主 save 请求已被短路
+     * 吞掉，分享链接解析失败 = 用户零所得 → 失败卡。走 [showOnTrackedActivity]（本类追踪 Activity +
+     * 重试链），文案/样式同 [startHdAsk] failCard 路。
+     * 诚实性注：短路轨「再次点击保存将使用系统保存」（[showParseFailCard] 固定文案）不成立——save
+     * 请求仍会被请求级短路吞掉；parsedEmptyNotes 拉黑只影响 a59.q 点击轨（本机零触发）。
+     */
+    fun showVideoParseFailCard(module: XposedModule) {
+        showOnTrackedActivity(module, "原片解析失败卡") {
+            showParseFailCard(it, "下载原片失败", module)
+        }
+    }
+
+    /**
      * 图片保存点击：**模块全接管**——接管判定只看分享链接可得性（全内存，见 [XhsSavePivot.availableShareLink]），
      * 链接可得 = 不 proceed（宿主原保存逻辑整段不执行），后台线程解析分享页（vendored 下载器管线）
      * 拿全部原图直链：1 张静默直下、≥2 张弹确认卡；链接不可得才 `proceed()` 回落宿主原生保存。
      *
+     * 2026-10-19 实况图集根因修（真机 19:46 日志「解析成功 图0 视频0 live6 候选0」+ vendored parser
+     * 读码）：分享页实况图集解析出的媒体全为 ResolvedMedia.LivePhoto（每项 image: Image + video:
+     * Video 双轨），旧取数只消费 note.images/note.videos ⇒ livePhotos 两头不沾 ⇒ urls 空 ⇒「无可用
+     * 图片」。取 URL 改两类合并（LinkedHashSet 去重保序）：images.originalUrl + livePhotos 每项
+     * image.originalUrl——LivePhoto 语义 = 只下静态帧原图（下载器实测 livePhoto 关时只下静帧，
+     * 对齐不双下 mp4+帧）；videos 维持不消费。「图 N 张」N 即合并后 URL 数（urls.size 透传，
+     * 进度卡/取消/落盘管线零改动）。
+     *
      * 与任务口径的偏差（2026-10-19，工程约束）：「解析也失败才 proceed()」不可行——libxposed 的
      * `chain.proceed()` 必须在 hook 回调线程调用，而解析是网络操作（app 主线程上等 15s = ANR）；
-     * 故接管判定提前到「链接可得」（三轨内存判定），链接可得但网页解析失败 = WARN 诚实失败
-     * （宿主未保存）——与旧管线「接管后下载失败」同一失败语义，宁缺勿错（绝不替用户下错图）。
+     * 故接管判定提前到「链接可得」（单链内存判定），链接可得但网页解析失败 = WARN + 失败卡
+     * （宿主未保存，parsedEmptyNotes 已记 → 下次点击放行宿主）——宁缺勿错（绝不替用户下错图）。
      */
     private fun mountClick(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         engine.mount(task, module, hostLoader!!) { chain ->
@@ -304,16 +388,30 @@ object XhsBatchSave {
             Thread({
                 val urls = runCatching {
                     val note = kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
-                    // 只取本笔记普通图（vendored NoteOutput.eligible 语义映射：封面/评论图排除），
-                    // originalUrl = 下载器确认的原图直链（imageList urlDefault 同源）
-                    note?.images
+                    // 两类合并去重保序（2026-10-19 实况图集根因修：真机 19:46 日志「解析成功 图0 视频0
+                    // live6 候选0」+ vendored parser 读码——该笔记 5 项媒体全为 ResolvedMedia.LivePhoto
+                    // （parser 正确产出，每项 image: Image + video: Video 双轨），旧适配层只消费
+                    // note.images/note.videos，livePhotos 两头不沾 ⇒ urls 空 ⇒「无可用图片」死寂）：
+                    // ① images.originalUrl（vendored NoteOutput.eligible 语义映射：封面/评论图排除，
+                    //   originalUrl = 下载器确认的原图直链，imageList urlDefault 同源）
+                    // ② livePhotos 每项只展开 image.originalUrl（下载器实测 livePhoto 关时只下静态帧
+                    //   原图，模块对齐此行为——不双下 mp4+帧）
+                    // ③ videos 维持不消费（视频流归 X4 HD 询问分支）
+                    val imageUrls = note?.images
                         ?.filterNot { it.cover || it.commentId != null }
                         ?.map { it.originalUrl }
                         .orEmpty()
+                    val liveFrameUrls = note?.livePhotos.orEmpty().map { it.image.originalUrl }
+                    LinkedHashSet(imageUrls + liveFrameUrls).toList()
                 }.getOrNull().orEmpty()
                 if (urls.isEmpty()) {
                     module.log(Log.WARN, MountEngine.TAG,
                         "$JUDGE_PREFIX 分享链接解析无可用图片 noteId=$noteId（接管已定，宿主未保存——诚实失败）")
+                    // 单链定案（2026-10-19）：接管后解析失败 = 宿主未保存、原为死寂——失败卡告知下次
+                    // 点击走系统保存（parsedEmptyNotes 已记，availableShareLink 返 null 放行宿主）
+                    showOnTrackedActivity(module, "解析失败卡") {
+                        showParseFailCard(it, "下载失败", module)
+                    }
                     return@Thread
                 }
                 if (urls.size == 1) {
@@ -466,6 +564,67 @@ object XhsBatchSave {
         dialog.setOnDismissListener { if (videoFeedbackDialog === dialog) videoFeedbackDialog = null }
         videoFeedbackDialog = dialog
         dialog.show()
+    }
+
+    /**
+     * 解析失败卡（2026-10-19 单链定案，消死寂）：接管后解析失败 = 宿主未保存，单按钮中性卡告知
+     * 「再次点击保存将使用系统保存」（[XhsSavePivot.parsedEmptyNotes] 已记，下次点击放行宿主）。
+     * 自绘风格照抄 [showStyledDialog]（圆角卡/深色自适应/XHS 红）；必须主线程调用
+     * （showOnTrackedActivity 已保证）。任何失败只 WARN，绝不波及下载/保存链路。
+     */
+    private fun showParseFailCard(activity: Activity, title: String, module: XposedModule) {
+        runCatching {
+            val night = (activity.resources.configuration.uiMode and
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+            val bg = if (night) 0xFF1E1E22.toInt() else 0xFFFFFFFF.toInt()
+            val titleColor = if (night) 0xFFF5F5F7.toInt() else 0xFF17171A.toInt()
+            val subColor = if (night) 0xFF98989D.toInt() else 0xFF8A8A8E.toInt()
+            val accent = 0xFFFF2E4D.toInt()
+            val dp = activity.resources.displayMetrics.density
+            fun d(v: Int) = (v * dp).toInt()
+            val card = android.widget.LinearLayout(activity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(d(24), d(22), d(24), d(18))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = d(22).toFloat(); setColor(bg)
+                }
+            }
+            card.addView(android.widget.TextView(activity).apply {
+                text = title
+                textSize = 17f
+                setTextColor(titleColor)
+                paint.isFakeBoldText = true
+            })
+            card.addView(android.widget.TextView(activity).apply {
+                text = "再次点击保存将使用系统保存"
+                textSize = 14f
+                setTextColor(subColor)
+                setPadding(0, d(8), 0, 0)
+            })
+            val dialog = android.app.Dialog(activity)
+            card.addView(android.widget.TextView(activity).apply {
+                text = "好"
+                textSize = 15f
+                gravity = android.view.Gravity.CENTER
+                setPadding(d(18), d(11), d(18), d(11))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = d(18).toFloat(); setColor(accent)
+                }
+                setTextColor(0xFFFFFFFF.toInt())
+                setOnClickListener { dialog.dismiss() }
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = d(18) }
+            })
+            dialog.setContentView(card)
+            dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+            dialog.setCancelable(true)
+            dialog.show()
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 解析失败卡失败: ${it.message}")
+        }
     }
 
     /** 追加询问（≥2 张）：图集来自分享链接解析（XhsSavePivot → vendored ResolvedNote）；确认后外挂直下。分流见 [mountClick]。 */
