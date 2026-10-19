@@ -80,19 +80,51 @@ object XhsSavePivot {
     }
 
     /**
-     * 从 [root]（hook 现场对象：a59.q / ji9.b lambda）向对象图下钻（≤3 层，跳过 java.* 与基本类型），
-     * 找第一个带无参 String `u0` 方法的对象 = NoteFeed（a59/q.java:53 `saveVideo(noteFeed.u0())`、
-     * ji9/b.java:55 `cVar.Ta().u0()` 双实证——u0 是 9.50 混淆名，随宿主版本漂移）。
-     * 返回 (feed 实例, noteId)；noteId 过 24hex 门。任一环节失败返回 null。
+     * kotlin.Lazy 包装解包（ji9/c.java:201 `this.m = Lazy...lazy(new ji9.b(this))` 属性委托实证——
+     * NoteFeed 依赖装在 UnsafeLazyImpl 内部，不拆包预算内够不到）。
+     * 接口判定 `obj is Lazy<*>` 在模块/宿主双 stdlib（不同 Class 对象）下 miss，兜：类图上任一接口
+     * 名 == "kotlin.Lazy" 再反射 getValue()。非 Lazy / 解包失败返回 null（走原字段下钻兜底）。
      */
-    fun findFeedAndNoteId(root: Any?): Pair<Any, String>? {
-        if (root == null) return null
-        val queue = ArrayDeque<Any>()
-        queue.addLast(root)
+    private fun unwrapLazy(obj: Any): Any? {
+        if (obj is Lazy<*>) return runCatching { obj.value }.getOrNull()
+        var c: Class<*>? = obj.javaClass
+        while (c != null) {
+            if (c.interfaces.any { it.name == "kotlin.Lazy" }) {
+                return runCatching {
+                    obj.javaClass.getMethod("getValue").apply { isAccessible = true }.invoke(obj)
+                }.getOrNull()
+            }
+            c = c.superclass
+        }
+        return null
+    }
+
+    /**
+     * 从若干 hook 现场根对象（[roots]：thisObject **和** invoke 入参——ji9/b.java:55 链路 =
+     * `cVar.Ta().u0()`，cVar 是入参 controller，只走 thisObject 字段图会 miss，2026-10-19 真机实证）
+     * 向对象图下钻（≤5 层，IdentityHashMap 防环，跳过 java.* 与基本类型；kotlin.Lazy 包装解包后同层），
+     * 找第一个带无参 String
+     * `u0` 方法的对象 = NoteFeed（a59/q.java:53 `saveVideo(noteFeed.u0())`、ji9/b.java:55
+     * `cVar.Ta().u0()` 双实证——u0 是 9.50 混淆名，随宿主版本漂移）。
+     * 返回 (feed 实例, noteId)；noteId 过 24hex 门。全 miss：WARN 诊断（各根 + 首层字段类名，
+     * 截 200 字符）并返回 null。
+     */
+    fun findFeedAndNoteId(module: XposedModule, vararg roots: Any?): Pair<Any, String>? {
+        val rootList = roots.filterNotNull()
+        val queue = ArrayDeque<Pair<Any, Int>>()   // 节点 + 层深（根 = 0）
+        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+        rootList.forEach { queue.addLast(it to 0) }
         var visited = 0
-        while (queue.isNotEmpty() && visited < 32) {
-            val node = queue.removeFirst()
+        while (queue.isNotEmpty() && visited < 64) {
+            val (node, depth) = queue.removeFirst()
+            if (!seen.add(node)) continue
             visited++
+            // Lazy 包装：解包值同层入队（也过 u0 门、也下钻其字段），包装体内部字段不再下钻
+            val inner = unwrapLazy(node)
+            if (inner != null) {
+                queue.addLast(inner to depth)
+                continue
+            }
             // 本节点直接是 NoteFeed？（a59.q：feed 是 lambda 捕获字段，一层即中）
             val noteId = runCatching {
                 val m = node.javaClass.declaredMethods.firstOrNull {
@@ -102,15 +134,30 @@ object XhsSavePivot {
                 (m?.invoke(node) as? String)?.takeIf { it.matches(HEX24) }
             }.getOrNull()
             if (noteId != null) return node to noteId
-            // 下钻字段值（lambda → controller → feed 的链路，ji9.b 要两层）
-            if (node.javaClass.name.startsWith("java.")) continue
+            // 下钻字段值（root → controller → feed；ji9.b 入参链路 arg → Ta() 两层）
+            if (depth >= 5 || node.javaClass.name.startsWith("java.")) continue
             val fields = runCatching { node.javaClass.declaredFields }.getOrNull() ?: continue
             for (f in fields) {
                 if (f.type.isPrimitive) continue
                 val v = runCatching { f.isAccessible = true; f.get(node) }.getOrNull() ?: continue
-                if (!v.javaClass.name.startsWith("java.")) queue.addLast(v)
+                if (!v.javaClass.name.startsWith("java.")) queue.addLast(v to depth + 1)
             }
         }
+        // 诊断仪表：miss 时打根与首层字段类名清单，下次 miss 一眼定位断点
+        val diag = buildString {
+            append("roots=[")
+            append(rootList.joinToString(", ") { it.javaClass.name.substringAfterLast('.') })
+            append("] L1=[")
+            append(rootList.flatMap { r ->
+                runCatching { r.javaClass.declaredFields }.getOrDefault(emptyArray())
+                    .mapNotNull { f ->
+                        runCatching { f.isAccessible = true; f.get(r) }.getOrNull()
+                            ?.javaClass?.name?.substringAfterLast('.')
+                    }
+            }.distinct().joinToString(", "))
+            append("]")
+        }
+        module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX u0 下钻 miss 诊断：${diag.take(200)}")
         return null
     }
 

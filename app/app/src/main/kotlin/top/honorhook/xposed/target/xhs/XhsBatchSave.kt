@@ -201,8 +201,8 @@ object XhsBatchSave {
                         module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 视频保存点击：noteId 不可得，HD 询问跳过")
                     } else {
                         // 分享链接反射轨输入：arg 命中时 feed 未取，用对象图下钻补一次（XhsSavePivot.findFeedAndNoteId，
-                        // ji9/b 同款 u0 语义）
-                        if (feed == null) feed = XhsSavePivot.findFeedAndNoteId(chain.thisObject)?.first
+                        // ji9/b 同款 u0 语义；根 = thisObject + invoke 入参 arg0）
+                        if (feed == null) feed = XhsSavePivot.findFeedAndNoteId(module, chain.thisObject, arg0)?.first
                         XhsSavePivot.stashFeed(feed)
                         // HD 询问改走分享链接解析（2026-10-19 X5 重构）：网络在后台线程，
                         // 解析结果（vendored ResolvedNote）映射候选后弹询问卡；解析失败 →
@@ -252,9 +252,10 @@ object XhsBatchSave {
      */
     private fun mountClick(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         engine.mount(task, module, hostLoader!!) { chain ->
-            // noteId/feed 从 lambda 捕获对象图下钻：ji9/b.java:55 `cVar.Ta().u0()` 实证——feed 挂在
-            // controller（ji9.c）上、u0 是 9.50 混淆名（与宿主版本绑定，漂移即 miss → 回落宿主）
-            val found = XhsSavePivot.findFeedAndNoteId(chain.thisObject)
+            // noteId/feed 下钻根 = lambda 捕获（thisObject）+ invoke 入参（ji9/b.java:55 `cVar.Ta().u0()`
+            // 实证——cVar 是入参 controller、feed 挂其上；u0 是 9.50 混淆名，漂移即 miss → 回落宿主）
+            val found = XhsSavePivot.findFeedAndNoteId(
+                module, chain.thisObject, runCatching { chain.getArg(0) }.getOrNull())
             val noteId = found?.second
             if (noteId == null) {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX noteId 不可得（u0 反射 miss），回落宿主原生保存")
