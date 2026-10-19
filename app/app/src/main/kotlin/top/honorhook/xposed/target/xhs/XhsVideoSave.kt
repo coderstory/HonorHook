@@ -72,6 +72,12 @@ object XhsVideoSave {
      *  本字段只认 body/query 可归属的 noteId，「沿用最近值」的响应不可归属、不更新。 */
     @Volatile private var currentNoteId: String? = null
 
+    /** 最近一篇视频笔记（videofeed 响应 query note_id，[rewriteVideoSave] 侧记录）。日志/观测用：
+     *  曾作 X5 点击轨（a59.q invoke）noteId 回落，2026-10-19 实证历史/缓存进入的笔记不发 entry
+     *  videofeed ⇒ 停留上一篇 id、错弹 HD 卡（下错片+删错文件），点击轨已改反射 NoteFeed.u0
+     *  + 24hex 门（见 XhsBatchSave），本字段仅供日志对照。 */
+    @Volatile var lastVideoNoteId: String? = null
+
     /** X5 取当前笔记图集（空 = 未采到，或缓存已过期非当前浏览笔记——见 [currentNoteId]；
      *  2026-10-19 起 save-hostile 笔记采集经张数一致性校验失败不入库，也走这里空回落）。 */
     fun lastNoteImages(): List<String> {
@@ -298,7 +304,10 @@ object XhsVideoSave {
             scheduleHdVideoDownload(url, body, module)
             return patched
         }
-        harvestVideoSources(body)
+        // X5 点击轨 noteId 回落锚：videofeed 响应 URL query 必带 note_id（harvest 入表回落同款口径），
+        // 记录「当前视频笔记」——invoke 的 String 参数语义不可证时（见 XhsBatchSave 挂载处）唯一归属来源
+        if (url.contains("/note/videofeed")) queryParam(url, "note_id")?.let { lastVideoNoteId = it }
+        harvestVideoSources(body, url, module)
         harvestNoteShare(body)
         harvestNoteImages(body, url)
         return null
@@ -467,7 +476,11 @@ object XhsVideoSave {
      * H264 _258 37808KB 胜 H265 高分档 ~10MB），且原片直链被字节比较挤掉。旧 E2/E5「窗口打分不可靠」
      * 的教训指**固定字符窗口**，现用花括号配对 + 精确区段（下一 video_info_v2 为界），非窗口法复活。
      */
-    private fun harvestVideoSources(body: String) {
+    private fun harvestVideoSources(body: String, url: String, module: XposedModule) {
+        // 仪表（2026-10-19 排查期引入，保留为正式观测）：v2 块数 / 归属 miss / 新入表数，videofeed 汇总行输出
+        var v2Blocks = 0
+        var attrMiss = 0
+        var inserted = 0
         var idx = body.indexOf("\"video_info_v2\"")
         while (idx >= 0) {
             // 区段上界 = 同 body 内下一个 "video_info_v2" 起点（无则 body.length）。旧固定窗口
@@ -483,11 +496,22 @@ object XhsVideoSave {
                 val idMatcher = P_NOTE_ID.matcher(body).region(maxOf(0, idx - REGION_NOTE_ID_BACK), idx)
                 var noteId: String? = null
                 while (idMatcher.find()) noteId = idMatcher.group(1)
+                if (noteId == null) {
+                    attrMiss++   // lookback miss 照计（回落成功也计，仪表 miss 率不因回落失真）
+                    // 归属回落（2026-10-19 实证 videofeed 首块（当前笔记）noteId lookback miss，
+                    // 归属miss=1）：videofeed 型 URL query 必带 note_id，body 内采不到时用 query 值
+                    // 入表——不回落则当前笔记候选永远空，HD 询问必弹不了
+                    if (url.contains("/note/videofeed")) noteId = queryParam(url, "note_id")
+                }
                 if (noteId != null && !videoSources.containsKey(noteId)) {
                     if (videoSources.size > URL_MAP_LIMIT) videoSources.clear()
                     videoSources[noteId] = VideoSource(originKey, candidates)
+                    inserted++
+                } else if (noteId != null) {
+                    attrMiss++
                 }
             }
+            v2Blocks++
             idx = body.indexOf("\"video_info_v2\"", idx + "\"video_info_v2\"".length)
         }
         // origin_video_key 全响应扫（V-1 后唯一 originKey 来源；实测恒 null——E6，保留待 web 会话路线复活）
@@ -507,6 +531,13 @@ object XhsVideoSave {
                 }
             }
             oidx = body.indexOf("\"origin_video_key\"", oidx + 18)
+        }
+        // 仪表（2026-10-19 排查期引入，保留为正式观测）：videofeed/detailfeed 采集可见性
+        // ——HD 询问弹不弹的第一判据行（v2块/masterUrl数/归属miss/新入表）
+        if (url.contains("/note/videofeed") || url.contains("/note/detailfeed")) {
+            val masterCount = P_MASTER_ANY.matcher(body).results().count()
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX 采集汇总 harvest url=${url.take(100)} len=${body.length} v2块=$v2Blocks masterUrl=$masterCount 归属miss=$attrMiss 新入表=$inserted")
         }
     }
 
@@ -1184,19 +1215,41 @@ object XhsVideoSave {
     }
 
     private fun scheduleHdVideoDownload(url: String, body: String, module: XposedModule) {
-        val noteId = queryParam(url, "note_id") ?: return
+        val noteId = queryParam(url, "note_id") ?: run {
+            // 仪表（2026-10-19 排查期引入）：save 响应无 note_id = URL 形态变化信号
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX save响应无note_id url=${url.take(140)}")
+            return
+        }
         // t0 = 本轮 save 拦截时刻，透传给 V-5 低画质清理的时间窗锚点
-        val t0 = System.currentTimeMillis()
+        offerHdDownload(noteId, System.currentTimeMillis(), module)
+    }
+
+    /**
+     * HD 询问卡唯一入口（2026-10-19 自 [scheduleHdVideoDownload] 抽取）：save 响应轨（仅覆盖网络
+     * `/note/video/save` 这条路）+ X5 视频保存点击轨（XhsBatchSave a59.q invoke——覆盖播放缓存直拷、
+     * 已存在短路两条不发 save 请求的保存路，2026-10-19 实证它们令 save 响应轨永不触发 → 用户只拿
+     * 720p）。流程：dedupe 检查 → 写入 → 采集候选 → Application → 关 X5 反馈卡 → 弹询问卡；
+     * 三条 early-return 均有仪表日志。
+     */
+    fun offerHdDownload(noteId: String, t0: Long, module: XposedModule) {
         ensureHdDedupeLoaded(module)   // A1：首次用到时读盘合并（跨进程去重；读失败退回纯内存）
         val last = hdDedupe[noteId] ?: 0L
-        if (t0 - last < HD_DEDUPE_MS) return   // V-6：命中即连询问卡都不弹
+        if (t0 - last < HD_DEDUPE_MS) {
+            // 仪表（2026-10-19 排查期引入）：同 note 去重窗口内重复发起
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX dedupe命中 noteId=$noteId 距上次${t0 - last}ms")
+            return   // V-6：命中即连询问卡都不弹
+        }
         hdDedupe[noteId] = t0
         persistHdDedupe(module)        // A1：变更后异步落盘，绝不阻塞本拦截线程
 
         // 候选集（2026-10-15 基准切换）：采集链全部逐 URL 候选，选档在 pickBestAndDownload
         // （逐语义移植 XHS_Downloader_Android NoteOutput.kt:47-56——响应 download_url 不参与选档）
         val streams = videoSources[noteId]?.candidates ?: emptyList()
-        if (streams.isEmpty()) return
+        if (streams.isEmpty()) {
+            // 仪表（2026-10-19 排查期引入）：发起已到但采集链无此 note 的候选
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 候选空 noteId=$noteId（videoSources miss）")
+            return
+        }
 
         // 下载上下文：宿主 Application（MediaStore/ContentResolver 用）
         val app = runCatching {

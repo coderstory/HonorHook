@@ -162,11 +162,42 @@ object XhsBatchSave {
             "xhs:batchSave.videoSaveClick.invoke" -> engine.mount(task, module, hostLoader!!) { chain ->
                 // a59.q 双分支：case1=分享引导（arg=Triple，rv9.a.CLOUD）default=saveVideo（arg=String）——只对
                 // String 轨弹反馈卡，分享路径静默放行
-                val isSave = runCatching { chain.getArg(0) is String }.getOrDefault(false)
+                val arg0 = runCatching { chain.getArg(0) }.getOrNull()
+                val isSave = arg0 is String
                 // 本轮起点（proceed 前）：X4 若在本轮保存里弹了询问卡，其 lastAskAtMs >= t0（见 askShownAfter）
                 val t0 = System.currentTimeMillis()
                 val result = chain.proceed()
                 if (!isSave) return@mount result
+                // X4 HD 询问触发搬迁（2026-10-19 缺陷修复）：播放缓存直拷 / 已存在短路两条保存路不发
+                // /note/video/save 请求，X4 原只挂 save 响应 ⇒ 询问卡永不弹、用户只拿 720p；本点击轨
+                // 每次保存必经，代为发起。noteId 三轨：
+                // ① arg0 String 仅 24hex 命中才采信——a59/q.java:52 cast 实证为 String，但值在 lambda
+                //   体内未消费（q.java:53 只透传 PatchProxy），语义静态不可证；
+                // ② miss 时反射取捕获的 NoteFeed 实例（字段序 (int, NoteFeed)，DexHint classFieldTypes
+                //   已证）invoke "u0"——a59/q.java:53 实证 saveVideo(noteFeed.u0())，返回值即 save API
+                //   入参 = note_id。u0 是 9.50 混淆名、与宿主版本绑定（漂移时反射失败走 ③）；
+                // ③ 再 miss → WARN 跳过（宁不弹、不错弹）。
+                // 返回值须 is String 且过同一 24hex 门——**24hex 门是防错弹硬校验**：曾用
+                // lastVideoNoteId 回落，历史/缓存进入的笔记不发 entry videofeed ⇒ 取到上一篇 id
+                // （2026-10-19 实证），错弹卡 = 下错片 + deleteLowQuality 删错文件，已弃用
+                // （XhsVideoSave.lastVideoNoteId 字段留作日志观测，本分支不再读）。
+                runCatching {
+                    val hex24 = Regex("^[0-9a-f]{24}$")
+                    val argNoteId = (arg0 as? String)?.takeIf { it.matches(hex24) }
+                    val noteId = argNoteId ?: runCatching {
+                        val feed = chain.thisObject.javaClass.declaredFields
+                            .firstOrNull { it.type.name == "com.xingin.entities.notedetail.NoteFeed" }
+                            ?.apply { isAccessible = true }
+                            ?.get(chain.thisObject)
+                        (feed?.javaClass?.getMethod("u0")?.apply { isAccessible = true }?.invoke(feed) as? String)
+                            ?.takeIf { it.matches(hex24) }
+                    }.getOrNull()
+                    if (noteId == null) {
+                        module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 视频保存点击：noteId 不可得，HD 询问跳过")
+                    } else {
+                        XhsVideoSave.offerHdDownload(noteId, t0, module)
+                    }
+                }.onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX X5 HD 询问发起失败: ${it.message}") }
                 mainHandler.post {
                     // 判重（2026-10-15，缺陷④）：X4 本轮已弹「下载高清原版视频」就不再弹「已保存本视频」
                     // （真机实证两卡并存）。重复保存落在 X4 的 5 分钟去重窗口内时 X4 不弹卡 ⇒ lastAskAtMs
