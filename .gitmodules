@@ -28,3 +28,6 @@
 [submodule "reference/notification-guard（同类插件）"]
 	path = reference/notification-guard（同类插件）
 	url = https://github.com/SlightNekoQAQ/notification-guard
+[submodule "reference/xhs/XHS_Downloader_Android"]
+	path = reference/xhs/XHS_Downloader_Android
+	url = https://github.com/NEORUAA/XHS_Downloader_Android

@@ -8,8 +8,10 @@ system-files/
 
 # reference/ 下手动放置的非 git 资产（外部项目一律以 submodule 引入）
 reference/Rain_1.1.5.apk
-# 2026-10-14 审计补：新增参考目录同样不入库（xhs 187M / dualsignal 272K；reference/ 只读）
-reference/xhs/
+# 2026-10-14 审计补：新增参考目录同样不入库（dualsignal 272K；reference/ 只读）；
+# 2026-10-19：XHS_Downloader_Android 升级为 submodule 引入（reference/xhs/ 其余非 git 资产仍忽略）
+reference/xhs/*
+!reference/xhs/XHS_Downloader_Android
 reference/dualsignal/
 
 # AI 工具/IDE 本地状态：工作树副本（149M）、代码索引、IDE 配置——均非工程代码
