@@ -56,7 +56,9 @@ object XhsWatermark {
         val loader = param.defaultClassLoader
         val sourceDir = param.applicationInfo?.sourceDir
         engine.begin(sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
-        val clsX2b = XhsPoints.cls(HostVersion.resolve(sourceDir), "x2b")
+        // 版本源不用 HostVersion.resolve：那条路走 ActivityThread.currentPackageManager，现代 Android/AOSP
+        // 无此成员（真机 + AOSP 14 源码全文 0 命中）⇒ 恒 null ⇒ 9.49.1 覆盖套从未生效过，一直走基线。
+        val clsX2b = XhsPoints.cls(HostVersion.resolveHostVersion(sourceDir, "com.xingin.xhs"), "x2b")
 
         val pending = mutableListOf<MountEngine.Task>()
         pending += MountEngine.SimpleTask(

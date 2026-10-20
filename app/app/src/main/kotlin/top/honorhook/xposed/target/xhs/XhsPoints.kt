@@ -44,11 +44,17 @@ object XhsPoints {
     )
 
     /**
-     * 查点坐标。hostVersion 命中 override 套用覆盖值，否则基线值；两处都 null = 该版本不挂此点。
+     * 查点坐标，三态：
+     * ① 命中覆盖套且值为 null → null（该版本无此点，挂载处跳过该点）；
+     * ② 命中覆盖套且有值 → 覆盖值；
+     * ③ 版本无覆盖项 / 版本为 null → 基线值（基线也查不到 = 未知 key → null）。
      * 挂载处契约：`XhsPoints.cls(v, key)?.let { …SimpleTask… } ?: 跳过（不进 pending）`。
      */
     fun cls(hostVersion: String?, key: String): String? {
-        val over = overrides[hostVersion]?.get(key)
-        return over ?: baseline[key]
+        val map = hostVersion?.let { overrides[it] } ?: return baseline[key]
+        if (!map.containsKey(key)) return baseline[key]
+        // 覆盖表里的显式 null = 「该版本无此点」（文件头 KDoc 语义），必须与「该版本无覆盖项」区分：
+        // 原实现 `over ?: baseline[key]` 把两者混同 ⇒ 9.49.1 的三个 null 点会错误回落基线坐标。
+        return map[key]
     }
 }

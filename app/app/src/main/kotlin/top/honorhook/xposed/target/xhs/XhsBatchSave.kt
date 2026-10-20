@@ -130,7 +130,9 @@ object XhsBatchSave {
         engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
 
         // 版本坐标走 XhsPoints（9.49.x 旧坐标；9.50 专属点旧套缺席 = 跳过，走 videoClick 轨兜底）
-        val hostVersion = HostVersion.resolve(param.applicationInfo?.sourceDir)
+        // 版本源不用 HostVersion.resolve：那条路走 ActivityThread.currentPackageManager，现代 Android/AOSP
+        // 无此成员（真机 + AOSP 14 源码全文 0 命中）⇒ 恒 null ⇒ 9.49.1 覆盖套从未生效过，一直走基线。
+        val hostVersion = HostVersion.resolveHostVersion(param.applicationInfo?.sourceDir, "com.xingin.xhs")
         val pending = mutableListOf<MountEngine.Task>()
         XhsPoints.cls(hostVersion, "saveClick")?.let { pending += MountEngine.SimpleTask(
                 className = it,
