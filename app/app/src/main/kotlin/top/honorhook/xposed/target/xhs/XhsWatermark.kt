@@ -7,6 +7,7 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.data.RemoteConfig
 import java.lang.reflect.Modifier
 
@@ -54,11 +55,57 @@ object XhsWatermark {
 
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        val sourceDir = param.applicationInfo?.sourceDir
-        engine.begin(sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
+        val apkPath = param.applicationInfo?.sourceDir
+        // 读版本 → 选坐标 → begin → 挂载，整链挪到挂载后台线程（与 InstallerHook 同范式）：
+        // 版本读取走公开 PM 取法 = 同步 IPC（system_server 解析 APK），放宿主主线程会卡宿主启动；
+        // begin 与 attemptMount 同线程 ⇒ 引擎状态无跨线程竞态。
+        MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[0]) {
+            selectPointsAndMount(module, loader, apkPath, 0)
+        }
+    }
+
+    /**
+     * 版本探针重试延迟（毫秒；下标 = 第几次尝试）：版本读不到就下一轮再试，重试用尽按基线坐标盲挂。
+     * 旧宿主（9.49.1）靠这层拿到覆盖套坐标（x2b = qc8.j），否则会挂基线坐标 = 旧宿主上这些类不存在。
+     */
+    private val VERSION_PROBE_DELAYS_MS = longArrayOf(0, 200, 600)
+
+    /** 读版本 → 选坐标 → 挂载（后台线程）。 */
+    private fun selectPointsAndMount(
+        module: XposedModule,
+        loader: ClassLoader,
+        apkPath: String?,
+        attempt: Int,
+    ) {
         // 版本源不用 HostVersion.resolve：那条路走 ActivityThread.currentPackageManager，现代 Android/AOSP
         // 无此成员（真机 + AOSP 14 源码全文 0 命中）⇒ 恒 null ⇒ 9.49.1 覆盖套从未生效过，一直走基线。
-        val clsX2b = XhsPoints.cls(HostVersion.resolveHostVersion(sourceDir, "com.xingin.xhs"), "x2b")
+        val hostVersion = HostVersion.resolveHostVersion(apkPath, "com.xingin.xhs")
+        if (hostVersion == null && attempt + 1 < VERSION_PROBE_DELAYS_MS.size) {
+            MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[attempt + 1]) {
+                selectPointsAndMount(module, loader, apkPath, attempt + 1)
+            }
+            return
+        }
+        val baseline = FeatureCatalog.baselineVersionOf("com.xingin.xhs")
+        if (hostVersion == null) {
+            module.log(
+                Log.WARN, MountEngine.TAG,
+                "宿主版本读取失败（公开取法都没读到版本号），按基线 $baseline 坐标盲挂，判据以 installed N/M 为准",
+            )
+        }
+        // 版本自检的期望值 = 实际用的坐标版本（读到版本就用它）：旧宿主挂覆盖套坐标时不该报「漂移」。
+        engine.begin(apkPath, hostVersion ?: baseline)
+        engine.attemptMount(buildPending(hostVersion), module, loader) { task -> mountOne(task, module, loader) }
+    }
+
+    /**
+     * 挂载点集合（按宿主版本选坐标）：[hostVersion] 为 null = 版本读不到 ⇒ 基线坐标。
+     *
+     * 坐标语义见 [XhsPoints]（覆盖套显式 null = 该版本无此点 ⇒ 该点不进 pending）。
+     * 单测直调本函数（见 XhsPendingTest）——纯逻辑，不碰 Android。
+     */
+    internal fun buildPending(hostVersion: String?): List<MountEngine.Task> {
+        val clsX2b = XhsPoints.cls(hostVersion, "x2b")
 
         val pending = mutableListOf<MountEngine.Task>()
         pending += MountEngine.SimpleTask(
@@ -82,7 +129,7 @@ object XhsWatermark {
         }
         // X2c：动态发现任务——className/methodName 由 resolveValue 期注解反射填入（见 X2cTask）
         pending += X2cTask()
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        return pending
     }
 
     private fun mountOne(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =

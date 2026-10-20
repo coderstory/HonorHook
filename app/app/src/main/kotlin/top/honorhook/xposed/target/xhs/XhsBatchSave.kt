@@ -14,6 +14,7 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.core.MountScheduler
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -43,8 +44,10 @@ import java.net.URL
  * （2026-10-15 定案保留：先 proceed 本张原生保存再追加会重复一张、模块零介入，见 git 历史）。
  * 视频点 a59.q（9.49.1 为 d49.q）：9.50.0 真机「存活 1 点」实为 **DexKit 无锚点兜底误绑假阳性**
  * （d49 包已换语义为分享引导族，误绑其 invoke lambda，arg 非 String ⇒ isSave=false 静默放行，视频
- * 反馈卡实际失效）。误绑根因 = MethodResolver「pkg 非空即绕过无锚点闸门 + firstOrNull 即采纳」，
- * 本轮不改码（记录见 docs/reverse/xhs.md §9.50 适配，留拍板）。
+ * 反馈卡实际失效）。误绑根因 = MethodResolver「pkg 非空即绕过无锚点闸门 + firstOrNull 即采纳」——
+ * **2026-10-20 已修**：`DexHitSelector.pickStrict` 统一「无内容锚点不猜 + 唯一命中才采纳」，
+ * 本点兜底锚也补上（classFieldTypes = int + NoteFeed）；真机再遇误绑，漂移 WARN 会留痕
+ * （declaringClass 与声明不符）。
  */
 object XhsBatchSave {
 
@@ -70,7 +73,7 @@ object XhsBatchSave {
     private const val FETCH_BACKOFF_BASE_MS = 500L
     private const val FETCH_BACKOFF_CAP_MS = 15_000L
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     /** 最近 resumed 的宿主 Activity（弹窗载体；[ensureActivityTracker] 追踪）。 */
     @Volatile private var lastActivity: Activity? = null
@@ -127,13 +130,58 @@ object XhsBatchSave {
         // 面板 Dialog 类挂载期缓存一次（关面板用；取不到只是面板关不掉，不阻断下载，见 dismissHostPanel）
         panelDialogClass = runCatching { Class.forName(CLS_PANEL_DIALOG, false, hostLoader) }.getOrNull()
         ensureActivityTracker()
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
+        val loader = param.defaultClassLoader
+        val apkPath = param.applicationInfo?.sourceDir
+        // 读版本 → 选坐标 → begin → 挂载，整链挪到挂载后台线程（与 InstallerHook 同范式）：
+        // 版本读取走公开 PM 取法 = 同步 IPC（system_server 解析 APK），放宿主主线程会卡宿主启动；
+        // begin 与 attemptMount 同线程 ⇒ 引擎状态无跨线程竞态。
+        MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[0]) {
+            selectPointsAndMount(module, loader, apkPath, 0)
+        }
+    }
 
-        // 版本坐标走 XhsPoints（9.49.x 旧坐标；9.50 专属点旧套缺席 = 跳过，走 videoClick 轨兜底）
+    /**
+     * 版本探针重试延迟（毫秒；下标 = 第几次尝试）：版本读不到就下一轮再试，重试用尽按基线坐标盲挂。
+     * 旧宿主（9.49.1）靠这层拿到覆盖套坐标，否则会挂 9.50.0 基线坐标 = 旧宿主上这些类根本不存在。
+     */
+    private val VERSION_PROBE_DELAYS_MS = longArrayOf(0, 200, 600)
+
+    /** 读版本 → 选坐标 → 挂载（后台线程）。 */
+    private fun selectPointsAndMount(
+        module: XposedModule,
+        loader: ClassLoader,
+        apkPath: String?,
+        attempt: Int,
+    ) {
         // 版本源不用 HostVersion.resolve：那条路走 ActivityThread.currentPackageManager，现代 Android/AOSP
         // 无此成员（真机 + AOSP 14 源码全文 0 命中）⇒ 恒 null ⇒ 9.49.1 覆盖套从未生效过，一直走基线。
-        val hostVersion = HostVersion.resolveHostVersion(param.applicationInfo?.sourceDir, "com.xingin.xhs")
-        val pending = mutableListOf<MountEngine.Task>()
+        val hostVersion = HostVersion.resolveHostVersion(apkPath, "com.xingin.xhs")
+        if (hostVersion == null && attempt + 1 < VERSION_PROBE_DELAYS_MS.size) {
+            MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[attempt + 1]) {
+                selectPointsAndMount(module, loader, apkPath, attempt + 1)
+            }
+            return
+        }
+        val baseline = FeatureCatalog.baselineVersionOf("com.xingin.xhs")
+        if (hostVersion == null) {
+            module.log(
+                Log.WARN, MountEngine.TAG,
+                "宿主版本读取失败（公开取法都没读到版本号），按基线 $baseline 坐标盲挂，判据以 installed N/M 为准",
+            )
+        }
+        // 版本自检的期望值 = 实际用的坐标版本（读到版本就用它）：旧宿主挂覆盖套坐标时不该报「漂移」。
+        engine.begin(apkPath, hostVersion ?: baseline)
+        engine.attemptMount(buildPending(hostVersion), module, loader) { task -> mountOne(task, module) }
+    }
+
+    /**
+     * 挂载点集合（按宿主版本选坐标）：[hostVersion] 为 null = 版本读不到 ⇒ 基线坐标。
+     *
+     * 坐标语义见 [XhsPoints]（覆盖套显式 null = 该版本无此点 ⇒ 该点不进 pending）。
+     * 单测直调本函数（见 XhsPendingTest）——纯逻辑，不碰 Android。
+     */
+    internal fun buildPending(hostVersion: String?): List<MountEngine.SimpleTask> {
+        val pending = mutableListOf<MountEngine.SimpleTask>()
         XhsPoints.cls(hostVersion, "saveClick")?.let { pending += MountEngine.SimpleTask(
                 className = it,
                 methodName = METHOD_INVOKE,
@@ -207,9 +255,7 @@ object XhsBatchSave {
                 description = "X5 笔记视频保存总入口·ab9.r1#b(boolean,Activity,z0,NoteFeed,int,boolean,ViewGroup,Function1,Function0)（r1.java:189 起：网络检查→建 SaveProgressView「正在保存到相册」→postDelayed(1s)→r1.d→function1(noteFeed.u0())=save 请求+下载流，2026-10-20 00:03 实证笔记保存正主链）→ 链接可得：不 proceed（view 不弹+请求不发+下载不跑）+ 模块管线弹卡直下原片；链接 miss：proceed 宿主原生保底",
                 dex = DexHint(strings = listOf("save video failed:")),
         ) }
-        // mountOne 按 SimpleTask 分派；全列表本就只含 SimpleTask（mutableListOf<Task> 只为 let-追加方便）
-        @Suppress("UNCHECKED_CAST")
-        engine.attemptMount(pending as List<MountEngine.SimpleTask>, module, hostLoader!!) { task -> mountOne(task, module) }
+        return pending
     }
 
     private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
