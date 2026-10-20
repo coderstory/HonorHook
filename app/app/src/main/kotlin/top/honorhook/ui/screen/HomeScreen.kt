@@ -78,8 +78,9 @@ import top.honorhook.ui.Glitch
  */
 @Composable
 fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
-    val active = FrameworkState.active
-    val resolved = FrameworkState.resolved
+    // 三态：null = 还没问出结果（没默认值），UI 先按「工作中」显示，确认没绑上才说「未激活」
+    val activeState = FrameworkState.active
+    val active = activeState == true
     val frameworkName = FrameworkState.frameworkName
     val frameworkVersion = FrameworkState.frameworkVersion
 
@@ -117,14 +118,14 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     ) {
                         StatusCard(
                             active = active,
-                            resolved = resolved,
+                            confirmed = activeState != null,
                             isDynamicColor = isDynamicColor,
                             // 默认「工作中」：服务绑定是异步的，绑定结果出来前不预设「未激活」
                             // （那等于在还不知道的时候先下结论）。只有确认没绑上才说「未激活」。
                             workingText = when {
                                 Glitch.cardRed -> Glitch.text("老色批已爆炸")
-                                active || !resolved -> Glitch.text("工作中")
-                                else -> Glitch.text("未激活")
+                                activeState == false -> Glitch.text("未激活")
+                                else -> Glitch.text("工作中")
                             },
                             versionText = Glitch.text(
                                 when {
@@ -132,7 +133,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                                         .filter { it.isNotBlank() }
                                         .joinToString(" ")
                                         .ifBlank { "LSPosed" }
-                                    !resolved -> "LSPosed"
+                                    activeState == null -> "LSPosed"
                                     else -> "未连接 LSPosed（已安装但未激活，或模块未启用）"
                                 },
                             ),
@@ -180,22 +181,23 @@ internal fun appVersionLabel(): String {
 @Composable
 private fun StatusCard(
     active: Boolean,
-    resolved: Boolean,
+    confirmed: Boolean,
     isDynamicColor: Boolean,
     workingText: String,
     versionText: String,
 ) {
-    // 底色跟三态走：彩蛋鲜红 / 工作中绿 / **确认**未激活浅红 / 还没问出结果中性灰
-    // （冷启动那一下曾是粉红底 + 「未激活」，等于先给个错误结论再跳成「工作中」）
+    // 卡片的**底色 / 图标 / 文字必须同源**：三态里只有「确认没绑上」才算未激活。
+    // 之前图标单独看 active（初值 false）⇒ 冷启动那一下画的是红色「!」，
+    // 底色和文字却是「工作中」——自相矛盾。
+    val inactive = confirmed && !active
     val containerColor = when {
         Glitch.cardRed -> Color(0xFFFF1744)
-        // 未确认期间也用绿色系：别先给一个红的（未激活）再跳成绿的
-        active || !resolved -> when {
+        inactive -> Color(0xFFFFDAD6)
+        else -> when {
             isDynamicColor -> colorScheme.secondaryContainer
             isInDarkTheme() -> Color(0xFF1A3825)
             else -> Color(0xFFDFFAE4)
         }
-        else -> Color(0xFFFFDAD6)
     }
 
     Card(
@@ -215,9 +217,9 @@ private fun StatusCard(
             ) {
                 Icon(
                     modifier = Modifier.size(110.dp),
-                    imageVector = if (active) Icons.Rounded.CheckCircleOutline else Icons.Rounded.ErrorOutline,
+                    imageVector = if (inactive) Icons.Rounded.ErrorOutline else Icons.Rounded.CheckCircleOutline,
                     tint = when {
-                        !active -> Color(0xFFBA1A1A).copy(alpha = 0.5f)
+                        inactive -> Color(0xFFBA1A1A).copy(alpha = 0.5f)
                         isDynamicColor -> colorScheme.primary.copy(alpha = 0.8f)
                         else -> Color(0xFF36D167)
                     },

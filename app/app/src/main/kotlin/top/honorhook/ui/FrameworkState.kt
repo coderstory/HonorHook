@@ -13,24 +13,20 @@ import io.github.libxposed.service.XposedService
  */
 object FrameworkState {
 
-    var active by mutableStateOf(false)
+    /**
+     * LSPosed 激活状态。
+     *
+     * **null = 还没问出结果**（没默认值）；true / false = 已确认。
+     * 初值刻意不是 false：服务绑定是异步的，false 会让状态卡先闪一个「未激活」再跳成
+     * 「工作中」——等于在还不知道的时候先下了结论。
+     */
+    var active: Boolean? by mutableStateOf(null)
         private set
     var frameworkName by mutableStateOf("")
         private set
     var frameworkVersion by mutableStateOf("")
         private set
     var apiVersion by mutableStateOf(0)
-        private set
-
-    /**
-     * 框架状态是否**已确认**。
-     *
-     * 服务绑定是异步的：冷启动那一下 [active] 还是默认值 false，若直接拿它当结论，
-     * 状态卡会先闪一个「未激活」再跳成「工作中」——等于在还不知道的时候先下结论。
-     * 这里把「还没问出结果」（false）与「确认没激活」（true）分开：
-     * 未确认期间 UI 走中性文案，确认后才说「未激活」。
-     */
-    var resolved by mutableStateOf(false)
         private set
 
     @Volatile
@@ -57,7 +53,7 @@ object FrameworkState {
      */
     fun armResolveTimeout(delayMs: Long = 1500) {
         mainHandler.postDelayed({
-            if (!resolved) resolved = true
+            if (active == null) active = false
         }, delayMs)
     }
 
@@ -74,7 +70,6 @@ object FrameworkState {
         mainHandler.post {
             if (latest == null) {
                 active = false
-                resolved = true
                 frameworkName = ""
                 frameworkVersion = ""
                 apiVersion = 0
@@ -87,13 +82,11 @@ object FrameworkState {
     private fun publish(s: XposedService) {
         runCatching {
             active = true
-            resolved = true
             apiVersion = s.apiVersion
             frameworkName = s.frameworkName.orEmpty()
             frameworkVersion = s.frameworkVersion.orEmpty()
         }.onFailure {
             active = true
-            resolved = true
             apiVersion = XposedService.API_102
         }
     }

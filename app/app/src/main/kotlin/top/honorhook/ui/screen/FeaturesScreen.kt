@@ -640,8 +640,8 @@ private fun SwitchSemanticsCard(
     noticeWhenInactive: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    // 只在状态已确认后提示「未激活」：还没问出结果时先闪这个提示同样是假结论
-    val inactive = noticeWhenInactive && FrameworkState.resolved && !FrameworkState.active
+    // 只在「确认没绑上」后提示：还没问出结果时先闪这个提示同样是假结论
+    val inactive = noticeWhenInactive && FrameworkState.active == false
     if (!inactive) return
     val title = Glitch.text("LSPosed 未激活")
     val summary = Glitch.text("LSPosed 没连上，开关改不动。请先在 LSPosed 里启用本模块。")
