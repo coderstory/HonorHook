@@ -16,9 +16,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # 构建依赖上游 submodule（:xhs-dn-core 的源码供给，见 libs/xhs-dn-core/build.gradle.kts）——
-          # 不带 submodules 则检不到上游源码，:xhs-dn-core 同步任务直接失败。
-          submodules: true
+          # 不用 submodules: true —— 另一个 submodule 路径含全角括号
+          # （reference/LSPosed（框架源码））会让 actions/checkout 的
+          # "Persisting credentials for submodules" 步骤 ENOENT 失败（2026-10-20 实测 CI 红）。
+          # 构建只需要 XHS 那一个（:xhs-dn-core 的源码供给），下面单独精确检出。
+          submodules: false
+
+      # 构建依赖的上游 submodule：XHS_Downloader_Android（:xhs-dn-core 的唯一源码供给，
+      # 见 libs/xhs-dn-core/build.gradle.kts）。LSPosed 框架源码是只读逆向参考，不参与构建。
+      - name: Checkout 构建依赖的 submodule
+        run: git submodule update --init --depth=1 reference/xhs/XHS_Downloader_Android
 
       # JDK 21：与 tools/README.md 声明的工具链要求一致（release 打包需要含 jlink 的完整 JDK）
       - name: Set up JDK 21
