@@ -77,8 +77,8 @@ object XhsWatermark {
         apkPath: String?,
         attempt: Int,
     ) {
-        // 版本源不用 HostVersion.resolve：那条路走 ActivityThread.currentPackageManager，现代 Android/AOSP
-        // 无此成员（真机 + AOSP 14 源码全文 0 命中）⇒ 恒 null ⇒ 9.49.1 覆盖套从未生效过，一直走基线。
+        // 版本源用公开 API 双取法（HostVersion.resolveHostVersion）；旧取法（ActivityThread.currentPackageManager）
+        // 现代 Android/AOSP 无此成员（真机 + AOSP 14 源码全文 0 命中）⇒ 恒 null ⇒ 9.49.1 覆盖套从未生效过，一直走基线。
         val hostVersion = HostVersion.resolveHostVersion(apkPath, "com.xingin.xhs")
         if (hostVersion == null && attempt + 1 < VERSION_PROBE_DELAYS_MS.size) {
             MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[attempt + 1]) {

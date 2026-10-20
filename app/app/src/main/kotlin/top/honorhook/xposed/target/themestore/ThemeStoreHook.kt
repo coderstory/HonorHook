@@ -8,6 +8,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 
@@ -26,24 +27,32 @@ object ThemeStoreHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        // 版本读 + 选表 + 挂载整体挪到后台线程（宿主主线程零同步磁盘 IO）：版本读是同步 IPC——
+        // system_server 那边要解析宿主 APK，放在宿主主线程会拖慢宿主启动。
+        // 挂载本来就由 MountScheduler 执行（attemptMount 非调度线程会转投），挪进来顺带把 begin 放到
+        // 同一线程 ⇒ begin 写入的字段不再跨线程读。
+        MountScheduler.postDelayed(0L) {
+            // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
+            val apkPath = param.applicationInfo?.sourceDir
 
-        // 挂载表 46 项；各项归属见 description 编号（A/B/C/H/T/W/S 系列）。计数注释历史上一再漂移
-        // （评审 #14：43→44→46 三代不符），故不再列分类算术——以表行数与真机 installed N/M 的 M 为准。
-        // 数据表 ThemeStoreMap_20_1_63_305.kt 手维护。
-        val actual = HostVersion.resolve(param.applicationInfo?.sourceDir)
-        val pick = HostVersion.pick(versionTables, actual)
-        // 盲挂留痕（评审 R7：把隐式行为变显式日志）：默认套任意版本兜底，实际版本偏离基线 = 按基线表盲挂，
-        // 判据以 installed N/M 为准（与 MountEngine.checkHostVersionOnce 的 WARN 互补：那条说风险，这条说行为）。
-        val baseline = FeatureCatalog.baselineVersionOf(packageName)
-        if (actual != null && baseline != null && actual != baseline) {
-            module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 未适配，按基线 $baseline 挂载表盲挂，判据以 installed N/M 为准")
+            // 挂载表 46 项；各项归属见 description 编号（A/B/C/H/T/W/S 系列）。计数注释历史上一再漂移
+            // （评审 #14：43→44→46 三代不符），故不再列分类算术——以表行数与真机 installed N/M 的 M 为准。
+            // 数据表 ThemeStoreMap_20_1_63_305.kt 手维护。
+            val actual = HostVersion.resolveHostVersion(apkPath, packageName)
+            val pick = HostVersion.pick(versionTables, actual)
+            // 盲挂留痕（评审 R7：把隐式行为变显式日志）：默认套任意版本兜底，实际版本偏离基线 = 按基线表盲挂，
+            // 判据以 installed N/M 为准（与 MountEngine.checkHostVersionOnce 的 WARN 互补：那条说风险，这条说行为）。
+            val baseline = FeatureCatalog.baselineVersionOf(packageName)
+            if (actual != null && baseline != null && actual != baseline) {
+                module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 未适配，按基线 $baseline 挂载表盲挂，判据以 installed N/M 为准")
+            }
+            // 期望版本 = 基线：theme 只有默认套，偏离基线就是「按基线盲挂」，自检要报的就是这个偏离。
+            engine.begin(apkPath, baseline)
+            val pending = pick.tasks
+                .map { it.toMountTask() }
+
+            engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
         }
-        val pending = pick.tasks
-            .map { it.toMountTask() }
-
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
     /** DOWNLOAD_TYPE_ROUTE 的 DownloadInfo 实例获取（口径同 isUriBlank 的 UriOwner 分派；drift → null → 放行）。 */

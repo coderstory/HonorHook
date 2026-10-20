@@ -1,7 +1,6 @@
 package top.honorhook.xposed.core
 
 import android.content.Context
-import android.content.pm.PackageManager
 
 /**
  * 宿主版本分发：同一目标可声明多套挂载表，运行时按宿主 versionName 选一套。
@@ -22,23 +21,6 @@ object HostVersion {
         val fallbackTo: String? = null,
         val matchedVersion: String? = null,
     )
-
-    /**
-     * 同步读宿主 versionName（不需要 Context）。失败返回 null。
-     *
-     * PM 取法只有一条：`ActivityThread.currentPackageManager`（2026-10-20 真机探针实证：荣耀 ROM
-     * **无此成员**，getMethod/getDeclaredMethod 均 NoSuchMethodException ⇒ 本 ROM 恒返回 null）。
-     * 这条路**不能**用来给 installer 选表——见 [resolveHostVersion]。
-     */
-    fun resolve(apkPath: String?): String? {
-        if (apkPath.isNullOrEmpty()) return null
-        return runCatching {
-            val pm = Class.forName("android.app.ActivityThread")
-                .getMethod("currentPackageManager").invoke(null) as? PackageManager ?: return null
-            @Suppress("DEPRECATION")
-            pm.getPackageArchiveInfo(apkPath, 0)?.versionName
-        }.getOrNull()
-    }
 
     /**
      * 读宿主 versionName（选表用）。

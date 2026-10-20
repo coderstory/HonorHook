@@ -9,6 +9,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
 import java.util.concurrent.CountDownLatch
@@ -59,14 +60,18 @@ object LauncherHook : TargetHook {
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         hostLoader = loader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        // 同 theme：版本读 + 选表 + 挂载整体挪到后台线程（宿主主线程零同步磁盘 IO；版本读是同步 IPC）。
+        MountScheduler.postDelayed(0L) {
+            val apkPath = param.applicationInfo?.sourceDir
+            // 数据表 LAUNCHER_POINTS_18_0_0_234.kt；逐点清点口径以真机 `installed N/M` 的 M 为准。
+            val pick = HostVersion.pick(versionTables, HostVersion.resolveHostVersion(apkPath, packageName))
+            // 期望版本 = 基线：launcher 只有默认套，偏离基线 = 按基线盲挂。
+            engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
+            val pending = pick.tasks
+                .map { it.toMountTask() }
 
-        // 数据表 LAUNCHER_POINTS_18_0_0_234.kt；逐点清点口径以真机 `installed N/M` 的 M 为准。
-        val pick = HostVersion.pick(versionTables, HostVersion.resolve(param.applicationInfo?.sourceDir))
-        val pending = pick.tasks
-            .map { it.toMountTask() }
-
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+            engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        }
     }
 
     /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 kind 分派的 intercept 构造）。 */

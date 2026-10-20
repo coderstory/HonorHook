@@ -8,8 +8,8 @@ import org.junit.Test
  * XhsPoints.cls() 的三态语义回归：①命中覆盖套且值为 null → null（该版本无此点）、
  * ②命中覆盖套且有值 → 覆盖值、③版本无覆盖项/版本为 null → 基线值。
  *
- * 缺陷①（版本源恒 null）由 [XhsPoints.cls] 的调用方修（HostVersion.resolveHostVersion 取代
- * HostVersion.resolve——后者走 ActivityThread.currentPackageManager，现代 Android 无此成员 ⇒ 恒 null
+ * 缺陷①（版本源恒 null）由 [XhsPoints.cls] 的调用方修（HostVersion.resolveHostVersion 取代已删除的
+ * 旧取法——后者走 ActivityThread.currentPackageManager，现代 Android 无此成员 ⇒ 恒 null
  * ⇒ 覆盖套从未生效）；本类钉的是纯函数语义，版本源是否读得到由调用方保证。
  *
  * 缺陷②（显式 null 语义被吞）：旧实现 `over ?: baseline[key]` 把「覆盖表里显式 null = 该版本无此点」

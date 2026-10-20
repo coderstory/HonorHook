@@ -100,6 +100,26 @@ class HostVersionTest {
     }
 
     @Test
+    fun `unknown actual version still selects the default suite`() {
+        // 版本读不到（resolveHostVersion 返回 null）时的契约：走默认套，不算“没匹配”。
+        // theme / launcher 的版本表目前只有默认套，这条断言钉住「读不到版本 ⇒ 仍挂基线点」。
+        val tables = listOf(table("1.0.0", build = listOf("old")), table(build = listOf("dflt")))
+        val pick = HostVersion.pick(tables, null)
+        assertTrue(pick.matched)
+        assertEquals(listOf("dflt"), pick.tasks)
+        assertNull(pick.matchedVersion)
+    }
+
+    @Test
+    fun `unknown actual version does not select a precise suite`() {
+        // 只有精确套时，读不到版本 ⇒ 不挂（matched=false），而不是盲挂某个精确套。
+        val tables = listOf(table("1.0.0", build = listOf("old")))
+        val pick = HostVersion.pick(tables, null)
+        assertFalse(pick.matched)
+        assertTrue(pick.tasks.isEmpty())
+    }
+
+    @Test
     fun `precise hit and default suite both preempt fallback`() {
         val precise = listOf(table("1.0.0", build = listOf("old")))
         val hit = HostVersion.pick(precise, "1.0.0", fallback = true)
