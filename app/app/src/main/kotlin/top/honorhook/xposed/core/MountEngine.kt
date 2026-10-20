@@ -3,13 +3,28 @@ package top.honorhook.xposed.core
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
-import java.lang.reflect.Method
 
 /** 各目标 hook 共享的挂载基建：懒加载重试、失败分级、统一解析、汇总日志。 */
 class MountEngine(private val hookName: String, private val hostPackage: String) {
 
-    /** 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。 */
-    enum class Result { OK, FAILED, NOT_RESOLVED }
+    /**
+     * 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。
+     *
+     * [MERGED]：与另一挂载点落到**同一方法**——同一方法只挂一次（不重复包装），但该挂载点的意图
+     * 已由另一个挂载点覆盖 ⇒ **计成功**（不扣 N、不进失败清单），日志留一行 WARN 说明谁与谁合并
+     * （复审缺陷④：原先记 NOT_RESOLVED ⇒ 扣 N + 进失败清单，与"方法确实已挂上"的事实不符）。
+     */
+    enum class Result {
+        OK, FAILED, NOT_RESOLVED, MERGED;
+
+        /**
+         * 成功口径（"installed N/M" 的 N）：[OK] 与 [MERGED] 都算已挂载。
+         *
+         * 口径的单一事实源（单测钉住：N 的定义与失败清单不许悄悄变）。MERGED = 与另一挂载点合并到
+         * 同一方法 ⇒ 该点的意图已由另一挂载点覆盖，记失败会凭空扣 N 并把点写进失败清单。
+         */
+        val installed: Boolean get() = this == OK || this == MERGED
+    }
 
     /** DexKit 兜底特征声明 —— 用于**混淆名目标**（类名/方法名随时可能被 R8 重映射）。 */
     class DexHint(
@@ -17,6 +32,12 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         val paramTypes: List<String>? = null,
         val classStrings: List<String>? = null,
         val classFieldTypes: List<String>? = null,
+        /**
+         * 期望**实例**方法：拦截器依赖 `thisObject`（如 installer 的 CHECK_BYPASS / CHECK_BYPASS_JOB）。
+         * static 实现挂上去 `thisObject` 恒 null ⇒ 拦截器静默空转（判据行照样打 N/M，功能不生效）。
+         * 置 true 后 static 候选一律不采纳，并留 WARN 痕迹（复审缺陷③）。
+         */
+        val instanceOnly: Boolean = false,
     )
 
     /** 各目标挂载任务须实现的最小协议（kind 枚举 / 路由条件等目标私有字段留在目标侧）。 */
@@ -63,6 +84,10 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     private val judgeCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     /** 回调异常 WARN 节流计数（task.id → 已打印次数；独立于 [judgeCount]，判据节流是"命中"口径，这里是"异常"口径）。 */
     private val callbackWarnCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    /** 挂载点漂移 WARN 节流计数（task.id → 已打印次数；漂移是每 task 一次的定性事实，重试轮重复打只会刷屏）。 */
+    private val driftWarnCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    /** "挂到 static 实现" WARN 节流计数（task.id → 已打印次数）。 */
+    private val staticWarnCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     /** 目标 APK 磁盘路径（[begin] 期写入，[MethodResolver] 第二轨 DexKit 兜底用；null 时跳过）。 */
     private var apkPath: String? = null
     /** hook 编写时的宿主版本基线（[begin] 期写入；非空则首轮挂载前做一次版本自检）。 */
@@ -83,6 +108,8 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         groupFailed.clear()
         judgeCount.clear()
         callbackWarnCount.clear()
+        driftWarnCount.clear()
+        staticWarnCount.clear()
     }
 
     /**
@@ -127,16 +154,18 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
                 module.log(Log.ERROR, TAG, "$hookName 挂载异常（任务隔离）: ${task.description}", it)
                 Result.FAILED
             }
-            when (result) {
-                Result.OK -> {
+            when {
+                // 成功口径单一事实源（[Result.installed]）：OK 与 MERGED（与另一挂载点合并）都算已挂载，
+                // 不扣 N、不进失败清单（复审缺陷④）。
+                isInstalled(result) -> {
                     okCount++
                     if (task.group.isNotEmpty()) groupOk[task.group] = (groupOk[task.group] ?: 0) + 1
                 }
-                Result.FAILED -> {
+                result == Result.FAILED -> {
                     failedIds += task.description
                     if (task.group.isNotEmpty()) groupFailed.getOrPut(task.group) { mutableListOf() }.add(task.description)
                 }
-                Result.NOT_RESOLVED -> unresolved += task
+                else -> unresolved += task   // NOT_RESOLVED：可随类加载重试
             }
         }
         if (unresolved.isEmpty()) {
@@ -166,30 +195,42 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
 
     /**
      * 统一方法解析：① [Task.resolveValue] 惰性值（依赖类加载，未就绪 → 重试）；
-     * ② [MethodResolver.resolveMethod] 双轨（直连反射 + DexKit 特征兜底）。
-     * 返回 `null` = [Result.NOT_RESOLVED]（标准 WARN 日志已打）。
+     * ② [MethodResolver.resolveOutcome] 双轨（直连反射 + DexKit 特征兜底）。
+     *
+     * 返回 [ResolveOutcome.Unresolved] = [Result.NOT_RESOLVED]（标准 WARN 日志已打）。
+     * [ResolveOutcome.Merged] = 与另一挂载点落到同一方法 ⇒ 合并计成功（不重复包装）。
      */
-    fun resolveTask(task: Task, module: XposedModule, loader: ClassLoader): Method? {
+    internal fun resolveTask(task: Task, module: XposedModule, loader: ClassLoader): ResolveOutcome {
         // resolveValue 是目标侧惰性 lambda，可能抛异常（如目标类未加载时枚举反射失败）——那本质是
         // 依赖项未就绪（NOT_RESOLVED，可随类加载重试），不能冒泡成挂载异常 → FAILED（重试无意义）。
         task.resolveValue?.let { resolveValue ->
             val resolved = runCatching { resolveValue(loader) }.getOrElse {
                 module.log(Log.WARN, TAG, "hook 未挂载（依赖项未解析，将重试）: ${task.description} — ${it.message}")
-                return null
+                return ResolveOutcome.Unresolved
             }
             if (resolved == null) {
                 module.log(Log.WARN, TAG, "hook 未挂载（依赖项未解析，将重试）: ${task.description}")
-                return null
+                return ResolveOutcome.Unresolved
             }
         }
-        val method = MethodResolver.resolveMethod(
-            loader, task.className, task.methodName, task.paramCount, task.returnType, apkPath,
-            task.dex?.strings, task.dex?.paramTypes, task.dex?.classStrings, task.dex?.classFieldTypes,
+        val outcome = MethodResolver.resolveOutcome(
+            loader = loader,
+            className = task.className,
+            methodName = task.methodName,
+            paramCount = task.paramCount,
+            returnType = task.returnType,
+            apkPath = apkPath,
+            usingStrings = task.dex?.strings,
+            paramTypes = task.dex?.paramTypes,
+            declaredClassStrings = task.dex?.classStrings,
+            declaredClassFieldTypes = task.dex?.classFieldTypes,
+            pointId = task.id,
+            instanceOnly = task.dex?.instanceOnly == true,
         )
-        if (method == null) {
+        if (outcome is ResolveOutcome.Unresolved) {
             module.log(Log.WARN, TAG, "hook 未挂载（类/方法不存在，版本差异，将重试）: ${task.description}")
         }
-        return method
+        return outcome
     }
 
     /** 挂载汇总始终输出，不受 [DEBUG_LOGGING] 门控（Rain "installed N/M" 汇总行模式，真机判据）。 */
@@ -231,7 +272,49 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         loader: ClassLoader,
         intercept: XposedInterface.Hooker,
     ): Result {
-        val method = resolveTask(task, module, loader) ?: return Result.NOT_RESOLVED
+        val method = when (val outcome = resolveTask(task, module, loader)) {
+            is ResolveOutcome.Resolved -> outcome.method
+            is ResolveOutcome.Merged -> {
+                // 同一方法已由另一挂载点挂上 ⇒ 不重复包装（两个 CONST 拦截器叠在同一个方法上没意义），
+                // 但**合并计成功**（不扣 N、不进失败清单）；这一行 WARN 是判据可审计的唯一现场。
+                module.log(
+                    Log.WARN,
+                    TAG,
+                    "$hookName 挂载点合并（与另一挂载点落到同一方法，只挂一次）: ${task.id} → " +
+                        "${DexKitHelper.signatureOf(outcome.method)}" +
+                        "（与 ${outcome.mergedWith ?: "另一挂载点"} 合并）",
+                )
+                return Result.MERGED
+            }
+            ResolveOutcome.Unresolved -> return Result.NOT_RESOLVED
+        }
+        // DexKit 兜底命中的是"特征相同、名字不同"的方法（严格轨/宽松轨都可能）：宿主升级后这是常态，
+        // 但挂载点漂移必须在模块日志里留痕——判据行只给 N/M，看不出具体哪个点被换成了什么。
+        // 按 task.id 节流（复审缺陷⑦）：漂移是每 task 一次的定性事实，重试轮各打一行只会刷屏。
+        if (method.declaringClass.name != task.className || method.name != task.methodName) {
+            val n = driftWarnCount.merge(task.id, 1) { a, b -> a + b } ?: 1
+            if (n <= DRIFT_WARN_PER_TASK) {
+                module.log(
+                    Log.WARN,
+                    TAG,
+                    "$hookName 挂载点漂移命中（DexKit 兜底）: ${task.id} 期望 " +
+                        "${task.className}#${task.methodName} → 实际 ${DexKitHelper.signatureOf(method)}",
+                )
+            }
+        }
+        // instanceOnly：期望实例方法却挂到 static 实现 ⇒ `thisObject` 恒 null，依赖它的拦截器静默空转
+        // （判据行照样打 N/M，功能却不生效）。留一行 WARN 让这条失效可审计（复审缺陷③）。
+        if (task.dex?.instanceOnly == true && java.lang.reflect.Modifier.isStatic(method.modifiers)) {
+            val n = staticWarnCount.merge(task.id, 1) { a, b -> a + b } ?: 1
+            if (n <= STATIC_WARN_PER_TASK) {
+                module.log(
+                    Log.WARN,
+                    TAG,
+                    "$hookName 挂到静态实现（依赖 thisObject 的拦截器将空转）: ${task.id} → " +
+                        DexKitHelper.signatureOf(method),
+                )
+            }
+        }
         // 回调期留痕（评审 #19）：PROTECTIVE 语义下框架吞 intercept 异常并回退原调用，模块侧零痕迹。
         // 这里只包 try/catch 记 WARN 后**原样 rethrow**——行为零变化；proceed 自身异常恒传播，不吞不包。
         val watched = XposedInterface.Hooker { chain ->
@@ -309,6 +392,20 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
 
         /** 回调异常 WARN 每任务打印上限（同 JUDGE_LOG_PER_TASK 口径；高频死点只告警前 3 次防刷屏）。 */
         const val CALLBACK_WARN_PER_TASK = 3
+
+        /** 挂载点漂移 WARN 每任务打印上限（漂移是每 task 一次的定性事实 ⇒ 只打 1 行，重试轮不重复打）。 */
+        const val DRIFT_WARN_PER_TASK = 1
+
+        /** "挂到 static 实现" WARN 每任务打印上限（同 DRIFT_WARN_PER_TASK 口径：每 task 一行）。 */
+        const val STATIC_WARN_PER_TASK = 1
+
+        /**
+         * 成功口径（"installed N/M" 的 N）：[Result.OK] 与 [Result.MERGED] 都算已挂载。
+         *
+         * MERGED = 与另一挂载点落到同一方法（同一方法只挂一次）⇒ 该挂载点的意图已由另一挂载点覆盖，
+         * 记失败会凭空扣 N 并把点写进失败清单（复审缺陷④）。
+         */
+        fun isInstalled(result: Result): Boolean = result.installed
 
         /** 挂载细节日志门控（默认关；汇总与判据日志不受门控）。 */
         const val DEBUG_LOGGING = false
