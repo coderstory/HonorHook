@@ -106,18 +106,24 @@ dependencies {
     // DexKit：混淆目标方法特征查找（双轨解析的兜底线）
     implementation(libs.dexkit)
 
-    // XHS vendored 下载器管线（com.neoruaa.xhsdn.*）编译期依赖：
-    // - okhttp：vendored XhsContentRepository.kt 的 OkHttpXhsPageSource 引用。**版本必须 5.5.0
+    // XHS 下载器管线：代码在外部模块 :xhs-dn-core（上游 XHS_Downloader_Android，AGPL-3.0，
+    //   submodule 供给 + 7 文件白名单，见 libs/xhs-dn-core/build.gradle.kts）——本仓不存上游源码。
+    // 模块侧三条依赖都是 compileOnly，**不传递给消费方** ⇒ 这三条必须在 app 侧再声明一次。
+    // - okhttp：模块内 XhsContentRepository.kt 的 OkHttpXhsPageSource 引用。**版本必须 5.5.0
     //   对齐上游**（XHS_Downloader_Android app/build.gradle:96）——上游代码假定 okhttp5 的
-    //   Response.body 非空，4.12 编译不过；vendored 文件禁改，只能对齐上游版本。运行期不加载该类
+    //   Response.body 非空，4.12 编译不过；上游文件禁改，只能对齐上游版本。运行期不加载该类
     //   （抓取走 XhsSavePivot 注入的 HttpURLConnection fetchHtml；宿主 classpath 自带 okhttp4，
-    //   版本差无影响）。
-    // - kotlinx-serialization-core：vendored ResolvedNote/StoredMediaRef 的 @Serializable 注解
+    //   版本差无影响）。R8 判该类不可达整类删除 ⇒ APK 内无 okhttp 引用，proguard 无需 -dontwarn。
+    // - kotlinx-serialization-core：模块内 ResolvedNote/StoredMediaRef 的 @Serializable 注解
     //   （仅注解，无序列化调用，无 serialization 编译器插件；运行期无反射查询，不进 APK）。
-    // kotlinx.coroutines：vendored 挂起函数用；编译期经 UI 依赖树（compose runtime api）可见，
-    //   运行期已在 APK（build.gradle packaging merges META-INF/services 注释实证），不另加依赖。
+    // - kotlinx-coroutines：模块内挂起函数用。此前靠 UI 依赖树（compose runtime api）隐式可见，
+    //   现显式声明（compileOnly 不影响打包，运行期仍由 compose 依赖树提供）。
     compileOnly("com.squareup.okhttp3:okhttp:5.5.0")
     compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
+    compileOnly(libs.kotlinx.coroutines.core)
+
+    // 上游下载器管线模块（AGPL-3.0 源码经 submodule 白名单供给，本仓不存上游代码）
+    implementation(project(":xhs-dn-core"))
 
     // ---- Miuix UI（KernelSU Manager 同源，UI 真基准）----
     // miuix-ui 提供 Scaffold/TopAppBar/Card/NavigationBar/FloatingBottomBar 依赖的 basic 组件

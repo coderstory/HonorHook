@@ -21,13 +21,14 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * X5 批量保存（引擎 XhsHook·X5）：保存按钮 hook → 分享链接 → vendored 下载器管线（2026-10-19 定案）。
+ * X5 批量保存（引擎 XhsHook·X5）：保存按钮 hook → 分享链接 → 上游下载器管线（2026-10-19 定案）。
  *
  * 架构（2026-10-19 重构）：不碰 app 内部结构、不再旁路采集图集/视频流——两个保存点击点把
  * hook 现场的 NoteFeed（含 noteId）交给 [XhsSavePivot]；Pivot 单链取分享链接（noteShares 长链 →
- * 宿主 getShortUrl 短链 → vendored resolve），vendored `com.neoruaa.xhsdn.*`（XHS_Downloader_Android 原样复制）
+ * 宿主 getShortUrl 短链 → 上游 resolve），上游 `com.neoruaa.xhsdn.*`（XHS_Downloader_Android，AGPL-3.0，
+ * 经外部模块 :xhs-dn-core 引用——代码不在本仓，见 libs/xhs-dn-core/build.gradle.kts）
  * 解析分享页出 ResolvedNote：图片 → 本文件现有外挂直下管线（downloadAll/downloadOne）；
- * 视频 → X4 HD 询问（offerHdDownloadFromNote 映射候选）。解析/选档逻辑全部 vendored，本文件只做接线。
+ * 视频 → X4 HD 询问（offerHdDownloadFromNote 映射候选）。解析/选档逻辑全部在上游，本文件只做接线。
  *
  * 前几版死因存档（勿复活）：
  * 1. 画廊三击——400ms 窗口苛刻 + 双击缩放冲突（用户否决）
@@ -36,7 +37,7 @@ import java.net.URL
  *    实证为空（三轮 census），MultiTypeAdapter.setItems 真机不存在（串池类名≠运行时类）
  * 4. okhttp 旁路采集图集/视频流（imagefeed images_list / video_info_v2 逐流）——2026-10-14 定稿、
  *    2026-10-19 删除：save-hostile 笔记服务端剥直链、归属 lookback 脆、采集正则与宿主载荷形态
- *    耦合；分享页 __INITIAL_STATE__ 是唯一全量无剥离数据源（vendored XhsNoteParser 消费）
+ *    耦合；分享页 __INITIAL_STATE__ 是唯一全量无剥离数据源（上游 XhsNoteParser 消费）
  *
  * 挂载点 `ji9.b`（图片长按面板「保存」点击 lambda；9.49.1 为 mh9.b，9.50.0 R8 迁名后旧类留
  * class_data_off=0 空壳——loadClass 成功但 declaredMethods 空 ⇒ 直连 0 候选 + 串锚随迁 ⇒ NOT_RESOLVED，
@@ -524,10 +525,10 @@ object XhsBatchSave {
 
     /**
      * 图片保存点击：**模块全接管**——接管判定只看分享链接可得性（全内存，见 [XhsSavePivot.availableShareLink]），
-     * 链接可得 = 不 proceed（宿主原保存逻辑整段不执行），后台线程解析分享页（vendored 下载器管线）
+     * 链接可得 = 不 proceed（宿主原保存逻辑整段不执行），后台线程解析分享页（上游下载器管线）
      * 拿全部原图直链：1 张静默直下、≥2 张弹确认卡；链接不可得才 `proceed()` 回落宿主原生保存。
      *
-     * 2026-10-19 实况图集根因修（真机 19:46 日志「解析成功 图0 视频0 live6 候选0」+ vendored parser
+     * 2026-10-19 实况图集根因修（真机 19:46 日志「解析成功 图0 视频0 live6 候选0」+ 上游 parser
      * 读码）：分享页实况图集解析出的媒体全为 ResolvedMedia.LivePhoto（每项 image: Image + video:
      * Video 双轨），旧取数只消费 note.images/note.videos ⇒ livePhotos 两头不沾 ⇒ urls 空 ⇒「无可用
      * 图片」。取 URL 改两类合并（LinkedHashSet 去重保序）：images.originalUrl + livePhotos 每项
@@ -567,10 +568,10 @@ object XhsBatchSave {
                 val urls = runCatching {
                     val note = kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
                     // 两类合并去重保序（2026-10-19 实况图集根因修：真机 19:46 日志「解析成功 图0 视频0
-                    // live6 候选0」+ vendored parser 读码——该笔记 5 项媒体全为 ResolvedMedia.LivePhoto
+                    // live6 候选0」+ 上游 parser 读码——该笔记 5 项媒体全为 ResolvedMedia.LivePhoto
                     // （parser 正确产出，每项 image: Image + video: Video 双轨），旧适配层只消费
                     // note.images/note.videos，livePhotos 两头不沾 ⇒ urls 空 ⇒「无可用图片」死寂）：
-                    // ① images.originalUrl（vendored NoteOutput.eligible 语义映射：封面/评论图排除，
+                    // ① images.originalUrl（上游 NoteOutput.eligible 语义映射：封面/评论图排除，
                     //   originalUrl = 下载器确认的原图直链，imageList urlDefault 同源）
                     // ② livePhotos 每项只展开 image.originalUrl（下载器实测 livePhoto 关时只下静态帧
                     //   原图，模块对齐此行为——不双下 mp4+帧）
@@ -805,7 +806,7 @@ object XhsBatchSave {
         }
     }
 
-    /** 追加询问（≥2 张）：图集来自分享链接解析（XhsSavePivot → vendored ResolvedNote）；确认后外挂直下。分流见 [mountClick]。 */
+    /** 追加询问（≥2 张）：图集来自分享链接解析（XhsSavePivot → 上游 ResolvedNote）；确认后外挂直下。分流见 [mountClick]。 */
     private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule) {
         // 全量 URL 不截断（2026-10-15 原图链路诊断）：PC 端 curl 比对需完整 token/query
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 " + urls.first() + "）")

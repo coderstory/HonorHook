@@ -15,6 +15,10 @@ jobs:
       tag: ${{ steps.rel.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 构建依赖上游 submodule（:xhs-dn-core 的源码供给，见 libs/xhs-dn-core/build.gradle.kts）——
+          # 不带 submodules 则检不到上游源码，:xhs-dn-core 同步任务直接失败。
+          submodules: true
 
       # JDK 21：与 tools/README.md 声明的工具链要求一致（release 打包需要含 jlink 的完整 JDK）
       - name: Set up JDK 21

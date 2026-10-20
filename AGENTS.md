@@ -48,6 +48,13 @@ N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**
 
 ## 架构里不明显的事实
 
+**XHS 下载器管线是外部依赖模块，不在本仓源码树里。** `com.neoruaa.xhsdn.*`（上游
+XHS_Downloader_Android，**AGPL-3.0**）来自 submodule `reference/xhs/XHS_Downloader_Android`
+（pin `d5c0070` / 1.4.1），构建时按 **7 文件白名单**同步进 `:xhs-dn-core` 模块再编译
+（白名单 = 唯一事实源，`libs/xhs-dn-core/build.gradle.kts`）——**本仓不存上游任何源码**。
+上游文件**禁改**（保持逐字一致 ⇒ AGPL 归因成立）；白名单缺文件 = 构建直接失败，不会静默少编译。
+项目整体按 **AGPLv3** 分发（根 `LICENSE` + `NOTICE`）。
+
 **开关通道是跨进程的，且延迟一轮注入。** UI 侧 `FeatureStore` 双写本地 prefs + 远端 prefs（group = `FeatureCatalog.REMOTE_GROUP`）；hook 侧 `RemoteConfig` 在 `HookEntry.onPackageLoaded` 注入一次后只读本地。**默认全开**：读不到 / 异常一律视为开；关闭某功能 = 宿主显式写 `false`，且**下次目标进程注入才生效**。
 
 **`FeatureCatalog` 是功能 key 的唯一事实源**（`app/app/src/main/kotlin/top/honorhook/FeatureCatalog.kt`），UI 侧与 hook 侧共用同一份 key 字面量。**任何一侧都禁止手写 key 字符串**——加开关只动这张表。该类被 proguard `-keep` 防 R8 重命名。
@@ -96,6 +103,7 @@ N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**
 | UI 页面 / 开关项 | `ui/screen/` |
 | 逆向记录 | `docs/reverse/<app>.md` |
 | 设备操作 | `tools/dev.sh` 新增子命令 |
+| 上游第三方代码接入 | `libs/<模块>/build.gradle.kts`（独立模块 + 文件白名单）；源码只走 `reference/` submodule，**不复制进本仓** |
 
 ## Agent skills
 

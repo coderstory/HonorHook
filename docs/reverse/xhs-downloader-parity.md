@@ -1,7 +1,10 @@
 # XHS_Downloader_Android（基准）业务逻辑全景 × 插件 xhs 系列对照
 
-> **销账（2026-10-19）**：基准已 vendored 为 submodule（`XHS_Downloader_Android` 1.4.1，7 件
-> byte-identical 进 `app/app/src/main/kotlin/com/neoruaa/xhsdn/`，零修改可直接同步上游）。
+> **销账（2026-10-20 更新）**：基准**不再 vendored 进本仓源码树**——7 件文件（byte-identical、零修改）
+> 改为经**外部模块 `:xhs-dn-core`** 引用：源码来自 submodule（`XHS_Downloader_Android` 1.4.1，pin
+> `d5c0070`），构建时按 **7 文件白名单**同步后编译（白名单 = 唯一事实源，见
+> `libs/xhs-dn-core/build.gradle.kts`）。2026-10-19 的旧形态（复制进
+> `app/app/src/main/kotlin/com/neoruaa/xhsdn/`）已废——本仓不再存上游任何源码。
 > 插件侧取数链 = 本文档 §1.1 路径 A（短链 302 → __INITIAL_STATE__ → ResolvedNote），实况图集
 > livePhotos.image 静帧合并按用户拍板（livePhoto 只下静态图）。选档/下载语义 100% 对齐基准，
 > 本文全景分析留作维护参考，现行架构 = **`xhs-save-masterplan.md`**。

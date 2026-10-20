@@ -11,24 +11,25 @@ import top.honorhook.xposed.core.MountEngine
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * X5 保存管线适配层（2026-10-19 重构，X5 定案）：保存按钮 hook → 分享链接 → vendored 下载器管线。
+ * X5 保存管线适配层（2026-10-19 重构，X5 定案）：保存按钮 hook → 分享链接 → 上游下载器管线。
  *
  * 自有代码只有本文件的适配：分享链接单链 + fetchHtml 注入 + ResolvedNote 交付。
- * 解析/选档/下载逻辑全部在 vendored `com.neoruaa.xhsdn.*`（XHS_Downloader_Android，整文件原样复制，
- * 见 app/app/src/main/kotlin/com/neoruaa/）——本文件不自创任何解析与选档语义。
+ * 解析/选档/下载逻辑全部在上游 `com.neoruaa.xhsdn.*`（XHS_Downloader_Android，AGPL-3.0）——**代码不在本仓**：
+ * 经外部模块 :xhs-dn-core 引用（submodule 供给 + 7 文件白名单，见 libs/xhs-dn-core/build.gradle.kts），
+ * 本文件不自创任何解析与选档语义。
  *
  * 分享链接**单链**（2026-10-19 拍板「地址就是分享链接，直接扔给下载器」；禁多轨叠补丁，前版
  * noteShares 直用/反射/剪贴板等多轨实现已删）：
  *  1. [XhsVideoSave.shareLinkOf]：noteShares 长链原文（okhttp 旁路采集 harvestNoteShare）
  *  2. [hostShortUrl]：反射调宿主 ShareService.getShortUrl(长链) → 短链（锚行
  *     "getShortUrlObservableIfNeed success"，u2c/y.java:70，9.50 实证）
- *  3. vendored [DefaultXhsContentRepository.resolve](短链)：UrlParser 规范化 + [expandShortUrl]
- *     302 展开（展开链自带 fresh xsec_token，2026-10-19 本地实证）+ vendored parser
+ *  3. 上游 [DefaultXhsContentRepository.resolve](短链)：UrlParser 规范化 + [expandShortUrl]
+ *     302 展开（展开链自带 fresh xsec_token，2026-10-19 本地实证）+ 上游 parser
  * 任一步失败：WARN + 记 [parsedEmptyNotes] + 返回 null（失败卡由 XhsBatchSave 弹；用户再点保存时
  * [availableShareLink] 对已记 noteId 返 null，放行宿主原生保存）。
  *
  * fetchHtml：HttpURLConnection GET，UA/头照抄 [XhsVideoSave.resolveOriginVideoUrl] 现有请求构造
- * （手机 UA 结尾 `xiaohongshu` 后缀实证必需），手动跟随 302（≤5 跳）。不用 vendored
+ * （手机 UA 结尾 `xiaohongshu` 后缀实证必需），手动跟随 302（≤5 跳）。不用 上游
  * OkHttpXhsPageSource（okhttp3 compileOnly，运行期不加载该类）。
  */
 object XhsSavePivot {
@@ -154,8 +155,8 @@ object XhsSavePivot {
     }
 
     /**
-     * 单链解析（2026-10-19 定案）：长链 → 宿主 getShortUrl 短链 → vendored resolve。IO 在
-     * Dispatchers.IO（vendored repository 默认 dispatcher）。任何失败（无长链 / getShortUrl 失败 /
+     * 单链解析（2026-10-19 定案）：长链 → 宿主 getShortUrl 短链 → 上游 resolve。IO 在
+     * Dispatchers.IO（上游 repository 默认 dispatcher）。任何失败（无长链 / getShortUrl 失败 /
      * 抓取 / 解析异常 / 图视频 live 全空）= WARN + 记 [parsedEmptyNotes] + 返 null——失败卡由
      * XhsBatchSave 弹，下次点击 [availableShareLink] 返 null 放行宿主。
      */
@@ -262,10 +263,10 @@ object XhsSavePivot {
     }.getOrNull()
 
     /**
-     * xhslink 短链 302 展开（注入 vendored [DefaultXhsContentRepository.resolveShortUrl] 的实现，
+     * xhslink 短链 302 展开（注入上游 [DefaultXhsContentRepository.resolveShortUrl] 的实现，
      * 单链第 3 步）：手动跟随 ≤5 跳取最终 URL（不读 body），连接构造与 [XhsVideoSave.fetchNotePageHtml]
      * 同款（手机 UA）；展开链自带 fresh xsec_token（2026-10-19 本地实证）。任何失败返 null
-     * （vendored 侧回落短链原样进 fetchHtml，由其手动 302 兜底）。
+     * （上游侧回落短链原样进 fetchHtml，由其手动 302 兜底）。
      */
     private fun expandShortUrl(startUrl: String): String? {
         var u = startUrl
@@ -292,13 +293,13 @@ object XhsSavePivot {
     }
 
     /**
-     * 注入给 vendored repository 的抓取实现（[DefaultXhsContentRepository.fetchHtml]）。
+     * 注入给 上游 repository 的抓取实现（[DefaultXhsContentRepository.fetchHtml]）。
      * 连接/请求头与 [XhsVideoSave.fetchNotePageHtml] 同一构造（手机 UA + Accept + 手动 302 ≤5 跳，
-     * xhslink 短链在此展开）；失败抛异常交 vendored 侧归类（XhsResolveException.Network）。
-     * vendored 侧把 fetch null/空与「解析出但无 noteId」同归 RequiresWebView，分不开——
+     * xhslink 短链在此展开）；失败抛异常交 上游侧归类（XhsResolveException.Network）。
+     * 上游侧把 fetch null/空与「解析出但无 noteId」同归 RequiresWebView，分不开——
      * 故在注入 lambda 处就地打 fetch 空/异常 WARN（url 前 80 字符 + body 长度/异常 message），
      * 并记 [lastFetchDiag] 供「媒体全空」行回溯。无状态 facade，按次构建。
-     * resolveShortUrl 注入 [expandShortUrl]：vendored resolve 对 xhslink 短链先经此 canonical 化
+     * resolveShortUrl 注入 [expandShortUrl]：上游 resolve 对 xhslink 短链先经此 canonical 化
      * （UrlParser 规范化设计路），展开链自带 fresh token 后 parser 才拿得到 expectedNoteId。
      */
     private fun repository(module: XposedModule): DefaultXhsContentRepository =

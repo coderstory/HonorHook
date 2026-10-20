@@ -17,8 +17,12 @@ miuix = "0.9.4"
 materialKolor = "5.0.1"
 # JVM 单元测试（表驱动决策的回归；跑在 :app:testDebugUnitTest）
 junit = "4.13.2"
+# kotlinx-coroutines：:xhs-dn-core（上游下载器模块）里的挂起函数需要。
+# 1.9.0 = 现状解析值（此前经 compose 依赖树隐式可见），显式声明后版本不漂。
+kotlinxCoroutines = "1.9.0"
 
 [libraries]
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
 # 模块宿主 App 经该服务与 LSPosed 通信：远程 prefs 下发 + 真实激活状态（照 LSPFRIDA/HyperChanger）
 libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed" }
@@ -56,6 +60,8 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+# :xhs-dn-core（上游下载器 AGPL 模块）用的 library 插件，与 application 同 AGP 版本
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 # Kotlin 唯一版本源（此前 settings.gradle.kts pluginManagement 里嵌 2.4.21 与这里 2.3.21 双源漂移，
 # 统一为 toml 实际生效者；顶层 build.gradle.kts 经此别名引用）

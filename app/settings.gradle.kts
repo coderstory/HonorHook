@@ -51,3 +51,9 @@ dependencyResolutionManagement {
 rootProject.name = "HonorHook"
 
 include(":app")
+
+// :xhs-dn-core —— 上游 XHS_Downloader_Android（AGPL-3.0）下载器管线的外部依赖模块。
+// 源码不在本仓，由 submodule（reference/xhs/XHS_Downloader_Android）供给，构建时按白名单同步。
+// CI 必须带 `submodules: true` 检出，否则构建拿不到源码（.github/workflows/ci.yml）。
+include(":xhs-dn-core")
+project(":xhs-dn-core").projectDir = file("../libs/xhs-dn-core")

@@ -17,7 +17,7 @@ import java.util.regex.Pattern
  *
  * 挂载点 `okhttp3.OkHttpClient$Builder.build()`（公开库 API，okhttp3 未 shade——dex 串池实证）。
  * before 反射读 `interceptors` 字段（okhttp 公开源码字段名，跨版稳定）注入动态代理 Interceptor。
- * okhttp3 不在编译期 classpath（compileOnly 仅供 vendored 件编译，运行期反射走宿主 loader），
+ * okhttp3 不在编译期 classpath（compileOnly 仅供上游件编译，运行期反射走宿主 loader），
  * 请求/响应全走反射调用。
  *
  * **2026-10-19 v3「视频图片化」：入口断**（[interceptVideoSave] 只解析+弹卡；下载断根 =
@@ -37,7 +37,7 @@ import java.util.regex.Pattern
  *
  * **2026-10-19 X5 重构**：video_info_v2/图集/分享三路**旁路采集**（harvestVideoSources /
  * harvestStreams / harvestNoteImages 及其全部正则与缓存表）随「保存按钮 hook → 分享链接 →
- * vendored 下载器管线」定案删除——视频候选只来自 X5 点击轨的分享链接解析（XhsSavePivot →
+ * 上游下载器管线」定案删除——视频候选只来自 X5 点击轨的分享链接解析（XhsSavePivot →
  * [offerHdDownloadFromNote]），本类只留 [harvestNoteShare]（share_info 缓存，XhsSavePivot 单链输入
  * [shareLinkOf]）。
  *
@@ -69,7 +69,7 @@ object XhsVideoSave {
      * 单条视频候选 URL（逐语义移植 XHS_Downloader_Android core/model/ResolvedNote.kt MediaCandidate）：
      * 每条流的 backup_urls 各元素与 master_url 各成一候选，共享流的 width/height/bitrate/size/codec。
      * 原片候选：width/height/bitrate/size = 0、watermarked = false、original = true（排序见
-     * [pickBestAndDownload]）。2026-10-19 起实例只由 [offerHdDownloadFromNote] 从 vendored
+     * [pickBestAndDownload]）。2026-10-19 起实例只由 [offerHdDownloadFromNote] 从 上游
      * ResolvedNote（MediaCandidate）映射产生。
      */
     private class VideoCandidate(
@@ -968,7 +968,7 @@ object XhsVideoSave {
 
     /**
      * X5 点击轨入口（2026-10-19 X5 重构）：XhsBatchSave a59.q invoke 点击轨把分享链接解析出的
-     * vendored [ResolvedNote]（可为 null = 解析失败）交进来，视频候选由此映射——
+     * 上游 [ResolvedNote]（可为 null = 解析失败）交进来，视频候选由此映射——
      * ResolvedNote.videos[].candidates（MediaCandidate）逐条转 [VideoCandidate]，字段同名直译
      * （core/model/ResolvedNote.kt 的 MediaCandidate 即本类 VideoCandidate 的上游原型）。
      * note = null 或无候选 ⇒ WARN 后回落（无梯子候选可退——采集已删，静默跳过）。
@@ -1136,7 +1136,7 @@ object XhsVideoSave {
      * 选档（2026-10-15 基准切换，用户拍板逐语义移植 XHS_Downloader_Android）：
      * 候选集 = 原片（移动版网页解析 originVideoKey 成功时置顶：width/height=0、watermarked=false、
      * original=true，等价下载器 `original=true` id 最高优先）+ 调用方给的逐 URL 候选
-     * （2026-10-19 起来自 vendored ResolvedNote——XhsNoteParser.kt:172-204 语义，经
+     * （2026-10-19 起来自上游 ResolvedNote——XhsNoteParser.kt:172-204 语义，经
      * offerHdDownloadFromNote 映射）。排序照 domain/download/NoteOutput.kt:47-56
      * 默认 RESOLUTION 偏好：watermarked 升序 → original 降序 → w×h 降序；`sortedWith` 稳定排序 +
      * `first()` = 平手取排序后列表第一个（逐字对齐）。origin 解析成功即走置顶语义（等价直接用原片）；
