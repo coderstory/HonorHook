@@ -776,15 +776,30 @@
 
 - [ ] **Step 1: 用户执行真机回归（AI 不跑）**
 
-  交付验证清单（逐目标）：
+  本轮（2026-10-20 复核后）**具体验证清单**——逐条按 §五 快照核对：
+
   ```bash
   tools/dev.sh install          # 装包（会先卸载旧包）
   tools/dev.sh enable-module    # 覆盖安装后 LSPosed 会停用模块，必须重新启用
-  tools/dev.sh modlog           # 抓模块日志
+  tools/dev.sh modlog           # 抓 LSPosed 框架日志（判据行在这里，不在 logcat）
+  tools/dev.sh modlog-grep 'installed'   # 只看判据行
   tools/dev.sh hook-test        # 主题商店专项回归
   ```
-  逐目标核对 `installed N/M` 与 §五 快照（重点：theme 49/49、installer、systemui 3/3 + U6/U7、xhs X1/X2/X4/X5、ads/tracking 各包）。
-  **判读规则**（写进交付说明）：N 明显小于 M ⇒ 宿主版本错位或选点失效，**先别改 hook 实现**（`docs/hook-craft.md` §六·1）。
+
+  | # | 验证项 | 期望 | 判读 |
+  |---|---|---|---|
+  | 1 | 判据行格式 | `HookName[宿主包名]: installed N/M`（如 `HonorAdsHook[com.hihonor.android.ads]: installed 2/2`） | 格式变更是预期；`installed N/M` 子串不变 |
+  | 2 | theme | 49/49 | N<M ⇒ 先查宿主版本，**别改 hook 实现** |
+  | 3 | installer | 11/11（宿主 14.0.38.301） | 换宿主版本时 M 变（22.326=8 / 38.301=11） |
+  | 4 | launcher / sysmgr / ouc / systemui | 5/5 · 3/3 · 11/11 · 3/3 + U6 3/3 + U7 3/3 | — |
+  | 5 | **xhs（重点）** | 9.50.0：X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7；**9.49.1 覆盖套：X5 M=4**（noteSave/aigcEdit/downloader 三点该版本显式缺席，**不是失效**） | 本轮 xhs 首次真正按版本选坐标（9.49.1 覆盖套此前从未生效） |
+  | 6 | **关功能**（重点） | 关掉某功能 ⇒ 该功能挂载点不挂、**M 变小**、N/M 同步变化；失败清单不含被关的点 | 本轮 feature 过滤下沉到引擎（口径：过滤在统计 M 之前） |
+  | 7 | **MERGED** | 合并到**别的功能**的同名方法 ⇒ 该点进失败清单、不计入 N | 本轮新增 `MERGED_CONFLICT` 口径 |
+  | 8 | **线程**（重点） | 宿主启动**无卡顿**（小红书 / 包管理器首启各观察一次） | 本轮 xhs/theme/launcher/installer 的版本读与挂载全挪到 `MountScheduler` 后台线程 |
+  | 9 | 版本未适配 | 日志出现「宿主 X 未适配，按基线 Y 挂载表盲挂，判据以 installed N/M 为准」 | 盲挂提示是预期 |
+  | 10 | 兜底诚实 | 有漂移风险时看到「严格轨候选未采纳…转宽松轨」/ 漂移 WARN | 猜挂已被闸门堵死，N 下降＝补锚点，**不是**放宽闸门 |
+
+  **判读规则**（写进交付说明）：N 明显小于 M ⇒ 宿主版本错位或选点失效，**先别改 hook 实现**（`docs/hook-craft.md` §六·1）；唯一例外是 §五 已分档的 9.49.1 覆盖套（X5 M=4）。
 
 - [ ] **Step 2: 回写判据快照**
 
@@ -828,3 +843,45 @@
 3. **类型一致性**：`MountSummary` / `MountOutcome` / `MountLogLevel` / `MountLogLine` 只在 Task 1 定义、Task 2/6 引用同名；`MountSession` 只在 Task 5 定义；`FeatureGate` / `filterByFeature` 只在 Task 6 定义；`VersionName` 只在 Task 8 定义。无同名异义。
 4. **Review Focus**：5 条分别落在 Task 4（#1）、Task 6（#2）、Task 1（#3）、Task 2/4（#4）、Task 3/4（#5）的测试里。
 5. **Proportion**：清单 9 个任务、约 60 个 step，对应一份 3 目标的重构；代码块只出现签名与断言，没有实现体。
+
+---
+
+## 执行台账（2026-10-20，native 执行完毕）
+
+**提交清单**（分支 `dev`，基线 `8693339` → `95e77c3`）：
+
+| 提交 | 任务 | 内容 |
+|---|---|---|
+| `c35ea7c` | Task 1 | 挂载结果聚合抽成纯函数 `MountSummary`（11 例 JVM 回归，判据口径逐字不变） |
+| `846e7b6` | Task 6 | 功能开关过滤下沉到引擎（`FeatureGate` + `filterByFeature`，6 例） |
+| `734875e` | Task 12 | 合并到别的功能的挂载点不再计入 installed（`MERGED_CONFLICT`，4 例） |
+| `5dc612d` | Task 7 | launcher/sysmgr/ouc 三张表纳入护栏（+7 例） |
+| `8ea7cd6` | Task 10 | xhs 宿主版本读取挪出主线程 + 挂载点集合按版本选取可回归（7 例） |
+| `b7e6acf` | Task 11 | 删除恒 null 的 `HostVersion.resolve`，统一走 `resolveHostVersion`（+2 例） |
+| `8ae3298` | Task 8 | 版本比较下沉共享层 `VersionName` + 判据行带宿主包名 + 无目标包不读远端 prefs（+6 例） |
+| `4d1f08e` | Task 5 | `MountEngine` session 化：新增 `MountSession`，23 个目标去掉两阶段 `begin`（+1 例） |
+| `1508bcf` | docs | `hook-craft.md` §四 补两条契约；`hook-inventory-audit.md` §五 补判据行格式 |
+| `95e77c3` | 复审修复 | 复审 Important 1/2：注释纠偏 + xhs 9.49.1 覆盖套期望 M 分档 |
+
+测试基线：87 → **128 tests / 0 fail / 1 skipped**；`tools/dev.sh build` 全程通过。
+
+### 关键裁决（不在计划正文里、但改变了结果的判断）
+
+| 任务 | 裁决 | 代价 |
+|---|---|---|
+| 1 | `MountOutcome` 字段用 `(id, description, group, feature, result)`——失败清单打印的是 `task.description` 不是 id | 与计划原案 `(id, group, result)` 不同 |
+| 1 | `begin` 用 `began` 布尔标志判首轮（不用 `total != 0`） | 空 pending 首轮会漏记 |
+| 1 | 增补 `markUnmounted`（现状 failedIds 同时收 FAILED 与重试耗尽的 unresolved） | 纯函数接口比计划多一个方法 |
+| 5 | `MountSession` 独立文件；会话建在**原 `engine.begin(...)` 调用点**（installer/xhs/theme/launcher 的 begin 在后台探测链里） | 建在 install() 开头会改期望版本语义 |
+| 5 | 30+ 个辅助函数显式首参 `session: MountSession`、不存字段 | 调用点多一行参数（编译器兜住漏改） |
+| 6 | `FeatureGate` 放 `xposed/core/`（不是计划的 `data/`）：消费方是 core；`RemoteConfig` 实现它 ⇒ 依赖方向 data→core | 与计划路径不同 |
+| 8 | 版本比较实现整体搬到 `top.honorhook.VersionName`，`HostVersion` 不留同名入口 | `HostVersionTest` 的 4 条用例随之迁到 `VersionNameTest` |
+| 8 | 判据行包名贴**行首** `Hook[包名]`（不追加行尾） | 判据行前缀变了，按整行匹配的脚本要改；按 `installed N/M` 抓的不受影响 |
+| 10 | xhs 的 `engine.begin` 期望版本由「恒基线」改为「读到版本就用它」 | **判据口径变化**（旧宿主挂覆盖套时不再自报漂移），需真机核对 |
+| 11 | theme/launcher 的 `begin` 期望版本**保持基线**（与 xhs 相反） | 两类目标口径分叉，已在代码注释里说明 |
+| 12 | 合并冲突判定下沉引擎（`MountSession.mount` 拿得到占用方 feature），纯函数 `mergedFeatureConflict` | 与计划原案（summary 槽位记 feature）实现路径不同 |
+
+### 复审与遗留
+
+- 整分支复审（fresh context subagent，模型 `opencode/glm-5.3-flash-free`）：**Critical 0**；Important 2（两处计划点名的注释被静默跳过、§五 缺 9.49.1 期望 M 分档）已在 `95e77c3` 修；Minor 3 记账不修。
+- **Deferred minors**（留给你决定是否补）：① 重试轮会重新过 feature 闸门（窗口极窄，可首轮缓存 eligible）；② 机械迁移把「共享挂载基建」字段 KDoc 搬成局部变量 KDoc（约 12 处，纯外观）；③ `MountSessionTest` 只有 1 例冒烟（session 级重试/冲突路径 JVM 层无直测，属已知未覆盖面）。
