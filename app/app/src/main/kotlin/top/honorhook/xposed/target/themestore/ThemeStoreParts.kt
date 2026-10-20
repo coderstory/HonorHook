@@ -107,6 +107,8 @@ internal class MountTask(
     override val dex: DexHint? = null,
     /** 功能点 id（通路汇总用，与 MountEngine.Task.group 契约对齐）。 */
     override val group: String = "",
+    /** 所属功能开关 key（空 = 常挂）；由引擎按闸门统一过滤。 */
+    override val feature: String = "",
 ) : MountEngine.Task
 
 /** 数据表挂载点 → 运行时任务（HookPoint 的声明式字段在此落到具体类型）。 */
@@ -120,6 +122,7 @@ internal fun HookPoint.toMountTask(): MountTask = MountTask(
     id = id,
     description = description,
     group = group,
+    feature = feature,
     resolveValue = enumRef?.let { ref ->
         { loader: ClassLoader ->
             runCatching {

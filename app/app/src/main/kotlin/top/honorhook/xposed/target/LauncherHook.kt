@@ -48,8 +48,8 @@ object LauncherHook : TargetHook {
 
     override val packageName = "com.hihonor.android.launcher"
 
-    /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("LauncherHook", packageName)
+    /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
+    private val engine = MountEngine("LauncherHook", packageName, RemoteConfig)
 
     /** 版本选表：默认套 = 基线点；适配其他宿主版本时在其上追加精确套。 */
     private val versionTables = listOf(
@@ -64,7 +64,6 @@ object LauncherHook : TargetHook {
         // 数据表 LAUNCHER_POINTS_18_0_0_234.kt；逐点清点口径以真机 `installed N/M` 的 M 为准。
         val pick = HostVersion.pick(versionTables, HostVersion.resolve(param.applicationInfo?.sourceDir))
         val pending = pick.tasks
-            .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
             .map { it.toMountTask() }
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
@@ -504,6 +503,8 @@ object LauncherHook : TargetHook {
         override val id: String,
         override val description: String,
         override val dex: MountEngine.DexHint? = null,
+        /** 所属功能开关 key（空 = 常挂）；由引擎按闸门统一过滤。 */
+        override val feature: String = "",
     ) : MountEngine.Task
 
     /** 数据表挂载点 → 运行时任务（声明式字段落到具体类型）。 */
@@ -518,5 +519,6 @@ object LauncherHook : TargetHook {
         description = description,
         // 同名重载消歧（如 Launcher.closeFolder 的 (Folder)V 与 (Z)V 同为 1 参 void）靠参数类型锚点。
         dex = dexParamTypes?.let { MountEngine.DexHint(paramTypes = it) },
+        feature = feature,
     )
 }

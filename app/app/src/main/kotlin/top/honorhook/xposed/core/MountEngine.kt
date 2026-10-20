@@ -4,8 +4,16 @@ import android.util.Log
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 
-/** 各目标 hook 共享的挂载基建：懒加载重试、失败分级、统一解析、汇总日志。 */
-class MountEngine(private val hookName: String, private val hostPackage: String) {
+/**
+ * 各目标 hook 共享的挂载基建：懒加载重试、失败分级、统一解析、汇总日志。
+ *
+ * @param gate 功能开关闸门（表级过滤的唯一口径，见 [FeatureGate]）；默认恒开 ⇒ 未显式传入的目标行为不变。
+ */
+class MountEngine(
+    private val hookName: String,
+    private val hostPackage: String,
+    private val gate: FeatureGate = FeatureGate.AlwaysOn,
+) {
 
     /**
      * 失败分级：[FAILED] hook 挂载异常（重试无意义）；[NOT_RESOLVED] 类/方法（或依赖值）未解析（可随类加载重试）。
@@ -52,6 +60,8 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         val description: String
         /** 功能点 id（如 "A1"）；"" = 探针/载体类，不参与通路汇总。 */
         val group: String get() = ""
+        /** 所属功能开关 key（FeatureCatalog）；空 = 常挂，不受开关控制。过滤由引擎按闸门统一执行。 */
+        val feature: String get() = ""
         /** DexKit 兜底特征（混淆名目标用；null = 仅直连轨）。 */
         val dex: DexHint? get() = null
         /** 挂载前惰性解析强制值（依赖目标类加载，如枚举常量）；返回 null = 未就绪 → [Result.NOT_RESOLVED] 重试。 */
@@ -69,6 +79,8 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         override val group: String = "",
         override val dex: DexHint? = null,
         override val resolveValue: ((ClassLoader) -> Any?)? = null,
+        // feature 放最后：各目标大量用位置传参构造 SimpleTask，插前会错位
+        override val feature: String = "",
     ) : Task
 
     private var retryRounds = 0
@@ -129,17 +141,21 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         MountScheduler.postDelayed(1000) {
             runCatching { checkHostVersionOnce(module) }
         }
+        // 功能开关闸门：功能关闭的挂载点不挂（挂了也白挂，还让判据行说不清是"没挂上"还是"功能已关"）。
+        // 过滤口径的唯一事实源 = 引擎（过去散落在 theme / installer / launcher 三处本地 .filter）。
+        // 过滤发生在统计 M 之前 ⇒ M 仍是"本次实际要挂的点数"，关功能不改变判据行的含义。
+        val eligible = filterByFeature(pending, gate)
         // 只在首轮记总数：重试轮传入的是 unresolved 子列表，若逐轮覆盖，判据行会变成
         // "installed 累计成功数/本轮待挂数"（成功数跨轮累计），M 失去意义。
         if (retryRounds == 0) {
             val groupCounts = LinkedHashMap<String, Int>()
-            for (task in pending) {
+            for (task in eligible) {
                 if (task.group.isNotEmpty()) groupCounts[task.group] = (groupCounts[task.group] ?: 0) + 1
             }
-            summary.begin(pending.size, groupCounts)
+            summary.begin(eligible.size, groupCounts)
         }
         val unresolved = mutableListOf<T>()
-        for (task in pending) {
+        for (task in eligible) {
             // per-task try/catch 隔离：单任务异常不阻断同批其他任务，汇总行始终输出
             val result = runCatching { mountOne(task) }.getOrElse {
                 module.log(Log.ERROR, TAG, "$hookName 挂载异常（任务隔离）: ${task.description}", it)

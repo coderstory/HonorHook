@@ -32,7 +32,7 @@ object SysmgrHook : TargetHook {
     override val packageName = "com.hihonor.systemmanager"
 
     /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("SysmgrHook", packageName)
+    private val engine = MountEngine("SysmgrHook", packageName, top.honorhook.xposed.data.RemoteConfig)
 
     /** 判据日志前缀（真机按此前缀过滤命中行）。 */
     private const val JUDGE_PREFIX = "sysmgr-hook"
@@ -92,6 +92,7 @@ object SysmgrHook : TargetHook {
         paramCount = paramCount,
         returnType = returnType,
         description = description,
+        feature = feature,
         dex = DexHint(
             strings = dexStrings,
             paramTypes = dexParamTypes,

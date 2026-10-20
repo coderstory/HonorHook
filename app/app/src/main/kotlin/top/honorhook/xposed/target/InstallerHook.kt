@@ -18,7 +18,7 @@ object InstallerHook : TargetHook {
     override val packageName = "com.android.packageinstaller"
 
     /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("InstallerHook", packageName)
+    private val engine = MountEngine("InstallerHook", packageName, RemoteConfig)
 
     private const val PKG_HN = "com.hihonor.packageinstaller"
 
@@ -86,7 +86,6 @@ object InstallerHook : TargetHook {
         val pick = HostVersion.pick(installerTables, actual)
         val pending: List<MountTask> = if (pick.matched) {
             pick.tasks
-                .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
                 .map { it.toInstallerTask() }
         } else {
             // 盲挂留痕（评审 R7）：基线版本不在任何精确套内是常态路径（默认套缺席），盲挂行为显式化——
@@ -157,6 +156,7 @@ object InstallerHook : TargetHook {
         id = id,
         description = description,
         group = group,
+        feature = feature,
         dex = DexHint(
             strings = dexStrings,
             paramTypes = dexParamTypes,
@@ -393,6 +393,8 @@ object InstallerHook : TargetHook {
         override val dex: DexHint? = null,
         // group 排在 dex 之后：addConst/addBlock 走位置传参，插前会错位
         override val group: String = "",
+        // feature 同样放最后（位置传参约束）；表级过滤由引擎按闸门统一执行
+        override val feature: String = "",
     ) : MountEngine.Task
 
     private fun addConst(

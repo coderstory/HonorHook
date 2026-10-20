@@ -2,6 +2,7 @@ package top.honorhook.xposed.data
 
 import android.content.SharedPreferences
 import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.FeatureGate
 
 /**
  * hook 侧功能开关读取器——「恒开」语义的开关化入口。
@@ -14,7 +15,7 @@ import top.honorhook.FeatureCatalog
  * 读不到（未连接/框架未下发/异常）一律回目录默认。与 UI 侧 FeatureStore 默认对齐——
  * 关某功能需宿主显式写入 false 后生效（下次目标进程注入时读取）。
  */
-object RemoteConfig {
+object RemoteConfig : FeatureGate {
 
     @Volatile
     private var prefs: SharedPreferences? = null
@@ -34,7 +35,7 @@ object RemoteConfig {
     }
 
     /** 读功能开关；默认随 FeatureCatalog 目录（2026-10-15 用户拍板：默认开，四个例外关，与 UI 侧 FeatureStore 对齐），读不到/异常回目录默认。 */
-    fun isEnabled(key: String): Boolean {
+    override fun isEnabled(key: String): Boolean {
         val fallback = catalogDefaults[key] ?: false
         return runCatching { prefs?.getBoolean(key, fallback) ?: fallback }.getOrDefault(fallback)
     }

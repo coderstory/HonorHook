@@ -25,7 +25,7 @@ object OucHook : TargetHook {
     override val packageName = "com.hihonor.ouc"
 
     /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
-    private val engine = MountEngine("OucHook", packageName)
+    private val engine = MountEngine("OucHook", packageName, top.honorhook.xposed.data.RemoteConfig)
 
     /** manifest 前缀（组件类全名 = 此前缀 + 相对路径；manifest 实证未被混淆）。 */
     private const val PKG_HNOUC = "com.hihonor.android.hnouc"
@@ -63,6 +63,7 @@ object OucHook : TargetHook {
         paramCount = paramCount,
         returnType = returnType,
         description = description,
+        feature = feature,
     )
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {

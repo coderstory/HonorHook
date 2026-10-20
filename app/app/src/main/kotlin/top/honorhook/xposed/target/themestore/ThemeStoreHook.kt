@@ -16,8 +16,8 @@ object ThemeStoreHook : TargetHook {
 
     override val packageName = "com.hihonor.android.thememanager"
 
-    /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("ThemeStoreHook", packageName)
+    /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
+    private val engine = MountEngine("ThemeStoreHook", packageName, RemoteConfig)
 
     /** 版本选表：默认套 = 基线点（行为与迁移前一致）；适配其他宿主版本时在其上追加精确套。 */
     private val versionTables = listOf(
@@ -41,7 +41,6 @@ object ThemeStoreHook : TargetHook {
             module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 未适配，按基线 $baseline 挂载表盲挂，判据以 installed N/M 为准")
         }
         val pending = pick.tasks
-            .filter { it.feature.isEmpty() || RemoteConfig.isEnabled(it.feature) }
             .map { it.toMountTask() }
 
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
