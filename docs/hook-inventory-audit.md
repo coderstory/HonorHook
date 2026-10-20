@@ -99,7 +99,7 @@
 | `SystemUiHook` | 3/3 + U6 3/3 + U7 3/3 | 宿主未变 |
 | `JdHook` / `MfaAuthHook` | 1/1 / 1/1 | |
 | `SysmgrHook` | 3/3 | 宿主 `17.0.0.455`（超基线，仅 WARN） |
-| `XhsHook` | X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7 | X5 的 4/5 已随 v1.1.6 修复；2026-10-20 16:48 换版本源（`resolveHostVersion`）后**复测逐字一致**（宿主 9.50.0，走基线坐标不变） |
+| `XhsHook` | X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7 | X5 的 4/5 已随 v1.1.6 修复；2026-10-20 16:48 换版本源（`resolveHostVersion`）后**复测逐字一致**（宿主 9.50.0，走基线坐标不变）。**M 按宿主版本分档**：9.50.0 = 上表数值；**9.49.1 覆盖套只有 X5 变 ⇒ X5 M=4**（noteSave / aigcEdit / downloader 三点该版本无此坐标 ⇒ 显式缺席，不是失效；X1/X2/X4 与版本无关，M 不变）——旧宿主自查时勿把 N<M 判成宿主版本错位 |
 | `HonorAdsHook` / `HonorOpsAdHook` | 2/2 / 1/1 | 按 scope 逐包注册 |
 | `HonorTrackingHook` | 日历 3/3；桌面·天气 2/3 | 2/3 = 已知旧账「Ex 工厂收口」1 点（`_instance_ex_tag` 类不存在）；2026-10-20 同轮回归仍 2/3（launcher 2/3×37 次、totemweather 2/3×36 次）⇒ **非回退**，历史同进程常态 |
 | 壁纸三 hook（Transcode / Loop / Timeline） | 无近期判据 | 需触发壁纸编辑或应用才注入 |

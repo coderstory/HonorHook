@@ -7,6 +7,8 @@ package top.honorhook.xposed.data
  * 版本分发用 [top.honorhook.xposed.core.HostVersion.pick]：精确命中 → 默认套 → 无表跳过。
  *
  * kind 用字符串而非目标私有枚举，避免抽象层反向依赖某个目标的实现。
+ * 代价：字符串 kind 仍由目标侧 valueOf 解析，字符串打错在**目标构建期**抛（不是运行期静默失配），
+ * 护栏见 HookPointTablesTest（kind 合法值逐表断言）。
  */
 data class HookPoint(
     val id: String,

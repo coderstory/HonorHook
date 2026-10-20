@@ -49,8 +49,9 @@ class MountSession internal constructor(
         loader: ClassLoader,
         mountOne: (T) -> MountEngine.Result,
     ) {
-        // 首轮挂载由各 hook 的 install() 在 onPackageLoaded 线程（宿主主线程）同步触发；直连 miss 后
-        // MethodResolver 第二轨会同步做 DexKit 磁盘扫描（秒级）。失效是常态 ⇒ DexKit 兜底是常态路径
+        // 首轮挂载一律转投 MountScheduler 后台执行（宿主主线程零同步磁盘 IO）：install() 在宿主主线程
+        // 被调用，直连 miss 后 MethodResolver 第二轨要同步做 DexKit 磁盘扫描（秒级），读宿主版本还要
+        // 同步 IPC 让 system_server 解析 APK。失效是常态 ⇒ DexKit 兜底是常态路径
         // ⇒ 宿主主线程零同步磁盘 IO 是验收不变量：非挂载线程一律转投 MountScheduler 后台执行。
         // 重试轮本就在 scheduler 线程（递归自然 inline），这里只在首轮命中。
         if (!MountScheduler.handler.looper.isCurrentThread) {
