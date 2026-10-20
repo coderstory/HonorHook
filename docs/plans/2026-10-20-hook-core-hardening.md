@@ -885,3 +885,16 @@
 
 - 整分支复审（fresh context subagent，模型 `opencode/glm-5.3-flash-free`）：**Critical 0**；Important 2（两处计划点名的注释被静默跳过、§五 缺 9.49.1 期望 M 分档）已在 `95e77c3` 修；Minor 3 记账不修。
 - **Deferred minors**（留给你决定是否补）：① 重试轮会重新过 feature 闸门（窗口极窄，可首轮缓存 eligible）；② 机械迁移把「共享挂载基建」字段 KDoc 搬成局部变量 KDoc（约 12 处，纯外观）；③ `MountSessionTest` 只有 1 例冒烟（session 级重试/冲突路径 JVM 层无直测，属已知未覆盖面）。
+
+### 外部审计 #1（2026-10-20，负责人自跑的第二个模型）
+
+| 等级 | 发现 | 处置 |
+|---|---|---|
+| Important | `MERGED_CONFLICT` 口径没进耐久文档（`hook-craft.md` §四④ 只写「合并计成功」，`hook-inventory-audit.md` §五 无 MERGED 口径）⇒ 真机出现冲突时按文档读会误判成回归 | 已修（`72d80e6`）：§四④ 补例外、§五 加「合并口径」注记 |
+| Minor | `MountOutcome.feature` 是死字段（`record` 不传、`MountSummary.record` 不读） | 已修（`72d80e6`）：删字段 + KDoc（Task 12 把冲突判定下沉引擎后失去消费者） |
+| Minor | `SysmgrHook` / `OucHook` 用全限定 `top.honorhook.xposed.data.RemoteConfig` | 已修（`72d80e6`）：改 import + 短名（共 4 处，审计只点了 2 处） |
+| Minor | `UpgradeGuideHook.kt:28` 的 `sourceDir` 被改成 `?.sourceDir` | **不成立**：`8693339` 基线本就是 `param.applicationInfo.sourceDir`，迁移逐字保留（已 grep 双向核对） |
+| Minor | Task 8 两项注释纠偏在 `1508bcf` 时未执行 | 已在 `95e77c3` 修 |
+| Minor | 工作区 `app/app/version.properties` 未提交 bump | 你的文件，未提交 |
+
+**Deferred minors（合计 4 条，留给你决定）**：① 重试轮重新过 feature 闸门；② 机械迁移把字段 KDoc 搬成局部变量 KDoc（约 12 处）；③ `MountSessionTest` 只 1 例冒烟；④ `UpgradeGuideHook.kt:24` 的全限定 `RemoteConfig`（**基线既有**，不在本清单改动面内，未动）。
