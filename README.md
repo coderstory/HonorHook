@@ -1,43 +1,142 @@
+<div align="center">
+
 # HonorHook
 
-基于 **LSPosed（libxposed API 102）** 的定制模块，覆盖荣耀（Honor / MagicOS）系统应用与指定第三方应用。
-一个 APK 两个运行面：**hook 侧**注入 22 个作用域包（功能默认全开，行为只改内存态，运行期输出日志判据）+ **UI 侧** Miuix Compose 配置面板（单 Activity 三 Tab，经 `libxposed service` 远端 prefs 下发开关）。
+**荣耀 / MagicOS 的「去广告 · 解锁 · 隐私」开关箱**
 
-> 文档入口：全部文档索引见 [`docs/README.md`](docs/README.md)；全部挂载点台账见 [`docs/hook-inventory-audit.md`](docs/hook-inventory-audit.md)。
+一个 LSPosed 模块，22 个系统与第三方应用装上就按你要的生效 —— 只改内存态，不刷机、不动系统分区。
 
-## 功能
+[![Release](https://img.shields.io/github/v/release/coderstory/HonorHook?label=%E6%9C%80%E6%96%B0%E7%89%88&color=blue)](https://github.com/coderstory/HonorHook/releases/latest)
+[![License](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF-AGPL--3.0-blue.svg)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-8.0%2B%20%7C%20arm64--v8a-3ddc84.svg)]()
+[![LSPosed](https://img.shields.io/badge/LSPosed-libxposed%20API%20102-8A2BE2.svg)]()
+[![Downloads](https://img.shields.io/github/downloads/coderstory/HonorHook/total?color=blue)](https://github.com/coderstory/HonorHook/releases)
 
-**系统应用净化**
+| 功能面板（22 个目标，一排一开关） | 小红书：保存被模块接管 | 主题商店：会员态收口 |
+| :---: | :---: | :---: |
+| <img src="docs/images/panel.png" width="250" alt="HonorHook 功能面板"> | <img src="docs/images/xhs-save.png" width="250" alt="小红书下载原图确认卡"> | <img src="docs/images/theme-vip.png" width="250" alt="主题商店会员态"> |
 
-- 主题商店 `com.hihonor.android.thememanager`（基线 20.1.63.305）：VIP 状态收口 / 资源免费化 / 试用无倒计时 / 云控开关表驱动 / 广告槽位与底部推广 tab 源头裁剪 / 下载链 VIP 通道 / 动态壁纸应用修复。
-- 包管理器 `com.android.packageinstaller`（基线 14.0.37.301，另适配 14.0.22.326 / 14.0.38.301）：不请求广告与 AB 实验 / 安装页广告与推广卡不展示 / 三方跳转不拦截 / 跳过联网安全检测 / 不提示开启安全模式。（现行宿主 14.0.38.301 真机挂载 `11/11`，行为层 2026-10-20 由用户真机实测通过）
-- 短信 `com.hihonor.mms`：推广卡片统一清除。
-- 设置 `com.android.settings`：应用详情页「停用」按钮恒可点（荣耀对管控应用置灰）/ 首页 HONOR ID 账户小红点隐藏。
-- SystemUI `com.android.systemui`：隐藏副卡图标（≥2 卡才生效）/ 隐藏 5G 标识 / 双排信号与双排 5G 制式标 / 替换 WiFi 与状态栏图标 / 隐藏充电·热点·USB 调试通知 / 手电筒忽略低电量。
-- 系统桌面 `com.hihonor.android.launcher`（基线 18.0.0.234）：隐藏 YOYO 卡片堆叠标题文本（应用图标名保留）/ 文件夹保持打开 / 清后台保留当前应用（直杀·管家广播二选一，默认关）。
-- 系统更新 `com.hihonor.ouc`（基线 18.0.3.230）：禁后台自动检测 / WiFi 自动下载 / 夜间安装 / 升级提醒通知，手动检查更新保留。
-- 升级引导 `com.hihonor.android.upgradeguide`：「发现新版本」全屏引导页闪现即退。
-- 系统管家服务 `com.hihonor.systemmanager`：病毒检测 / 查杀 / 病毒弹窗三路全禁（安装后「发现病毒应用」弹窗从源头断链）。
-- 视频壁纸增强（`com.hihonor.wallpapereditor` + `com.hihonor.livewallpaper.paradise`，功能入口归到「系统桌面」卡）：高画质转码 / 去时长限制 / 循环播放。
+<sub>真机截图（MagicOS 11 / AAK-AN00）· 头像与账号已打码 · 小红书背景为第三方内容，已模糊</sub>
 
-**荣耀系应用通杀**
+</div>
 
-- 埋点通杀：荣耀埋点 SDK（`com.hihonor.hianalytics`）上报链路拦截，事件不落库不出网，覆盖浏览器 / 日历 / 天气 / 游戏中心 / 视频 / 云音乐。
-- 广告 SDK 通杀：`com.hihonor.adsdk` 信息流 / 横幅 / 开屏 / 插屏 / 激励全形态渲染层短路。
-- 日历运营推荐位：`com.hihonor.osoperationsdk` 服务卡 / 资讯推荐位整链收口。
-- 搜狗键盘（荣耀版）`com.sohu.inputmethod.sogou.honor`：候选区功能免同意开启。
+---
 
-**指定应用会员态**
+## 这是什么
 
-- 成人高考题库 `com.exam8.chengrenGK`（基线 5.9.0.0-release）：会员档位 / 有效期 / 特权等级伪造为超级会员，「阅后即焚」特权 UI 门放行（正文由服务端按订单下发，hook 取不到）。
+HonorHook 把荣耀手机上那些「烦人的默认行为」做成**可开关的开关箱**：想关的关掉，不想管的别动。
 
-**指定第三方应用**
+| | 干什么 | 说明 |
+|---|---|---|
+| **hook 侧** | 注入 22 个作用域包，改掉它们的默认行为 | 只改**运行内存**里的行为：重启手机就恢复原样，不写 `/system`、不改分区、不动应用数据 |
+| **UI 侧** | 一个 Miuix 面板，列出所有开关 | 面板写在模块 APK 里，跨进程把开关下发给 hook 侧；**功能默认全开**，你只关不想用的 |
 
-- 京东 `com.jingdong.app.mall`（基线 16.1.0）：开屏广告跳过（`SplashFragment` 永不挂载）。
-- MFA 身份验证器 `com.aimazhishi.mfa.authenticator`（基线 1.0.5）：开屏广告短路（360 加固，框架 `Activity.onCreate` 收口）。
-- 小红书 `com.xingin.xhs`（基线 9.50.0）：解除保存限制 / 接管下载（保存视频零宿主提示、只弹一次模块下载卡）。
+> 换句话说：**它不是"破解版"，是"把厂商塞进去的东西一个个摘掉"**。删掉广告位、收掉埋点上报、把会员页显示成该显示的样子，其余原封不动。
+
+## 能替你省掉什么
+
+### 系统应用
+
+| 应用 | 你会得到什么 | 默认 |
+|---|---|---|
+| **主题商店** | VIP 状态收口、资源免费化、试用不倒计时、底部推广 tab 与广告槽位消失、下载走 VIP 通道、动态壁纸应用修复 | 开 |
+| **包管理器** | 安装页不请求广告与 AB 实验、不展示广告与推广卡、不拦截三方跳转、跳过联网安全检测、不提示开启安全模式 | 开 |
+| **系统桌面** | 隐藏 YOYO 卡片标题（图标保留）、文件夹点开不跳二次确认、清后台保留当前应用 | 开 |
+| **系统更新** | 禁后台自动检测、禁 WiFi 自动下载、禁夜间安装、禁升级提醒（**手动检查更新保留**） | 开 |
+| **系统管家** | 病毒检测 / 查杀 / 病毒弹窗三路全禁（装完不再弹"发现病毒应用"） | 开 |
+| **系统设置** | 应用详情页「停用」按钮恒可点（荣耀对管控应用置灰）、首页 HONOR ID 账户小红点隐藏 | 开 |
+| **短信** | 推广卡片统一清除 | 开 |
+| **SystemUI** | 隐藏副卡图标、5G 标识、双排信号与双排 5G 制式标，替换 WiFi 与状态栏图标，隐藏充电 / 热点 / USB 调试通知，手电筒忽略低电量 | 开 |
+| **升级引导** | 「发现新版本」全屏引导页闪现即退 | 开 |
+| **视频壁纸** | 高画质转码、去掉时长限制、循环播放 | 开 |
+
+### 荣耀系应用（埋点与广告）
+
+| 范围 | 你会得到什么 | 默认 |
+|---|---|---|
+| **广告 SDK**（浏览器 / 日历 / 天气 / 游戏中心 / 优酷视频） | 信息流、横幅、开屏、插屏、激励广告全形态不再渲染 | 开 |
+| **埋点上报**（日历 / 天气 / 浏览器 / 游戏中心 / 优酷视频 / 云音乐） | 上报链路在本地收口，**事件不落库、不出网** | 开 |
+| **日历运营位** | 服务卡与资讯推荐位整链收口 | 开 |
+| **搜狗键盘（荣耀版）** | 候选区功能免同意开启 | 开 |
+
+### 指定第三方应用
+
+| 应用 | 你会得到什么 | 默认 |
+|---|---|---|
+| **小红书** | 解除保存限制并接管下载：保存视频零宿主提示、只弹一次模块下载卡，可批量下原图 | 开 |
+| **京东** | 开屏广告跳过 | 开 |
+| **MFA 身份验证器** | 开屏广告短路 | 开 |
+| **成人高考题库** | 会员档位 / 有效期 / 特权等级显示为超级会员 | 开 |
+
+## 怎么装
+
+1. **先有 LSPosed**（Zygisk / Riru 版都行）。本模块基于 **libxposed API 102**，实测环境为 **LSPosed 2.2.1**。
+2. **下载 APK**：[Releases](https://github.com/coderstory/HonorHook/releases/latest) 里下 `app-release.apk`，装到手机。
+3. **在 LSPosed 里启用它**：模块列表里打开 `HonorHook` 的开关，作用域里确认要生效的应用已勾上（模块自带默认作用域清单，通常安装时就已自动勾好）。
+4. **打开 HonorHook 面板**：桌面图标进，面板首页会显示「工作中 + LSPosed 版本」，功能页是全部开关。
+
+## 怎么用
+
+- 面板三个页签：**首页**（模块与设备状态）、**功能**（所有开关，按目标应用分组）、**设置**。
+- **默认全开** —— 装上就生效，不需要你逐个打开。
+- 想关某个功能：功能页点进去把对应开关关掉。
+- ⚠️ **改完开关要重启那个目标应用才生效**（开关是跨进程下发的，下一次应用启动时才读到）。
+
+## 兼容情况
+
+下面是**真机实测**过的挂载情况（`installed N/M` 是 LSPosed 日志里的判据，N = 生效的点数，M = 该应用应有的点数，**N = M 即全部生效**）：
+
+| 应用 | 适配版本 | 真机判据 |
+|---|---|---|
+| 主题商店 | 20.1.63.305 | 49/49 ✅ |
+| 包管理器 | 14.0.37.301 · 14.0.38.301 · 14.0.22.326 | 11/11 ✅ |
+| 系统桌面 | 18.0.0.234（实测 18.0.0.259） | 5/5 ✅ |
+| 系统管家 | 17.0.0.414（实测 17.0.0.455） | 3/3 ✅ |
+| 小红书 | 9.50.0（9.49.1 亦兼容） | 3/3 · 3/3 · 1/1 · 7/7 ✅ |
+| 系统更新 | 18.0.3.230 | 11/11 ✅ |
+| 搜狗键盘 | — | 5/5 ✅ |
+| 系统设置 | — | 2/2 ✅ |
+| 短信 | 19.0.9.306 | 2/2 ✅ |
+| 京东 / MFA 身份验证器 | 16.1.0 / 1.0.5 | 1/1 · 1/1 ✅ |
+| 广告与埋点（日历 / 天气 / 浏览器 / 游戏中心 / 优酷 / 云音乐） | — | 广告 2/2 ✅ · 埋点多数 3/3 |
+
+> 宿主版本比基线新时，日志里会多一行"宿主版本与基线不一致"的**提示**（不是故障）——功能照常生效。
+
+## 常见问题
+
+**Q：装上了没反应？**
+A：① LSPosed 里模块开关是否打开、作用域是否勾上；② 目标应用是否**完全退出过**（后台不算，hook 只在进程启动时注入）；③ 面板首页是否显示"工作中"。
+
+**Q：在哪看日志？**
+A：LSPosed 的模块日志（不是 logcat）。每个目标启动时会有一行 `xxxHook[应用包名]: installed N/M`，N=M 就是全好。
+
+**Q：会不会变砖 / 会不会留下痕迹？**
+A：不会。全部改动只发生在进程内存里，**不写系统分区、不改应用数据、不装额外组件**，卸载模块即彻底还原。
+
+**Q：某个功能我不想要怎么办？**
+A：功能页里把对应开关关掉，再重启那个应用即可。不关就是全开。
+
+**Q：为什么小红书保存后弹的是模块的卡片？**
+A：这是设计如此 —— 接管下载后由模块确认下载哪些原图，**不弹宿主的分享引导**，也不会重复弹。
 
 ## 免责声明
 
 本项目仅供个人学习与研究 Android 框架与逆向工程之用，请于 24 小时内自行删除，勿用于任何商业用途；
 因使用本项目产生的任何问题由使用者自行承担。
+
+## 开源许可
+
+本项目按 **[GNU AGPL-3.0](LICENSE)** 发布（[NOTICE](NOTICE) 里是完整署名）。
+
+其中包含第三方项目 **[XHS_Downloader_Android](https://github.com/NEORUAA/XHS_Downloader_Android)**（同为 AGPL-3.0）的小红书下载解析代码 —— 以 git submodule 方式引入、**原样未作任何修改**，仅 7 个文件参与编译。对应源码见 [本仓库](https://github.com/coderstory/HonorHook) 与 [上游对应 commit](https://github.com/NEORUAA/XHS_Downloader_Android/tree/d5c0070328f82ff5f748de5c0b826161d5eaca8b)。
+
+荣耀 / Honor / MagicOS / YOYO 等商标属其各自权利人所有，本项目与之无隶属或背书关系。
+
+---
+
+### 开发者
+
+- 全部文档索引：[`docs/README.md`](docs/README.md)
+- 挂载点台账与真机判据快照：[`docs/hook-inventory-audit.md`](docs/hook-inventory-audit.md)
+- 怎么写 hook：[`docs/hook-craft.md`](docs/hook-craft.md) · 怎么逆向：[`docs/reverse-craft.md`](docs/reverse-craft.md)
+- 构建与设备操作一律走 `tools/dev.sh`（`tools/dev.sh help` 是唯一命令索引）
