@@ -73,6 +73,8 @@
 - **失败分级**：`FAILED` = 挂载抛异常，重试无意义；`NOT_RESOLVED` = 类/依赖未就绪，随类加载重试。
 - **挂载类型要分**：改返回值 / 条件短路（只对目标参数生效，避免误伤无关判定，如 `hasPrivilege(14)` 只短路特权位 14）/ 前置改写（PRE_PROCESS，proceed 前修状态、失败不动）/ 键值覆盖（KEY_OVERRIDE，表驱动云控）。
 - **幂等与防重装**：挂在注册表层保证；实现内不加 installed 标志；多包共享进程需对象级去重。
+- **挂载会话化（2026-10-20）**：`MountEngine` 已改成**无状态 object**（有状态部分全在 `MountSession`：APK 路径 / 版本基线 / 计数 / 节流 / 判据聚合）。新目标的写法 = `MountEngine.open(hookName, hostPackage, apkPath, expectedHostVersion, gate)` **一次开会话** ⇒ apkPath 与版本基线在**构造期**固定，**「忘记 begin」不再可能**（旧写法是 `MountEngine(...)` + `engine.begin(...)` 两阶段初始化，23 个调用点全靠人记；忘记 ⇒ apkPath 为 null ⇒ DexKit 兜底轨**静默关闭**且版本自检静默关闭，只留一行 WARN）。会话不存字段，需要它的辅助函数按目标侧显式传参（`mountOne(session, task, module, loader)`）。
+- **判据行带宿主包名（2026-10-20）**：`installed N/M` 行首格式变成 `HookName[宿主包名]: installed N/M` —— 同一个 hook 名按包注册多次（HonorAds 5 个包各注册一次）时，判据行才分得清归属；`installed N/M` 子串本身不变（按它抓的脚本不受影响）。
 
 ## 五、防御与可观测（底线，不是加分项）
 

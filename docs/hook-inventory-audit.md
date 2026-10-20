@@ -106,6 +106,8 @@
 
 > M 随代码变更、N 随宿主版本：**改完 hook 回来更新本表**。
 
+> **判据行格式（2026-10-20 起）**：`HookName[宿主包名]: installed N/M`（如 `HonorAdsHook[com.hihonor.android.ads]: installed 2/2`）—— 同一 hook 名按包注册多次（HonorAds 5 个包）时靠包名区分归属；`installed N/M` 子串本身不变，按它抓的脚本不受影响。
+
 - 各目标 `installed N/M` 全命中、无 `failed` 清单；
 - 详情页付费主题仍走 VIP 通道下载（日志 `theme-download-chain 路由触发` H1/H2b 两条，不再有 H2）；
 - 列表/浏览页无 VIP 专属角标（覆盖 `getVipOnly` 直连消费点后）。
