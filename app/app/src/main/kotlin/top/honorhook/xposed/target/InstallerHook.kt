@@ -8,6 +8,7 @@ import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.core.MountScheduler
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.InstallerConfigTable
 import top.honorhook.xposed.data.RemoteConfig
@@ -16,9 +17,6 @@ import top.honorhook.xposed.data.RemoteConfig
 object InstallerHook : TargetHook {
 
     override val packageName = "com.android.packageinstaller"
-
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("InstallerHook", packageName, RemoteConfig)
 
     private const val PKG_HN = "com.hihonor.packageinstaller"
 
@@ -105,8 +103,9 @@ object InstallerHook : TargetHook {
             buildSourcePending()
         }
         // 版本自检的期望值 = 选中表对应的版本（精确套 = 该版本号），无对应版本则回基线版本。
-        engine.begin(apkPath, pick.matchedVersion ?: FeatureCatalog.baselineVersionOf(packageName))
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("InstallerHook", packageName, apkPath, pick.matchedVersion ?: FeatureCatalog.baselineVersionOf(packageName), RemoteConfig)
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
     /** 版本表注册：精确套（旧版）；无默认套——基线走 [buildSourcePending]。
@@ -429,12 +428,12 @@ object InstallerHook : TargetHook {
     }
 
     /** 单个挂载任务执行：本函数只产出 kind 分派的 intercept 逻辑，解析/异常/分级交给共享 [MountEngine.mount]。 */
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
-        val result = engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
+        val result = session.mount(task, module, loader) { chain ->
             when (task.kind) {
                 // 常量短路：命中即返回强制值（List 类值每次新建实例，避免共享可变集合被调用方改写）
                 MountKind.CONST -> {
-                    engine.judge(module, task, JUDGE_PREFIX)
+                    session.judge(module, task, JUDGE_PREFIX)
                     val v = task.value
                     if (v is Collection<*>) {
                         // 集合类强制值每次新建实例（避免共享可变集合被调用方改写）
@@ -445,7 +444,7 @@ object InstallerHook : TargetHook {
                 }
                 // void 空实现阻断（不调原方法）
                 MountKind.BLOCK -> {
-                    engine.judge(module, task, JUDGE_PREFIX)
+                    session.judge(module, task, JUDGE_PREFIX)
                     null
                 }
                 // 安全检测分发器短路：不调原方法，主线程回吐"通过"结果；准备失败放行原方法（不死锁）
@@ -470,7 +469,7 @@ object InstallerHook : TargetHook {
                         true
                     }.getOrDefault(false)
                     if (delivered) {
-                        engine.judge(module, task, JUDGE_PREFIX)
+                        session.judge(module, task, JUDGE_PREFIX)
                         null
                     } else {
                         chain.proceed()
@@ -486,7 +485,7 @@ object InstallerHook : TargetHook {
                             .invoke(null, isHn)
                     }.getOrNull()
                     if (pass != null) {
-                        engine.judge(module, task, JUDGE_PREFIX)
+                        session.judge(module, task, JUDGE_PREFIX)
                         pass
                     } else {
                         chain.proceed()
@@ -538,7 +537,7 @@ object InstallerHook : TargetHook {
                         // ⇒ 失败时返回 null 停在当前页 + ERROR 留痕，交人工介入，绝不二次推进。
                         runCatching { (prepared[1] as java.lang.reflect.Method).invoke(prepared[0], prepared[2], prepared[3]) }
                             .onSuccess {
-                                engine.judge(module, task, JUDGE_PREFIX)
+                                session.judge(module, task, JUDGE_PREFIX)
                             }
                             .onFailure { t ->
                                 module.log(
@@ -574,7 +573,7 @@ object InstallerHook : TargetHook {
                         true
                     }.getOrDefault(false)
                     if (ok) {
-                        engine.judge(module, task, JUDGE_PREFIX)
+                        session.judge(module, task, JUDGE_PREFIX)
                         null
                     } else {
                         chain.proceed()

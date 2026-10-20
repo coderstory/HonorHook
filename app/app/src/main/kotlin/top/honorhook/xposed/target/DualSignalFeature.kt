@@ -23,6 +23,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -69,7 +70,6 @@ object DualSignalFeature {
     /** 引擎名与判据前缀都含 "SystemUiHook"：modlog-f 'SystemUiHook' 可一并过滤到汇总行与判据行。 */
     private const val JUDGE_PREFIX = "SystemUiHook·U6"
 
-    private val engine = MountEngine("SystemUiHook·U6", HOST_PACKAGE)
 
     // ---- 挂载点（jadx 实证均未混淆；onAttachedToWindow 均为类自声明覆写，declaredMethods 直连可解析）----
 
@@ -165,7 +165,7 @@ object DualSignalFeature {
         }
         labelEnabled = RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL_LABEL)
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(HOST_PACKAGE))
+        val session = MountEngine.open("SystemUiHook·U6", HOST_PACKAGE, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(HOST_PACKAGE))
 
         val pending = listOf(
             MountEngine.SimpleTask(
@@ -193,11 +193,11 @@ object DualSignalFeature {
                 description = "U6 双排信号·attach 入口（SignalUnitUCTView，上溯找 cluster root）",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // after 语义：先放行宿主原 attach 逻辑，再调度注入（void 方法 → 回调显式返回 null，§7.4）
             chain.proceed()
             val self = chain.thisObject as? View
@@ -206,7 +206,7 @@ object DualSignalFeature {
                 // cluster root 判定按类名（SimpleTask 无目标私有字段，isClusterRoot 由 className 推导）
                 val isClusterRoot = task.className == CLS_SIGNAL_CLUSTER_VIEW
                 val root = if (isClusterRoot) self else findClusterRoot(self) ?: self
-                schedule(root, task, module)
+                schedule(session, root, task, module)
             }
             null
         }
@@ -224,17 +224,17 @@ object DualSignalFeature {
     }
 
     /** attach 后立即 + 500ms 各刷一轮（原插件 schedule：首轮赌宿主刚建完，二轮兜异步构建）。 */
-    private fun schedule(root: View, task: MountEngine.SimpleTask, module: XposedModule) {
-        root.post { safeRestyle(root, task, module) }
-        root.postDelayed({ safeRestyle(root, task, module) }, 500L)
+    private fun schedule(session: MountSession, root: View, task: MountEngine.SimpleTask, module: XposedModule) {
+        root.post { safeRestyle(session, root, task, module) }
+        root.postDelayed({ safeRestyle(session, root, task, module) }, 500L)
     }
 
-    private fun safeRestyle(root: View, task: MountEngine.SimpleTask, module: XposedModule) {
+    private fun safeRestyle(session: MountSession, root: View, task: MountEngine.SimpleTask, module: XposedModule) {
         try {
             resolveResourceIdsOnce(root.context)
             val fixed = walkAndFix(root, task, module)
             if (fixed > 0) {
-                engine.judge(module, task, JUDGE_PREFIX, "双排容器已接管 $fixed 处")
+                session.judge(module, task, JUDGE_PREFIX, "双排容器已接管 $fixed 处")
             }
         } catch (t: Throwable) {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX restyle 失败: $t")

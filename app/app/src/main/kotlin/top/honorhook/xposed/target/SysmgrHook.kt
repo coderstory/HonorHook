@@ -5,6 +5,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 
 /**
@@ -30,9 +31,6 @@ import top.honorhook.xposed.data.HookPoint
 object SysmgrHook : TargetHook {
 
     override val packageName = "com.hihonor.systemmanager"
-
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("SysmgrHook", packageName, top.honorhook.xposed.data.RemoteConfig)
 
     /** 判据日志前缀（真机按此前缀过滤命中行）。 */
     private const val JUDGE_PREFIX = "sysmgr-hook"
@@ -115,8 +113,9 @@ object SysmgrHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSMGR_ANTIVIRUS, "SysmgrHook")
         }
         if (pending.isEmpty()) return
-        engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("SysmgrHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), top.honorhook.xposed.data.RemoteConfig)
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
     /**
@@ -127,15 +126,15 @@ object SysmgrHook : TargetHook {
      *     实证一致，同 calledBySubUser 跳过分支的返回值形状）；构造失败则 [chain.proceed] 放行原方法
      *     （降级为有检测，安装流程不死锁——同 InstallerHook CHECK_BYPASS 的"失败放行"语义）。
      */
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             when (task.returnType) {
                 "boolean" -> {
-                    engine.judge(module, task, JUDGE_PREFIX)
+                    session.judge(module, task, JUDGE_PREFIX)
                     true
                 }
                 "int" -> {
-                    engine.judge(module, task, JUDGE_PREFIX)
+                    session.judge(module, task, JUDGE_PREFIX)
                     2
                 }
                 "android.os.Bundle" -> {
@@ -146,7 +145,7 @@ object SysmgrHook : TargetHook {
                         }
                     }.getOrNull()
                     if (bundle != null) {
-                        engine.judge(module, task, JUDGE_PREFIX)
+                        session.judge(module, task, JUDGE_PREFIX)
                         bundle
                     } else {
                         chain.proceed()

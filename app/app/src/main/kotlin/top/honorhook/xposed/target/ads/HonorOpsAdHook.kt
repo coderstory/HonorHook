@@ -4,6 +4,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -27,7 +28,6 @@ import top.honorhook.xposed.target.logDisabled
  */
 class HonorOpsAdHook(override val packageName: String) : TargetHook {
 
-    private val engine = MountEngine("HonorOpsAdHook", packageName)
 
     private val CLS_CLIENT = "com.hihonor.osoperationsdk.manager.RecommendCardClient"
     private val CLS_CALLBACK = "com.hihonor.osoperationsdk.listener.RecommendCallback"
@@ -38,7 +38,7 @@ class HonorOpsAdHook(override val packageName: String) : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_ADS_BLOCK, "HonorOpsAdHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir)
+        val session = MountEngine.open("HonorOpsAdHook", packageName, param.applicationInfo?.sourceDir)
 
         val pending = listOf(
             MountEngine.SimpleTask(
@@ -50,11 +50,11 @@ class HonorOpsAdHook(override val packageName: String) : TargetHook {
                 description = "运营推荐位请求收口：不执行原加载链，直接回调 loadFail(1000) 隐藏推荐位",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // api 102 Chain：不调 proceed() = 原方法不执行（配置拉取/广告请求/埋点整链跳过）。
             // args[2] = RecommendCallback（宿主匿名实现），必须回调 loadFail 让宿主立即走失败分支。
             runCatching {
@@ -62,7 +62,7 @@ class HonorOpsAdHook(override val packageName: String) : TargetHook {
                 val iface = loader.loadClass(CLS_CALLBACK)
                 iface.getMethod("loadFail", Int::class.javaPrimitiveType).invoke(callback, 1000)
             }
-            engine.judge(module, task, JUDGE_PREFIX)
+            session.judge(module, task, JUDGE_PREFIX)
             null
         }
 

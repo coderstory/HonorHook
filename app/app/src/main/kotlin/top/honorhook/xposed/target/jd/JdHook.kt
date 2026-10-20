@@ -4,6 +4,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -26,9 +27,6 @@ object JdHook : TargetHook {
 
     override val packageName = "com.jingdong.app.mall"
 
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("JdHook", packageName)
-
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "jd-hook"
 
@@ -37,7 +35,8 @@ object JdHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_JD_SPLASH, "JdHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("JdHook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
         val loader = param.defaultClassLoader
         val task = object : MountEngine.Task {
             override val className = "com.jingdong.app.mall.home.JDHomeManager"
@@ -49,13 +48,13 @@ object JdHook : TargetHook {
             override val id = "jd:splash.homeManagerAdd"
             override val description = "跳过开屏 SplashFragment 挂载（JDHomeManager.a 直接短路）"
         }
-        engine.attemptMount(listOf(task), module, loader) { t -> mountSplash(t, module, loader) }
+        session.attemptMount(listOf(task), module, loader) { t -> mountSplash(session, t, module, loader) }
     }
 
-    private fun mountSplash(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { _ ->
+    private fun mountSplash(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { _ ->
             // hookBefore 短路：不调 chain.proceed() ⇒ a() 永不执行，SplashFragment 永不挂载
-            engine.judge(module, task, JUDGE_PREFIX, "SplashFragment 已短路，开屏广告未挂载")
+            session.judge(module, task, JUDGE_PREFIX, "SplashFragment 已短路，开屏广告未挂载")
             null   // void 方法：必须显式 null
         }
 }

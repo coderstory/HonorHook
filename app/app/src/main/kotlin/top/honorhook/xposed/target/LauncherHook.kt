@@ -10,6 +10,7 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountScheduler
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
 import java.util.concurrent.CountDownLatch
@@ -49,9 +50,6 @@ object LauncherHook : TargetHook {
 
     override val packageName = "com.hihonor.android.launcher"
 
-    /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
-    private val engine = MountEngine("LauncherHook", packageName, RemoteConfig)
-
     /** 版本选表：默认套 = 基线点；适配其他宿主版本时在其上追加精确套。 */
     private val versionTables = listOf(
         HostVersion.Table(versions = emptySet()) { LAUNCHER_POINTS_18_0_0_234 },
@@ -66,27 +64,28 @@ object LauncherHook : TargetHook {
             // 数据表 LAUNCHER_POINTS_18_0_0_234.kt；逐点清点口径以真机 `installed N/M` 的 M 为准。
             val pick = HostVersion.pick(versionTables, HostVersion.resolveHostVersion(apkPath, packageName))
             // 期望版本 = 基线：launcher 只有默认套，偏离基线 = 按基线盲挂。
-            engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
+            /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
+            val session = MountEngine.open("LauncherHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), RemoteConfig)
             val pending = pick.tasks
                 .map { it.toMountTask() }
 
-            engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+            session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
         }
     }
 
-    /** 单个挂载任务执行（解析/重试/汇总在共享 [engine]；本函数只做 kind 分派的 intercept 构造）。 */
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    /** 单个挂载任务执行（解析/重试/汇总在共享 [MountSession]；本函数只做 kind 分派的 intercept 构造）。 */
+    private fun mountOne(session: MountSession, task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             when (task.kind) {
                 // 常量短路：命中即返回强制值，不调原方法
                 MountKind.CONST -> {
-                    engine.judge(module, task, JUDGE_PREFIX)
+                    session.judge(module, task, JUDGE_PREFIX)
                     task.value
                 }
                 // R1 记录目标：用户在打开的文件夹里点了应用。此刻文件夹必然还开着，把它的视图记下来。
                 MountKind.ARM_FOLDER_REOPEN -> {
                     chain.thisObject?.let { reopenTarget = it }
-                    engine.judge(module, task, JUDGE_PREFIX, "已记下文件夹，返回桌面后重开")
+                    session.judge(module, task, JUDGE_PREFIX, "已记下文件夹，返回桌面后重开")
                     chain.proceed()
                 }
                 // R2 重开：`Launcher.onResume` = 回到桌面。先让宿主自己的 onResume 跑完，再延迟重开。
@@ -109,7 +108,7 @@ object LauncherHook : TargetHook {
                     killTaskObjs = captured?.third
                     keepCapturedAtMs = if (captured != null) SystemClock.elapsedRealtime() else 0L
                     if (captured != null) {
-                        engine.judge(
+                        session.judge(
                             module, task, JUDGE_PREFIX,
                             "捕获: 保留 ${captured.first.size} 任务(id=${captured.first.joinToString(",")})，" +
                                 "移除 ${captured.second.size} 卡/${captured.third.size} Task 对象",
@@ -159,7 +158,7 @@ object LauncherHook : TargetHook {
                         if (removed) {
                             val via = if (atms) "直杀A(ATMS removeTask)" else "管家广播B(sendRemoveTaskToSystemManager)"
                             val removedCount = if (atms) kill.size else (killObjs?.size ?: 0)
-                            engine.judge(
+                            session.judge(
                                 module, task, JUDGE_PREFIX,
                                 "已按${via}移除 $removedCount 个任务（移除集 ${kill.size} id），保留 id=${keep.joinToString(",")}",
                             )

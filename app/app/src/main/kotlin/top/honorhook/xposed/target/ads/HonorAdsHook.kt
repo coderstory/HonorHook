@@ -7,6 +7,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -33,7 +34,6 @@ import top.honorhook.xposed.target.logDisabled
  */
 class HonorAdsHook(override val packageName: String) : TargetHook {
 
-    private val engine = MountEngine("HonorAdsHook", packageName)
 
     /** 所有广告形态共用的真实广告 View 控件（广告内容经此渲染）。 */
     private val CLS_BASE_AD_VIEW = "com.hihonor.adsdk.base.widget.base.BaseAdView"
@@ -44,7 +44,7 @@ class HonorAdsHook(override val packageName: String) : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_ADS_BLOCK, "HonorAdsHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir)
+        val session = MountEngine.open("HonorAdsHook", packageName, param.applicationInfo?.sourceDir)
 
         // 挂载表 2 项；以真机 installed N/M 的 M 为准。
         val pending = listOf(
@@ -65,11 +65,11 @@ class HonorAdsHook(override val packageName: String) : TargetHook {
                 description = "广告 View 挂载即清空内容+GONE，折叠占位（兜底，防异步加载在 attach 后才注入内容）",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // api 102 Chain：不调 proceed() = 原方法不执行（广告注入/原 attach 逻辑整体跳过）；
             // removeAllViews 只兜底 hook 生效前已注入的内容；不抛异常。
             (chain.thisObject as? ViewGroup)?.let { view ->
@@ -78,7 +78,7 @@ class HonorAdsHook(override val packageName: String) : TargetHook {
                     view.visibility = View.GONE
                 }
             }
-            engine.judge(module, task, JUDGE_PREFIX)
+            session.judge(module, task, JUDGE_PREFIX)
             null
         }
 

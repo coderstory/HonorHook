@@ -6,6 +6,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 
@@ -33,9 +34,6 @@ object Exam8Hook : TargetHook {
 
     override val packageName = "com.exam8.chengrenGK"
 
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("Exam8Hook", packageName)
-
     /** 超级会员档位 id（后端档位编码 1=轻享 2=功勋 4=超级；待真机诊断日志确认）。 */
     private const val SUPER_VIP_TYPE = 4
 
@@ -51,7 +49,8 @@ object Exam8Hook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("Exam8Hook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         val pending = mutableListOf<MountTask>()
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_EXAM8_SUPER_VIP)) {
@@ -62,7 +61,7 @@ object Exam8Hook : TargetHook {
             collectBurnAfterReadingHooks(pending) // F2 阅后即焚特权门
         }
 
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
     // ---------------- F1 VipUserStatus：中央会员态（驱动「我的/会员页」UI） ----------------
@@ -139,7 +138,7 @@ object Exam8Hook : TargetHook {
         )
     }
 
-    // ---------------- 挂载执行：CONST 常量短路 / CONDITIONAL 按参短路（解析/重试/汇总在共享 [engine]） ----------------
+    // ---------------- 挂载执行：CONST 常量短路 / CONDITIONAL 按参短路（解析/重试/汇总在共享 [MountSession]） ----------------
 
     private enum class MountKind { CONST, CONDITIONAL }
 
@@ -188,15 +187,15 @@ object Exam8Hook : TargetHook {
      * 单个挂载任务执行：CONST / CONDITIONAL 的 intercept 逻辑交给共享 [MountEngine.mount]
      * （解析 / 异常兜底 / 结果分级都在那边）。
      */
-    private fun mountOne(task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // CONDITIONAL：参数未命中则放行原方法（只短路目标特权位，不误伤其他判定）
             val missed = task.kind == MountKind.CONDITIONAL &&
                 (chain.args.firstOrNull() as? Int) != task.matchArg
             if (missed) {
                 chain.proceed()
             } else {
-                engine.judge(module, task, JUDGE_PREFIX)
+                session.judge(module, task, JUDGE_PREFIX)
                 if (DEBUG) {
                     // 诊断原值：仅每个 task 首次命中时取一次（节流，避免列表滚动刷屏）
                     logOrigOnce(module, task, chain)

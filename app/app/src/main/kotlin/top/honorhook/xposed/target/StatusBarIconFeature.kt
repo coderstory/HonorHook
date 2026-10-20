@@ -9,6 +9,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipEntry
@@ -45,7 +46,6 @@ object StatusBarIconFeature {
     /** 引擎名与判据前缀都含 "SystemUiHook"：modlog-f 'SystemUiHook' 可一并过滤到汇总行与判据行。 */
     private const val JUDGE_PREFIX = "SystemUiHook·U7"
 
-    private val engine = MountEngine("SystemUiHook·U7", HOST_PACKAGE)
 
     // ---- 挂载点（framework 公开 API，未混淆，declaredMethods 直连）----
 
@@ -83,7 +83,7 @@ object StatusBarIconFeature {
         // API 102：XposedModule.getModuleApplicationInfo() = 当前模块自身的 ApplicationInfo
         //（非 PackageLoadedParam 那个宿主 info）；ZipFile 直接开模块包取 assets
         moduleApkPath = module.getModuleApplicationInfo()?.sourceDir
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(HOST_PACKAGE))
+        val session = MountEngine.open("SystemUiHook·U7", HOST_PACKAGE, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(HOST_PACKAGE))
 
         val pending = listOf(
             MountEngine.SimpleTask(
@@ -111,11 +111,11 @@ object StatusBarIconFeature {
                 description = "U7 图标替换·TypedArray.getDrawable(int)（仅 wifi 轨）",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // after 语义：先放行宿主原读取，命中内置资产再改返回值（未命中返回宿主原值）
             val result = chain.proceed()
             if (task.className == CLS_TYPED_ARRAY) {
@@ -126,13 +126,13 @@ object StatusBarIconFeature {
                 val index = chain.getArg(0) as? Int
                 val resId = index?.let { i -> ta?.let { runCatching { it.getResourceId(i, 0) }.getOrNull() } } ?: 0
                 val replacement =
-                    if (ta != null && resId != 0 && wifiEnabled) lookup(ta.resources, resId, wifiOnly = true, task, module) else null
+                    if (ta != null && resId != 0 && wifiEnabled) lookup(session, ta.resources, resId, wifiOnly = true, task, module) else null
                 replacement ?: result
             } else {
                 val res = chain.thisObject as? Resources
                 val resId = chain.getArg(0) as? Int
                 val replacement =
-                    if (res != null && resId != null) lookup(res, resId, wifiOnly = false, task, module) else null
+                    if (res != null && resId != null) lookup(session, res, resId, wifiOnly = false, task, module) else null
                 replacement ?: result
             }
         }
@@ -142,7 +142,7 @@ object StatusBarIconFeature {
      * miss 且 status 门开再查 icons 目录；[wifiOnly]=TypedArray 轨，只查 wifi 目录。
      * lookup 内任何异常吞掉返回 null（放行宿主原值，不打扰宿主）。
      */
-    private fun lookup(
+    private fun lookup(session: MountSession, 
         resources: Resources,
         resId: Int,
         wifiOnly: Boolean,
@@ -152,13 +152,13 @@ object StatusBarIconFeature {
         val entry = runCatching { resources.getResourceEntryName(resId) }.getOrNull() ?: return null
         if (wifiEnabled) {
             getIcon(ASSET_WIFI_PREFIX, entry, wifiCache)?.let {
-                engine.judge(module, task, JUDGE_PREFIX, "替换 $entry")
+                session.judge(module, task, JUDGE_PREFIX, "替换 $entry")
                 return BitmapDrawable(resources, it)
             }
         }
         if (!wifiOnly && statusEnabled) {
             getIcon(ASSET_STATUS_PREFIX, entry, statusCache)?.let {
-                engine.judge(module, task, JUDGE_PREFIX, "替换 $entry")
+                session.judge(module, task, JUDGE_PREFIX, "替换 $entry")
                 return BitmapDrawable(resources, it)
             }
         }

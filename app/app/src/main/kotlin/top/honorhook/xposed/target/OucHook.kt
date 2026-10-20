@@ -4,6 +4,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 
 /**
@@ -23,9 +24,6 @@ import top.honorhook.xposed.data.HookPoint
 object OucHook : TargetHook {
 
     override val packageName = "com.hihonor.ouc"
-
-    /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
-    private val engine = MountEngine("OucHook", packageName, top.honorhook.xposed.data.RemoteConfig)
 
     /** manifest 前缀（组件类全名 = 此前缀 + 相对路径；manifest 实证未被混淆）。 */
     private const val PKG_HNOUC = "com.hihonor.android.hnouc"
@@ -78,8 +76,9 @@ object OucHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_OTA_BLOCK, "OucHook")
         }
         if (pending.isEmpty()) return
-        engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
+        val session = MountEngine.open("OucHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), top.honorhook.xposed.data.RemoteConfig)
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
     /**
@@ -87,9 +86,9 @@ object OucHook : TargetHook {
      * 返回值必须匹配原方法类型（libxposed 102 硬约束，见 systemui.md §7.4 实证）：
      * void onReceive → null；int onStartCommand → 2（START_NOT_STICKY，告诉系统别 restart）。
      */
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
-            engine.judge(module, task, "ota-hook", "入口已短路")
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            session.judge(module, task, "ota-hook", "入口已短路")
             when (task.returnType) {
                 "void" -> null
                 else -> 2   // android.app.Service.START_NOT_STICKY

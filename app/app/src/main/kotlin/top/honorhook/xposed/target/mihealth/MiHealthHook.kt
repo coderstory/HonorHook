@@ -7,6 +7,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import org.json.JSONObject
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -44,9 +45,6 @@ object MiHealthHook : TargetHook {
 
     override val packageName = "com.mi.health"
 
-    /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
-    private val engine = MountEngine("MiHealthHook", packageName)
-
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "mih-face"
 
@@ -70,7 +68,8 @@ object MiHealthHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_MIH_FACE_FREE, "MiHealthHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
+        val session = MountEngine.open("MiHealthHook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
         hostDataDir = param.applicationInfo?.dataDir
         val loader = param.defaultClassLoader
         val task = object : MountEngine.Task {
@@ -81,11 +80,11 @@ object MiHealthHook : TargetHook {
             override val id = "mih:bt.sendFileToDevice"
             override val description = "sendFileToDevice 文件层手术：试用文件截获 → 免费流装载（v3）"
         }
-        engine.attemptMount(listOf(task), module, loader) { t -> mountSendFileToDevice(t, module, loader) }
+        session.attemptMount(listOf(task), module, loader) { t -> mountSendFileToDevice(session, t, module, loader) }
     }
 
-    private fun mountSendFileToDevice(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountSendFileToDevice(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // 就绪判定（每进程一次）：首个 sendFileToDevice 调用即 hook 已挂载且通路被踩过
             logThrottled(module, "ready", "$JUDGE_PREFIX: sendFileToDevice hook 就绪")
             val args = chain.args

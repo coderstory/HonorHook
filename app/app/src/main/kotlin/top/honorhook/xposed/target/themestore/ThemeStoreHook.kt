@@ -9,6 +9,7 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountScheduler
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 
@@ -16,9 +17,6 @@ import top.honorhook.xposed.target.TargetHook
 object ThemeStoreHook : TargetHook {
 
     override val packageName = "com.hihonor.android.thememanager"
-
-    /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
-    private val engine = MountEngine("ThemeStoreHook", packageName, RemoteConfig)
 
     /** 版本选表：默认套 = 基线点（行为与迁移前一致）；适配其他宿主版本时在其上追加精确套。 */
     private val versionTables = listOf(
@@ -47,11 +45,12 @@ object ThemeStoreHook : TargetHook {
                 module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 未适配，按基线 $baseline 挂载表盲挂，判据以 installed N/M 为准")
             }
             // 期望版本 = 基线：theme 只有默认套，偏离基线就是「按基线盲挂」，自检要报的就是这个偏离。
-            engine.begin(apkPath, baseline)
+            /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
+            val session = MountEngine.open("ThemeStoreHook", packageName, apkPath, baseline, RemoteConfig)
             val pending = pick.tasks
                 .map { it.toMountTask() }
 
-            engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+            session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
         }
     }
 
@@ -71,19 +70,19 @@ object ThemeStoreHook : TargetHook {
     )
 
     /**
-     * 单个挂载任务执行：解析/per-task 隔离/回调留痕/汇总全部交给共享 [engine.mount]，本函数只产出 kind 分派逻辑。
+     * 单个挂载任务执行：解析/per-task 隔离/回调留痕/汇总全部交给共享 [session.mount]，本函数只产出 kind 分派逻辑。
      * （评审 #13：46 点最大目标此前自行内联 resolve+builder+fold 绕开 engine——engine 的任何增强对 theme 不生效，
      * 两份 fold 已漂移；现在收敛到统一模板。）
      */
-    private fun mountOne(
+    private fun mountOne(session: MountSession, 
         task: MountTask,
         module: XposedModule,
         loader: ClassLoader,
     ): MountEngine.Result {
         // 挂载期一次求值（恢复旧实现口径，审计 nit：intercept 闭包内逐回调 invoke 纯浪费）；
-        // resolveValue 幂等（enumConstants 纯查找）；null 未就绪已被 engine.resolveTask 拦成 NOT_RESOLVED（?: 兜底取声明值）
+        // resolveValue 幂等（enumConstants 纯查找）；null 未就绪已被 session.resolveTask 拦成 NOT_RESOLVED（?: 兜底取声明值）
         val value = task.resolveValue?.invoke(loader) ?: task.value
-        return engine.mount(task, module, loader) { chain ->
+        return session.mount(task, module, loader) { chain ->
             when (task.kind) {
             // 常量短路：命中即返回强制值，不调原方法
             MountKind.CONST -> {
@@ -126,7 +125,7 @@ object ThemeStoreHook : TargetHook {
                     if (route == null) {
                         chain.proceed()
                     } else {
-                        engine.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
+                        session.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
                         route
                     }
                 }

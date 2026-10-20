@@ -6,6 +6,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -23,7 +24,6 @@ import top.honorhook.xposed.target.logDisabled
  */
 class HonorTrackingHook(override val packageName: String) : TargetHook {
 
-    private val engine = MountEngine("HonorTrackingHook", packageName)
 
     /** 已完成动态阻断的具体类（幂等门控：create 与 getInstanceByTag 会拿到同一实例）。 */
     private val blockedClasses = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -34,7 +34,7 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_TRACK_BLOCK, "HonorTrackingHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir)
+        val session = MountEngine.open("HonorTrackingHook", packageName, param.applicationInfo?.sourceDir)
 
         // 挂载表 3 项（facade 工厂，未混淆）；以真机 installed N/M 为准。
         val pending = listOf(
@@ -63,15 +63,15 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
                 description = "埋点实例Ex工厂收口：autoCollect 自动采集实例（_instance_ex_tag）",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // 原工厂照常执行拿返回实例；仅追加动态阻断，不改工厂行为
             val instance = chain.proceed()
             instance?.let { blockReporting(module, loader, it) }
-            engine.judge(module, task, JUDGE_PREFIX)
+            session.judge(module, task, JUDGE_PREFIX)
             instance
         }
 

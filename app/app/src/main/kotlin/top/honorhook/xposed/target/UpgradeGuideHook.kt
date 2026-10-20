@@ -5,6 +5,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 
 /**
  * 荣耀升级引导 `com.hihonor.android.upgradeguide`（16.0.0.005，aapt2 实证）：整包只有
@@ -16,7 +17,6 @@ object UpgradeGuideHook : TargetHook {
 
     override val packageName = "com.hihonor.android.upgradeguide"
 
-    private val engine = MountEngine("UpgradeGuideHook", packageName)
 
     private const val CLS_WIZARD = "com.hihonor.android.upgradeguide.UpgradeWizardActivity"
 
@@ -25,7 +25,7 @@ object UpgradeGuideHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_OTA_BLOCK, "UpgradeGuideHook")
             return
         }
-        engine.begin(param.applicationInfo.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        val session = MountEngine.open("UpgradeGuideHook", packageName, param.applicationInfo.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
         val loader = param.defaultClassLoader
         val task = object : MountEngine.Task {
             override val className = CLS_WIZARD
@@ -35,14 +35,14 @@ object UpgradeGuideHook : TargetHook {
             override val id = "ota:guide.wizardOnCreate"
             override val description = "升级引导页启动即 finish（全屏『发现新版本』引导）"
         }
-        engine.attemptMount(listOf(task), module, loader) { t -> mountWizard(t, module, loader) }
+        session.attemptMount(listOf(task), module, loader) { t -> mountWizard(session, t, module, loader) }
     }
 
-    private fun mountWizard(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountWizard(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             chain.proceed()   // 先走宿主 onCreate（super 链必须完整，防状态机半初始化）
             runCatching { (chain.thisObject as? Activity)?.finish() }
-                .onSuccess { engine.judge(module, task, "ota-hook", "引导页已 finish") }
+                .onSuccess { session.judge(module, task, "ota-hook", "引导页已 finish") }
             null   // void 方法：必须显式 null
         }
 }

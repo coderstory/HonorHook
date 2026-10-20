@@ -6,6 +6,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -31,9 +32,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 object SystemUiHook : TargetHook {
 
     override val packageName = "com.android.systemui"
-
-    /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
-    private val engine = MountEngine("SystemUiHook", packageName)
 
     /** 未混淆实现类（Dagger 绑定，jadx classes.dex 实证）。 */
     private const val CLS_MOBILE_DATA_CONTROLLER = "com.android.systemui.plugins.signal.MobileDataControllerImpl"
@@ -234,10 +232,11 @@ object SystemUiHook : TargetHook {
         }
 
         if (pending.isEmpty()) return
-        engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
+        val session = MountEngine.open("SystemUiHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName))
 
         if (pending.isNotEmpty()) {
-            engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+            session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
         }
     }
 
@@ -265,20 +264,20 @@ object SystemUiHook : TargetHook {
         }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
-            ID_HIDE_5G -> mountHide5G(task, module, loader)
-            ID_SET_ICON_FOR_VIEW -> mountTypeIconSink(task, module, loader)
-            ID_ICON_BINDER -> mountTypeIconSink(task, module, loader)
-            ID_FILTER_NOTIF -> mountHideSystemNotifs(task, module, loader)
-            ID_SHADE_HIDE -> mountHideInNotificationCenter(task, module, loader)
-            ID_FLASHLIGHT_LOW_BATT -> mountFlashlightLowBatt(task, module, loader)
-            else -> mountHideSim2(task, module, loader)
+            ID_HIDE_5G -> mountHide5G(session, task, module, loader)
+            ID_SET_ICON_FOR_VIEW -> mountTypeIconSink(session, task, module, loader)
+            ID_ICON_BINDER -> mountTypeIconSink(session, task, module, loader)
+            ID_FILTER_NOTIF -> mountHideSystemNotifs(session, task, module, loader)
+            ID_SHADE_HIDE -> mountHideInNotificationCenter(session, task, module, loader)
+            ID_FLASHLIGHT_LOW_BATT -> mountFlashlightLowBatt(session, task, module, loader)
+            else -> mountHideSim2(session, task, module, loader)
         }
 
     /** U1 副卡隐藏：updateSubs 入参剔除 slotId==1（数据层，宿主重建时自然用改过的数据）。 */
-    private fun mountHideSim2(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountHideSim2(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // ⚠️ updateSubs 是 void 方法：hook 回调**必须返回 null**。
             // 2026-10-11 真机崩溃实证：lambda 隐式返回了最后一行 proceedWith(...) 的 Object，
@@ -303,7 +302,7 @@ object SystemUiHook : TargetHook {
                 if (unreadable > 0) warnUnreadableOnce(module)
                 chain.proceed()
             } else {
-                engine.judge(module, task, JUDGE_PREFIX, "剔除副卡后 ${kept.size}/${orig.size} 卡")
+                session.judge(module, task, JUDGE_PREFIX, "剔除副卡后 ${kept.size}/${orig.size} 卡")
                 // 传过滤副本：宿主内部只逐元素拷贝进 mSubscriptionInfoList，不持有入参引用，副本安全
                 chain.proceedWith(chain.thisObject, arrayOf(kept))
             }
@@ -318,15 +317,15 @@ object SystemUiHook : TargetHook {
      *
      * 只读不改：不改宿主数据，纯粹让这个子视图不占位；宿主其它逻辑不受影响。
      */
-    private fun mountHide5G(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountHide5G(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // SignalIconBinder.bind 是 void 方法：回调必须返回 null（见 mountHideSim2 的崩溃实证注释）
             val cardView = runCatching { chain.getArg(1) as? android.view.View }.getOrNull()
             if (cardView != null) {
                 val hidden = hideMobileType(cardView)
                 if (hidden) {
-                    engine.judge(module, task, JUDGE_PREFIX, "5G 类型标已隐藏")
+                    session.judge(module, task, JUDGE_PREFIX, "5G 类型标已隐藏")
                 } else {
                     // view id 读不到 = 布局结构漂移；静默 no-op 必须留痕（installed N/M 照打但无效果）
                     warnMobileTypeMissing(module)
@@ -344,8 +343,8 @@ object SystemUiHook : TargetHook {
      * 两路必经点。扫描前两参找 ImageView：命中类型标 view → GONE + 短路；其余一律放行
      * （信号格/漫游/箭头不受影响）。
      */
-    private fun mountTypeIconSink(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountTypeIconSink(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             diagCallback(module, task.id)
             // void 方法：回调必须显式返回 null（见 mountHideSim2 的崩溃实证注释）
             val iconView = (0..1).firstNotNullOfOrNull { i ->
@@ -354,7 +353,7 @@ object SystemUiHook : TargetHook {
             }
             if (iconView != null) {
                 runCatching { iconView.visibility = android.view.View.GONE }
-                engine.judge(module, task, JUDGE_PREFIX, "类型标收口命中，已 GONE")
+                session.judge(module, task, JUDGE_PREFIX, "类型标收口命中，已 GONE")
                 null   // 短路：drawable 不设置；外层随后的 setVisibility(0) 只作用于空 view
             } else {
                 chain.proceed()
@@ -434,15 +433,15 @@ object SystemUiHook : TargetHook {
      * 再 OR 上我们的匹配结果——宿主原有过滤行为不受影响。
      * 返回类型 Z：hook 回调必须返回 Boolean（返回值规则见 mountHideSim2 的 2026-10-11 崩溃实证注释）。
      */
-    private fun mountHideSystemNotifs(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountHideSystemNotifs(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // 入参是 NotificationEntry，抽 public 字段 mSbn（U4b 的入参直接就是 sbn）
             val hit = runCatching {
                 chain.getArg(0)?.javaClass?.getField("mSbn")?.get(chain.getArg(0))
                     ?.let { matchesHiddenNotif(it, module) }
             }.getOrNull()
             val hostResult = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
-            if (hit != null) engine.judge(module, task, JUDGE_PREFIX, "隐藏$hit")
+            if (hit != null) session.judge(module, task, JUDGE_PREFIX, "隐藏$hit")
             hostResult || hit != null
         }
 
@@ -457,11 +456,11 @@ object SystemUiHook : TargetHook {
      * 命中返 true 与宿主官方隐藏机制同语义（上游一致性）；恒 proceed 放行宿主逻辑后 OR。
      * 2026-10-12 真机实证：只挂 U4 管线过滤点，判据命中但通知中心仍渲染——本点才是渲染仲裁。
      */
-    private fun mountHideInNotificationCenter(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountHideInNotificationCenter(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             val hit = runCatching { matchesHiddenNotif(chain.getArg(0), module) }.getOrNull()
             val hostResult = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
-            if (hit != null) engine.judge(module, task, JUDGE_PREFIX, "隐藏$hit")
+            if (hit != null) session.judge(module, task, JUDGE_PREFIX, "隐藏$hit")
             hostResult || hit != null
         }
 
@@ -547,15 +546,15 @@ object SystemUiHook : TargetHook {
      * 另一扇门，不在此点覆盖（未实现，见 docs/reverse/systemui.md §九）；长按亮度面板是内联
      * mBatteryLevel>5 判断（FlashlightActivity.java:243），无单点可挂，放弃。
      */
-    private fun mountFlashlightLowBatt(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountFlashlightLowBatt(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // 只在宿主本来会拦的低电量档留判据；电量充足时宿主本就放行，不打点
             val level = runCatching {
                 val mgr = chain.thisObject?.javaClass?.getField("mBatteryManager")?.get(chain.thisObject)
                 mgr?.javaClass?.getField("mLevel")?.getInt(mgr)
             }.getOrNull()
             if (level != null && level <= LOW_BATTERY_THRESHOLD) {
-                engine.judge(module, task, JUDGE_PREFIX, "电量 ${level}% 放行手电筒")
+                session.judge(module, task, JUDGE_PREFIX, "电量 ${level}% 放行手电筒")
             }
             true
         }

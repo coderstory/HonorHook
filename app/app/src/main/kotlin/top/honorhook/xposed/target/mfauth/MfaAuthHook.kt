@@ -6,6 +6,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -28,9 +29,6 @@ object MfaAuthHook : TargetHook {
 
     override val packageName = "com.aimazhishi.mfa.authenticator"
 
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("MfaAuthHook", packageName)
-
     /** 判据日志前缀（沿用历史口径，便于按前缀过滤真机日志）。 */
     private const val JUDGE_PREFIX = "mfa-hook"
 
@@ -45,7 +43,8 @@ object MfaAuthHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_MFA_SPLASH, "MfaAuthHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("MfaAuthHook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
         val loader = param.defaultClassLoader
         val task = object : MountEngine.Task {
             // 框架基类收口点：启动即可解析，绕开 360 加固的业务类时序
@@ -57,11 +56,11 @@ object MfaAuthHook : TargetHook {
             override val id = "mfa:splash.skip"
             override val description = "冷启动跳过 MfaSplashActivity（直达 MainActivity）"
         }
-        engine.attemptMount(listOf(task), module, loader) { t -> mountSplash(t, module, loader) }
+        session.attemptMount(listOf(task), module, loader) { t -> mountSplash(session, t, module, loader) }
     }
 
-    private fun mountSplash(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountSplash(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             chain.proceed()   // 宿主 onCreate 完整跑完（壳解密后的真实逻辑照常）
             val act = chain.thisObject as? Activity
             // 该 hook 对进程内每个 activity 的 onCreate 都触发：先类名门控再 judge，避免刷屏
@@ -69,7 +68,7 @@ object MfaAuthHook : TargetHook {
                 runCatching {
                     act.startActivity(Intent().setClassName(act, CLS_MAIN))
                     act.finish()
-                }.onSuccess { engine.judge(module, task, JUDGE_PREFIX, "开屏已跳过，直达主界面") }
+                }.onSuccess { session.judge(module, task, JUDGE_PREFIX, "开屏已跳过，直达主界面") }
             }
             null   // void 方法：必须显式 null
         }

@@ -6,6 +6,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -41,7 +42,6 @@ object ImeHook : TargetHook {
 
     override val packageName = "com.sohu.inputmethod.sogou.honor"
 
-    private val engine = MountEngine("ImeHook", packageName)
 
     /**
      * X5 的唯一写封装。jadx 实证（SettingManager.java:5446）：`public void zf(boolean z,
@@ -63,8 +63,8 @@ object ImeHook : TargetHook {
             return
         }
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
-        engine.attemptMount(
+        val session = MountEngine.open("ImeHook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        session.attemptMount(
             listOf(
                 MountEngine.SimpleTask(
                     className = CLS_SETTING_MANAGER,
@@ -113,11 +113,11 @@ object ImeHook : TargetHook {
             ),
             module,
             loader,
-        ) { task -> mountOne(task, module, loader) }
+        ) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             when (task.id) {
                 ID_ZF -> {
                     val args = chain.args?.toTypedArray()
@@ -127,7 +127,7 @@ object ImeHook : TargetHook {
                         // 唯一 false 写点 = 联网服务拒绝擦除（OemAppServiceImpl.onPrivacyAgreedChanged）。
                         // 改写 true：拒绝同意不再吞掉验证码候选 pref；用户自关走设置页直落盘，不经此。
                         args[0] = true
-                        engine.judge(module, task, JUDGE_PREFIX, "consent 擦除已拦截（pref_smscode_to_canidate 保活）")
+                        session.judge(module, task, JUDGE_PREFIX, "consent 擦除已拦截（pref_smscode_to_canidate 保活）")
                     }
                     chain.proceedWith(chain.thisObject, args)
                 }
@@ -135,7 +135,7 @@ object ImeHook : TargetHook {
                     // 读数强制（ID_X5 / ID_CLIP）：proceed 跑原方法（副作用保留）后覆盖返回值。
                     // 显示层瑕疵：设置页勾选框显示态含同意位参与计算，可能仍显示关——功能由运行链读数驱动，chip 照常。
                     chain.proceed()
-                    engine.judge(module, task, JUDGE_PREFIX, "读数强制 true")
+                    session.judge(module, task, JUDGE_PREFIX, "读数强制 true")
                     true
                 }
             }

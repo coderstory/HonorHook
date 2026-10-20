@@ -15,6 +15,7 @@ import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.core.MountScheduler
+import top.honorhook.xposed.core.MountSession
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -53,7 +54,6 @@ object XhsBatchSave {
 
     private const val JUDGE_PREFIX = "XhsHook·X5"
 
-    private val engine = MountEngine("XhsHook·X5", "com.xingin.xhs")
 
     /** 图片长按面板「保存」点击 lambda（逻辑体 invoke(Object)，jadx ji9/b.java:42 实证；9.49.1 为 mh9/b.java:41，
      *  9.50.0 迁名后旧 mh9/b 成 class_data_off=0 空壳类，findings-x5 2026-10-19）。 */
@@ -170,8 +170,8 @@ object XhsBatchSave {
             )
         }
         // 版本自检的期望值 = 实际用的坐标版本（读到版本就用它）：旧宿主挂覆盖套坐标时不该报「漂移」。
-        engine.begin(apkPath, hostVersion ?: baseline)
-        engine.attemptMount(buildPending(hostVersion), module, loader) { task -> mountOne(task, module) }
+        val session = MountEngine.open("XhsHook·X5", "com.xingin.xhs", apkPath, hostVersion ?: baseline)
+        session.attemptMount(buildPending(hostVersion), module, loader) { task -> mountOne(session, task, module) }
     }
 
     /**
@@ -258,12 +258,12 @@ object XhsBatchSave {
         return pending
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
         when (task.id) {
-            "xhs:videoSave.noteSaveEntry" -> mountNoteSaveEntry(task, module)
-            "xhs:videoSave.aigcEditLaunch" -> mountAigcEditLaunch(task, module)
-            "xhs:videoSave.downloader.entry" -> mountDownloadEntry(task, module)
-            "xhs:batchSave.videoSaveClick.invoke" -> engine.mount(task, module, hostLoader!!) { chain ->
+            "xhs:videoSave.noteSaveEntry" -> mountNoteSaveEntry(session, task, module)
+            "xhs:videoSave.aigcEditLaunch" -> mountAigcEditLaunch(session, task, module)
+            "xhs:videoSave.downloader.entry" -> mountDownloadEntry(session, task, module)
+            "xhs:batchSave.videoSaveClick.invoke" -> session.mount(task, module, hostLoader!!) { chain ->
                 // a59.q 双分支：case1=分享引导（arg=Triple，rv9.a.CLOUD）default=saveVideo（arg=String）——只对
                 // String 轨做拦截/反馈，分享路径静默放行
                 val arg0 = runCatching { chain.getArg(0) }.getOrNull()
@@ -315,7 +315,7 @@ object XhsBatchSave {
                     val link = runCatching { XhsSavePivot.availableShareLink(n, module) }.getOrNull()
                     if (link != null) {
                         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX X5 拦截宿主默认保存（链接可得，不 proceed）noteId=$n")
-                        engine.judge(module, task, JUDGE_PREFIX, "拦截宿主默认保存（链接可得，不 proceed）")
+                        session.judge(module, task, JUDGE_PREFIX, "拦截宿主默认保存（链接可得，不 proceed）")
                         startHdAsk(n, t0, module, failCard = true)
                         // 不 proceed ⇒ 返回值自给：宿主 invoke 返 kotlin.Unit（图片分支同款写法，
                         // **宿主 loader** 取 INSTANCE——模块 loader 的同名类不保证同一 class 身份）
@@ -341,15 +341,15 @@ object XhsBatchSave {
                         return@post
                     }
                     val activity = lastActivity ?: return@post
-                    engine.judge(module, task, JUDGE_PREFIX, "视频保存完成，弹反馈卡")
+                    session.judge(module, task, JUDGE_PREFIX, "视频保存完成，弹反馈卡")
                     runCatching { showVideoSavedDialog(activity, module) }
                         .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 视频反馈卡失败: ${it.message}") }
                 }
                 result
             }
-            "xhs:videoSave.albumSink.h0" -> mountAlbumSink(task, module)
-            "xhs:videoSave.albumSink.e0" -> mountAlbumSink(task, module)
-            else -> mountClick(task, module)
+            "xhs:videoSave.albumSink.h0" -> mountAlbumSink(session, task, module)
+            "xhs:videoSave.albumSink.e0" -> mountAlbumSink(session, task, module)
+            else -> mountClick(session, task, module)
         }
 
     /**
@@ -362,8 +362,8 @@ object XhsBatchSave {
      * - 链接 miss/拉黑 → proceed 宿主原生保底
      * 下游 b75.h.e / mg4.b / albumSink 全降级纯兜底（r1.b 拦住时它们无输入）。
      */
-    private fun mountNoteSaveEntry(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
-        engine.mount(task, module, hostLoader!!) { chain ->
+    private fun mountNoteSaveEntry(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        session.mount(task, module, hostLoader!!) { chain ->
             val noteId = runCatching {
                 val feed = chain.getArg(3) ?: return@runCatching null
                 val id = feed.javaClass.getMethod("u0").invoke(feed) as? String
@@ -375,7 +375,7 @@ object XhsBatchSave {
             }
             module.log(Log.INFO, MountEngine.TAG,
                 "$JUDGE_PREFIX 笔记保存总入口已断（ab9.r1.b，宿主零提示零请求零下载）noteId=$noteId")
-            engine.judge(module, task, JUDGE_PREFIX, "笔记保存总入口已断（ab9.r1.b，链接可得不 proceed）")
+            session.judge(module, task, JUDGE_PREFIX, "笔记保存总入口已断（ab9.r1.b，链接可得不 proceed）")
             startHdAsk(noteId, System.currentTimeMillis(), module, failCard = true)
             null // r1.b 返回 void
         }
@@ -391,8 +391,8 @@ object XhsBatchSave {
      * 关掉「正在保存」框；返回 kotlin.Unit.INSTANCE（Function1 契约，跨 loader 反射取）。
      * 模块弹卡直下原片（interceptVideoSave 主卡位已弹）。
      */
-    private fun mountAigcEditLaunch(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
-        engine.mount(task, module, hostLoader!!) { chain ->
+    private fun mountAigcEditLaunch(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        session.mount(task, module, hostLoader!!) { chain ->
             val case = runCatching {
                 chain.thisObject.javaClass.getDeclaredField("d").get(chain.thisObject) as? Int
             }.getOrNull()
@@ -407,7 +407,7 @@ object XhsBatchSave {
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX AIGC 进度框 dismiss 失败（忽略）: ${it.message}")
             }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX AIGC 编辑保存发起已断（转码零启动+提示已关）")
-            engine.judge(module, task, JUDGE_PREFIX, "AIGC 编辑保存发起已断（mg4.b case10 不 proceed）")
+            session.judge(module, task, JUDGE_PREFIX, "AIGC 编辑保存发起已断（mg4.b case10 不 proceed）")
             // Function1.invoke 返 Unit：跨 loader 反射取 INSTANCE，失败退 null（返回值无人消费）
             runCatching {
                 Class.forName("kotlin.Unit", true, hostLoader).getDeclaredField("INSTANCE").get(null)
@@ -423,8 +423,8 @@ object XhsBatchSave {
      * 四轮管道内手术全废弃（反例档案见 [mountAlbumSink]），入口断 = 图片 ji9.b 同款模式。
      * e 为 void ⇒ 不 proceed 返 null 即可（U6 惯例）。
      */
-    private fun mountDownloadEntry(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
-        engine.mount(task, module, hostLoader!!) { chain ->
+    private fun mountDownloadEntry(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        session.mount(task, module, hostLoader!!) { chain ->
             // url 精确匹配 pending 登记（审计 H1 修复：A 笔记解析失败没登记 → e(A.url) 放行宿主保底；
             // B 笔记早前登记不影响 A）。域判据（xhscdn.com）保留作第二道：e 的 Java 调用点为 0
             // （跨平台桥 JS 分发，classes.dex 未 dump），非 xhscdn 域必有别的用途，登记表污染也放行。
@@ -433,7 +433,7 @@ object XhsBatchSave {
             if (noteId == null || !url.contains("xhscdn.com")) return@mount chain.proceed()
             module.log(Log.INFO, MountEngine.TAG,
                 "$JUDGE_PREFIX 保存下载入口已断（b75.h.e，宿主零下载零回调）noteId=$noteId url=${url.take(120)}")
-            engine.judge(module, task, JUDGE_PREFIX, "保存下载入口已断（b75.h.e，接管中不 proceed）")
+            session.judge(module, task, JUDGE_PREFIX, "保存下载入口已断（b75.h.e，接管中不 proceed）")
             XhsVideoSave.rescuePending(noteId, module)
             null
         }
@@ -460,8 +460,8 @@ object XhsBatchSave {
      * ③60s 窗放行过 1.2MB 缓存 720p；④size>8MB 分流误放 AIGC 长缓存。教训 = 在拷贝层按文件
      * 特征猜「宿主在下什么」必错；猜的活全交给入口断。
      */
-    private fun mountAlbumSink(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
-        engine.mount(task, module, hostLoader!!) { chain ->
+    private fun mountAlbumSink(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        session.mount(task, module, hostLoader!!) { chain ->
             val hit = runCatching { isVideoAlbumCopy(chain.args) }.getOrDefault(false)
             if (!hit) return@mount chain.proceed()
             if (!XhsVideoSave.savePendingActive()) {
@@ -472,7 +472,7 @@ object XhsBatchSave {
             val size = runCatching { (chain.args?.getOrNull(0) as? java.io.File)?.length() ?: -1L }.getOrDefault(-1L)
             module.log(Log.INFO, MountEngine.TAG,
                 "$JUDGE_PREFIX save_to_album 落盘已断（纯兜底，size=$size）")
-            engine.judge(module, task, JUDGE_PREFIX, "save_to_album 落盘已断（w.h0/e0 video 过滤）")
+            session.judge(module, task, JUDGE_PREFIX, "save_to_album 落盘已断（w.h0/e0 video 过滤）")
             true // 假成功：h0/e0 返 boolean（java.lang.Boolean 自动装箱），宿主按「拷贝成功」消费
         }
 
@@ -540,8 +540,8 @@ object XhsBatchSave {
      * 故接管判定提前到「链接可得」（单链内存判定），链接可得但网页解析失败 = WARN + 失败卡
      * （宿主未保存，parsedEmptyNotes 已记 → 下次点击放行宿主）——宁缺勿错（绝不替用户下错图）。
      */
-    private fun mountClick(task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
-        engine.mount(task, module, hostLoader!!) { chain ->
+    private fun mountClick(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        session.mount(task, module, hostLoader!!) { chain ->
             // noteId/feed 下钻根 = lambda 捕获（thisObject）+ invoke 入参（ji9/b.java:55 `cVar.Ta().u0()`
             // 实证——cVar 是入参 controller、feed 挂其上；u0 是 9.50 混淆名，漂移即 miss → 回落宿主）
             val found = XhsSavePivot.findFeedAndNoteId(
@@ -561,7 +561,7 @@ object XhsBatchSave {
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 接管图片保存（分享链接管线）noteId=$noteId（不 proceed）")
             // 宿主原实现末尾的 `cVar.i.getValue().dismiss()` 随 proceed 一起被跳过 ⇒ 面板得模块自己关
             dismissHostPanel(chain.thisObject, module)
-            engine.judge(module, task, JUDGE_PREFIX, "已接管图片保存（分享链接管线）noteId=$noteId")
+            session.judge(module, task, JUDGE_PREFIX, "已接管图片保存（分享链接管线）noteId=$noteId")
             // 解析（网络）在后台线程；交互与旧采集管线一致（1 张静默 / ≥2 张确认卡）
             Thread({
                 val urls = runCatching {

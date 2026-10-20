@@ -5,6 +5,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -39,7 +40,6 @@ object XhsHook : TargetHook {
     /** X1 引擎名与判据前缀（modlog-f 'XhsHook' 一并过滤到各引擎汇总行与判据行）。 */
     private const val JUDGE_PREFIX = "XhsHook·X1"
 
-    private val engine = MountEngine("XhsHook·X1", packageName)
 
     // ---- 挂载点类名（未混淆，jadx 实证；方法号见各 Task description）----
 
@@ -73,7 +73,7 @@ object XhsHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_XHS_SAVE_UNLOCK, "XhsHook")
             return
         }
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        val session = MountEngine.open("XhsHook·X1", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         val pending = listOf(
             MountEngine.SimpleTask(
@@ -101,18 +101,18 @@ object XhsHook : TargetHook {
                 description = "X1c 保存解锁·ShareInfoDetail\$Operate.a()→false（disable 位 getter；同 type 判定）",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
-            ID_FS_ENABLE -> mountFunctionSwitch(task, module, loader)
-            ID_OPERATE_DISABLE -> mountShareOperate(task, module, loader)
-            else -> engine.mount(task, module, loader) { chain ->
+            ID_FS_ENABLE -> mountFunctionSwitch(session, task, module, loader)
+            ID_OPERATE_DISABLE -> mountShareOperate(session, task, module, loader)
+            else -> session.mount(task, module, loader) { chain ->
                 // X1a：b() 返 true 即「作者关保存」，after 改 false。boolean 回调返回 Boolean。
                 val result = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
                 if (result) {
-                    engine.judge(module, task, JUDGE_PREFIX, "disable_save 已解锁")
+                    session.judge(module, task, JUDGE_PREFIX, "disable_save 已解锁")
                 }
                 false
             }
@@ -122,13 +122,13 @@ object XhsHook : TargetHook {
      * X1b：FunctionSwitch.a() 命中 false 时动态读 type，只对 image/video_download 强制 true。
      * 其它 type（如 paid_image_download 付费图）原样放行——付费边界（doc §一）。
      */
-    private fun mountFunctionSwitch(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountFunctionSwitch(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             val result = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
             if (result) return@mount true
             val type = readTypeValue(chain.thisObject, fallbackMethod = "c")
             if (type in DOWNLOAD_TYPES) {
-                engine.judge(module, task, JUDGE_PREFIX, "type=$type 已解锁")
+                session.judge(module, task, JUDGE_PREFIX, "type=$type 已解锁")
                 true
             } else {
                 false
@@ -136,13 +136,13 @@ object XhsHook : TargetHook {
         }
 
     /** X1c：Operate.a()（disable 位）true 且 type 命中下载类 → 改 false。 */
-    private fun mountShareOperate(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountShareOperate(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             val result = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
             if (!result) return@mount false
             val type = readTypeValue(chain.thisObject, fallbackMethod = "h")
             if (type in DOWNLOAD_TYPES) {
-                engine.judge(module, task, JUDGE_PREFIX, "type=$type 已解锁")
+                session.judge(module, task, JUDGE_PREFIX, "type=$type 已解锁")
                 false
             } else {
                 true

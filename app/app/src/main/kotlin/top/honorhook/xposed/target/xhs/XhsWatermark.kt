@@ -8,6 +8,7 @@ import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.core.MountScheduler
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import java.lang.reflect.Modifier
 
@@ -36,7 +37,6 @@ object XhsWatermark {
 
     private const val JUDGE_PREFIX = "XhsHook·X2"
 
-    private val engine = MountEngine("XhsHook·X2", "com.xingin.xhs")
 
     private const val CLS_MEDIA_SAVE_CONFIG = "com.xingin.entities.MediaSaveConfig"
     /** X2b 载体：9.50.0 R8 重命名 qc8.j→nd8.j（同 classes6.dex 内换包；dexdump c6.txt:901382 类头实证，findings-x2b 2026-10-19）。
@@ -94,8 +94,8 @@ object XhsWatermark {
             )
         }
         // 版本自检的期望值 = 实际用的坐标版本（读到版本就用它）：旧宿主挂覆盖套坐标时不该报「漂移」。
-        engine.begin(apkPath, hostVersion ?: baseline)
-        engine.attemptMount(buildPending(hostVersion), module, loader) { task -> mountOne(task, module, loader) }
+        val session = MountEngine.open("XhsHook·X2", "com.xingin.xhs", apkPath, hostVersion ?: baseline)
+        session.attemptMount(buildPending(hostVersion), module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
     /**
@@ -132,21 +132,21 @@ object XhsWatermark {
         return pending
     }
 
-    private fun mountOne(task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
-            ID_MSC_DISABLE_WM -> engine.mount(task, module, loader) { chain ->
+            ID_MSC_DISABLE_WM -> session.mount(task, module, loader) { chain ->
                 // X2a：恒 true（宿主读它决定是否画作者水印）。boolean 回调返回 Boolean。
                 true
             }
-            ID_AI_BITMAP -> engine.mount(task, module, loader) { chain ->
+            ID_AI_BITMAP -> session.mount(task, module, loader) { chain ->
                 // X2b：AI 水标位图不构造 → 合成时 bitmap4 == null 不画。回调返回 null（引用类型）。
                 null
             }
-            else -> engine.mount(task, module, loader) { chain ->
+            else -> session.mount(task, module, loader) { chain ->
                 // X2c：disable_ai getter after→true（UI/合成两路都读它决定是否贴 AI「生成」标签）
                 val result = runCatching { chain.proceed() as? Boolean }.getOrNull() ?: false
                 if (!result) {
-                    engine.judge(module, task, JUDGE_PREFIX, "disable_ai 已置真")
+                    session.judge(module, task, JUDGE_PREFIX, "disable_ai 已置真")
                 }
                 true
             }

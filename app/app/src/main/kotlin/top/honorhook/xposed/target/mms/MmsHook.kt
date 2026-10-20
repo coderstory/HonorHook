@@ -7,6 +7,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MethodResolver
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
@@ -30,9 +31,6 @@ import top.honorhook.xposed.target.logDisabled
 object MmsHook : TargetHook {
 
     override val packageName = "com.hihonor.mms"
-
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("MmsHook", packageName)
 
     /**
      * 插件环境探针类：mms 侧智能信息控制器，**未混淆**（跨 APK 反射留名，sms-ads.md §一；
@@ -88,7 +86,8 @@ object MmsHook : TargetHook {
         }
 
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("MmsHook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 挂载表（T1 探针 + T2 载体；**以真机 `installed N/M` 的 M 为准**）。
         val pending = mutableListOf<MountEngine.SimpleTask>()
@@ -108,13 +107,13 @@ object MmsHook : TargetHook {
             id = ID_MENU_FACTORY,
             description = "T2 菜单全杀载体：proceed 后从返回的菜单处理器对象捕获插件 ClassLoader 并挂主轨 findMenus，本身放行不改行为",
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
-            ID_MENU_FACTORY -> mountMenuFactory(task, module, loader)
-            else -> mountProbe(task, module, loader)
+            ID_MENU_FACTORY -> mountMenuFactory(session, task, module, loader)
+            else -> mountProbe(session, task, module, loader)
         }
 
     /**
@@ -122,10 +121,10 @@ object MmsHook : TargetHook {
      * 次，自带节流）→ **原值返回**，零行为改动。around 语义照 Exam8Hook 放行路径：chain.proceed()
      * 裸调不吞原方法异常，挂载级 PROTECTIVE 模式兜底防炸宿主。
      */
-    private fun mountProbe(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountProbe(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             val orig = chain.proceed()
-            engine.judge(module, task, JUDGE_PREFIX, "当前值=$orig")
+            session.judge(module, task, JUDGE_PREFIX, "当前值=$orig")
             orig
         }
 
@@ -155,19 +154,19 @@ object MmsHook : TargetHook {
      * MountEngine 的 DexKit 轨扫的是 mms 自身 apk，扫不到插件 dex——若未来插件混淆改名，
      * 属版本适配问题（adapt_new_version.py 流程），本点诚实 NOT_RESOLVED 不误伤。
      */
-    private fun mountMenuFactory(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountMenuFactory(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             val result = chain.proceed()
             // 载体放行：菜单处理器照常返回，只在返回值上做插件 CL 捕获
             val processor = (result as? java.util.Optional<*>)?.takeIf { it.isPresent }?.orElse(null)
             if (processor == null) {
                 // 插件未就绪（Optional.empty）——菜单本来就不渲染；不置一次幂标志，下次会话页再试
-                engine.judge(module, task, JUDGE_PREFIX, "返回空 Optional（插件未就绪）")
+                session.judge(module, task, JUDGE_PREFIX, "返回空 Optional（插件未就绪）")
                 return@mount result
             }
-            engine.judge(module, task, JUDGE_PREFIX, "处理器=${processor.javaClass.name}")
-            installMenuKill(module, processor, loader)
-            installCardKill(module, processor, loader)
+            session.judge(module, task, JUDGE_PREFIX, "处理器=${processor.javaClass.name}")
+            installMenuKill(session, module, processor, loader)
+            installCardKill(session, module, processor, loader)
             result
         }
 
@@ -187,7 +186,7 @@ object MmsHook : TargetHook {
         description = "T2 主轨：菜单数据源清空（返空数组 → init 走引擎自带 -201 干净退出）",
     )
 
-    private fun installMenuKill(module: XposedModule, processor: Any, hostLoader: ClassLoader) {
+    private fun installMenuKill(session: MountSession, module: XposedModule, processor: Any, hostLoader: ClassLoader) {
         if (!menuKillTried.compareAndSet(false, true)) return
         runCatching {
             val pluginCl = pluginClassLoaderOf(processor, hostLoader)
@@ -210,7 +209,7 @@ object MmsHook : TargetHook {
                 .intercept { _ ->
                     // org.json. 在插件加载白名单（Interceptor.HOST_CLASS_ARRAY）——宿主/插件同一份
                     // Class，返空数组类型对齐；length()==0 → init -201 → menuGroup 保持 GONE。
-                    engine.judge(module, findMenusTask, JUDGE_PREFIX)
+                    session.judge(module, findMenusTask, JUDGE_PREFIX)
                     org.json.JSONArray()
                 }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_TED_MENU_PROCESSOR.findMenus → 空数组")
@@ -246,7 +245,7 @@ object MmsHook : TargetHook {
      * 若同为 SimpleActionLayout 渲染（UI dump 同 id 实证）则一并消失；若推广卡实为 AIM 模板
      * （bindAimCard 链）则本点管不到，真机如实报告。
      */
-    private fun installCardKill(module: XposedModule, processor: Any, hostLoader: ClassLoader) {
+    private fun installCardKill(session: MountSession, module: XposedModule, processor: Any, hostLoader: ClassLoader) {
         if (!cardKillTried.compareAndSet(false, true)) return
         runCatching {
             val pluginCl = pluginClassLoaderOf(processor, hostLoader)
@@ -275,7 +274,7 @@ object MmsHook : TargetHook {
                     // （menus:[] 数组值，optString → "[]" 非空 → 不触发空 menus 提前 return），
                     // c() 从 tedCard.subTitle 本地合成复制按钮——引擎原生路径，实测见验证记录。
                     args[1] = ""
-                    engine.judge(module, simpleActionTask, JUDGE_PREFIX, "json 已置空（card=${args.getOrNull(3)?.javaClass?.simpleName ?: "null"}）")
+                    session.judge(module, simpleActionTask, JUDGE_PREFIX, "json 已置空（card=${args.getOrNull(3)?.javaClass?.simpleName ?: "null"}）")
                     chain.proceedWith(chain.thisObject, args)
                 }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.b → 全卡 json 置空")

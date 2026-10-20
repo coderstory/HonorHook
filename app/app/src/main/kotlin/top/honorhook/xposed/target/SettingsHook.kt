@@ -7,6 +7,7 @@ import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 
 /**
@@ -17,9 +18,6 @@ import top.honorhook.xposed.data.RemoteConfig
 object SettingsHook : TargetHook {
 
     override val packageName = "com.android.settings"
-
-    /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-    private val engine = MountEngine("SettingsHook", packageName)
 
     /** 类名可读；方法名 Q3 为 R8 单字母混淆（OTA 漂移风险点，DexKit 锚点兜底）。 */
     private const val CLS_APP_DETAILS = "com.android.settings.applications.InstalledAppDetails"
@@ -37,7 +35,8 @@ object SettingsHook : TargetHook {
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
+        /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
+        val session = MountEngine.open("SettingsHook", packageName, param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf(packageName))
 
         // 挂载表（**以真机 `installed N/M` 的 M 为准**；每个 feature 独立门控）
         val pending = mutableListOf<MountEngine.SimpleTask>()
@@ -70,21 +69,21 @@ object SettingsHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SETTINGS_HIDE_ACCOUNT_DOT, "SettingsHook")
         }
         if (pending.isEmpty()) return
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
     /** 停用按钮的视图 id（布局层级 header_view → control_buttons_panel → left_button；运行时 getIdentifier 取，抗资源漂移）。 */
     private const val ID_BUTTON_PANEL = "control_buttons_panel"
     private const val ID_BUTTON_DISABLE = "left_button"
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         when (task.id) {
-            ID_ACCOUNT_DOT -> mountHideAccountDot(task, module, loader)
-            else -> mountEnableDisable(task, module, loader)
+            ID_ACCOUNT_DOT -> mountHideAccountDot(session, task, module, loader)
+            else -> mountEnableDisable(session, task, module, loader)
         }
 
-    private fun mountEnableDisable(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountEnableDisable(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // after 语义：Q3 决策跑完后按场景修残态（2026-10-13 用户拍板的两场景规格）。
             // 用户应用：Q3 !z11 路径恒 setText(卸载)，永不为空 ⇒ 零介入。
             // 系统应用：按钮语义 = 停用/启用，修两种残态——
@@ -118,7 +117,7 @@ object SettingsHook : TargetHook {
                 if (!touched) return@runCatching
                 val listener = self as? android.view.View.OnClickListener
                 if (listener != null) btn.setOnClickListener(listener)
-                engine.judge(module, task, JUDGE_PREFIX, "系统应用停用位恢复: en=${btn.isEnabled} text=${tv?.text} appEnabled=${info.enabled}")
+                session.judge(module, task, JUDGE_PREFIX, "系统应用停用位恢复: en=${btn.isEnabled} text=${tv?.text} appEnabled=${info.enabled}")
             }.onFailure { t ->
                 module.log(Log.WARN, MountEngine.TAG, "停用按钮启用失败（放行原状态）: ${t.message}")
             }
@@ -148,8 +147,8 @@ object SettingsHook : TargetHook {
      * Drawable/String/String/boolean（u.java:423-434），**唯一 boolean 即 badge**——按字段类型定位，
      * 不依赖混淆名 f22223d（版本漂移安全）。置 false 后 proceed，宿主 else 分支自清红点。
      */
-    private fun mountHideAccountDot(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        engine.mount(task, module, loader) { chain ->
+    private fun mountHideAccountDot(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
             // void 方法：回调必须显式返回 null
             val data = runCatching { chain.getArg(0) }.getOrNull()
             if (data != null) {
@@ -159,7 +158,7 @@ object SettingsHook : TargetHook {
                         badgeField.isAccessible = true
                         badgeField.setBoolean(data, false)
                     }.onSuccess {
-                        engine.judge(module, task, JUDGE_PREFIX, "tile badge 置 false")
+                        session.judge(module, task, JUDGE_PREFIX, "tile badge 置 false")
                     }
                 } else {
                     // 字段结构漂移：留痕不猜（纪律：无锚点诚实跳过）

@@ -6,6 +6,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import java.lang.reflect.Proxy
 import java.util.concurrent.ConcurrentHashMap
@@ -47,7 +48,6 @@ object XhsVideoSave {
 
     private const val JUDGE_PREFIX = "XhsHook·X4"
 
-    private val engine = MountEngine("XhsHook·X4", "com.xingin.xhs")
 
     private const val CLS_OKHTTP_BUILDER = "okhttp3.OkHttpClient\$Builder"
     private const val METHOD_BUILD = "build"
@@ -151,7 +151,7 @@ object XhsVideoSave {
         ensureActivityTracker()
         // A2：进程被杀留下的 .pending- 半成品（IS_PENDING 态）后台清一次（每进程一次；年龄门槛见函数注释）
         cleanupPendingOrphans(module)
-        engine.begin(param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
+        val session = MountEngine.open("XhsHook·X4", "com.xingin.xhs", param.applicationInfo?.sourceDir, FeatureCatalog.baselineVersionOf("com.xingin.xhs"))
 
         val pending = listOf(
             MountEngine.SimpleTask(
@@ -163,16 +163,16 @@ object XhsVideoSave {
                 description = "X4 视频直链·OkHttpClient\$Builder.build() 注入 Interceptor 动态代理（/note/video/save 拦截：解析+弹卡+pending 登记；share_info 旁路采集 + 回落改写）",
             ),
         )
-        engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
+        session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
-    private fun mountOne(task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
+    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result {
         val interceptor = runCatching { buildInterceptorProxy(loader, module) }.getOrNull()
             ?: run {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX okhttp3.Interceptor 不可用，视频直链未注入")
                 return MountEngine.Result.FAILED
             }
-        return engine.mount(task, module, loader) { chain ->
+        return session.mount(task, module, loader) { chain ->
             // before：往 interceptors 列表塞代理后放行 build()。
             // ★ build() 非 void（返回 OkHttpClient）：intercept 返回值即方法最终返回值，
             //   必须回传 proceed 结果——写成「proceed(); null」会让 build() 返回 null，
