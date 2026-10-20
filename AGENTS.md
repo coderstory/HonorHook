@@ -1,6 +1,6 @@
 # AGENTS.md — HonorHook
 
-荣耀 LSPosed 模块（libxposed API 102，包名 `top.honorhook`）。一个 APK 两个运行面：**hook 侧**注入 6 个目标进程（只改内存态）、**UI 侧** Miuix Compose 面板经远端 prefs 下发开关。
+荣耀 LSPosed 模块（libxposed API 102，包名 `top.honorhook`）。一个 APK 两个运行面：**hook 侧**注入 22 个作用域包（20 个已注册 `TargetHook`，SDK 通杀类按包分别注册；只改内存态）、**UI 侧** Miuix Compose 面板经远端 prefs 下发开关。
 
 详细背景见 `README.md`（功能台账 + 验证清单）、`CLAUDE.md`（纪律）、`docs/README.md`（文档索引）。
 
@@ -30,18 +30,11 @@ CI（`.github/workflows/ci.yml`）：`dev` push = `assembleDebug` + `test`（真
 
 ## 判据只有一条：`installed N/M`
 
-来自 **LSPosed 框架日志 `/data/adb/lspd/log/modules_*.log`，不在 logcat**。抓取用 `tools/dev.sh hook-test` / `wait-hook` / `log-hook` / `modlog`。
-
-| 目标 | 应为 |
-|---|---|
-| `ThemeStoreHook` | 43/43 |
-| `InstallerHook` | 11/11 |
-| `Exam8Hook` | 10/10 |
-| `SettingsHook` | 1/1 |
-| `LauncherHook` | 4/4 |
-| `SystemUiHook` | 2/2 |
+来自 **LSPosed 框架日志 `/data/adb/lspd/log/modules_*.log`，不在 logcat**。抓取用 `tools/dev.sh modlog` / `modlog-grep` / `wait-hook` / `hook-test`。
 
 N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**。
+
+逐 hook 的应 M / 最近实测 N **只维护一份**：[`docs/hook-inventory-audit.md`](docs/hook-inventory-audit.md) §五 判据快照——本文件不复制数字（复制过一次，漂移过一次）。
 
 覆盖安装后 LSPosed 会停用模块（进程活着但零模块日志）→ 跑 `tools/dev.sh enable-module`；按需拉起的进程还要 force-stop。
 
@@ -63,9 +56,9 @@ N 明显小于 M = **宿主版本错位或选点失效，先别改 hook 实现**
 
 **挂载失败分两级**（`MountEngine`）：`FAILED` = 挂载抛异常，重试无意义；`NOT_RESOLVED` = 类/依赖未就绪，随类加载重试（懒加载重试循环）。汇总行始终输出，不受 debug 日志门控。
 
-**DexKit 兜底必须有内容锚点**（混淆不动的字符串常量 / 参数类型序列）。**没有锚点就诚实跳过返回 `NOT_RESOLVED`，绝不猜类名硬兜。** 解析走双轨：直连反射优先（不缓存，赌类稍后加载）→ DexKit 兜底。
+**DexKit 兜底必须有内容锚点**（混淆不动的字符串常量 / 参数类型序列）。**没有锚点就诚实跳过返回 `NOT_RESOLVED`，绝不猜类名硬兜。** 解析三阶段：直连反射优先（不缓存，赌类稍后加载）→ DexKit 严格轨（方法名/签名钉死）→ 宽松轨（只按内容锚点查，名字/签名只用于排序，唯一胜出才采纳）；abstract/native 不可 hook，**static 可 hook**。
 
-**`tools/adapt_new_version.py` 的挂载点提取当前覆盖不全**（实测：`extract_mounts()` 只 glob `target/*Hook.kt` 非递归、且只认 `addConst`/`addForceArg`/`MountTask(kind=MountKind.X, className=...)` 三种书写格式）。目前只能提取出 9 个点（全部来自 `InstallerHook.kt`），**漏掉 themestore/ 与 exam8/ 子目录，以及各文件私有的 `MountTask(className=..., ...)` 写法**。用它跑版本适配前，先手工核对挂载点台账（`docs/hook-inventory-audit.md`），别拿它的 N/M 当覆盖度结论。
+**`tools/adapt_new_version.py` 现提取 140 个挂载点**（2026-10-20 实测：`extract_mounts()` 已改递归 `rglob` 全 `target/`——旧的「只覆盖 9 点」结论作废）。注意**提取数 ≠ 运行期 M**：挂载点声明四格式并存（`HookPoint` 表 / 源码 `addConst`·`addForceArg` / OucHook 字符串对模板 / SDK 内联 `MountTask`，见 `docs/review-findings-2026-10-12.md` #22），且 id 字面量与运行期任务非一一对应（例：mms 4 个 id ↔ `installed 2/2`）。它只回答「反编译产物里这些类/方法还在不在」，**别拿它的计数当覆盖度结论**——口径与逐 hook M 见 `docs/hook-inventory-audit.md` §一/§五。
 
 ## 构建 gotchas
 
@@ -117,3 +110,18 @@ Default five-role vocabulary. See `docs/agents/triage-labels.md`.
 ### Domain docs
 
 Single-context. See `docs/agents/domain.md`.
+
+<!-- cockpit-conventions: start · written by /cockpit-setup, which updates it in place -->
+## Cockpit conventions
+
+**Shells**
+- Start the build with `tools/dev.sh build` as a background shell described "build". Reuse it if it is already running; never start a second one.
+- Run the tests with `tools/dev.sh test` as a background shell described "test". Read its output instead of running the suite again.
+
+**Trail**
+- Tickets are GitHub issues on coderstory/HonorHook, keys like `#123`. When a PR, branch or page is for a ticket, put its key in `for`.
+- Pull requests go to `github.com/coderstory/HonorHook`.
+
+**Subagents**
+- Explore the codebase in background subagents and keep this conversation free.
+<!-- cockpit-conventions: end -->
