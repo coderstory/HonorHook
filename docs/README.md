@@ -8,23 +8,24 @@
 
 | 文件 | 内容 |
 |---|---|
-| [`hook-craft.md`](hook-craft.md) | **怎么写好 hook**：选点原则与实证 · 四类"改了也没用"的死点（服务端字段 / null 实例 / 类内直读 / 休眠链）· 旁路与缓存 · 挂载基建与双轨解析 · 失败分级 · 防御与可观测 · 验证铁律 |
+| [`hook-craft.md`](hook-craft.md) | **怎么写好 hook**：选点原则与实证 · 四类"改了也没用"的死点（服务端字段 / null 实例 / 类内直读 / 休眠链）· 旁路与缓存 · 挂载基建与三阶段解析（DexKit 七条修正 / 宿主版本读取纪律）· 失败分级 · 防御与可观测 · 验证铁律 |
 | [`reverse-craft.md`](reverse-craft.md) | **怎么逆向分析**：证据标准（file:line / 消费点数 / 可达性 / 版本对齐 / 设备实机优先）· 流程 · 定位手段 · 读法与兜底 · 版本适配 · 坑清单 |
 
 ## 二、按目标
 
 | 内容 | 文件 |
 |---|---|
-| 6 目标总表 + 能力边界 + 已放弃目标结论 + 各 app 逆向记录 | [`reverse/README.md`](reverse/README.md) |
+| 目标总表（13 行 host 对）+ 能力边界 + 已放弃目标结论 + 各 app 逆向记录 | [`reverse/README.md`](reverse/README.md) |
 | **壁纸管线**（wallpapereditor + livewallpaper.paradise 两宿主合一文档。§一–八 = 已放弃路线「视频单独设桌面」W1–W8 留档；§九–十一 = 现行 W16–W19 四点——转码码率 / 时间轴去限 / 桌面循环 / 隐藏暂停，2026-10-18 全验证） | [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) |
 | 主题商店**设计**（需求 / 策略与理由 / 判据 / 未解决项） | [`theme-store.md`](theme-store.md) |
-| 挂载点**口径、已决删除决策、勿删观察项、真机回归教训** | [`hook-inventory-audit.md`](hook-inventory-audit.md) |
+| 挂载点**口径、判据快照（M/N 单一事实源）、已决删除决策、勿删观察项、真机回归教训** | [`hook-inventory-audit.md`](hook-inventory-audit.md) |
 
 ## 三、模块自身
 
 | 文件 | 内容 |
 |---|---|
-| **待办任务收件箱**（版本机制框架 / 包管理器双版本 / 强制重启 / 在线更新） | [`TODO.md`](TODO.md) |
+| **待办任务收件箱**（迭代候选 / 待验证 / 老 bug / 设备环境） | [`TODO.md`](TODO.md) |
+| **变更清单 / 实施计划**（改动前先出清单，只改清单内的） | [`plans/2026-10-20-hook-core-hardening.md`](plans/2026-10-20-hook-core-hardening.md) |
 | [`ui-miuix-overview.md`](ui-miuix-overview.md) | 宿主 UI（Miuix Compose）结构与开关下发通道 |
 | [`hook-philosophy-manifesto.md`](hook-philosophy-manifesto.md) | hook 设计哲学（哲学表述版 + 工程条款版，七条原则与审计应用） |
 

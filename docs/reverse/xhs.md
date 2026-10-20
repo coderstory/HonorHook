@@ -329,3 +329,44 @@ judge 行（9.50.0 现版本两点都出不来）。
 
 旧采集器（noteImages/videoSources/harvest*/imagefeed/videofeed 图谱）已随基准切换删除——
 解析单一事实源 = 分享链接，不再依赖宿主 feed 端点形态。历史设计见 git log 4e01b33^。
+
+## 十、2026-10-20 版本覆盖套从未生效（版本源恒 null）→ 修复
+
+### 根因
+
+`XhsPoints.cls(hostVersion, key)` 的 `hostVersion` 来自 `HostVersion.resolve(sourceDir)`，那条路走
+`ActivityThread.currentPackageManager` —— 该成员在现代 Android/AOSP **根本不存在**（Android 14 源码全文
+0 命中；真机 `getMethod`/`getDeclaredMethod` 均 `NoSuchMethodException`）⇒ **恒返回 null** ⇒
+`overrides[null]` 永远 miss ⇒ **9.49.1 覆盖套（saveClick=mh9.b / videoClick=d49.q / x2b=qc8.j +
+三个 null 点）从未生效过**，xhs 一直按基线（9.50.0 坐标）挂载。
+
+ART 对「成员不存在」与「被 hidden-API 黑名单拒绝」抛**同一种异常类型** ⇒ 这条路自 2026-10-11 引入
+（commit e842055）起就是死路，只因以前没有 target 消费版本号才潜伏（installer 选表是第一个真消费方）。
+
+### 第二个缺陷：显式 null 被吞
+
+旧 `cls()` 是 `over ?: baseline[key]`：覆盖表里显式 null（= 「该版本无此点」，见文件头 KDoc）与
+「该版本无覆盖项」被混成同一种 null ⇒ 三个 null 点会错误回落基线坐标。
+现改三态：命中覆盖且值为 null → null（跳过该点）；命中覆盖且有值 → 覆盖值；版本无覆盖项 / 版本为 null → 基线值。
+
+### 修复
+
+- 版本源换公开路径 `HostVersion.resolveHostVersion(sourceDir, "com.xingin.xhs")`
+  （系统上下文 PM 直读宿主 APK 磁盘 → 宿主 Application PM 查包名；见 `docs/hook-craft.md`「宿主版本读取纪律」）。
+- `cls()` 三态如上；纯逻辑已钉进 `XhsPointsTest`（6 例，含「显式 null 保持 null」——
+  旧实现下该用例会红，确属咬住缺陷）。
+
+### 影响面
+
+- **9.50.x 宿主：逐键返回值与修复前完全一致**（覆盖表无 9.50.x 套 → 仍走基线）⇒ `installed N/M` 不变。
+- **9.49.1 宿主**：三个点从「回落基线去挂一个该版本不存在的类」变为「跳过」（按表意）；saveClick/videoClick/x2b
+  换回 9.49.1 真坐标 —— 这才是「旧宿主保持旧 hook」的设计意图首次真正成立。判据分母随之 -3
+  （文件头 KDoc 明写「N 随之变化可判」）。
+
+### 待验证
+
+真机 XHS 判据复核（设备重新连上后跑）：9.50.x 上 `installed N/M` 应与修复前逐字一致。
+
+**2026-10-20 16:48 真机复核（宿主 xhs 9.50.0，新包）**：`XhsHook·X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7`
+（主进程与 `:pushservice` 进程各一轮）—— 与修复前**逐字一致** ⇒ 换版本源对 9.50.x 无任何挂载点影响；
+同轮 installer 复测 `installed 11/11` + 「宿主版本与 hook 基线一致: 14.0.38.301」。

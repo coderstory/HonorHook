@@ -38,7 +38,7 @@
 ## 工具清单（tools/，详情 `tools/README.md`）
 
 自写脚本：`dev.sh`（构建/安装/日志/UI 自动化/反编译统一入口）、`adapt_new_version.py`
-（宿主新版本适配校验：从 hook 源码+数据表提取全部挂载点，现 71 点，对反编译产物核对类/方法存活）、
+（宿主新版本适配校验：从 hook 源码+数据表提取挂载点，现 140 点，对反编译产物核对类/方法存活；口径见 docs/hook-inventory-audit.md §一）、
 `rain-decrypt.py`（Rain 参考模块字符串解密，逆向期）。
 下载件：`apktool.jar`（APK→smali，需 JDK 21）、`android-sdk/`（gradle 构建 + aapt2）、
 `bin/apktool`、`bin/jadx`（PATH 垫片）。
@@ -57,7 +57,7 @@
 - `packaging { excludes += "**" }` + 显式 merge `META-INF/xposed/*` = 混淆后 `java_init.list` 存活的保证；动 proguard/packaging 必须回归 release 包元数据
 - release = 混淆 + 收缩 + 稳定 keystore 签名（CI 走 Secrets `-Phh*`，本地走 gitignored `app/app/signing.properties`，无凭据回落 debug；keystore 在 `tools/signing/`，备份见 `credentials.txt`）；`abiFilters` 只 arm64
 - 模块名/简介只从 `<application>` 的 label 与 description（必须 `@string`）读
-- DexKit 兜底必须有内容锚点，无锚点诚实跳过（`NOT_RESOLVED`），不猜类名
+- DexKit 兜底必须有内容锚点，无锚点诚实跳过（`NOT_RESOLVED`），不猜类名；严格轨（名字/签名钉死）失败后走宽松轨（只按内容锚点查，唯一排序胜出才采纳），static 方法可正常兜底
 - 失败分级：`FAILED` = 重试无意义；`NOT_RESOLVED` = 随类加载重试
 
 ## 跨版本兼容（hook 选点原则）
@@ -77,12 +77,17 @@
 实证：SystemUI 的 `ModernStatusBarMobileView.constructAndBind`（AOSP 共同祖先）跨厂商跨版本成立；
 包管理器 11 点曾因宿主 14.0.37.301 → 14.0.22.326 全线 `installed 0/N`——混淆点锚点不足，
 可读点又把 `com.hihonor.packageinstaller` 前缀写死（「优先未混淆目标」本可避免）。
+2026-10-20 再添一条：**版本分发的前提是读得到宿主版本**——`ActivityThread.currentPackageManager`
+在本 ROM 根本不存在（ART 对「成员不存在」与「hidden-API 黑名单拒绝」抛同一种异常类型，易误判为被拦），
+故版本读取改走**公开 API 双取法 + 延后探测**（`HostVersion.resolveHostVersion`），零隐藏 API 绕过。
 
 版本分发机制已建成（2026-10-11）：`HookPoint` 数据表（唯一事实源，勿手生成）+
 `HostVersion` 选表器（`versionTables`，精确套优先默认套）+ `adapt_new_version.py` 校验。
-**策略 = 只维护基线表，不做旧版映射**（设备升宿主至基线 20.1.63.305 / 14.0.37.301）；
+**策略（2026-10-11 原定）= 只维护基线表，不做旧版映射**（前提是设备能升到基线 20.1.63.305 / 14.0.37.301）；
+**2026-10-20 现状已变**：installer 改为「基线表 + 额外版本表」——`14.0.22.326`（8 点）/ `14.0.38.301`（11 点）各一张，
+经 `installerTables` 按精确版本分发（38.301 表真机判据已于 2026-10-20 达成 `installed 11/11`；22.326 表无真机判据）。
 新宿主版本 = 反编译逐点核对 → 手写新表注册 `versionTables`。
-主题商店 43 点已入表；其余 5 目标仍源码 `MountTask` 式，渐进迁移。
+主题商店 49 点已入表；其余目标仍源码 `MountTask` 式，渐进迁移。
 
 ## 哲学
 
@@ -91,7 +96,10 @@
 ## 未解决
 
 - ~~设备宿主待升级至基线~~ **已升级（2026-10-12 dumpsys 实证）**：theme 20.1.63.305 / installer 14.0.37.301，
-  modlog `installed 43/43` 全绿；旧「4/43 / 0/11」判据作废
+  modlog 全绿；旧「4/43 / 0/11」判据作废
+- **2026-10-20 复核**：theme `49/49`；设备 installer 已升 **14.0.38.301** → 升级时 `installed 1/11`（历史快照）
+  → 同日 16:33 真机复测 **`installed 11/11`**（11 点全直连命中、无失败清单）；**挂载层已达成，行为层 2026-10-20 由用户真机实测通过**；
+  launcher `18.0.0.259`（5/5）/ sysmgr `17.0.0.455`（3/3）挂载全活、仅版本自检 WARN
 - 主题商店搜索页「免费领」是本地硬编码 tab，云控与槽位裁剪都管不到 → `docs/theme-store.md` §七·2
 - ~~挂载点口径漂移~~ **已排查为假问题（2026-10-11）**：`docs/hook-inventory-audit.md` 的复核 grep 正则漏了 6 个命名空间，
   误报 theme 37 / installer 8；用全命名空间命令复查后代码计数（theme 43 / installer 11）与 README 一致。

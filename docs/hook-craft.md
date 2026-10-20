@@ -56,8 +56,20 @@
 ## 四、挂载基建与解析（本项目形态）
 
 - **表驱动 + 单一事实源**：功能 key 集中在 `FeatureCatalog`（双端共用，禁止任一侧手写 key 字符串）；加/改开关只动表。**默认开（2026-10-15 用户拍板）**语义：读不到/异常/未写入一律回 FeatureCatalog 目录默认（默认开；例外关 = hide_5g / hide_sim2 / 清后台 A/B 互斥对）；关某功能 = 宿主显式写 false，且**下次目标进程注入才生效**。
-- **双轨解析**：直连反射优先（不缓存——赌类稍后加载）→ DexKit 特征兜底。混淆目标必配**内容性锚点**（混淆不改字符串常量/参数类型序列）⇒ 无锚点就诚实跳过（`NOT_RESOLVED`），**不猜类名硬兜**。
-  ⚠️ 兜底轨只覆盖**实例方法**：`DexKitHelper.findMethodByFeatures` 硬过滤 `Modifier.isStatic`（`DexKitHelper.kt:140`）⇒ **静态挂载点（静态方法）的 DexKit 兜底整体失效**（直连轨失败即 `NOT_RESOLVED`）。判据：挂点是否 `static`（以设备包 smali 为准）；是则要么自带静态版查找，要么别把 DexKit 锚点当真兜底。先例：`target/wallpaper/WallpaperEditorHook.kt`（自带 `resolveStaticByFeatures`），详见 [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) §四·3。
+- **三阶段解析**：直连反射优先（不缓存——赌类稍后加载）→ DexKit **严格轨**（方法名/签名都钉死，只治类名漂移）→ DexKit **宽松轨**（只用内容锚点查，旧名字/签名降级为排序依据，治方法名与实现类整体漂移）。混淆目标必配**内容性锚点**（混淆不改字符串常量/参数类型序列）⇒ 无锚点就诚实跳过（`NOT_RESOLVED`），**不猜类名硬兜**；宽松轨只在候选唯一胜出时采纳，歧义/重复一律跳过并留日志。
+- 兜底轨的诚实规则：严格轨命中**优先声明类精确匹配**，类名整体漂移时只接受"唯一候选"；候选集不完整（`getMethodInstance` 失败）或 DexKit 桥/查询瞬时失败 ⇒ 本轮**不做判定也不缓存 miss**（下轮类加载重试）——静默丢弃的候选可能正把"并列"翻转成"唯一"。宽松轨候选"全部不可挂载"要跳到下一层查询继续（那是"没有可用命中"，不是"并列歧义"）。
+- 兜底轨**允许 static**：`DexHitSelector.isHookable` 只排除 abstract/native（旧实现误抄 Rain 的 `Modifier.isStatic` 过滤，导致静态实现整体收不到 DexKit 兜底）。签名串带 `static` 前缀——旧实例点被挂到 static 上时 `thisObject` 为 null，依赖 thisObject 的拦截器会静默空转，漂移日志是唯一现场。
+- **DexKit 三阶段的七条修正**（2026-10-20 复审，installer 38.301 全线漂移逼出来；纯逻辑部分已钉进 JVM 单测）：
+  ① **严格轨无内容锚点不猜**——唯一候选也不采纳（此时只剩「名字+签名」这种弱特征，同名方法全 APK 一大把，猜错会直接改坏宿主行为），交宽松轨；宽松轨也无锚点 ⇒ 诚实 `NOT_RESOLVED`。
+  ② **宽松轨 L1 只用 `usingStrings`**（方法体串）；类锚点层（`classStrings`）另加**声明类硬约束**——类锚点多是类内 TAG，同串也会出现在别的类（UI 串/布局名尤其容易），不加约束会把候选铺满全 APK。
+  ③ **`instanceOnly` 标记**：依赖 `thisObject` 的拦截器**不许挂 static**——挂上后 `thisObject` 恒 null，判据行照样打 `installed N/M`，功能却静默空转（判据能绿、功能不生效的典型）。
+  ④ **两挂载点落到同一方法 = 合并，不是失败**：记「合并」并**合并计成功**（不扣 N、不进失败清单），但留一行 WARN 让判据可审计（谁与谁合并）。
+  ⑤ **返回类型比较走 `canonicalTypeName` 归一**（`int` ≡ `java.lang.Integer`）——此前只参数侧归一，返回侧漏了 ⇒ 整批候选被丢弃。
+  ⑥ **严格轨弃权要留 WARN**（有候选却未采纳）——否则 miss 缓存把它钉死，日志上看不出原因。
+  ⑦ **漂移 WARN 按 `task.id` 节流**——漂移是每 task 一次的定性事实，重试轮各打一行只会刷屏。
+- **宿主版本读取纪律**：`ActivityThread.currentPackageManager` 在现代 AOSP **根本不存在**（Android 14 源码全文 0 命中，真机 `getMethod`/`getDeclaredMethod` 均 `NoSuchMethodException`）⇒ 版本读取走**公开 API 双取法**（系统上下文 `PackageManager.getPackageArchiveInfo` → 宿主 Application `getPackageInfo`）并**延后探测**（`MountScheduler.postDelayed` 重试表 0/200/600 ms）。
+  **ART 对「成员不存在」与「被 hidden-API 黑名单拒绝」抛同一种异常类型** ⇒ 反射探针拿到异常**不能**直接判成黑名单拦截；下「被拦」的结论前必须另找证据（成员清单 / AOSP 源码 / 不依赖该成员的公开路径能取到值）。另：`ApplicationInfo` 无 `versionName` 字段 ⇒ libxposed 的 `getApplicationInfo()` 取不到宿主版本。
+- **版本依赖型 target 一律用 `HostVersion.resolveHostVersion`**：`HostVersion.resolve()`（旧取法）在本 ROM 恒 null ⇒ 任何「按宿主版本选表 / 选坐标」的逻辑接它 = 永远走基线（xhs 的 9.49.1 覆盖套就因此**从未生效**，2026-10-20 修复）。覆盖表还要区分「显式 null = 该版本无此点」与「无覆盖项 → 回落基线」两种 null，否则覆盖套里的空点会错误回落基线坐标（`XhsPoints.cls()` 三态 + `XhsPointsTest` 钉住）。
 - **失败分级**：`FAILED` = 挂载抛异常，重试无意义；`NOT_RESOLVED` = 类/依赖未就绪，随类加载重试。
 - **挂载类型要分**：改返回值 / 条件短路（只对目标参数生效，避免误伤无关判定，如 `hasPrivilege(14)` 只短路特权位 14）/ 前置改写（PRE_PROCESS，proceed 前修状态、失败不动）/ 键值覆盖（KEY_OVERRIDE，表驱动云控）。
 - **幂等与防重装**：挂在注册表层保证；实现内不加 installed 标志；多包共享进程需对象级去重。
