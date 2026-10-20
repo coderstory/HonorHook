@@ -306,7 +306,7 @@ internal fun ThemeSettingsPage(
                     ) {
                         SwitchPreference(
                             title = "启用玻璃",
-                            summary = "底栏药丸的透镜折射与高光",
+                            summary = "底栏按钮的立体折射和高光",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.WaterDrop,

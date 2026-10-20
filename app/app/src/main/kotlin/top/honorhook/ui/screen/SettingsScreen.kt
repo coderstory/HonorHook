@@ -278,7 +278,7 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
 }
 
 private val RESTART_SIDE_EFFECT = mapOf(
-    "com.hihonor.android.launcher" to "桌面会重建：图标与小部件重载、回到主屏",
+    "com.hihonor.android.launcher" to "桌面会重新加载一下（图标和小部件会闪一下）",
     "com.android.systemui" to "状态栏与导航栏会重建：短暂闪一下",
 )
 
@@ -336,9 +336,9 @@ private fun RestartResult(
         push?.let {
             Text(
                 text = if (!it.connected) {
-                    "⚠️ LSPosed 未连接：开关没有同步，功能仍按之前的设置运行"
+                    "LSPosed 没连上：开关没能同步过去，功能还在按之前的设置运行"
                 } else {
-                    "开关已同步 ${it.sent}/${it.total}"
+                    "已同步 ${it.sent}/${it.total} 个开关"
                 },
             )
         }

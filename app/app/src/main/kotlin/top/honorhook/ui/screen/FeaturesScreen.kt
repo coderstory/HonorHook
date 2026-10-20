@@ -168,7 +168,7 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
                 )
             }
             when {
-                installedTargets == null -> item { EmptyHint("正在读取设备上已安装的目标应用…") }
+                installedTargets == null -> item { EmptyHint("正在读取设备上已安装的应用…") }
                 installedTargets!!.isEmpty() -> item {
                     EmptyHint("设备上没有检测到支持的应用。\n本模块只支持荣耀系统应用和指定第三方应用，装上后会自动显示在这里。")
                 }
@@ -418,7 +418,6 @@ private fun AppHeaderCard(
                 if (target.iconKey == null) {
                     // 每行带色：版本适配行单独染色（颜色即语义），其余行维持弱化灰。
                     val meta: List<Pair<String, Color>> = listOfNotNull(
-                        target.packageName to colorScheme.onSurfaceVariantSummary,
                         versionText?.let { "版本 $it" to colorScheme.onSurfaceVariantSummary },
                         // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）。
                         // 绿色判据 = 装机 versionName ∈ target.supportedVersions（含历史精确套）；红色 = 不在集合内。
@@ -434,7 +433,7 @@ private fun AppHeaderCard(
                             if (versionMismatch) {
                                 "未适配（最新支持 $it，仍会尝试）" to VersionTagRed
                             } else {
-                                "已适配 $it" to VersionTagGreen
+                                "已适配" to VersionTagGreen
                             }
                         },
                     )

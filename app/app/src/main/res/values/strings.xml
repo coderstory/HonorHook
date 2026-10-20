@@ -13,12 +13,12 @@
     <string name="target_name_settings">系统设置</string>
     <string name="target_name_exam8">成考题库</string>
     <string name="target_name_launcher">系统桌面</string>
-    <string name="target_name_systemui">SystemUI</string>
+    <string name="target_name_systemui">状态栏与通知栏</string>
     <string name="target_name_ouc">系统更新</string>
     <string name="target_name_upgradeguide">升级引导</string>
     <string name="target_name_mms">短信</string>
     <string name="target_name_ime">搜狗键盘</string>
-    <string name="target_name_purify">荣耀系统净化</string>
+    <string name="target_name_purify">广告与跟踪净化</string>
     <string name="target_name_jd">京东</string>
     <string name="target_name_mfa">MFA身份验证器</string>
     <string name="target_name_sysmgr">系统管家</string>
@@ -33,7 +33,7 @@
     <string name="feature_theme_trial_title">试用永不过期</string>
     <string name="feature_theme_trial_desc">试用主题不再有到期倒计时和「试用中」标记，应用后不会被自动换回默认主题</string>
     <string name="feature_theme_ad_off_title">广告净化</string>
-    <string name="feature_theme_ad_off_desc">隐藏主题商店里的广告位、福利活动和会员推荐板块</string>
+    <string name="feature_theme_ad_off_desc">隐藏主题商店里的广告、福利活动和会员推荐</string>
 
     <string name="feature_installer_ad_title">广告净化</string>
     <string name="feature_installer_ad_desc">安装应用时不再显示广告</string>
@@ -44,7 +44,7 @@
     <string name="feature_installer_skip_check_title">跳过安全检测</string>
     <string name="feature_installer_skip_check_desc">安装前不再联网检测应用风险，直接安装，不弹风险页和确认勾选</string>
 
-    <string name="feature_settings_disable_btn_title">停用按钮解锁</string>
+    <string name="feature_settings_disable_btn_title">停用按钮可点</string>
     <string name="feature_settings_disable_btn_desc">应用详情页的「停用」按钮对系统应用也可以点击</string>
     <string name="feature_settings_hide_account_dot_title">隐藏账户小红点</string>
     <string name="feature_settings_hide_account_dot_desc">设置首页账户名后面的红点不再显示</string>
@@ -55,7 +55,7 @@
     <string name="feature_exam8_burn_reading_desc">题目和答案可以完整查看，不再被遮盖</string>
 
     <string name="feature_jd_splash_title">屏蔽开屏广告</string>
-    <string name="feature_jd_splash_desc">冷启动直接进首页，不再展示开屏广告页（含启动图联动入口）；广告数据请求不受影响，下次注入生效</string>
+    <string name="feature_jd_splash_desc">冷启动直接进首页，不再展示开屏广告页</string>
 
     <string name="feature_mfa_splash_title">屏蔽开屏广告</string>
     <string name="feature_mfa_splash_desc">冷启动直接进主界面，跳过全屏开屏广告页；验证码生成/备份/设置等其余功能不受影响</string>
@@ -64,32 +64,32 @@
     <string name="feature_launcher_hide_card_title_desc">隐藏桌面卡片上的标题文字（如「YOYO 建议」），不影响应用图标</string>
     <string name="feature_launcher_keep_folder_open_title">文件夹保持打开</string>
     <string name="feature_launcher_keep_folder_open_desc">从文件夹打开应用后返回桌面，文件夹保持打开状态；点空白处或回主屏仍会正常关闭</string>
-    <string name="feature_launcher_recents_keep_atms_title">清后台保留当前应用（直杀）</string>
-    <string name="feature_launcher_recents_keep_atms_desc">最近任务点垃圾桶时，直接逐个移除其他任务卡（ATMS 同单卡划走通道），保留清后台前的前台应用并自动热回；缓存清理与内存释放 toast 由管家负责的部分不再发生。与「管家广播」互斥，只能开一个</string>
-    <string name="feature_launcher_recents_keep_manager_title">清后台保留当前应用（管家广播）</string>
-    <string name="feature_launcher_recents_keep_manager_desc">最近任务点垃圾桶时，按荣耀原生单任务通道逐个广播系统管家移除其他任务卡，保留清后台前的前台应用并自动热回。与「直杀」互斥，只能开一个</string>
+    <string name="feature_launcher_recents_keep_atms_title">清后台保留当前应用（直接划掉）</string>
+    <string name="feature_launcher_recents_keep_atms_desc">点最近任务的垃圾桶时，把其他任务卡一个个划掉，保留你正在用的应用并自动切回它。和「交给管家」只能开一个</string>
+    <string name="feature_launcher_recents_keep_manager_title">清后台保留当前应用（交给管家）</string>
+    <string name="feature_launcher_recents_keep_manager_desc">点最近任务的垃圾桶时，让系统管家来清其他任务卡，保留你正在用的应用并自动切回它。和「直接划掉」只能开一个</string>
 
     <string name="feature_systemui_hide_sim2_title">隐藏副卡图标</string>
     <string name="feature_systemui_hide_sim2_desc">双卡时状态栏只显示主卡的信号图标，隐藏副卡（SIM2）</string>
     <string name="feature_systemui_hide_5g_title">隐藏 5G 标识</string>
     <string name="feature_systemui_hide_5g_desc">状态栏信号旁不再显示 5G/4G 字样</string>
     <string name="feature_systemui_dual_signal_title">双排信号</string>
-    <string name="feature_systemui_dual_signal_desc">状态栏信号分上下两排显示（上排主卡、下排副卡）；与其他双排信号类插件二选一，不要同时开启</string>
+    <string name="feature_systemui_dual_signal_desc">状态栏信号分上下两排显示（上排主卡、下排副卡）。别和其他双排信号插件同时开</string>
     <string name="feature_systemui_dual_signal_label_title">双排 5G 制式标</string>
-    <string name="feature_systemui_dual_signal_label_desc">双排信号右侧显示 5G/4G/3G/2G 制式文字（WiFi 或移动数据关闭时自动隐藏）；需先开启双排信号，双排关闭时本开关不可用</string>
+    <string name="feature_systemui_dual_signal_label_desc">双排信号右侧显示网络制式文字（5G/4G/3G/2G，WiFi 和移动数据都关掉时自动隐藏）。要先打开「双排信号」，没开时这个开关用不了</string>
     <string name="feature_systemui_icon_wifi_title">替换 WiFi 图标</string>
-    <string name="feature_systemui_icon_wifi_desc">状态栏 WiFi 信号图标换成内置全套（含 WiFi5/WiFi6/6+ 按档位区分），改动重启 SystemUI 生效</string>
+    <string name="feature_systemui_icon_wifi_desc">状态栏的 WiFi 图标换成内置的一套（WiFi5、WiFi6、6+ 各不相同）</string>
     <string name="feature_systemui_icon_status_title">替换状态图标</string>
-    <string name="feature_systemui_icon_status_desc">闹钟/NFC/热点/VPN/蓝牙/静音/振动/勿扰/护眼/定位/no SIM 等状态图标换成内置风格，改动重启 SystemUI 生效</string>
+    <string name="feature_systemui_icon_status_desc">闹钟、NFC、热点、VPN、蓝牙、静音、振动、勿扰、护眼、定位、无卡等状态图标换成内置风格</string>
 
     <string name="feature_systemui_hide_charge_notif_title">隐藏充电通知</string>
     <string name="feature_systemui_hide_charge_notif_desc">隐藏系统管家充电通知（「正在充电/极速充电」），插拔充电器不再弹横幅或进下拉列表</string>
     <string name="feature_systemui_hide_hotspot_notif_title">隐藏热点通知</string>
-    <string name="feature_systemui_hide_hotspot_notif_desc">隐藏热点共享进行中通知（android 系统 · 已连接设备数 · 已共享流量）</string>
+    <string name="feature_systemui_hide_hotspot_notif_desc">隐藏热点共享的通知（已连接设备数、已共享流量）</string>
     <string name="feature_systemui_hide_adb_notif_title">隐藏 USB 调试通知</string>
     <string name="feature_systemui_hide_adb_notif_desc">隐藏「USB 调试已连接」系统通知</string>
     <string name="feature_systemui_flashlight_ignore_low_batt_title">手电筒忽略低电量</string>
-    <string name="feature_systemui_flashlight_ignore_low_batt_desc">电量低于 5% 时仍可从下拉瓷贴/桌面小部件打开手电筒。注意：绕过的是厂商电池保护阈值，可一直用到深度放电自动关机</string>
+    <string name="feature_systemui_flashlight_ignore_low_batt_desc">电量低于 5% 时仍可从下拉瓷贴或桌面小部件打开手电筒。注意：这样会绕过厂商的低电量保护，电量能一直用到手机自动关机</string>
 
     <string name="feature_mms_ad_off_title">广告净化</string>
     <string name="feature_mms_ad_off_desc">去除短信里的营销内容：会话底部的充值菜单、推广按钮和应用推广卡片（如 10010 发的流量套餐入口）</string>
@@ -98,9 +98,9 @@
     <string name="feature_ime_code_free_desc">键盘候选区的「短信验证码一键填充」不再要求先同意搜狗联网服务；其他联网功能不受影响</string>
 
     <string name="feature_ads_block_title">广告净化</string>
-    <string name="feature_ads_block_desc">去除日历、天气、浏览器、游戏中心、视频等系统应用里的开屏、横幅、信息流广告；钩在系统广告 SDK 上，上述应用装了哪个就净化哪个</string>
+    <string name="feature_ads_block_desc">去除日历、天气、浏览器、游戏中心、优酷视频等系统应用里的开屏、横幅、信息流广告</string>
     <string name="feature_tracking_block_title">去除跟踪</string>
-    <string name="feature_tracking_block_desc">阻止日历、天气、浏览器、游戏中心、视频、音乐等应用上报你的使用记录和设备标识；钩在埋点 SDK 上，上述应用装了哪个就拦截哪个</string>
+    <string name="feature_tracking_block_desc">阻止日历、天气、浏览器、游戏中心、优酷视频、云音乐等应用上报你的使用记录和设备标识</string>
 
     <string name="feature_ota_block_title">禁止自动检测与提示</string>
     <string name="feature_ota_block_desc">系统更新不再在后台自动检测和下载，不再弹出升级提醒通知；在设置里手动检查更新不受影响</string>
@@ -112,14 +112,14 @@
 
     <string name="target_name_xhs">小红书</string>
     <string name="feature_xhs_save_unlock_title">解除保存限制</string>
-    <string name="feature_xhs_save_unlock_desc">帖子被作者关闭「下载/保存」时仍可长按保存图片和视频；付费内容不绕过。重启小红书后生效</string>
+    <string name="feature_xhs_save_unlock_desc">帖子被作者关掉「下载/保存」时，仍可长按保存图片和视频；付费内容不处理</string>
     <string name="feature_xhs_takeover_save_title">接管下载</string>
-    <string name="feature_xhs_takeover_save_desc">保存时接管：图片下载原图（实况只下静帧）、视频自动换链原片（作者关闭下载时弹卡由模块直下）、去水印；带进度与取消。重启小红书后生效</string>
+    <string name="feature_xhs_takeover_save_desc">保存时由模块接手：图片下原图（实况图只下静态那张），视频自动换到原片（作者关掉下载时会先弹卡片问你），顺手去水印，带进度和取消按钮</string>
 
-    <string name="target_name_wallpapereditor">壁纸视频增强（转码）</string>
-    <string name="target_name_livewallpaper">壁纸视频增强（循环）</string>
+    <string name="target_name_wallpapereditor">壁纸视频增强</string>
+    <string name="target_name_livewallpaper">壁纸视频循环播放</string>
     <string name="feature_wallpaper_transcode_quality_title">视频壁纸高画质转码</string>
-    <string name="feature_wallpaper_transcode_quality_desc">设置壁纸时自动补足转码码率，减轻二次压缩带来的模糊</string>
+    <string name="feature_wallpaper_transcode_quality_desc">设置壁纸时自动提高转码画质，减轻二次压缩带来的模糊</string>
     <string name="feature_wallpaper_timeline_unlimited_title">视频壁纸去时长限制</string>
     <string name="feature_wallpaper_timeline_unlimited_desc">编辑页时间轴不再限制最长 10 秒，可选完整视频</string>
     <string name="feature_wallpaper_loop_title">视频壁纸循环播放</string>

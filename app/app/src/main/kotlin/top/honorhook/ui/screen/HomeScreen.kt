@@ -80,7 +80,6 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     val active = FrameworkState.active
     val frameworkName = FrameworkState.frameworkName
     val frameworkVersion = FrameworkState.frameworkVersion
-    val apiVersion = FrameworkState.apiVersion
 
     val scrollBehavior = MiuixScrollBehavior()
     val isDynamicColor = AppSettings.miuixMonet
@@ -122,7 +121,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                                 listOf(frameworkName, frameworkVersion)
                                     .filter { it.isNotBlank() }
                                     .joinToString(" ")
-                                    .ifBlank { "LSPosed" } + " · API $apiVersion"
+                                    .ifBlank { "LSPosed" }
                             } else {
                                 "未连接 LSPosed（已安装但未激活，或模块未启用）"
                             },
@@ -274,11 +273,11 @@ private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPad
 private fun InfoCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, "插件版本", appVersionLabel())
-            InfoRow(Icons.Filled.DeveloperBoard, "插件包名", BuildConfig.APPLICATION_ID)
+            InfoRow(Icons.Filled.Tag, "模块版本", appVersionLabel())
+            InfoRow(Icons.Filled.DeveloperBoard, "模块包名", BuildConfig.APPLICATION_ID)
             InfoRow(
                 Icons.Filled.Smartphone, "系统版本",
-                "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                "Android ${Build.VERSION.RELEASE}",
             )
             InfoRow(
                 Icons.Filled.Fingerprint, "设备",
