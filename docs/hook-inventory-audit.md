@@ -89,12 +89,12 @@
 >
 > **重采结果与上一版快照逐值一致**（theme 49/49、launcher 5/5、settings 2/2、sysmgr 3/3、ime 5/5、ouc 11/11、ads 2/2、ops 1/1、tracking 3/3、jd 1/1、mfa 1/1、mms 2/2、xhs X1 3/3·X2 3/3·X4 1/1·X5 7/7）⇒ **功能开关过滤下沉（Task 6）与判据行带包名（Task 8）都没有改变 M/N 口径**（开关全开时 M 与过滤前相同）。
 >
-> **本轮未采到新格式判据行的目标**（冷启动未起 / 需人工触发，不等于失效）：`InstallerHook`（packageinstaller 无 launcher activity，须在设备上真实走一次安装流程）、ads+tracking 的 quickgame / browser / youku 三包、壁纸三 hook（Transcode / Loop / Timeline）、`UpgradeGuideHook`、`Exam8Hook`（最近已知 10/10）、`SystemUiHook·U6/U7`（force-stop SystemUI 有黑屏风险且本项目禁 reboot 无兜底 ⇒ 主动跳过，留人工）。
+> **本轮未采到新格式判据行的目标**（冷启动未起 / 需人工触发，不等于失效）：ads+tracking 的 quickgame / browser / youku 三包、壁纸三 hook（Transcode / Loop / Timeline）、`UpgradeGuideHook`、`Exam8Hook`（最近已知 10/10）、`SystemUiHook·U6/U7`（force-stop SystemUI 有黑屏风险且本项目禁 reboot 无兜底 ⇒ 主动跳过，留人工）。`InstallerHook` 已于 18:51 用 `am start` 拉起进程补采（新格式 11/11），不在此列。
 
 | hook | 最近实测 | 备注 |
 |---|---|---|
 | `ThemeStoreHook` | 49/49 | 宿主 = 基线 |
-| `InstallerHook` | **11/11** | 宿主 `14.0.38.301`（2026-10-20 16:33 真机，旧判据行格式）：11 点**全直连命中**，无失败清单、无漂移命中行。**M = 开关过滤后的点数，随选表路径变化**：22.326 = 8 / 37.301（基线源码路径）= 11 / 38.301 = 11。**挂载层 11/11 已达成，行为层 2026-10-20 由用户真机实测通过**。⚠ 18:41 新格式重采**未覆盖**该目标（packageinstaller 无 launcher activity，冷启动未起）⇒ 新格式下 installer 尚无判据行 |
+| `InstallerHook` | **11/11** | 宿主 `14.0.38.301`（2026-10-20 **18:51 真机，新判据行格式** `InstallerHook[com.android.packageinstaller]: installed 11/11`）：11 点**全直连命中**，无失败清单、无漂移命中行；随后 `宿主版本与 hook 基线一致: 14.0.38.301`（精确表命中 ⇒ 自检一致）。**M = 开关过滤后的点数，随选表路径变化**：22.326 = 8 / 37.301（基线源码路径）= 11 / 38.301 = 11。**挂载层 11/11 已达成，行为层 2026-10-20 由用户真机实测通过**。冷启动方式：`am start -n com.android.packageinstaller/com.android.packageinstaller.PackageInstallerActivity`（无需真实走安装流程） |
 | `SettingsHook` | 2/2 | |
 | `OucHook` | 11/11 | 三个宿主进程（ouc / dataupdateservice / pluginupdateservice）均命中 |
 | `UpgradeGuideHook` | 无近期判据 | 引导页不出现即不注入 |

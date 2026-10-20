@@ -932,6 +932,7 @@
 | HonorAdsHook[totemweather] | 2/2 | HonorTrackingHook[cloudmusic] | 3/3 |
 | JdHook[jingdong] | 1/1 | MfaAuthHook[mfa] | 1/1 |
 | MmsHook[mms] | 2/2 | XhsHook·X1/X2/X4/X5[xhs] | 3/3 · 3/3 · 1/1 · 7/7 |
+| InstallerHook[packageinstaller] | 11/11（18:51 补采） | — | — |
 
 **结论**：与上一版快照**逐值一致** ⇒ 功能开关过滤下沉（Task 6）未改 M 口径、判据行带包名（Task 8）未改 N 口径 —— **本轮重构零回归**。
 
@@ -940,6 +941,8 @@
 - `LauncherHook`（宿主 18.0.0.259 vs 基线 18.0.0.234）、`SysmgrHook`（宿主 17.0.0.455 vs 基线 17.0.0.414）—— 宿主版本高于基线、盲挂基线表的**预期 WARN**，两点仍全挂（5/5、3/3）。
 - **无 ERROR 行、无「通路全灭」行**；通路行正常输出（theme A1–A5/T*/B*/C*/H*/W*/S*）⇒ Task 7 补的 group 透传生效。
 
-**未覆盖（本轮采不到新格式判据行，非失效）**：`InstallerHook`（packageinstaller 无 launcher activity，须人工走一次安装流程）、ads+tracking 的 quickgame/browser/youku 三包、壁纸三 hook、UpgradeGuideHook、Exam8Hook、SystemUiHook·U6/U7（force-stop SystemUI 有黑屏风险 + 禁 reboot 无兜底 ⇒ 主动跳过）。
+**未覆盖（本轮采不到新格式判据行，非失效）**：ads+tracking 的 quickgame/browser/youku 三包、壁纸三 hook、UpgradeGuideHook、Exam8Hook、SystemUiHook·U6/U7（force-stop SystemUI 有黑屏风险 + 禁 reboot 无兜底 ⇒ 主动跳过）。
+
+**Installer 补采（18:51）**：packageinstaller 无 launcher activity，冷启动起不来 ⇒ 用 `tools/dev.sh exec adb shell am start -n com.android.packageinstaller/com.android.packageinstaller.PackageInstallerActivity` 直接拉起安装器进程（无需真实走安装流程、无需用户点 UI）。判据行 `InstallerHook[com.android.packageinstaller]: installed 11/11`，随后 `InstallerHook 宿主版本与 hook 基线一致: 14.0.38.301`（精确表命中 ⇒ 自检一致）。
 
 **已回写**：`docs/hook-inventory-audit.md` §五（重采说明 + HonorTrackingHook/InstallerHook 行更新）。
