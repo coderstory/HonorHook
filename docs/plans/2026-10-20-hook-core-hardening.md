@@ -913,3 +913,33 @@
 | Minor | `MountSummary.logLines` 的 `hostPackage` 为空时退化成旧格式 | 审计判定无需改（`MountSession` 构造期必填，实际不触发） |
 | Rec | `mergedFeatureConflict` KDoc 未写死「一方为空（常挂点）、另一方非空 ⇒ 也算冲突」 | 已补（`MountOutcome.kt`） |
 
+
+---
+
+## Task 9 执行结果（2026-10-20 18:41–18:43，真机）
+
+**采集**：模块 1.1.7 覆盖安装 + `enable-module`（22 个 scope 进程已强停）→ 逐目标 `tools/dev.sh relaunch <pkg>` 冷启动 → 判据行用 `tools/dev.sh modlog-grep 'installed'` 从 LSPosed 框架日志抓（**判据在框架日志，不在 logcat**）。
+
+**新格式判据行实测**（`HookName[宿主包名]: installed N/M`）：
+
+| 目标 | 判据 | 目标 | 判据 |
+|---|---|---|---|
+| ThemeStoreHook[thememanager] | 49/49 | ImeHook[sogou] | 5/5 |
+| LauncherHook[launcher] | 5/5 | OucHook[ouc] | 11/11（两进程各一行）|
+| SettingsHook[settings] | 2/2 | HonorAdsHook[calendar] | 2/2 |
+| SysmgrHook[systemmanager] | 3/3 | HonorOpsAdHook[calendar] | 1/1 |
+| HonorTrackingHook[calendar] | 3/3 | HonorTrackingHook[totemweather] | **2/3** |
+| HonorAdsHook[totemweather] | 2/2 | HonorTrackingHook[cloudmusic] | 3/3 |
+| JdHook[jingdong] | 1/1 | MfaAuthHook[mfa] | 1/1 |
+| MmsHook[mms] | 2/2 | XhsHook·X1/X2/X4/X5[xhs] | 3/3 · 3/3 · 1/1 · 7/7 |
+
+**结论**：与上一版快照**逐值一致** ⇒ 功能开关过滤下沉（Task 6）未改 M 口径、判据行带包名（Task 8）未改 N 口径 —— **本轮重构零回归**。
+
+**告警（全部已判读）**：
+- `HonorTrackingHook[totemweather] 2/3`（autoCollect `_instance_ex_tag` 类不存在）—— **旧账非回归**：安装前的旧模块在 17:23 同样 2/3。按 AGENTS「N 明显小于 M ⇒ 先别改 hook 实现」，需另开适配单（该宿主版本无此埋点实例 Ex 工厂）。
+- `LauncherHook`（宿主 18.0.0.259 vs 基线 18.0.0.234）、`SysmgrHook`（宿主 17.0.0.455 vs 基线 17.0.0.414）—— 宿主版本高于基线、盲挂基线表的**预期 WARN**，两点仍全挂（5/5、3/3）。
+- **无 ERROR 行、无「通路全灭」行**；通路行正常输出（theme A1–A5/T*/B*/C*/H*/W*/S*）⇒ Task 7 补的 group 透传生效。
+
+**未覆盖（本轮采不到新格式判据行，非失效）**：`InstallerHook`（packageinstaller 无 launcher activity，须人工走一次安装流程）、ads+tracking 的 quickgame/browser/youku 三包、壁纸三 hook、UpgradeGuideHook、Exam8Hook、SystemUiHook·U6/U7（force-stop SystemUI 有黑屏风险 + 禁 reboot 无兜底 ⇒ 主动跳过）。
+
+**已回写**：`docs/hook-inventory-audit.md` §五（重采说明 + HonorTrackingHook/InstallerHook 行更新）。

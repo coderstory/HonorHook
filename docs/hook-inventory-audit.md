@@ -85,10 +85,16 @@
 
 ### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；2026-10-20 复核）
 
+> **最近一次重采：2026-10-20 18:41–18:43**（新判据行格式 `HookName[包名]: installed N/M`；模块 1.1.7 覆盖安装 + `enable-module` 后，逐目标 `tools/dev.sh relaunch <pkg>` 强停冷启动，判据行用 `tools/dev.sh modlog-grep 'installed'` 从 LSPosed 框架日志抓）。
+>
+> **重采结果与上一版快照逐值一致**（theme 49/49、launcher 5/5、settings 2/2、sysmgr 3/3、ime 5/5、ouc 11/11、ads 2/2、ops 1/1、tracking 3/3、jd 1/1、mfa 1/1、mms 2/2、xhs X1 3/3·X2 3/3·X4 1/1·X5 7/7）⇒ **功能开关过滤下沉（Task 6）与判据行带包名（Task 8）都没有改变 M/N 口径**（开关全开时 M 与过滤前相同）。
+>
+> **本轮未采到新格式判据行的目标**（冷启动未起 / 需人工触发，不等于失效）：`InstallerHook`（packageinstaller 无 launcher activity，须在设备上真实走一次安装流程）、ads+tracking 的 quickgame / browser / youku 三包、壁纸三 hook（Transcode / Loop / Timeline）、`UpgradeGuideHook`、`Exam8Hook`（最近已知 10/10）、`SystemUiHook·U6/U7`（force-stop SystemUI 有黑屏风险且本项目禁 reboot 无兜底 ⇒ 主动跳过，留人工）。
+
 | hook | 最近实测 | 备注 |
 |---|---|---|
 | `ThemeStoreHook` | 49/49 | 宿主 = 基线 |
-| `InstallerHook` | **11/11** | 宿主 `14.0.38.301`（2026-10-20 16:33 真机）：11 点**全直连命中**，无失败清单、无漂移命中行。**M = 开关过滤后的点数，随选表路径变化**：22.326 = 8 / 37.301（基线源码路径）= 11 / 38.301 = 11。**挂载层 11/11 已达成，行为层 2026-10-20 由用户真机实测通过** |
+| `InstallerHook` | **11/11** | 宿主 `14.0.38.301`（2026-10-20 16:33 真机，旧判据行格式）：11 点**全直连命中**，无失败清单、无漂移命中行。**M = 开关过滤后的点数，随选表路径变化**：22.326 = 8 / 37.301（基线源码路径）= 11 / 38.301 = 11。**挂载层 11/11 已达成，行为层 2026-10-20 由用户真机实测通过**。⚠ 18:41 新格式重采**未覆盖**该目标（packageinstaller 无 launcher activity，冷启动未起）⇒ 新格式下 installer 尚无判据行 |
 | `SettingsHook` | 2/2 | |
 | `OucHook` | 11/11 | 三个宿主进程（ouc / dataupdateservice / pluginupdateservice）均命中 |
 | `UpgradeGuideHook` | 无近期判据 | 引导页不出现即不注入 |
@@ -101,7 +107,7 @@
 | `SysmgrHook` | 3/3 | 宿主 `17.0.0.455`（超基线，仅 WARN） |
 | `XhsHook` | X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7 | X5 的 4/5 已随 v1.1.6 修复；2026-10-20 16:48 换版本源（`resolveHostVersion`）后**复测逐字一致**（宿主 9.50.0，走基线坐标不变）。**M 按宿主版本分档**：9.50.0 = 上表数值；**9.49.1 覆盖套只有 X5 变 ⇒ X5 M=4**（noteSave / aigcEdit / downloader 三点该版本无此坐标 ⇒ 显式缺席，不是失效；X1/X2/X4 与版本无关，M 不变）——旧宿主自查时勿把 N<M 判成宿主版本错位 |
 | `HonorAdsHook` / `HonorOpsAdHook` | 2/2 / 1/1 | 按 scope 逐包注册；**判据行按包分列**：`HonorAdsHook` 注册 5 个包（`com.hihonor.calendar` / `com.hihonor.android.totemweather` / `com.honor.browser` / `com.hihonor.quickgame` / `com.hihonor.youku.video`）⇒ 5 行 `installed 2/2`；`HonorOpsAdHook` 仅日历 ⇒ 1 行 `installed 1/1`。本行的 2/2、1/1 是**单包口径**（声明级共 3 点 = ads 2 + ops 1） |
-| `HonorTrackingHook` | 日历 3/3；桌面·天气 2/3 | 2/3 = 已知旧账「Ex 工厂收口」1 点（`_instance_ex_tag` 类不存在）；2026-10-20 同轮回归仍 2/3（launcher 2/3×37 次、totemweather 2/3×36 次）⇒ **非回退**，历史同进程常态 |
+| `HonorTrackingHook` | 日历 3/3；桌面·天气 2/3；云音乐 3/3 | 2/3 = 已知旧账「Ex 工厂收口」1 点（`_instance_ex_tag` 类不存在）；2026-10-20 18:41 重采仍 2/3，且**安装前的旧模块在 17:23 同样是 2/3** ⇒ **非回退**，历史同进程常态；对应 WARN「类/方法不存在，已重试 2 轮，放弃」 |
 | 壁纸三 hook（Transcode / Loop / Timeline） | 无近期判据 | 需触发壁纸编辑或应用才注入 |
 
 > M 随代码变更、N 随宿主版本：**改完 hook 回来更新本表**。
