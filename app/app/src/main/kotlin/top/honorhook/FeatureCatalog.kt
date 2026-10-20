@@ -90,7 +90,7 @@ object FeatureCatalog {
          *  单一事实源：各 hook 的 MountEngine.begin 版本自检读这里（原各文件私有 HOST_VERSION_BASELINE 已上提）；
          *  新增目标必须在此登记，查落空 = 该目标版本自检静默关闭（baselineVersionOf 返回 null）。 */
         val baselineVersion: String? = null,
-        /** 基线之外额外适配的精确套版本（如 installer 旧版 14.0.22.326，与 InstallerHook.installerTables 联动，勿单侧改）。 */
+        /** 基线之外额外适配的精确套版本（如 installer 旧版 14.0.22.326、新版 14.0.38.301，与 InstallerHook.installerTables 联动，勿单侧改）。 */
         val extraVersions: Set<String> = emptySet(),
         /** 仅从「功能」一级列表隐藏（功能入口归并到别的卡）；scope 页与版本查表仍走这里。
          *  用于多宿主合一的功能：宿主 Target 留壳（baseline/包名），UI 不单独出卡。 */
@@ -126,7 +126,7 @@ object FeatureCatalog {
                 Feature(KEY_INSTALLER_SKIP_CHECK, R.string.feature_installer_skip_check_title, R.string.feature_installer_skip_check_desc),
             ),
             baselineVersion = "14.0.37.301",  // aapt2 实证（原 InstallerHook 私有常量上提）
-            extraVersions = setOf("14.0.22.326"),
+            extraVersions = setOf("14.0.22.326", "14.0.38.301"),
         ),
         Target(
             "com.android.settings", R.string.target_name_settings,

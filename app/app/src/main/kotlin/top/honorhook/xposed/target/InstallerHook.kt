@@ -7,11 +7,12 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
+import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.InstallerConfigTable
 import top.honorhook.xposed.data.RemoteConfig
 
-/** 包管理器目标（14.0.37.301）：五项「清净化」。 */
+/** 包管理器目标（基线 14.0.37.301；另适配 14.0.22.326 / 14.0.38.301 三版，各版结构见对应 Map 表）。 */
 object InstallerHook : TargetHook {
 
     override val packageName = "com.android.packageinstaller"
@@ -45,10 +46,43 @@ object InstallerHook : TargetHook {
         val loader = param.defaultClassLoader
         // DexKit 第二轨兜底需要 APK 磁盘路径（MethodResolver）
         val apkPath = param.applicationInfo?.sourceDir
-        engine.begin(apkPath, FeatureCatalog.baselineVersionOf(packageName))
+        // 选表 + 挂载整体挪到后台线程：挂载要在宿主主线程之外做（宿主主线程零同步磁盘 IO），
+        // 同时给"读版本"留出重试窗口（读不到就按基线盲挂，见 selectTableAndMount）。
+        MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[0]) {
+            selectTableAndMount(module, param, loader, apkPath, 0)
+        }
+    }
 
+    /**
+     * 版本探针重试延迟（毫秒；下标 = 第几次尝试）。
+     * 版本读取走公开路径（系统上下文 PackageManager，无时机依赖；见 HostVersion.resolveHostVersion），
+     * 正常一次就读到；这里保留短延迟重试兜底——万一两条取法都没值（宿主还没就绪），下一轮再试，
+     * 不必空等（延迟只影响选表时机，不影响挂载正确性）。
+     */
+    private val VERSION_PROBE_DELAYS_MS = longArrayOf(0, 200, 600)
+
+    /**
+     * 选表 + 挂载（后台线程）：读宿主版本 → 选表 → 挂载。
+     *
+     * 版本读取用公开路径（HostVersion.resolveHostVersion：系统上下文 PM 直读 APK 磁盘 → 宿主
+     * Application 的 PM 查包名）；读不到就按 [VERSION_PROBE_DELAYS_MS] 重试，重试用尽仍读不到
+     * = 按基线盲挂（留痕日志见下）。
+     */
+    private fun selectTableAndMount(
+        module: XposedModule,
+        param: XposedModuleInterface.PackageLoadedParam,
+        loader: ClassLoader,
+        apkPath: String?,
+        attempt: Int,
+    ) {
+        val actual = HostVersion.resolveHostVersion(apkPath, packageName)
+        if (actual == null && attempt + 1 < VERSION_PROBE_DELAYS_MS.size) {
+            MountScheduler.postDelayed(VERSION_PROBE_DELAYS_MS[attempt + 1]) {
+                selectTableAndMount(module, param, loader, apkPath, attempt + 1)
+            }
+            return
+        }
         // 旧版宿主结构漂移 → 专用表优先；未命中任何表 = 基线源码路径（行为与表迁移前一致）
-        val actual = HostVersion.resolve(apkPath)
         val pick = HostVersion.pick(installerTables, actual)
         val pending: List<MountTask> = if (pick.matched) {
             pick.tasks
@@ -57,13 +91,22 @@ object InstallerHook : TargetHook {
         } else {
             // 盲挂留痕（评审 R7）：基线版本不在任何精确套内是常态路径（默认套缺席），盲挂行为显式化——
             // 判据以 installed N/M 为准（与 MountEngine.checkHostVersionOnce 的 WARN 互补：那条说风险，这条说行为）。
+            // actual==null 不能静默：选表落空时唯一有价值的证据就是"版本没读到"（读不到 = 宿主 Application 还没起来）。
             val baseline = FeatureCatalog.baselineVersionOf(packageName)
-            if (actual != null && baseline != null) {
-                module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 不在适配表，按基线 $baseline 挂载点盲挂，判据以 installed N/M 为准")
+            if (baseline != null) {
+                if (actual == null) {
+                    module.log(
+                        Log.WARN, MountEngine.TAG,
+                        "宿主版本读取失败（公开取法都没读到版本号），按基线 $baseline 挂载点盲挂，判据以 installed N/M 为准",
+                    )
+                } else {
+                    module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 不在适配表，按基线 $baseline 挂载点盲挂，判据以 installed N/M 为准")
+                }
             }
             buildSourcePending()
         }
-
+        // 版本自检的期望值 = 选中表对应的版本（精确套 = 该版本号），无对应版本则回基线版本。
+        engine.begin(apkPath, pick.matchedVersion ?: FeatureCatalog.baselineVersionOf(packageName))
         engine.attemptMount(pending, module, loader) { task -> mountOne(task, module, loader) }
     }
 
@@ -74,7 +117,12 @@ object InstallerHook : TargetHook {
      *  internal = DecisionTablesTest 交叉校验 extraVersions ↔ 本表用（评审 #20）。 */
     internal val installerTables =
         FeatureCatalog.extraVersionsOf(packageName).takeIf { it.isNotEmpty() }
-            ?.let { listOf(HostVersion.Table(it) { INSTALLER_POINTS_14_0_22_326 }) }
+            ?.let { versions ->
+                listOf(
+                    HostVersion.Table(setOf("14.0.22.326")) { INSTALLER_POINTS_14_0_22_326 },
+                    HostVersion.Table(setOf("14.0.38.301")) { INSTALLER_POINTS_14_0_38_301 },
+                ).filter { table -> table.versions.all { it in versions } }
+            }
             ?: emptyList()
 
     /** 基线 14.0.37.301 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。** */
@@ -289,15 +337,17 @@ object InstallerHook : TargetHook {
             id = "installer:SecurityCheck.bypass",
             description = "R6 联网安全检测分发器短路（ly1.h → 直接回传通过；检测请求/网络不佳横幅/风险页/勾选框一并消除）",
             // ly1 类内零字符串常量 ⇒ 仅参数类型序列弱锚点（OTA 重混淆时诚实 NOT_RESOLVED，由汇总行暴露）
-            dex = DexHint(paramTypes = listOf("boolean", "sy1")),
+            // instanceOnly：拦截器读 chain.thisObject（取 isHn + 静态工厂），挂到 static 实现会静默空转
+            dex = DexHint(paramTypes = listOf("boolean", "sy1"), instanceOnly = true),
         )
     }
 
     // ---------------- R6 安装指纹校验直接通过（风险链兜底） ----------------
 
     /**
-     * `qf2.g(Context, qf2$a)` = 安装前指纹/密码校验唯一入口。回调 `c()`（清除待决弹窗）+ `a(true)`（判定通过），
-     * 不调原方法（校验弹窗不出现）。检测分发器短路后该链通常已不触发，此点为双保险。
+     * `qf2.g(Context, qf2$a)` = 安装前指纹/密码校验唯一入口（14.0.38.301 为 `lt1.w0(Context, cv1)`）。
+     * 回调清待决弹窗 + `a(true)`（判定通过），不调原方法（校验弹窗不出现）。清弹窗方法名不固定
+     * （旧版 `c()` / 新版 `b()`），拦截侧按"0 参 void"签名找。检测链短路后该点通常已不触发，此点为双保险。
      */
     private fun collectFingerprintBypassHooks(pending: MutableList<MountTask>) {
         pending += MountTask(
@@ -324,10 +374,11 @@ object InstallerHook : TargetHook {
      * [BLOCK] void 空实现阻断（返回 null = 不调原方法，libxposed 语义，`.cursor/skills/libxposed-api/SKILL.md` 实证）；
      * [CHECK_BYPASS] 安全检测分发器短路（自构造"通过"结果回调宿主，失败放行原方法）；
      * [CHECK_BYPASS_RET] 检测直通·返回式（旧版：不调原方法，静态工厂 a(isHn) 的返回值直接作为方法结果，失败放行）；
-     * [FINGERPRINT_BYPASS] 指纹校验直接通过（回调 c()+a(true)，失败放行原方法）。
+     * [CHECK_BYPASS_JOB] 检测直通·任务式（14.0.38.301：HnAppCheckJob 两条管线 b(kd1,Z)，回调 c(dd1,vd1)）；
+     * [FINGERPRINT_BYPASS] 指纹校验直接通过（回调清弹窗 + a(true)，失败放行原方法）。
      */
     // internal = DecisionTablesTest 校验挂载表 kind 合法性用（评审 #18）
-    internal enum class MountKind { CONST, BLOCK, CHECK_BYPASS, CHECK_BYPASS_RET, FINGERPRINT_BYPASS }
+    internal enum class MountKind { CONST, BLOCK, CHECK_BYPASS, CHECK_BYPASS_RET, CHECK_BYPASS_JOB, FINGERPRINT_BYPASS }
 
     private class MountTask(
         val kind: MountKind,
@@ -439,17 +490,84 @@ object InstallerHook : TargetHook {
                         chain.proceed()
                     }
                 }
-                // 指纹校验直接通过：回调 c()（清待决弹窗）+ a(true)（判定通过），不调原方法；失败放行
+                // 检测直通·任务式（14.0.38.301：HnAppCheckJob 两条管线）：
+                // 不调原方法（检测请求不发），复用宿主自己的"无需检测"通过结果 bd1.a(isHn)，
+                // 经回调 c(dd1, vd1) 同步回吐（ld1.b 唯一调用点 = PackageInstallerActivity 主线程）。
+                // 准备段失败 → 放行原方法（降级为有检测）；投递段失败 → **不回退原调用**（见下）。
+                MountKind.CHECK_BYPASS_JOB -> {
+                    // —— 准备段：纯查找，任何一步失败都还能安全降级 proceed ——
+                    val prepared = runCatching {
+                        val callback = chain.args?.getOrNull(0) ?: return@runCatching null
+                        // 回调是 PackageInstallerActivity$b：合成字段持有外部 Activity
+                        val activityField = callback.javaClass.declaredFields.firstOrNull {
+                            it.type.name == "com.android.packageinstaller.PackageInstallerActivity"
+                        }?.apply { isAccessible = true } ?: return@runCatching null
+                        val activity = activityField.get(callback) ?: return@runCatching null
+                        // Activity.D0 = HnAppCheckJob（bd1）：a 字段是 isHn（构造时据此二选一管线）
+                        val job = runCatching { activity.javaClass.getField("D0").get(activity) }.getOrNull()
+                            ?: return@runCatching null
+                        val isHn = runCatching { job.javaClass.getField("a").getBoolean(job) }
+                            .getOrDefault(task.value as? Boolean ?: false)
+                        // 通过结果 = 宿主静态工厂 bd1.a(boolean)（与"无需检测"分支同构）
+                        val pass = runCatching {
+                            job.javaClass.getMethod("a", Boolean::class.javaPrimitiveType)
+                                .invoke(null, isHn)
+                        }.getOrNull() ?: return@runCatching null
+                        // 最终回调 c(dd1, vd1)：先按参数类型精确匹配，再退 isInstance（将来出现
+                        // c(Object,...) 重载时精确匹配防止选叉，评审 NIT）；vd1 是图标回调接口，
+                        // 用空实现代理（宿主会调 a(Drawable)）
+                        val deliver = callback.javaClass.methods.firstOrNull {
+                            it.parameterTypes.size == 2 && it.parameterTypes[0] == pass.javaClass
+                        } ?: callback.javaClass.methods.firstOrNull {
+                            it.parameterTypes.size == 2 && it.parameterTypes[0].isInstance(pass)
+                        } ?: return@runCatching null
+                        val iconCallback = java.lang.reflect.Proxy.newProxyInstance(
+                            loader, arrayOf(deliver.parameterTypes[1]),
+                        ) { _, _, _ -> null }
+                        // 返回三元组：回调实例 / 回调方法 / 通过结果 / 图标代理
+                        listOf(callback, deliver, pass, iconCallback)
+                    }.getOrNull()
+                    if (prepared == null) {
+                        // 什么都没做就失败：宿主状态机未被动过，放行原方法继续真检测
+                        chain.proceed()
+                    } else {
+                        // —— 投递段：invoke 可能有部分副作用（c() → P() → b1() 已推进宿主状态机），
+                        // 此时回退 chain.proceed() 会让宿主真检测再跑一遍并可能二次回调（状态机被推两次）
+                        // ⇒ 失败时返回 null 停在当前页 + ERROR 留痕，交人工介入，绝不二次推进。
+                        runCatching { (prepared[1] as java.lang.reflect.Method).invoke(prepared[0], prepared[2], prepared[3]) }
+                            .onSuccess {
+                                engine.judge(module, task, JUDGE_PREFIX)
+                            }
+                            .onFailure { t ->
+                                module.log(
+                                    Log.ERROR,
+                                    MountEngine.TAG,
+                                    "安全检测通过结果投递失败（已短路检测且不回退原调用，安装流程停在当前页）: ${task.id} — ${t.message}",
+                                    t,
+                                )
+                            }
+                        null
+                    }
+                }
+                // 指纹校验直接通过：清待决弹窗 + a(true)（判定通过），不调原方法；失败放行
                 MountKind.FINGERPRINT_BYPASS -> {
                     val ok = runCatching {
                         val cb = chain.args?.getOrNull(1) ?: return@runCatching false
-                        val cMethod = cb.javaClass.methods.firstOrNull { it.name == "c" && it.parameterTypes.isEmpty() }
-                        val aMethod = cb.javaClass.methods.firstOrNull {
-                            it.name == "a" && it.parameterTypes.size == 1 &&
+                        // 清弹窗方法按签名找：旧版 qf2$a.c() / 新版 cv1.b() 都是"0 参"，名字不固定。
+                        // 先按名字 c 找（不校验返回类型，14.0.22.326 的 c() 可能非 void，评审 NIT）；
+                        // 找不到再退"唯一 0 参 void"（38.301 的 b()）。排除 Object 继承方法（notify 等）。
+                        val zeroArg = cb.javaClass.methods.filter {
+                            it.declaringClass != Any::class.java && it.parameterTypes.isEmpty()
+                        }
+                        val clearMethod = zeroArg.firstOrNull { it.name == "c" }
+                            ?: zeroArg.filter { it.returnType == Void.TYPE }.singleOrNull()
+                        val boolArg = cb.javaClass.methods.filter {
+                            it.parameterTypes.size == 1 &&
                                 it.parameterTypes[0] == Boolean::class.javaPrimitiveType
                         }
-                        if (cMethod == null || aMethod == null) return@runCatching false
-                        cMethod.invoke(cb)
+                        val aMethod = boolArg.firstOrNull { it.name == "a" } ?: boolArg.singleOrNull()
+                        if (clearMethod == null || aMethod == null) return@runCatching false
+                        clearMethod.invoke(cb)
                         aMethod.invoke(cb, true)
                         true
                     }.getOrDefault(false)
@@ -468,6 +586,7 @@ object InstallerHook : TargetHook {
                 MountKind.BLOCK -> "空实现阻断"
                 MountKind.CHECK_BYPASS -> "检测短路直通"
                 MountKind.CHECK_BYPASS_RET -> "检测直通(返回式)"
+                MountKind.CHECK_BYPASS_JOB -> "检测直通(任务式)"
                 MountKind.FINGERPRINT_BYPASS -> "指纹直通"
             }
             module.log(Log.INFO, MountEngine.TAG, "hook 已挂载: ${task.description} → $verb ${task.value ?: "null"}")

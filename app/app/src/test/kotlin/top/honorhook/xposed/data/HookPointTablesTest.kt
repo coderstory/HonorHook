@@ -4,6 +4,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.target.INSTALLER_POINTS_14_0_22_326
+import top.honorhook.xposed.target.INSTALLER_POINTS_14_0_38_301
 import top.honorhook.xposed.target.InstallerHook
 import top.honorhook.xposed.target.themestore.THEME_POINTS_20_1_63_305
 import top.honorhook.xposed.target.themestore.MountKind as ThemeMountKind
@@ -64,14 +65,25 @@ class HookPointTablesTest {
     @Test
     fun `installer table kinds features and groups are valid`() {
         val installerKinds = InstallerMountKind.values().map { it.name }.toSet()
-        INSTALLER_POINTS_14_0_22_326.forEach { p ->
-            assertTrue(
-                "${p.id} kind=\"${p.kind}\" 不是 InstallerHook MountKind 值（valueOf 构建期必炸）",
-                p.kind in installerKinds,
-            )
+        listOf(INSTALLER_POINTS_14_0_22_326, INSTALLER_POINTS_14_0_38_301).forEach { table ->
+            table.forEach { p ->
+                assertTrue(
+                    "${p.id} kind=\"${p.kind}\" 不是 InstallerHook MountKind 值（valueOf 构建期必炸）",
+                    p.kind in installerKinds,
+                )
+            }
+            assertValidFeatures(table.map { it.id to it.feature })
+            assertValidGroups(table.map { it.id to it.group })
         }
-        assertValidFeatures(INSTALLER_POINTS_14_0_22_326.map { it.id to it.feature })
-        assertValidGroups(INSTALLER_POINTS_14_0_22_326.map { it.id to it.group })
+    }
+
+    @Test
+    fun `installer table ids are unique`() {
+        // id 是判据汇总（judgeCount / 失败清单）的键：重复会让两个挂载点在日志里变一个，M 对不上 N。
+        listOf(INSTALLER_POINTS_14_0_22_326, INSTALLER_POINTS_14_0_38_301).forEach { table ->
+            val ids = table.map { it.id }
+            assertTrue("挂载点 id 重复: ${ids.groupingBy { it }.eachCount().filter { it.value > 1 }.keys}", ids.size == ids.toSet().size)
+        }
     }
 
     // ---------------- ② extraVersions ↔ installerTables 交叉 ----------------
