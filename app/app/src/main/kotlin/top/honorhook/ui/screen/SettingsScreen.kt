@@ -2,6 +2,7 @@ package top.honorhook.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -366,20 +367,23 @@ private fun failureText(failure: ScopeRestarter.Failure): String = when (failure
  * 关于页的信息行：**纯展示**，不带右箭头也不可点。
  * 原先用 `ArrowPreference` + 空 `onClick`，右箭头会给出Glitch.text("点进去还有东西")的错觉。
  */
+/** 关于页条目卡：一张卡一项（原来三项挤在同一张卡里，改成三张独立的卡）。 */
 @Composable
-private fun AboutRow(title: String, summary: String) {
-    Column(modifier = Modifier.padding(vertical = 6.dp)) {
-        Text(
-            text = title,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-            color = colorScheme.onSurface,
-        )
-        Text(
-            text = summary,
-            fontSize = 12.sp,
-            color = colorScheme.onSurfaceVariantSummary,
-        )
+private fun AboutCard(title: String, summary: String) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = colorScheme.onSurface,
+            )
+            Text(
+                text = summary,
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+            )
+        }
     }
 }
 
@@ -413,16 +417,13 @@ private fun AboutPage(
             overscrollEffect = null,
         ) {
             item {
-                Card(
-                    modifier = Modifier
-                        .padding(top = 12.dp)
-                        .fillMaxWidth(),
+                Column(
+                    modifier = Modifier.padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                        AboutRow(Glitch.text("Re:荣耀"), Glitch.text("版本 ${appVersionLabel()}"))
-                        AboutRow(Glitch.text("作者"), Glitch.text("©${java.time.Year.now().value} CoderStory"))
-                        AboutRow(Glitch.text("第三方库"), Glitch.text("LSPosed API · Compose · Miuix · DexKit"))
-                    }
+                    AboutCard(Glitch.text("Re:荣耀"), Glitch.text("版本 ${appVersionLabel()}"))
+                    AboutCard(Glitch.text("作者"), Glitch.text("©${java.time.Year.now().value} CoderStory"))
+                    AboutCard(Glitch.text("第三方库"), Glitch.text("LSPosed API · Compose · Miuix · DexKit · XHS 下载器"))
                 }
                 Spacer(
                     Modifier.height(

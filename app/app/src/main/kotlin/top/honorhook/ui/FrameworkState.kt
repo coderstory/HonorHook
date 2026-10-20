@@ -22,6 +22,17 @@ object FrameworkState {
     var apiVersion by mutableStateOf(0)
         private set
 
+    /**
+     * 框架状态是否**已确认**。
+     *
+     * 服务绑定是异步的：冷启动那一下 [active] 还是默认值 false，若直接拿它当结论，
+     * 状态卡会先闪一个「未激活」再跳成「工作中」——等于在还不知道的时候先下结论。
+     * 这里把「还没问出结果」（false）与「确认没激活」（true）分开：
+     * 未确认期间 UI 走中性文案，确认后才说「未激活」。
+     */
+    var resolved by mutableStateOf(false)
+        private set
+
     @Volatile
     private var service: XposedService? = null
 
@@ -40,6 +51,16 @@ object FrameworkState {
     /** 当前可用 XposedService（宿主写远端 prefs 用）；无服务返回 null（未激活）。 */
     fun current(): XposedService? = service
 
+    /**
+     * 兜底计时：服务一直没绑上（模块被停用 / LSPosed 没起）时，延时把状态标成「已确认」。
+     * 绑上则走 [publish] 提前置 true，不受这个计时影响。
+     */
+    fun armResolveTimeout(delayMs: Long = 1500) {
+        mainHandler.postDelayed({
+            if (!resolved) resolved = true
+        }, delayMs)
+    }
+
     @Synchronized
     fun onServiceBind(s: XposedService) {
         service = s
@@ -53,6 +74,7 @@ object FrameworkState {
         mainHandler.post {
             if (latest == null) {
                 active = false
+                resolved = true
                 frameworkName = ""
                 frameworkVersion = ""
                 apiVersion = 0
@@ -65,11 +87,13 @@ object FrameworkState {
     private fun publish(s: XposedService) {
         runCatching {
             active = true
+            resolved = true
             apiVersion = s.apiVersion
             frameworkName = s.frameworkName.orEmpty()
             frameworkVersion = s.frameworkVersion.orEmpty()
         }.onFailure {
             active = true
+            resolved = true
             apiVersion = XposedService.API_102
         }
     }
