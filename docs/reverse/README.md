@@ -10,20 +10,22 @@
 | app | 包名 | 逆向基线 | 逆向难点（混淆 / 防护 / 结构约束） | 记录 |
 |---|---|---|---|---|
 | 主题商店 | `com.hihonor.android.thememanager` | 20.1.63.305 | 半混淆：主包 ~9800 类可读（keep 名单），`defpackage/` 8074 类单字母名；付费资源文件加密（未深挖） | [`theme-store.md`](theme-store.md) |
-| 包管理器 | `com.android.packageinstaller` | 14.0.37.301 | 半混淆；**无布尔开关表**（云控 = `CommonConfig` configVO→JSON + AB 实验）；广告是内容下发型（无总开关） | [`installer.md`](installer.md) |
+| 包管理器 | `com.android.packageinstaller` | 14.0.37.301（另适配 14.0.22.326 / 14.0.38.301） | 半混淆；**无布尔开关表**（云控 = `CommonConfig` configVO→JSON + AB 实验）；广告是内容下发型（无总开关）；两个额外版本的挂载点表已落代码（`InstallerMap_14_0_22_326.kt` / `InstallerMap_14_0_38_301.kt`），真机 `installed 11/11`（38.301，2026-10-20；22.326 表无真机判据） | [`installer.md`](installer.md) |
 | 设置 | `com.android.settings` | 14.0.0.210 | 类名可读，方法名 R8 单字母混淆（需 DexKit 锚点兜底）；**执行层受 system_server 保护**（已放弃守卫方案） | [`settings.md`](settings.md) |
 | 系统桌面 | `com.hihonor.android.launcher` | 18.0.0.234 | 目标文本在 **`YOYOCardStackPlugin.apk` 独立 ClassLoader**（插件类不可经 base CL 解析 ⇒ 只能挂 base 包等价判定）；清后台保留当前 app 方案见 [`launcher-recents-keepcurrent.md`](launcher-recents-keepcurrent.md) | [`launcher.md`](launcher.md) |
 | SystemUI | `com.android.systemui` | 17.0.0.1 | 目标类有 2 个 1 参 void 重载（直连轨须按参数类型消歧）；重载消歧坑；U4 通知身份锚点（dumpsys 渠道打码 → group/id/探针） | [`systemui.md`](systemui.md) |
-| 系统更新 | `com.hihonor.ouc` + `com.hihonor.android.upgradeguide` | 18.0.3.206 / 16.0.0.005 | 主代码 R8 深混淆，但 **manifest 组件名未混淆**（锚点全选组件 framework 回调，零 DexKit）；手动检查路径与自动链分离须保留 | [`ouc.md`](ouc.md) |
+| 系统更新 | `com.hihonor.ouc` + `com.hihonor.android.upgradeguide` | 18.0.3.230 / 16.0.0.005 | 主代码 R8 深混淆，但 **manifest 组件名未混淆**（锚点全选组件 framework 回调，零 DexKit）；手动检查路径与自动链分离须保留 | [`ouc.md`](ouc.md) |
 | 成人高考题库 | `com.exam8.chengrenGK` | 5.9.0.0-release | **未混淆**（bean 稳定）；但**服务端按订单态下发正文** ⇒ 能力边界见下 | [`exam8.md`](exam8.md) |
-| 荣耀短信+智能信息 | `com.hihonor.mms` + `com.hihonor.intelligentmessage` | 19.0.9.304 / 10.0.41.308 | 引擎以插件载入 mms 进程；`ted.sms` 半可读、广告管线在 `defpackage`；mms 侧桥接 `com.smartsms.proxy.hw.*` **未混淆** | [`sms-ads.md`](sms-ads.md) |
-| 京东 | `com.jingdong.app.mall` | 16.0.70 (102834) | 半可读：业务类名大量保留（SplashFragment/JDHomeManager），方法名 R8 单字母；开屏自研（无第三方广告 SDK） | [`jd.md`](jd.md) |
+| 荣耀短信+智能信息 | `com.hihonor.mms` + `com.hihonor.intelligentmessage` | 19.0.9.306 / 10.0.41.308 | 引擎以插件载入 mms 进程；`ted.sms` 半可读、广告管线在 `defpackage`；mms 侧桥接 `com.smartsms.proxy.hw.*` **未混淆** | [`sms-ads.md`](sms-ads.md) |
+| 京东 | `com.jingdong.app.mall` | 16.1.0 | 半可读：业务类名大量保留（SplashFragment/JDHomeManager），方法名 R8 单字母；开屏自研（无第三方广告 SDK） | [`jd.md`](jd.md) |
 | MFA身份验证器 | `com.aimazhishi.mfa.authenticator` | 1.0.5 (5) | **360 加固**（StubApp/libjiagu）：业务代码静态不可读，hook 走 manifest 类名 + classloader 捕获；广告 = 穿山甲开屏 | [`mfa-authenticator.md`](mfa-authenticator.md) |
 | 系统管家服务 | `com.hihonor.systemmanager` | 17.0.0.414 | 116MB 巨包；杀毒模块类名可读（`com.hihonor.antivirus.*` 未混淆）；自带 `msc.config.hide_virus` 总开关 | [`sysmgr.md`](sysmgr.md) |
 | 壁纸编辑器（独立桌面视频路线已放弃留档；现行 W16 转码/W18 去限）+ LivePaper 引擎（W17 循环/W19 隐藏暂停） | `com.hihonor.wallpapereditor` + `com.hihonor.livewallpaper.paradise` | 153.0.0.423 / 11.0.0.252 | editor 类名/方法名/字段名都是**源码原名**（非 R8 产物，但无 keep）；**陷阱：jadx 把短字段名改写成 `f<hash><字母>`，运行时是字母本身 ⇒ 以 smali 为准**；mcs 转码库未混淆。paradise 引擎 n4.* 变体（z 手机/w Pad/c0 折叠）混淆，锚点串全类共享 ⇒ DexKit 全挂；受体 l3.l（VisionControllerImpl，pluginsdk 接口）稳定 | [`wallpaper-editor.md`](wallpaper-editor.md) |
 | 小红书 | `com.xingin.xhs` | 9.50.0 | 深混淆但**载荷字段名明文**（gson/kotlinx 双模型并行）；保存业务三入口三路（§九图谱）；**锚点登记表** [`xhs-anchors.md`](xhs-anchors.md) + 流程 skill `xhs-recon` | [`xhs.md`](xhs.md) |
 
 > 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` §八 未解决项与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。
+>
+> **归档目录 [`archive/`](archive/)**：已关线/已放弃目标的逆向记录留档（`mihealth-face.md` 2026-10-14 关线、`mailmaster.md` 2026-10-13 放弃）——只作历史证据，不在目标总表内。
 
 ## 二、能力边界（诚实结论，勿当已完成）
 

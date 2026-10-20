@@ -5,7 +5,7 @@
 ## 已放弃：网易邮箱大师（2026-10-13 拍板）
 
 - 易盾企业壳 runtime 反制无 Java 层解：注入即 native `exit(28)`（主+子进程全灭，5/5 复现；Java 三出口探针零命中），证据链见 commit 3fd6424 与 T1 实测记录。
-- 功能已下线：MailMasterHook / FeatureCatalog 两开关 / scope 条目全撤（本 commit）；调研档 `docs/reverse/mailmaster.md` 留档；生态或壳策略变化时可 git revert 复活。
+- 功能已下线：MailMasterHook / FeatureCatalog 两开关 / scope 条目全撤（本 commit）；调研档 `docs/reverse/archive/mailmaster.md` 留档；生态或壳策略变化时可 git revert 复活。
 
 ## 待验证
 
@@ -16,7 +16,7 @@
 
 - [ ] **UI 面板「判据日志」页**：面板直读 installed N/M 与模块日志，验证不依赖电脑（杠杆最高）
 - [ ] 主题商店「免费领」tab：搜索页本地硬编码，云控与槽位裁剪都管不到（docs/theme-store.md §七·2，调研已到位）
-- [ ] OTA 适配例行化：ouc 18.0.3.206→230 实证 OTA 常态；荣耀 OTA 后例行跑 `adapt_new_version.py`（71 挂载点）+ 剩余 5 目标渐进迁 HookPoint 表
+- [ ] OTA 适配例行化：ouc 18.0.3.206→230 实证 OTA 常态；荣耀 OTA 后例行跑 `adapt_new_version.py`（现提取 140 点，口径见 hook-inventory-audit.md §一）+ 剩余目标渐进迁 HookPoint 表
 - [ ] 短信 T4 收尾：服务关时验证码卡「复制」按钮渲染路径（docs/reverse/sms-ads.md §五）
 - [ ] 埋点 hook「Ex 工厂收口」1 点持续 2/3 失败（autoCollect 类不存在）：修或降级登记
 

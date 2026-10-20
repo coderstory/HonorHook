@@ -16,7 +16,7 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 小米运动健康 `com.mi.health` 表盘试用永久化（基线 3.59.1，逆向记录 `docs/reverse/mihealth-face.md`）。
+ * 小米运动健康 `com.mi.health` 表盘试用永久化（基线 3.59.1，逆向记录 `docs/reverse/archive/mihealth-face.md`）。
  *
  * 控制通道手术 v1/v2 已死透（2026-10-13 真机双证）：v1 抹空 verification（tag+len=0）、v2 保
  * info/sign 原字节改 trialDuration=36500，手表均拒收 ⇒ 手表校验 sign 覆盖全字段，**prepareInfo
@@ -35,7 +35,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 注释与 doc §Y。选点依据不变：YRNBluetoothModule 类与方法未混淆（jadx 复核）。
  */
 /**
- * ⚠️ 已关线（2026-10-14，docs/reverse/mihealth-face.md §关线）：未注册（TargetRegistry 无此目标、
+ * ⚠️ 已关线（2026-10-14，docs/reverse/archive/mihealth-face.md §关线）：未注册（TargetRegistry 无此目标、
  * scope.list 无 com.mi.health）——代码留档供后续变体实验复用，任何复活须先读 §关线三轮实证。
  * 关线原因：手表端三重校验（v1 verification 签名 / v2 时长字段 / v3 文件内容）全部拒收。
  * 残留活路 = 试用循环（10 分钟还原后重点试用，服务端重发授权已实证）。
