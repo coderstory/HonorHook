@@ -642,7 +642,7 @@ private fun SwitchSemanticsCard(
     val inactive = noticeWhenInactive && !FrameworkState.active
     if (!inactive) return
     val title = "LSPosed 未激活"
-    val summary = "LSPosed 未连接，开关暂时不会生效。请先在 LSPosed 中启用本模块。"
+    val summary = "LSPosed 没连上，开关改不动。请先在 LSPosed 里启用本模块。"
     val bg = colorScheme.tertiaryContainer.copy(alpha = 0.6f)
     val fg = colorScheme.onTertiaryContainer
     Card(modifier = modifier) {

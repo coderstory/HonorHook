@@ -5,7 +5,7 @@
   故必须落一个字符串资源。本文件只承载 Manager 展示用的简介文本；应用 UI 的图标/主题在 drawable、mipmap、values/themes.xml。
 -->
 <resources>
-    <string name="module_description">重现荣耀的旧日荣光</string>
+    <string name="module_description">重铸荣耀昔日之光</string>
 
     <!-- ===== 目标应用名（FeatureCatalog.Target.nameRes）===== -->
     <string name="target_name_thememanager">主题商店</string>

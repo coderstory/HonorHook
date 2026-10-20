@@ -146,7 +146,7 @@ private fun SettingsMain(
                     ) {
                         ArrowPreference(
                             title = "重启目标应用",
-                            summary = "关闭相关应用进程，让开关立即生效",
+                            summary = "把相关应用关掉后重新打开",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.RestartAlt,
