@@ -39,7 +39,7 @@ object OucHook : TargetHook {
      *
      * 有意不收录：CheckNewVersionReceiver（手动检查路径）、HiskytoneVersionDemoReceiver（demo）。
      */
-    private val OUC_POINTS: List<HookPoint> = listOf(
+    internal val OUC_POINTS: List<HookPoint> = listOf(
         HookPoint(id = "ota:recv.FirmwareAutoDownloadReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.FirmwareAutoDownloadReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "固件自动下载触发（AUTO_DOWNLOAD_ALARM）"),
         HookPoint(id = "ota:recv.NightUpgradeReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.NightUpgradeReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "夜间安装调度（NIGHT_UPGRADE_ALARM）"),
         HookPoint(id = "ota:recv.UpgradeRemindReceiver", kind = "CONST", feature = FeatureCatalog.KEY_OTA_BLOCK, className = "$PKG_HNOUC.biz.impl.reveiver.UpgradeRemindReceiver", methodName = "onReceive", paramCount = 2, returnType = "void", value = null, description = "升级提醒（通知/红点复唤）"),
@@ -56,13 +56,14 @@ object OucHook : TargetHook {
     )
 
     /** 表行 → 运行时任务（声明式字段直拷；value 不透传——拦截值由 [mountOne] 按 returnType 定）。 */
-    private fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
+    internal fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
         id = id,
         className = className,
         methodName = methodName,
         paramCount = paramCount,
         returnType = returnType,
         description = description,
+        group = group,
         feature = feature,
     )
 

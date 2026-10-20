@@ -6,6 +6,10 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.target.INSTALLER_POINTS_14_0_22_326
 import top.honorhook.xposed.target.INSTALLER_POINTS_14_0_38_301
 import top.honorhook.xposed.target.InstallerHook
+import top.honorhook.xposed.target.LAUNCHER_POINTS_18_0_0_234
+import top.honorhook.xposed.target.LauncherHook
+import top.honorhook.xposed.target.OucHook
+import top.honorhook.xposed.target.SysmgrHook
 import top.honorhook.xposed.target.themestore.THEME_POINTS_20_1_63_305
 import top.honorhook.xposed.target.themestore.MountKind as ThemeMountKind
 import top.honorhook.xposed.target.InstallerHook.MountKind as InstallerMountKind
@@ -98,6 +102,132 @@ class HookPointTablesTest {
         }
         tableVersions.forEach { v ->
             assertTrue("installerTables versions 的 $v 未回写 FeatureCatalog.extraVersions（单侧改动，评审 #20）", v in extra)
+        }
+    }
+
+    // ---------------- ③ launcher / sysmgr / ouc 三张表的护栏 ----------------
+
+    /**
+     * sysmgr / ouc **没有 MountKind 枚举**：intercept 按 `returnType` 分派，表里的 kind 只是行自描述。
+     * 这里锁死它们当前只允许 CONST——将来新增 kind 必须同时改分派与本断言。
+     */
+    private val descriptiveOnlyKinds = setOf("CONST")
+
+    @Test
+    fun `launcher table kinds features and groups are valid`() {
+        val launcherKinds = LauncherHook.MountKind.values().map { it.name }.toSet()
+        LAUNCHER_POINTS_18_0_0_234.forEach { p ->
+            assertTrue(
+                "${p.id} kind=\"${p.kind}\" 不是 LauncherHook MountKind 值（valueOf 构建期必炸）",
+                p.kind in launcherKinds,
+            )
+        }
+        assertValidFeatures(LAUNCHER_POINTS_18_0_0_234.map { it.id to it.feature })
+        assertValidGroups(LAUNCHER_POINTS_18_0_0_234.map { it.id to it.group })
+    }
+
+    @Test
+    fun `sysmgr table kinds features and groups are valid`() {
+        SysmgrHook.SYSMGR_POINTS.forEach { p ->
+            assertTrue(
+                "${p.id} kind=\"${p.kind}\" 不在允许集 $descriptiveOnlyKinds",
+                p.kind in descriptiveOnlyKinds,
+            )
+        }
+        assertValidFeatures(SysmgrHook.SYSMGR_POINTS.map { it.id to it.feature })
+        assertValidGroups(SysmgrHook.SYSMGR_POINTS.map { it.id to it.group })
+    }
+
+    @Test
+    fun `ouc table kinds features and groups are valid`() {
+        OucHook.OUC_POINTS.forEach { p ->
+            assertTrue(
+                "${p.id} kind=\"${p.kind}\" 不在允许集 $descriptiveOnlyKinds",
+                p.kind in descriptiveOnlyKinds,
+            )
+        }
+        assertValidFeatures(OucHook.OUC_POINTS.map { it.id to it.feature })
+        assertValidGroups(OucHook.OUC_POINTS.map { it.id to it.group })
+    }
+
+    @Test
+    fun `launcher sysmgr and ouc table ids are unique`() {
+        // id 是判据汇总（judgeCount / 失败清单）的键：重复会让两个挂载点在日志里变一个，M 对不上 N。
+        listOf(
+            "launcher" to LAUNCHER_POINTS_18_0_0_234,
+            "sysmgr" to SysmgrHook.SYSMGR_POINTS,
+            "ouc" to OucHook.OUC_POINTS,
+        ).forEach { (name, table) ->
+            val ids = table.map { it.id }
+            val dup = ids.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
+            assertTrue("$name 挂载点 id 重复: $dup", dup.isEmpty())
+        }
+    }
+
+    // ---------------- ④ 表 → 任务：字段透传不丢 ----------------
+
+    @Test
+    fun `sysmgr tasks carry table group and feature`() {
+        SysmgrHook.SYSMGR_POINTS.forEach { p ->
+            val task = with(SysmgrHook) { p.toTask() }
+            assertTrue("${p.id} feature 透传丢失: 表=${p.feature} 任务=${task.feature}", task.feature == p.feature)
+            assertTrue("${p.id} group 透传丢失: 表=${p.group} 任务=${task.group}", task.group == p.group)
+        }
+    }
+
+    @Test
+    fun `ouc tasks carry table group and feature`() {
+        OucHook.OUC_POINTS.forEach { p ->
+            val task = with(OucHook) { p.toTask() }
+            assertTrue("${p.id} feature 透传丢失: 表=${p.feature} 任务=${task.feature}", task.feature == p.feature)
+            assertTrue("${p.id} group 透传丢失: 表=${p.group} 任务=${task.group}", task.group == p.group)
+        }
+    }
+
+    @Test
+    fun `launcher tasks carry table kind group and feature`() {
+        LAUNCHER_POINTS_18_0_0_234.forEach { p ->
+            val task = with(LauncherHook) { p.toMountTask() }
+            assertTrue("${p.id} kind 透传丢失: 表=${p.kind} 任务=${task.kind.name}", task.kind.name == p.kind)
+            assertTrue("${p.id} feature 透传丢失: 表=${p.feature} 任务=${task.feature}", task.feature == p.feature)
+            assertTrue("${p.id} group 透传丢失: 表=${p.group} 任务=${task.group}", task.group == p.group)
+        }
+    }
+
+    // ---------------- ⑤ CONST 值的类型必须与声明返回类型一致 ----------------
+
+    /**
+     * CONST = 常量短路：intercept 直接返回表里的 `value`。
+     * value 类型与宿主方法返回类型不符 ⇒ libxposed 102 硬约束被违反（宿主收到错类型）。
+     * void / Bundle 这类「值不是表里给」的形态不在此断言范围（skip）。
+     */
+    private fun allowedConstValueTypes(returnType: String): Set<Class<*>> = when (returnType) {
+        "boolean" -> setOf(Boolean::class.javaObjectType)
+        "int", "java.lang.Integer" -> setOf(Int::class.javaObjectType)
+        "long", "java.lang.Long" -> setOf(Long::class.javaObjectType)
+        "double", "java.lang.Double" -> setOf(Double::class.javaObjectType)
+        "java.lang.String" -> setOf(String::class.java)
+        else -> emptySet()
+    }
+
+    @Test
+    fun `const values match declared return types`() {
+        listOf(
+            "theme" to THEME_POINTS_20_1_63_305,
+            "installer" to INSTALLER_POINTS_14_0_22_326,
+            "installer38" to INSTALLER_POINTS_14_0_38_301,
+            "launcher" to LAUNCHER_POINTS_18_0_0_234,
+        ).forEach { (name, table) ->
+            table.forEach { p ->
+                if (p.kind != "CONST") return@forEach
+                val allowed = allowedConstValueTypes(p.returnType)
+                if (allowed.isEmpty()) return@forEach
+                val v = p.value
+                assertTrue(
+                    "$name ${p.id} CONST 声明返回类型=${p.returnType}，但 value=$v（${v?.javaClass}）不在允许类型 $allowed",
+                    v != null && v.javaClass in allowed,
+                )
+            }
         }
     }
 }

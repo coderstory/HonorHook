@@ -488,12 +488,12 @@ object LauncherHook : TargetHook {
      * ARM_KEEP_CURRENT / REMOVE_HW_ALL_KEEP_CURRENT = 清后台保留当前应用两步
      * （N1 荣耀垃圾桶 onClick 捕获 → N2 全杀收口 removeHwAllTask 替换，docs/reverse/launcher-recents-keepcurrent.md）。
      */
-    private enum class MountKind {
+    internal enum class MountKind {
         CONST, ARM_FOLDER_REOPEN, REOPEN_FOLDER_ON_RESUME,
         ARM_KEEP_CURRENT, REMOVE_HW_ALL_KEEP_CURRENT,
     }
 
-    private class MountTask(
+    internal class MountTask(
         val kind: MountKind,
         override val className: String,
         override val methodName: String,
@@ -505,10 +505,12 @@ object LauncherHook : TargetHook {
         override val dex: MountEngine.DexHint? = null,
         /** 所属功能开关 key（空 = 常挂）；由引擎按闸门统一过滤。 */
         override val feature: String = "",
+        /** 功能点 id（通路汇总用）；空 = 载体/探针行，不参与汇总。 */
+        override val group: String = "",
     ) : MountEngine.Task
 
     /** 数据表挂载点 → 运行时任务（声明式字段落到具体类型）。 */
-    private fun HookPoint.toMountTask(): MountTask = MountTask(
+    internal fun HookPoint.toMountTask(): MountTask = MountTask(
         kind = MountKind.valueOf(kind),
         className = className,
         methodName = methodName,
@@ -520,5 +522,6 @@ object LauncherHook : TargetHook {
         // 同名重载消歧（如 Launcher.closeFolder 的 (Folder)V 与 (Z)V 同为 1 参 void）靠参数类型锚点。
         dex = dexParamTypes?.let { MountEngine.DexHint(paramTypes = it) },
         feature = feature,
+        group = group,
     )
 }

@@ -43,7 +43,7 @@ object SysmgrHook : TargetHook {
      * DexKit 锚点均为方法体独有日志串/参数类型序列——类名可读（com.hihonor.antivirus.* 未混淆），
      * 锚点仅作兜底（宿主 OTA 若混淆类名仍可检索，不强依赖）。
      */
-    private val SYSMGR_POINTS: List<HookPoint> = listOf(
+    internal val SYSMGR_POINTS: List<HookPoint> = listOf(
         HookPoint(
             id = "sysmgr:AntivirusTools.hideVirusPrefer",
             kind = "CONST",
@@ -85,13 +85,14 @@ object SysmgrHook : TargetHook {
     )
 
     /** 表行 → 运行时任务（DexHint 四维按非空聚合，InstallerHook.toInstallerTask 同款写法）。 */
-    private fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
+    internal fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
         id = id,
         className = className,
         methodName = methodName,
         paramCount = paramCount,
         returnType = returnType,
         description = description,
+        group = group,
         feature = feature,
         dex = DexHint(
             strings = dexStrings,
