@@ -25,6 +25,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
 import java.io.File
+import top.honorhook.ui.Glitch
 
 private sealed interface Phase {
     data object Confirm : Phase
@@ -60,14 +61,14 @@ fun UpdateDialog(onDismiss: () -> Unit) {
                 }
                 phase = Phase.Ready(dest)
             } catch (e: Exception) {
-                phase = Phase.Error(e.message ?: "下载失败")
+                phase = Phase.Error(e.message ?: Glitch.text("下载失败"))
             }
         }
     }
 
     WindowDialog(
         show = true,
-        title = "检查更新",
+        title = Glitch.text("检查更新"),
         summary = null,
         onDismissRequest = { if (phase !is Phase.Downloading) onDismiss() },
     ) {
@@ -75,13 +76,13 @@ fun UpdateDialog(onDismiss: () -> Unit) {
         when (p) {
             is Phase.Confirm -> {
                 Text(
-                    text = "当前 v${BuildConfig.VERSION_NAME}"
-                            + " → 最新 ${release.tag}"
-                            + (if (release.apkUrl.isEmpty()) "\n⚠️ 该 release 未附带 APK" else ""),
+                    text = Glitch.text("当前 v${BuildConfig.VERSION_NAME}")
+                            + Glitch.text(" → 最新 ${release.tag}")
+                            + (if (release.apkUrl.isEmpty()) Glitch.text("\n⚠️ 该 release 未附带 APK") else ""),
                 )
                 Actions(
-                    left = "取消" to onDismiss,
-                    right = "下载" to { startDownload() },
+                    left = Glitch.text("取消") to onDismiss,
+                    right = Glitch.text("下载") to { startDownload() },
                     rightEnabled = release.apkUrl.isNotEmpty(),
                 )
             }
@@ -94,7 +95,7 @@ fun UpdateDialog(onDismiss: () -> Unit) {
                     progress = p.progress / 100f,
                 )
                 Text(
-                    text = "下载中… ${p.progress}%",
+                    text = Glitch.text("下载中… ${p.progress}%"),
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
@@ -102,16 +103,16 @@ fun UpdateDialog(onDismiss: () -> Unit) {
             is Phase.Ready -> {
                 // install 返回 false = 已跳「安装未知应用」授权页：保持 Ready 只挂提示，
                 // 授权回来安装按钮还在，授权后点安装直达系统安装器
-                Text(text = "下载完成，点击安装")
+                Text(text = Glitch.text("下载完成，点击安装"))
                 if (installHint) {
                     Text(
-                        text = "请先授权安装未知应用，授权后回到这里再点安装",
+                        text = Glitch.text("请先授权安装未知应用，授权后回到这里再点安装"),
                         modifier = Modifier.padding(top = 6.dp),
                     )
                 }
                 Actions(
-                    left = "关闭" to onDismiss,
-                    right = "安装" to {
+                    left = Glitch.text("关闭") to onDismiss,
+                    right = Glitch.text("安装") to {
                         if (ApkInstaller.install(context, p.apk)) {
                             installHint = false
                         } else {
@@ -124,11 +125,11 @@ fun UpdateDialog(onDismiss: () -> Unit) {
             is Phase.Error -> {
                 Text(text = p.msg)
                 Actions(
-                    left = "关闭" to onDismiss,
-                    right = "重试" to { startDownload() },
+                    left = Glitch.text("关闭") to onDismiss,
+                    right = Glitch.text("重试") to { startDownload() },
                 )
                 TextButton(
-                    text = "用浏览器下载",
+                    text = Glitch.text("用浏览器下载"),
                     onClick = { ApkInstaller.openInBrowser(context, release.apkUrl) },
                     modifier = Modifier
                         .fillMaxWidth()

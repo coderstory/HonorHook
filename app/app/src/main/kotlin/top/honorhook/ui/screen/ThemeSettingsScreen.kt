@@ -64,17 +64,18 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.honorhook.ui.Glitch
 
 /** 关键色的中文名（顺序对齐 `AppSettings.keyColorOptions`，index 0 = 默认）。 */
 private val keyColorNames = listOf(
-    "默认", "红色", "粉色", "紫色", "深紫", "靛蓝", "蓝色", "青色",
-    "蓝绿", "绿色", "黄色", "琥珀", "橙色", "棕色", "蓝灰", "樱粉",
+    Glitch.text("默认"), Glitch.text("红色"), Glitch.text("粉色"), Glitch.text("紫色"), Glitch.text("深紫"), Glitch.text("靛蓝"), Glitch.text("蓝色"), Glitch.text("青色"),
+    Glitch.text("蓝绿"), Glitch.text("绿色"), Glitch.text("黄色"), Glitch.text("琥珀"), Glitch.text("橙色"), Glitch.text("棕色"), Glitch.text("蓝灰"), Glitch.text("樱粉"),
 )
 
 /**
  * 主题设置页 —— **照抄 KernelSU `ColorPaletteScreenMiuix.kt`**：
  * ```
- * Scaffold(TopAppBar("主题设置", back)) {
+ * Scaffold(TopAppBar(Glitch.text("主题设置"), back)) {
  *   LazyColumn {
  *     Spacer(32.dp); ThemePreviewCardMiuix(); Spacer(72.dp)
  *     TabRow(跟随系统/浅色/深色)
@@ -96,7 +97,7 @@ internal fun ThemeSettingsPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = "主题设置",
+                title = Glitch.text("主题设置"),
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,
             )
@@ -131,7 +132,7 @@ internal fun ThemeSettingsPage(
 
                 // 跟随系统 / 浅色 / 深色
                 TabRow(
-                    tabs = listOf("跟随系统", "浅色", "深色"),
+                    tabs = listOf(Glitch.text("跟随系统"), Glitch.text("浅色"), Glitch.text("深色")),
                     selectedTabIndex = ui.toNonMonetMode().coerceIn(0, 2),
                     onTabSelected = { index ->
                         val picked = ColorMode.fromValue(index)
@@ -153,13 +154,13 @@ internal fun ThemeSettingsPage(
                             .fillMaxWidth(),
                     ) {
                         SwitchPreference(
-                            title = "纯黑背景（AMOLED）",
-                            summary = "深色模式下页面底色改为纯黑（更省电、对比更强）",
+                            title = Glitch.text("纯黑背景（AMOLED）"),
+                            summary = Glitch.text("深色模式下页面底色改为纯黑（更省电、对比更强）"),
                             startAction = {
                                 Icon(
                                     Icons.Rounded.DarkMode,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "纯黑背景（AMOLED）",
+                                    contentDescription = Glitch.text("纯黑背景（AMOLED）"),
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -184,12 +185,12 @@ internal fun ThemeSettingsPage(
                         .fillMaxWidth(),
                 ) {
                     SwitchPreference(
-                        title = "跟随壁纸取色",
+                        title = Glitch.text("跟随壁纸取色"),
                         startAction = {
                             Icon(
                                 Icons.Rounded.Wallpaper,
                                 modifier = Modifier.padding(end = 6.dp),
-                                contentDescription = "跟随壁纸取色",
+                                contentDescription = Glitch.text("跟随壁纸取色"),
                                 tint = colorScheme.onBackground,
                             )
                         },
@@ -201,12 +202,12 @@ internal fun ThemeSettingsPage(
                         Column {
                             val colorValues = listOf(0) + AppSettings.keyColorOptions
                             OverlayDropdownPreference(
-                                title = "关键色",
+                                title = Glitch.text("关键色"),
                                 startAction = {
                                     Icon(
                                         Icons.Rounded.Colorize,
                                         modifier = Modifier.padding(end = 6.dp),
-                                        contentDescription = "关键色",
+                                        contentDescription = Glitch.text("关键色"),
                                         tint = colorScheme.onBackground,
                                     )
                                 },
@@ -221,12 +222,12 @@ internal fun ThemeSettingsPage(
                                 Column {
                                     val styles = PaletteStyle.entries
                                     OverlayDropdownPreference(
-                                        title = "配色风格",
+                                        title = Glitch.text("配色风格"),
                                         startAction = {
                                             Icon(
                                                 Icons.Rounded.Style,
                                                 modifier = Modifier.padding(end = 6.dp),
-                                                contentDescription = "配色风格",
+                                                contentDescription = Glitch.text("配色风格"),
                                                 tint = colorScheme.onBackground,
                                             )
                                         },
@@ -241,12 +242,12 @@ internal fun ThemeSettingsPage(
 
                                     val specs = ColorSpec.SpecVersion.entries
                                     OverlayDropdownPreference(
-                                        title = "色规范",
+                                        title = Glitch.text("色规范"),
                                         startAction = {
                                             Icon(
                                                 Icons.Rounded.DesignServices,
                                                 modifier = Modifier.padding(end = 6.dp),
-                                                contentDescription = "色规范",
+                                                contentDescription = Glitch.text("色规范"),
                                                 tint = colorScheme.onBackground,
                                             )
                                         },
@@ -272,13 +273,13 @@ internal fun ThemeSettingsPage(
                 ) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         SwitchPreference(
-                            title = "启用模糊",
-                            summary = "顶栏与底栏的背景模糊",
+                            title = Glitch.text("启用模糊"),
+                            summary = Glitch.text("顶栏与底栏的背景模糊"),
                             startAction = {
                                 Icon(
                                     Icons.Rounded.BlurOn,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "启用模糊",
+                                    contentDescription = Glitch.text("启用模糊"),
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -287,13 +288,13 @@ internal fun ThemeSettingsPage(
                         )
                     }
                     SwitchPreference(
-                        title = "悬浮底栏",
-                        summary = "关闭则退回贴边导航栏",
+                        title = Glitch.text("悬浮底栏"),
+                        summary = Glitch.text("关闭则退回贴边导航栏"),
                         startAction = {
                             Icon(
                                 Icons.Rounded.CallToAction,
                                 modifier = Modifier.padding(end = 6.dp),
-                                contentDescription = "悬浮底栏",
+                                contentDescription = Glitch.text("悬浮底栏"),
                                 tint = colorScheme.onBackground,
                             )
                         },
@@ -305,13 +306,13 @@ internal fun ThemeSettingsPage(
                                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                     ) {
                         SwitchPreference(
-                            title = "启用玻璃",
-                            summary = "底栏按钮的立体折射和高光",
+                            title = Glitch.text("启用玻璃"),
+                            summary = Glitch.text("底栏按钮的立体折射和高光"),
                             startAction = {
                                 Icon(
                                     Icons.Rounded.WaterDrop,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = "启用玻璃",
+                                    contentDescription = Glitch.text("启用玻璃"),
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -399,7 +400,7 @@ private fun ThemePreviewCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     androidx.compose.material3.Text(
-                        text = "Re:荣耀",
+                        text = Glitch.text("Re:荣耀"),
                         fontSize = 12.sp,
                         color = textColor,
                     )

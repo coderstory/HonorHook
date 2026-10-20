@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // 彩蛋：每次打开摇一次骰子（两个效果各 1%，可能同时命中）；早于 setContent 即可，无需重组
+        Glitch.roll()
         // 打开即静默查一次更新（失败无感，结果进设置页「检查更新」行）。
         // debug 构建跳过：debug 包版本号跟入库 version.properties（常落后远端发布版），静默查必弹「发现新版本」干扰自装调试；手动检查不受影响
         if (!BuildConfig.DEBUG) UpdateState.checkAsync()
@@ -125,9 +127,9 @@ private fun AppRoot() {
 
     val items = remember {
         listOf(
-            NavigationItem(label = "首页", icon = Icons.Rounded.Cottage),
-            NavigationItem(label = "功能", icon = Icons.Rounded.Extension),
-            NavigationItem(label = "设置", icon = Icons.Rounded.Settings),
+            NavigationItem(label = Glitch.text("首页"), icon = Icons.Rounded.Cottage),
+            NavigationItem(label = Glitch.text("功能"), icon = Icons.Rounded.Extension),
+            NavigationItem(label = Glitch.text("设置"), icon = Icons.Rounded.Settings),
         )
     }
 

@@ -59,6 +59,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.honorhook.ui.Glitch
 
 /**
  * 首页 —— **逐行照抄 KernelSU `HomeMiuix.kt`**：
@@ -87,7 +88,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = "Re:荣耀",
+                title = Glitch.text("Re:荣耀"),
                 scrollBehavior = scrollBehavior,
             )
         },
@@ -116,15 +117,16 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                         StatusCard(
                             active = active,
                             isDynamicColor = isDynamicColor,
-                            workingText = if (active) "工作中" else "未激活",
-                            versionText = if (active) {
+                            workingText = if (Glitch.cardRed) Glitch.text("老色批已爆炸")
+                            else if (active) Glitch.text("工作中") else Glitch.text("未激活"),
+                            versionText = Glitch.text(if (active) {
                                 listOf(frameworkName, frameworkVersion)
                                     .filter { it.isNotBlank() }
                                     .joinToString(" ")
                                     .ifBlank { "LSPosed" }
                             } else {
                                 "未连接 LSPosed（已安装但未激活，或模块未启用）"
-                            },
+                            }),
                         )
 
                         InfoCard()
@@ -174,6 +176,7 @@ private fun StatusCard(
     versionText: String,
 ) {
     val containerColor = when {
+        Glitch.cardRed -> Color(0xFFFF1744)
         !active -> Color(0xFFFFDAD6)
         isDynamicColor -> colorScheme.secondaryContainer
         isInDarkTheme() -> Color(0xFF1A3825)
@@ -273,20 +276,20 @@ private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPad
 private fun InfoCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, "模块版本", appVersionLabel())
-            InfoRow(Icons.Filled.DeveloperBoard, "模块包名", BuildConfig.APPLICATION_ID)
+            InfoRow(Icons.Filled.Tag, Glitch.text("模块版本"), Glitch.text(appVersionLabel()))
+            InfoRow(Icons.Filled.DeveloperBoard, Glitch.text("模块包名"), Glitch.text(BuildConfig.APPLICATION_ID))
             InfoRow(
-                Icons.Filled.Smartphone, "系统版本",
-                "Android ${Build.VERSION.RELEASE}",
+                Icons.Filled.Smartphone, Glitch.text("系统版本"),
+                Glitch.text("Android ${Build.VERSION.RELEASE}"),
             )
             InfoRow(
-                Icons.Filled.Fingerprint, "设备",
-                "${Build.MANUFACTURER} ${Build.MODEL}",
+                Icons.Filled.Fingerprint, Glitch.text("设备"),
+                Glitch.text("${Build.MANUFACTURER} ${Build.MODEL}"),
             )
-            // 系统架构原来复用了 DeveloperBoard（与"插件包名"同一个图标），换成 Memory
+            // 系统架构原来复用了 DeveloperBoard（与Glitch.text("插件包名")同一个图标），换成 Memory
             InfoRow(
-                Icons.Filled.Memory, "系统架构",
-                Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
+                Icons.Filled.Memory, Glitch.text("系统架构"),
+                Glitch.text(Build.SUPPORTED_ABIS.firstOrNull() ?: "未知"),
                 bottomPadding = 0.dp,
             )
         }

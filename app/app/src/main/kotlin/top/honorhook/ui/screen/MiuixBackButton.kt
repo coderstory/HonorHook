@@ -10,6 +10,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.honorhook.ui.Glitch
 
 /**
  * 返回按钮 —— 照抄 KernelSU 二级页的 `navigationIcon`：
@@ -29,7 +30,7 @@ internal fun MiuixBackButton(onClick: () -> Unit) {
                 if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
             },
             imageVector = MiuixIcons.Back,
-            contentDescription = "返回",
+            contentDescription = Glitch.text("返回"),
             tint = colorScheme.onBackground,
         )
     }

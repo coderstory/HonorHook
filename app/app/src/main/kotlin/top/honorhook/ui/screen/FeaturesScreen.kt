@@ -78,6 +78,7 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.honorhook.ui.Glitch
 
 /**
  * 第二个 Tab —— **照抄 KernelSU `SuperUserMiuix.kt` 的视觉结构**：
@@ -135,7 +136,7 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
     Scaffold(
         topBar = {
             TopAppBar(
-                title = "功能",
+                title = Glitch.text("功能"),
                 scrollBehavior = scrollBehavior,
             )
         },
@@ -159,7 +160,7 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
         ) {
             item {
                 SwitchSemanticsCard(
-                    // 只讲"开关到底下没下发到进程"（框架未激活＝假反馈）；生效时机提示卡已按用户要求全局删除
+                    // 只讲Glitch.text("开关到底下没下发到进程")（框架未激活＝假反馈）；生效时机提示卡已按用户要求全局删除
                     noticeWhenInactive = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -168,9 +169,9 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
                 )
             }
             when {
-                installedTargets == null -> item { EmptyHint("正在读取设备上已安装的应用…") }
+                installedTargets == null -> item { EmptyHint(Glitch.text("正在读取设备上已安装的应用…")) }
                 installedTargets!!.isEmpty() -> item {
-                    EmptyHint("设备上没有检测到支持的应用。\n本模块只支持荣耀系统应用和指定第三方应用，装上后会自动显示在这里。")
+                    EmptyHint(Glitch.text("设备上没有检测到支持的应用。\n本模块只支持荣耀系统应用和指定第三方应用，装上后会自动显示在这里。"))
                 }
                 else -> items(count = installedTargets!!.size) { index ->
                     val target = installedTargets!![index]
@@ -289,7 +290,7 @@ private fun AppIconSlot(
         }
         icon != null -> Image(painter = icon, contentDescription = null, modifier = modifier)
         else -> {
-            // 兜底：Miuix 次强调色圆角块 + 首字母，避免"图标空白"看起来像 bug
+            // 兜底：Miuix 次强调色圆角块 + 首字母，避免Glitch.text("图标空白")看起来像 bug
             Box(
                 modifier = modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -334,7 +335,7 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
         Row(verticalAlignment = Alignment.CenterVertically) {
             AppIconSlot(
                 packageName = target.packageName,
-                fallbackText = stringResource(target.nameRes),
+                fallbackText = Glitch.text(stringResource(target.nameRes)),
                 iconKey = target.iconKey,
                 modifier = Modifier
                     .padding(end = 10.dp)
@@ -342,7 +343,7 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(target.nameRes),
+                    text = Glitch.text(stringResource(target.nameRes)),
                     modifier = Modifier.basicMarquee(),
                     fontWeight = FontWeight(550),
                     color = colorScheme.onSurface,
@@ -356,12 +357,12 @@ private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) 
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 StatusTag(
-                    label = "$enabledCount/${target.features.size}",
+                    label = Glitch.text("$enabledCount/${target.features.size}"),
                     backgroundColor = if (enabledCount > 0) activeBg else countBg,
                     contentColor = if (enabledCount > 0) activeFg else countFg,
                 )
                 if (enabledCount > 0) {
-                    StatusTag(label = "已启用", backgroundColor = customBg, contentColor = customFg)
+                    StatusTag(label = Glitch.text("已启用"), backgroundColor = customBg, contentColor = customFg)
                 }
             }
             ArrowRightIcon()
@@ -395,7 +396,7 @@ private fun AppHeaderCard(
         ) {
             AppIconSlot(
                 packageName = target.packageName,
-                fallbackText = stringResource(target.nameRes),
+                fallbackText = Glitch.text(stringResource(target.nameRes)),
                 iconKey = target.iconKey,
                 modifier = Modifier.size(44.dp),
             )
@@ -406,7 +407,7 @@ private fun AppHeaderCard(
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
                 Text(
-                    text = stringResource(target.nameRes),
+                    text = Glitch.text(stringResource(target.nameRes)),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = colorScheme.onSurface,
@@ -418,7 +419,7 @@ private fun AppHeaderCard(
                 if (target.iconKey == null) {
                     // 每行带色：版本适配行单独染色（颜色即语义），其余行维持弱化灰。
                     val meta: List<Pair<String, Color>> = listOfNotNull(
-                        versionText?.let { "版本 $it" to colorScheme.onSurfaceVariantSummary },
+                        versionText?.let { Glitch.text("版本 $it") to colorScheme.onSurfaceVariantSummary },
                         // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）。
                         // 绿色判据 = 装机 versionName ∈ target.supportedVersions（含历史精确套）；红色 = 不在集合内。
                         // 红字保留「仍会尝试」的依据：MountEngine.checkHostVersionOnce 版本不一致只打 WARN，
@@ -431,9 +432,9 @@ private fun AppHeaderCard(
                         // 红也不再另给右上「版本未适配」tag（同上 P3）：同屏两处红表达同一事实，红字信息量更大。
                         supportedText?.let {
                             if (versionMismatch) {
-                                "未适配（最新支持 $it，仍会尝试）" to VersionTagRed
+                                Glitch.text("未适配（最新支持 $it，仍会尝试）") to VersionTagRed
                             } else {
-                                "已适配" to VersionTagGreen
+                                Glitch.text("已适配") to VersionTagGreen
                             }
                         },
                     )
@@ -449,7 +450,7 @@ private fun AppHeaderCard(
                     }
                 }
                 Text(
-                    text = "已启用 $enabledCount/${target.features.size} 项功能",
+                    text = Glitch.text("已启用 $enabledCount/${target.features.size} 项功能"),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     color = if (enabledCount > 0) activeFg else colorScheme.onSurfaceVariantSummary,
@@ -464,7 +465,7 @@ private fun AppHeaderCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 StatusTag(
-                    label = if (enabledCount > 0) "已启用" else "待启用",
+                    label = if (enabledCount > 0) Glitch.text("已启用") else Glitch.text("待启用"),
                     backgroundColor = if (enabledCount > 0) activeBg else idleBg,
                     contentColor = if (enabledCount > 0) activeFg else idleFg,
                     // 头部卡空间有限，用 11sp（原 13sp 偏大）；一级列表仍用 9sp
@@ -516,7 +517,7 @@ private fun FeatureListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = stringResource(target.nameRes),
+                title = Glitch.text(stringResource(target.nameRes)),
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,
             )
@@ -606,9 +607,9 @@ private fun FeatureListScreen(
                         // 不加图标：每个开关都重复同一个目标应用图标反而是噪声，
                         // 左侧色条（开=primary / 关=primaryContainer）已经能表达状态。
                         SwitchPreference(
-                            title = stringResource(feature.titleRes),
+                            title = Glitch.text(stringResource(feature.titleRes)),
                             // 用户要求：二级菜单每个选项都带功能说明
-                            summary = stringResource(feature.descRes),
+                            summary = Glitch.text(stringResource(feature.descRes)),
                             checked = effectiveOn,
                             onCheckedChange = { FeatureStore.setEnabled(feature.key, it) },
                             enabled = !gatedOff,
@@ -630,7 +631,7 @@ private fun FeatureListScreen(
 /**
  * 框架未激活提示卡 —— 唯一必须讲清楚、否则用户会误判的点：
  * **框架未激活**时 [FeatureStore.setEnabled] 只写本地，hook 侧读不到 ⇒ 开关看起来生效了
- * （UI 状态变了）而实际行为没变，属于最坏的一类"假反馈"。
+ * （UI 状态变了）而实际行为没变，属于最坏的一类Glitch.text("假反馈")。
  *
  * 原「开关何时生效」提示卡（重启目标进程才生效）已按用户要求全局删除（2026-10-14）。
  */
@@ -641,8 +642,8 @@ private fun SwitchSemanticsCard(
 ) {
     val inactive = noticeWhenInactive && !FrameworkState.active
     if (!inactive) return
-    val title = "LSPosed 未激活"
-    val summary = "LSPosed 没连上，开关改不动。请先在 LSPosed 里启用本模块。"
+    val title = Glitch.text("LSPosed 未激活")
+    val summary = Glitch.text("LSPosed 没连上，开关改不动。请先在 LSPosed 里启用本模块。")
     val bg = colorScheme.tertiaryContainer.copy(alpha = 0.6f)
     val fg = colorScheme.onTertiaryContainer
     Card(modifier = modifier) {
@@ -697,7 +698,7 @@ private val VersionTagRed = Color(0xFFEF5350)
  * 「已适配」文字绿色（Miuix colorScheme 无 success 槽，同上固定值）。
  *
  * 刻意**不取** accentPalette 里的「绿」0xFF66BB6A（2026-10-14 审计 P4）：那支是左侧功能色条的
- * 哈希调色板之一，两者同值会被连读成「某功能的色条」，且调色板改绿时本处"同值"承诺静默漂移。
+ * 哈希调色板之一，两者同值会被连读成「某功能的色条」，且调色板改绿时本处Glitch.text("同值")承诺静默漂移。
  * 选深一档的 Material Green 700：浅色背景对比度更高，文字 11sp 也看得清。
  */
 private val VersionTagGreen = Color(0xFF43A047)
