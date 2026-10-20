@@ -63,6 +63,36 @@ class MountSummaryTest {
         assertTrue(summary.failedDescriptions().isEmpty())
     }
 
+    // ---------------- 合并冲突（功能不同 ⇒ 本点意图未生效，不计 installed） ----------------
+
+    @Test
+    fun `merged conflict is not counted as installed`() {
+        val summary = MountSummary()
+        summary.begin(2, mapOf("A1" to 2))
+        summary.record(outcome("x", "A1", MountEngine.Result.MERGED_CONFLICT, description = "desc-x"))
+        summary.record(outcome("y", "A1", MountEngine.Result.MERGED, description = "desc-y"))
+        assertEquals(1, summary.ok())
+        assertEquals(listOf("desc-x"), summary.failedDescriptions())
+    }
+
+    @Test
+    fun `merged conflict result is not installed`() {
+        assertTrue(!MountEngine.Result.MERGED_CONFLICT.installed)
+        assertTrue(MountEngine.Result.MERGED.installed)
+    }
+
+    @Test
+    fun `same feature merge does not conflict`() {
+        assertTrue(!mergedFeatureConflict("f1", "f1"))
+        assertTrue(!mergedFeatureConflict("", ""))   // 双方都是常挂点
+    }
+
+    @Test
+    fun `different feature merge conflicts`() {
+        assertTrue(mergedFeatureConflict("f1", "f2"))
+        assertTrue(mergedFeatureConflict("f1", ""))   // 占用方是常挂点 ⇒ 本功能意图未生效
+    }
+
     // ---------------- 失败清单 ----------------
 
     @Test

@@ -40,10 +40,10 @@ object MethodResolver {
      * 进失败清单，与"该方法确实已被挂上"的事实不符）；避免同一方法被两个 CONST 拦截器重复包装。
      * 合并留痕（WARN：谁与谁合并）由 MountEngine 用 module.log 打——落 LSPosed 框架日志（判据审计的sink）。
      */
-    private val looseHitBuckets = java.util.WeakHashMap<ClassLoader, MutableMap<String, String>>()
+    private val looseHitBuckets = java.util.WeakHashMap<ClassLoader, MutableMap<String, Claim>>()
 
-    private fun looseHitBucket(loader: ClassLoader): MutableMap<String, String> = synchronized(looseHitBuckets) {
-        looseHitBuckets.getOrPut(loader) { java.util.concurrent.ConcurrentHashMap<String, String>() }
+    private fun looseHitBucket(loader: ClassLoader): MutableMap<String, Claim> = synchronized(looseHitBuckets) {
+        looseHitBuckets.getOrPut(loader) { java.util.concurrent.ConcurrentHashMap<String, Claim>() }
     }
 
     /**
@@ -101,6 +101,7 @@ object MethodResolver {
      * @param declaredClassStrings **所在类**引用的字符串常量（类名+方法名都被混淆时的兜底锚点；可选）
      * @param declaredClassFieldTypes **所在类的字段类型集合**（字段类型含可读类名，如 `common.DownloadInfo`；可选）
      * @param pointId     挂载点 id（合并留痕用：谁占了同一方法）
+     * @param pointFeature 挂载点所属功能开关 key（合并冲突判定用：挂上去的是不是同一个功能的意图）
      * @param instanceOnly 期望实例方法（依赖 thisObject 的拦截器；static 候选不采纳，见 [DexHitSelector.Expectation]）
      */
     internal fun resolveOutcome(
@@ -115,6 +116,7 @@ object MethodResolver {
         declaredClassStrings: List<String>? = null,
         declaredClassFieldTypes: List<String>? = null,
         pointId: String? = null,
+        pointFeature: String = "",
         instanceOnly: Boolean = false,
     ): ResolveOutcome {
         // 第一轨：直连反射（照 Rain ck0.S 语义：loadClass + 按名匹配，异常/查不到只记日志转兜底；不缓存——重试靠它赌类稍后可加载）
@@ -250,6 +252,7 @@ object MethodResolver {
         var looseUncertain = false
         var looseClaimed: String? = null
         var mergedWith: String? = null
+        var mergedFeature: String = ""
         val outcome = resolveLoose(
             specs = DexQueryPlan.loose(usingStrings, declaredClassStrings, declaredClassFieldTypes),
             expect = expect,
@@ -278,15 +281,17 @@ object MethodResolver {
             },
             // 原子占位：putIfAbsent 返回非 null 即已被别的挂载点先占（防并发解析时同一方法被挂两次）；
             // 占位成功才记 claim，最终未采纳时释放（Duplicate 的占位努力归原主，不可释放）。
+            // 占位连同**功能开关**一起记：合并时才能判断"挂上去的是不是同一个功能的意图"。
             isDuplicate = { method ->
                 val sig = DexKitHelper.signatureOf(method)
                 val owner = pointId ?: sig
-                val prev = looseHitBucket(loader).putIfAbsent(sig, owner)
+                val prev = looseHitBucket(loader).putIfAbsent(sig, Claim(ownerId = owner, feature = pointFeature))
                 if (prev == null) {
                     looseClaimed = sig
                     false
                 } else {
-                    mergedWith = prev
+                    mergedWith = prev.ownerId
+                    mergedFeature = prev.feature
                     true
                 }
             },
@@ -318,7 +323,7 @@ object MethodResolver {
             is LooseOutcome.Duplicate -> {
                 // 复审缺陷④：同一方法已被另一挂载点挂上 ⇒ **合并计成功**（不扣 N、不进失败清单），
                 // 但必须留一行 WARN 让判据可审计（谁与谁合并）。
-                return looseOutcomeToResolve(outcome, mergedWith)
+                return looseOutcomeToResolve(outcome, mergedWith, mergedFeature)
             }
             LooseOutcome.Miss -> Unit
         }
@@ -362,9 +367,25 @@ object MethodResolver {
  */
 internal sealed interface ResolveOutcome {
     data class Resolved(val method: Method) : ResolveOutcome
-    data class Merged(val method: Method, val mergedWith: String?) : ResolveOutcome
+
+    /**
+     * 合并：与另一挂载点落到同一方法。
+     *
+     * [mergedWith] = 占用该方法的挂载点 id（留痕用）；[mergedFeature] = 占用方的功能开关 key
+     * （空 = 常挂点）。功能不同 ⇒ 本点的意图没生效 ⇒ 引擎按 MERGED_CONFLICT 处理（不计入 installed）。
+     */
+    data class Merged(val method: Method, val mergedWith: String?, val mergedFeature: String = "") : ResolveOutcome
+
     object Unresolved : ResolveOutcome
 }
+
+/**
+ * 宽松轨的方法占位记录（谁占了同一个方法 + 它属于哪个功能）。
+ *
+ * 为什么要带 feature：合并时若两点的功能不同，挂上去的是先到那点的拦截器 ⇒ 后到那点的意图未生效，
+ * 判据必须能看出"N 是不是虚高"（见 [mergedFeatureConflict]）。
+ */
+internal data class Claim(val ownerId: String, val feature: String)
 
 /**
  * 宽松轨结果 → 解析结论（纯函数，可 JVM 单测）。
@@ -374,10 +395,14 @@ internal sealed interface ResolveOutcome {
  * 记 NOT_RESOLVED 会把它算进失败清单并扣 N，与事实不符。歧义（[LooseOutcome.Ambiguous]）与
  * 全灭（[LooseOutcome.Miss]）才是真的没挂上。
  */
-internal fun looseOutcomeToResolve(outcome: LooseOutcome, mergedWith: String? = null): ResolveOutcome =
+internal fun looseOutcomeToResolve(
+    outcome: LooseOutcome,
+    mergedWith: String? = null,
+    mergedFeature: String = "",
+): ResolveOutcome =
     when (outcome) {
         is LooseOutcome.Hit -> ResolveOutcome.Resolved(outcome.method)
-        is LooseOutcome.Duplicate -> ResolveOutcome.Merged(outcome.method, mergedWith)
+        is LooseOutcome.Duplicate -> ResolveOutcome.Merged(outcome.method, mergedWith, mergedFeature)
         is LooseOutcome.Ambiguous -> ResolveOutcome.Unresolved
         LooseOutcome.Miss -> ResolveOutcome.Unresolved
     }

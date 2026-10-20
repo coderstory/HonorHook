@@ -23,13 +23,16 @@ class MountEngine(
      * （复审缺陷④：原先记 NOT_RESOLVED ⇒ 扣 N + 进失败清单，与"方法确实已挂上"的事实不符）。
      */
     enum class Result {
-        OK, FAILED, NOT_RESOLVED, MERGED;
+        OK, FAILED, NOT_RESOLVED, MERGED, MERGED_CONFLICT;
 
         /**
          * 成功口径（"installed N/M" 的 N）：[OK] 与 [MERGED] 都算已挂载。
          *
          * 口径的单一事实源（单测钉住：N 的定义与失败清单不许悄悄变）。MERGED = 与另一挂载点合并到
          * 同一方法 ⇒ 该点的意图已由另一挂载点覆盖，记失败会凭空扣 N 并把点写进失败清单。
+         *
+         * [MERGED_CONFLICT]：合并到的却是**别的功能**的挂载点 ⇒ 方法确实挂上了，但挂的是别人的意图，
+         * 本点的拦截语义没有生效 ⇒ 不能算 installed（否则 N 虚高，功能实际是死的）。
          */
         val installed: Boolean get() = this == OK || this == MERGED
     }
@@ -223,6 +226,7 @@ class MountEngine(
             declaredClassStrings = task.dex?.classStrings,
             declaredClassFieldTypes = task.dex?.classFieldTypes,
             pointId = task.id,
+            pointFeature = task.feature,
             instanceOnly = task.dex?.instanceOnly == true,
         )
         if (outcome is ResolveOutcome.Unresolved) {
@@ -263,14 +267,23 @@ class MountEngine(
             is ResolveOutcome.Merged -> {
                 // 同一方法已由另一挂载点挂上 ⇒ 不重复包装（两个 CONST 拦截器叠在同一个方法上没意义），
                 // 但**合并计成功**（不扣 N、不进失败清单）；这一行 WARN 是判据可审计的唯一现场。
+                //
+                // 例外：占用方的**功能开关**与本点不同 ⇒ 挂上去的是别人的拦截器，本点的意图压根没生效
+                // ⇒ 不能算 installed（否则 N 虚高，功能实际是死的却显示"已挂载"）。
+                val conflict = mergedFeatureConflict(task.feature, outcome.mergedFeature)
+                val conflictNote = if (conflict) {
+                    "，功能不同（本功能 ${task.feature} vs 占用方 ${outcome.mergedFeature}）⇒ 本点意图未生效"
+                } else {
+                    ""
+                }
                 module.log(
                     Log.WARN,
                     TAG,
                     "$hookName 挂载点合并（与另一挂载点落到同一方法，只挂一次）: ${task.id} → " +
                         "${DexKitHelper.signatureOf(outcome.method)}" +
-                        "（与 ${outcome.mergedWith ?: "另一挂载点"} 合并）",
+                        "（与 ${outcome.mergedWith ?: "另一挂载点"} 合并$conflictNote）",
                 )
-                return Result.MERGED
+                return if (conflict) Result.MERGED_CONFLICT else Result.MERGED
             }
             ResolveOutcome.Unresolved -> return Result.NOT_RESOLVED
         }

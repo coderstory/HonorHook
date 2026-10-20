@@ -23,6 +23,18 @@ internal data class MountOutcome(
 /** 汇总日志级别（与 `android.util.Log` 级别一一对应，但本层不依赖 Android，可 JVM 回归）。 */
 internal enum class MountLogLevel { INFO, WARN, ERROR }
 
+/**
+ * 合并到**别的功能**的同名方法上 ⇒ 意图冲突（纯判定，可 JVM 回归）。
+ *
+ * 背景：宽松轨里两个挂载点可能落到同一方法，只挂一次（[MountEngine.Result.MERGED]）。但若两点的
+ * 功能开关不同（一方 feature="A"、另一方 feature="B"），挂上去的是**先到那点**的拦截器 ⇒ 后到那点
+ * 的意图压根没生效。判据若照样记 N/M，N 就虚高了（功能实际是死的却显示"已挂载"）。
+ *
+ * 口径：feature 相同（含双方都为空 = 都是常挂点）⇒ 不冲突，按 MERGED 计成功。
+ */
+internal fun mergedFeatureConflict(currentFeature: String, mergedWithFeature: String): Boolean =
+    currentFeature != mergedWithFeature
+
 /** 一行汇总日志。 */
 internal data class MountLogLine(val level: MountLogLevel, val text: String)
 
@@ -32,6 +44,7 @@ internal data class MountLogLine(val level: MountLogLevel, val text: String)
  * 口径（全部由 `MountSummaryTest` 钉住）：
  * - M 只在**首轮**记一次：重试轮传入的是未解析子列表，逐轮覆盖会让判据行变成"累计成功/本轮待挂"；
  * - N = OK + MERGED（[MountEngine.Result.installed]），NOT_RESOLVED 不计；
+ *   MERGED_CONFLICT（合并到别的功能 ⇒ 本点意图没生效）也不计，并进失败清单（判据不许虚高）；
  * - 失败清单只收 FAILED 与"重试耗尽仍未挂载"的点，NOT_RESOLVED 在重试中不进清单；
  * - 通路行按 group **首次出现序**（= 声明序）输出，全灭 group 升级 ERROR 附失败明细。
  */
@@ -65,7 +78,8 @@ internal class MountSummary {
                     groupOk[outcome.group] = (groupOk[outcome.group] ?: 0) + 1
                 }
             }
-            outcome.result == MountEngine.Result.FAILED -> {
+            outcome.result == MountEngine.Result.FAILED ||
+                outcome.result == MountEngine.Result.MERGED_CONFLICT -> {
                 failed += outcome.description
                 if (outcome.group.isNotEmpty()) {
                     groupFailed.getOrPut(outcome.group) { mutableListOf() }.add(outcome.description)
