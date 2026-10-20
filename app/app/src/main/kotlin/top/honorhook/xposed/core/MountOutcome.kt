@@ -29,6 +29,8 @@ internal enum class MountLogLevel { INFO, WARN, ERROR }
  * 的意图压根没生效。判据若照样记 N/M，N 就虚高了（功能实际是死的却显示"已挂载"）。
  *
  * 口径：feature 相同（含双方都为空 = 都是常挂点）⇒ 不冲突，按 MERGED 计成功。
+ * 一方为空（常挂点/探针行）、另一方非空 ⇒ **算冲突**：挂上去的是对方（或常挂点）的拦截器，
+ * 本功能的意图压根没生效 ⇒ 计失败不计 N（否则 N 虚高，功能实际是死的）。
  */
 internal fun mergedFeatureConflict(currentFeature: String, mergedWithFeature: String): Boolean =
     currentFeature != mergedWithFeature

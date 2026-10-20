@@ -199,7 +199,8 @@ class HookPointTablesTest {
     /**
      * CONST = 常量短路：intercept 直接返回表里的 `value`。
      * value 类型与宿主方法返回类型不符 ⇒ libxposed 102 硬约束被违反（宿主收到错类型）。
-     * void / Bundle 这类「值不是表里给」的形态不在此断言范围（skip）。
+     * 「值不由表给」的形态（void / List / Bundle）不在此断言范围，但必须**显式列出**
+     * （见 [constValueNotFromTable]）——否则白名单会把未知类型静默跳过，断言出现空洞。
      */
     private fun allowedConstValueTypes(returnType: String): Set<Class<*>> = when (returnType) {
         "boolean" -> setOf(Boolean::class.javaObjectType)
@@ -210,22 +211,109 @@ class HookPointTablesTest {
         else -> emptySet()
     }
 
+    /** 值在 JVM 期无从比对的 CONST 形态（表里给了值，但类型无法核）：必须显式列出（不许静默跳过）。 */
+    private val constValueNotFromTable = setOf(
+        "java.util.List",
+    )
+
+    /**
+     * CONST 行但表里 `value = null` 且返回类型不是 void ⇒ 值由**目标侧硬编码**（表不提供常量），
+     * JVM 期无从比对类型。必须显式登记（不许静默跳过）；新增此类行要同步此清单。
+     */
+    private val constValueFromTargetSide = setOf(
+        // theme C7：值由 enumRef 反射取宿主枚举常量（PERMANENT）
+        "theme:ThemeResManager.getThemeApplyState",
+        // sysmgr：hook 恒返 true（宿主自带 hide_virus 总开关），常量写在目标侧
+        "sysmgr:AntivirusTools.hideVirusPrefer",
+        // sysmgr：目标侧构造同构 Bundle 返回（result_code=0），结构在目标侧
+        "sysmgr:CheckUninstallApkCaller.scanClean",
+    )
+
+    /** 全部挂载表（护栏覆盖面：theme / installer×2 / launcher / sysmgr / ouc）。 */
+    private fun allTables(): List<Pair<String, List<HookPoint>>> = listOf(
+        "theme" to THEME_POINTS_20_1_63_305,
+        "installer" to INSTALLER_POINTS_14_0_22_326,
+        "installer38" to INSTALLER_POINTS_14_0_38_301,
+        "launcher" to LAUNCHER_POINTS_18_0_0_234,
+        "sysmgr" to SysmgrHook.SYSMGR_POINTS,
+        "ouc" to OucHook.OUC_POINTS,
+    )
+
     @Test
     fun `const values match declared return types`() {
-        listOf(
-            "theme" to THEME_POINTS_20_1_63_305,
-            "installer" to INSTALLER_POINTS_14_0_22_326,
-            "installer38" to INSTALLER_POINTS_14_0_38_301,
-            "launcher" to LAUNCHER_POINTS_18_0_0_234,
-        ).forEach { (name, table) ->
+        allTables().forEach { (name, table) ->
             table.forEach { p ->
                 if (p.kind != "CONST") return@forEach
+                if (p.value == null) {
+                    if (p.returnType == "void") return@forEach   // void 无值可校
+                    // 值由目标侧硬编码（表里 value=null）⇒ 无从比对类型；必须显式登记。
+                    assertTrue(
+                        "$name ${p.id} CONST 的 value=null（值由目标侧硬编码）但不在已知清单 $constValueFromTargetSide",
+                        p.id in constValueFromTargetSide,
+                    )
+                    return@forEach
+                }
                 val allowed = allowedConstValueTypes(p.returnType)
-                if (allowed.isEmpty()) return@forEach
+                if (allowed.isEmpty()) {
+                    // 跳过必须是「已知且明确跳过」：不在白名单里的类型由下面的穷举测试先红。
+                    assertTrue(
+                        "$name ${p.id} CONST 返回类型=${p.returnType} 既不在类型白名单、也不在明确跳过集",
+                        p.returnType in constValueNotFromTable,
+                    )
+                    return@forEach
+                }
                 val v = p.value
                 assertTrue(
-                    "$name ${p.id} CONST 声明返回类型=${p.returnType}，但 value=$v（${v?.javaClass}）不在允许类型 $allowed",
-                    v != null && v.javaClass in allowed,
+                    "$name ${p.id} CONST 声明返回类型=${p.returnType}，但 value=$v（${v.javaClass}）不在允许类型 $allowed",
+                    v.javaClass in allowed,
+                )
+            }
+        }
+    }
+
+    // ---------------- ⑥ CONST 返回类型穷举（白名单不许有静默跳过的空洞） ----------------
+
+    @Test
+    fun `const return types are all known`() {
+        // 类型断言（allowedConstValueTypes）是白名单：新增一种返回类型若不同时更新白名单，
+        // 那一行会被静默跳过 ⇒ 断言覆盖状态不可知。这里把「出现过的 CONST 返回类型集合」钉死。
+        val known = setOf(
+            "boolean", "double", "int", "long",
+            "java.lang.Integer", "java.lang.Long", "java.lang.String",
+            // theme C7：宿主自定义类型（值由 enumRef 取），JVM 期无从比对
+            "com.hihonor.android.thememanager.theme.apply.ThemeApplyState",
+            // sysmgr scanClean：宿主 Bundle 类型（结构在目标侧构造）
+            "android.os.Bundle",
+            // void：receiver 类 CONST 行（无值可校）
+            "void",
+        ) + constValueNotFromTable
+        val actual = allTables().flatMap { (_, table) -> table.filter { it.kind == "CONST" } }
+            .map { it.returnType }
+            .toSet()
+        val unknown = actual - known
+        assertTrue(
+            "CONST 行出现未知返回类型（类型断言会静默跳过 ⇒ 断言空洞）：$unknown",
+            unknown.isEmpty(),
+        )
+    }
+
+    // ---------------- ⑦ 表里的 feature key 必须在目录里注册 ----------------
+
+    /**
+     * 表里的 feature key 只被 `RemoteConfig.isEnabled` 消费，而它的目录默认取不到**未注册**的 key
+     * ⇒ 回退 false ⇒ 该挂载点被引擎闸门剔除（不进 M、不进失败清单，判据行只表现为 M 变小）。
+     * 这是唯一会「静默少挂一个点」的表字段（KEY_* 常量存在 ≠ 目录已注册），必须在 JVM 期拦住。
+     */
+    @Test
+    fun `table feature keys are registered in the catalog`() {
+        val registered = FeatureCatalog.targets.flatMap { it.features }.map { it.key }.toSet()
+        allTables().forEach { (name, table) ->
+            table.forEach { p ->
+                if (p.feature.isEmpty()) return@forEach
+                assertTrue(
+                    "$name ${p.id} feature=\"${p.feature}\" 未在 FeatureCatalog.targets 注册" +
+                        "（isEnabled 回退 false ⇒ 该点被引擎闸门静默剔除）",
+                    p.feature in registered,
                 )
             }
         }
