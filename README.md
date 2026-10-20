@@ -4,7 +4,7 @@
 
 **给荣耀手机用的去广告 / 解锁 / 隐私小工具**
 
-一个 LSPosed 模块 —— 【重铸荣耀昔日之光】
+一个 LSPosed 模块 —— 重铸荣耀昔日之光
 
 [![Release](https://img.shields.io/github/v/release/coderstory/HonorHook?label=%E6%9C%80%E6%96%B0%E7%89%88&color=blue)](https://github.com/coderstory/HonorHook/releases/latest)
 [![License](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF-AGPL--3.0-blue.svg)](LICENSE)
