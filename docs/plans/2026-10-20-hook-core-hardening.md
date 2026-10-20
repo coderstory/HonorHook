@@ -898,3 +898,18 @@
 | Minor | 工作区 `app/app/version.properties` 未提交 bump | 你的文件，未提交 |
 
 **Deferred minors（合计 4 条，留给你决定）**：① 重试轮重新过 feature 闸门；② 机械迁移把字段 KDoc 搬成局部变量 KDoc（约 12 处）；③ `MountSessionTest` 只 1 例冒烟；④ `UpgradeGuideHook.kt:24` 的全限定 `RemoteConfig`（**基线既有**，不在本清单改动面内，未动）。
+
+### 外部审计 #2（2026-10-20，负责人自跑的第二个模型；范围 8693339..1508bcf）
+
+| 等级 | 发现 | 处置 |
+|---|---|---|
+| Critical | 无 | — |
+| Important | §五 的 xhs M 是单档快照，但 Task 10 已让 M 随宿主版本分档 | **已修**（`95e77c3`）：§五 xhs 行补「9.49.1 覆盖套只有 X5 变 ⇒ X5 M=4」。审计基线停在 `1508bcf`，在该修复之前 |
+| Important | §五 快照需按新判据格式重采（旧数据无法反推 HonorAds 5 个包各自挂了几个） | **部分由我做**：§五 补「两种粒度」说明 + HonorAds 逐包口径 + 修正判据行格式示例里的包名（`com.hihonor.android.ads` → `com.hihonor.calendar`，那个包名并不在注册列表里）；**重采本身 = Task 9（你跑）** |
+| Important | 重试中间态不可解释：首轮 NOT_RESOLVED 的点既不进失败清单也不进 ok，判据行无法区分「待重试」与「已放弃」 | **不成立**：`MountSession.attemptMount` 只在①全部点已解析 ②重试耗尽（先 `markUnmounted` 再打 WARN + logSummary）两处打判据行 ⇒ 不存在「3/5 且两点既没成功也没进失败清单」的判据行；进程中途被杀则整条判据行根本不输出（用户看到「缺行」而非「误读 3/5」） |
+| Minor | `MountOutcome.feature` 死字段 | 已修（`72d80e6`） |
+| Minor | 表里出现未在 `FeatureCatalog` 注册的 feature key ⇒ `isEnabled` 回退 false ⇒ 该点被引擎闸门**静默剔除**（不进 M、不进失败清单，只表现为 M 变小） | **已修**：`HookPointTablesTest` 新增 `table feature keys are registered in the catalog`（14 例全绿） |
+| Minor | CONST 值类型断言是白名单 ⇒ 未知返回类型静默跳过 ⇒ 断言有空洞 | **已修**：新增 `const return types are all known`（穷举 known 集）+ `const values match declared return types` 覆盖面扩到全部 6 张表，跳过必须显式登记（`constValueNotFromTable` / `constValueFromTargetSide`） |
+| Minor | `MountSummary.logLines` 的 `hostPackage` 为空时退化成旧格式 | 审计判定无需改（`MountSession` 构造期必填，实际不触发） |
+| Rec | `mergedFeatureConflict` KDoc 未写死「一方为空（常挂点）、另一方非空 ⇒ 也算冲突」 | 已补（`MountOutcome.kt`） |
+

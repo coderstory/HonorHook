@@ -100,13 +100,15 @@
 | `JdHook` / `MfaAuthHook` | 1/1 / 1/1 | |
 | `SysmgrHook` | 3/3 | 宿主 `17.0.0.455`（超基线，仅 WARN） |
 | `XhsHook` | X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7 | X5 的 4/5 已随 v1.1.6 修复；2026-10-20 16:48 换版本源（`resolveHostVersion`）后**复测逐字一致**（宿主 9.50.0，走基线坐标不变）。**M 按宿主版本分档**：9.50.0 = 上表数值；**9.49.1 覆盖套只有 X5 变 ⇒ X5 M=4**（noteSave / aigcEdit / downloader 三点该版本无此坐标 ⇒ 显式缺席，不是失效；X1/X2/X4 与版本无关，M 不变）——旧宿主自查时勿把 N<M 判成宿主版本错位 |
-| `HonorAdsHook` / `HonorOpsAdHook` | 2/2 / 1/1 | 按 scope 逐包注册 |
+| `HonorAdsHook` / `HonorOpsAdHook` | 2/2 / 1/1 | 按 scope 逐包注册；**判据行按包分列**：`HonorAdsHook` 注册 5 个包（`com.hihonor.calendar` / `com.hihonor.android.totemweather` / `com.honor.browser` / `com.hihonor.quickgame` / `com.hihonor.youku.video`）⇒ 5 行 `installed 2/2`；`HonorOpsAdHook` 仅日历 ⇒ 1 行 `installed 1/1`。本行的 2/2、1/1 是**单包口径**（声明级共 3 点 = ads 2 + ops 1） |
 | `HonorTrackingHook` | 日历 3/3；桌面·天气 2/3 | 2/3 = 已知旧账「Ex 工厂收口」1 点（`_instance_ex_tag` 类不存在）；2026-10-20 同轮回归仍 2/3（launcher 2/3×37 次、totemweather 2/3×36 次）⇒ **非回退**，历史同进程常态 |
 | 壁纸三 hook（Transcode / Loop / Timeline） | 无近期判据 | 需触发壁纸编辑或应用才注入 |
 
 > M 随代码变更、N 随宿主版本：**改完 hook 回来更新本表**。
 
-> **判据行格式（2026-10-20 起）**：`HookName[宿主包名]: installed N/M`（如 `HonorAdsHook[com.hihonor.android.ads]: installed 2/2`）—— 同一 hook 名按包注册多次（HonorAds 5 个包）时靠包名区分归属；`installed N/M` 子串本身不变，按它抓的脚本不受影响。
+> **判据行格式（2026-10-20 起）**：`HookName[宿主包名]: installed N/M`（如 `HonorAdsHook[com.hihonor.calendar]: installed 2/2`）—— 同一 hook 名按包注册多次（HonorAds 5 个包）时靠包名区分归属；`installed N/M` 子串本身不变，按它抓的脚本不受影响。
+
+> **两种粒度（2026-10-20 补）**：本表的点数是**声明级**（一个挂载点声明一次，跨包共用），判据行是**按包**（按包注册的 hook 每个包各出一行）。二者不可直接相加：HonorAds 声明级 2 点，判据行则是 5 个包各 `2/2`。对照时先按 `HookName[包名]` 对齐到本表的**单包**口径，再比 N。
 
 > **合并口径（2026-10-20 起）**：两个挂载点落到同一方法时**只挂一次**（`MERGED`）⇒ 计成功、不扣 N、不进失败清单；若**占用方的功能开关与本点不同**（`MERGED_CONFLICT`）⇒ 挂上去的是别人的拦截器，本点意图未生效 ⇒ **计失败不计 N**（该点会出现在失败清单里）。判读时看到 `N<M` 且失败清单里躺着「合并」条目，先看是不是这个口径，别当成宿主版本错位去改实现。
 
