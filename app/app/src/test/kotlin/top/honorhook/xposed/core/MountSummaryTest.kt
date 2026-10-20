@@ -166,4 +166,25 @@ class MountSummaryTest {
         assertTrue(lines.any { it.level == MountLogLevel.ERROR && it.text.contains("通路 A2 全灭 0/1") })
         assertTrue(lines.any { it.text == "ThemeStoreHook 通路: A1: 1/2; A2: 0/1" })
     }
+
+    // ---------------- 宿主包名（同一 hook 名按包注册多次时，判据行要能分清归属） ----------------
+
+    @Test
+    fun `summary line carries the host package name`() {
+        val summary = MountSummary()
+        summary.begin(1, mapOf("A1" to 1))
+        summary.record(outcome("x", "A1"))
+        val line = summary.logLines("HonorAdsHook", hostPackage = "com.hihonor.hihonorads").first()
+        assertTrue(line.text.contains("com.hihonor.hihonorads"))
+        assertTrue(line.text.contains("installed 1/1"))
+    }
+
+    @Test
+    fun `group line carries the host package name`() {
+        val summary = MountSummary()
+        summary.begin(1, mapOf("A1" to 1))
+        summary.record(outcome("x", "A1"))
+        val lines = summary.logLines("HonorAdsHook", hostPackage = "com.hihonor.hihonorads")
+        assertTrue(lines.any { it.text.startsWith("HonorAdsHook[com.hihonor.hihonorads] 通路:") })
+    }
 }

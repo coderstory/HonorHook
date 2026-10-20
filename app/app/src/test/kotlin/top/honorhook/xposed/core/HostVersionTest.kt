@@ -7,40 +7,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * HostVersion 的 JVM 回归测试：版本比较器与选表三级（精确命中 / 默认套 / 显式 fallback）。
+ * HostVersion 的 JVM 回归测试：选表三级（精确命中 / 默认套 / 显式 fallback）。
  *
  * fallback 第三级是显式 opt-in——默认 false 的现状语义（installer matched=false → 基线源码路径）
  * 由 `fallback off` 用例钉死，误开默认会在这里先红。
+ *
+ * 版本号比较的用例已随实现迁到共享层 `top.honorhook.VersionNameTest`（语义逐字未变）。
  */
 class HostVersionTest {
-
-    // ---------------- compareVersionNames ----------------
-
-    @Test
-    fun `equal versions compare as zero`() {
-        assertEquals(0, HostVersion.compareVersionNames("14.0.37.301", "14.0.37.301"))
-    }
-
-    @Test
-    fun `segment-wise numeric ordering`() {
-        assertTrue(HostVersion.compareVersionNames("14.0.37.301", "14.0.22.326") > 0)
-        assertTrue(HostVersion.compareVersionNames("14.0.22.326", "14.0.37.301") < 0)
-        assertTrue(HostVersion.compareVersionNames("16.1.0", "16.0.9") > 0)
-    }
-
-    @Test
-    fun `shorter version pads missing segments with zero`() {
-        // 缺段按 0：16.1 == 16.1.0（与 FeatureCatalog 原内联语义一致）
-        assertEquals(0, HostVersion.compareVersionNames("16.1", "16.1.0"))
-        assertTrue(HostVersion.compareVersionNames("16.2", "16.1.9") > 0)
-    }
-
-    @Test
-    fun `non-numeric suffix is truncated to zero`() {
-        // "0-release" 截断为 0 → 与 5.9.0.0 相等（exam8 基线 "5.9.0.0-release" 场景）
-        assertEquals(0, HostVersion.compareVersionNames("5.9.0.0-release", "5.9.0.0"))
-        assertTrue(HostVersion.compareVersionNames("5.9.0.1-release", "5.9.0.0") > 0)
-    }
 
     // ---------------- pick 三级 ----------------
 

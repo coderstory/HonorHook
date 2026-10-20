@@ -240,7 +240,7 @@ class MountEngine(
         val hostPart = actualVersion?.let { "（宿主 $it）" } ?: ""
         // 通路汇总（存在非空 group 才输出；单行紧凑 "; " 拼接）。判读单位 = 功能点至少一条通路存活，
         // 全灭（ok=0）才升级 ERROR 附失败明细——部分存活是失效常态，不制造噪音。
-        summary.logLines(hookName, hostPart).forEach { line ->
+        summary.logLines(hookName, hostPart, hostPackage).forEach { line ->
             val level = when (line.level) {
                 MountLogLevel.INFO -> Log.INFO
                 MountLogLevel.WARN -> Log.WARN

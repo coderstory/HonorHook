@@ -99,10 +99,10 @@ object FeatureCatalog {
         /** 全部受支持宿主版本（派生不落盘，UI「版本未适配」tag 用）。
          *  已按数字段升序排序（"14.0.37.301" > "9.9.9.9"），末位恒为最新——UI meta 行取 last 即最新，
          *  不依赖 targets 里的声明序；"-release" 等非数字尾缀截断后按 0 计。
-         *  比较器唯一实现在 HostVersion.compareVersionNames（HostVersion fallback 选表共用，消双处漂移）。 */
+         *  比较器唯一实现在共享层 [VersionName.compare]（hook 侧选表共用，消双处漂移）。 */
         val supportedVersions: List<String>
             get() = (setOfNotNull(baselineVersion) + extraVersions).sortedWith { a, b ->
-                top.honorhook.xposed.core.HostVersion.compareVersionNames(a, b)
+                VersionName.compare(a, b)
             }
     }
 

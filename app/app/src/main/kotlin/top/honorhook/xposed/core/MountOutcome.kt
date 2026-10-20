@@ -113,19 +113,21 @@ internal class MountSummary {
         groupTotal.keys.filter { (groupOk[it] ?: 0) == 0 }
 
     /** 汇总日志行（顺序：判据行 → 通路行 → 全灭通路 ERROR 行）。 */
-    fun logLines(hookName: String, hostPart: String = ""): List<MountLogLine> {
+    fun logLines(hookName: String, hostPart: String = "", hostPackage: String = ""): List<MountLogLine> {
         val lines = mutableListOf<MountLogLine>()
+        // 同一 hook 名按包注册多次（HonorAds 5 个包各注册一次）⇒ 行首带宿主包名，否则判据行分不清归属。
+        val tag = if (hostPackage.isEmpty()) hookName else "$hookName[$hostPackage]"
         val failurePart = if (failed.isEmpty()) "" else " — 失败: ${failed.joinToString()}"
         lines += MountLogLine(
             if (failed.isEmpty()) MountLogLevel.INFO else MountLogLevel.WARN,
-            "$hookName: installed $ok/$total$hostPart$failurePart",
+            "$tag: installed $ok/$total$hostPart$failurePart",
         )
         if (groupTotal.isNotEmpty()) {
-            lines += MountLogLine(MountLogLevel.INFO, "$hookName 通路: " + groupLines().joinToString("; "))
+            lines += MountLogLine(MountLogLevel.INFO, "$tag 通路: " + groupLines().joinToString("; "))
             deadGroups().forEach { group ->
                 lines += MountLogLine(
                     MountLogLevel.ERROR,
-                    "$hookName 通路 $group 全灭 0/${groupTotal[group]} — 失败: ${groupFailed[group]?.joinToString() ?: "无明细"}",
+                    "$tag 通路 $group 全灭 0/${groupTotal[group]} — 失败: ${groupFailed[group]?.joinToString() ?: "无明细"}",
                 )
             }
         }

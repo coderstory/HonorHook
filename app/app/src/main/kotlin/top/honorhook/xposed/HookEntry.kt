@@ -17,13 +17,16 @@ import top.honorhook.xposed.target.TargetRegistry
 class HookEntry : XposedModule() {
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
-        // 远端 prefs 缓存注入（一次 Binder 读取；读失败回 null = 全功能默认开）。
-        RemoteConfig.attach(runCatching { getRemotePreferences(FeatureCatalog.REMOTE_GROUP) }.getOrNull())
-
         // 防重装靠 TargetRegistry 对象级判定（多键目标共享进程时不重复挂载）；同包多 hook 依次装。
         // 任何异常只记日志：hook 挂载绝不能炸宿主进程（CLAUDE.md §九 防御性编程）。
         runCatching {
             val fresh = TargetRegistry.find(param.packageName).filterNot { TargetRegistry.isInstalled(it) }
+            // 无目标（或本进程该包已装过）⇒ 不读远端 prefs：那是跨进程 Binder 读取，
+            // 而没有 target 的包里没有任何东西会消费开关（读不到本来就回退「全功能默认开」）。
+            if (fresh.isNotEmpty()) {
+                // 远端 prefs 缓存注入（一次 Binder 读取；读失败回 null = 全功能默认开）。
+                RemoteConfig.attach(runCatching { getRemotePreferences(FeatureCatalog.REMOTE_GROUP) }.getOrNull())
+            }
             fresh.forEach { target ->
                 // per-target 隔离：单 target install 抛异常不阻断同包其余 TargetHook
                 // （同进程注册多个 TargetHook 的目标，如日历进程 3 个——第一个炸不能拖死其余）

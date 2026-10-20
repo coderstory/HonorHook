@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import top.honorhook.BuildConfig
-import top.honorhook.xposed.core.HostVersion
+import top.honorhook.VersionName
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -33,9 +33,9 @@ object UpdateChecker {
         return Release(v, apkUrl, tag)
     }
 
-    /** 远端是否比本地新：语义版本逐段比（复用宿主版本比较实现，消双处漂移）。 */
+    /** 远端是否比本地新：语义版本逐段比（复用共享层 [VersionName]，消双处漂移）。 */
     fun isNewer(remote: Release, localVersionName: String): Boolean =
-        HostVersion.compareVersionNames(remote.version, localVersionName) > 0
+        VersionName.compare(remote.version, localVersionName) > 0
 
     /** 拉 releases/latest（IO）。失败抛异常，由调用方决定如何呈现。 */
     fun fetchLatest(): Release {
