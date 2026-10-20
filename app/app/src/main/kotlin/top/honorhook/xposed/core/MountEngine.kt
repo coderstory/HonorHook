@@ -72,14 +72,8 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
     ) : Task
 
     private var retryRounds = 0
-    private var okCount = 0
-    private var totalCount = 0
-    private val failedIds = mutableListOf<String>()
-    /** 通路汇总（task.group 非空才计入；总数只在首轮记，与 [totalCount] 同口径——重试轮只传未解析子列表）。 */
-    private val groupTotal = LinkedHashMap<String, Int>()
-    private val groupOk = HashMap<String, Int>()
-    /** 全死通路 ERROR 行的失败明细（group → 失败任务描述）。 */
-    private val groupFailed = HashMap<String, MutableList<String>>()
+    /** 判据聚合（`installed N/M`、通路存活、失败清单的口径单一事实源；纯逻辑，可 JVM 回归）。 */
+    private var summary = MountSummary()
     /** 判据日志节流计数（task.id → 已打印次数）。 */
     private val judgeCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
     /** 回调异常 WARN 节流计数（task.id → 已打印次数；独立于 [judgeCount]，判据节流是"命中"口径，这里是"异常"口径）。 */
@@ -101,11 +95,7 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
         this.apkPath = apkPath
         this.expectedHostVersion = expectedHostVersion
         retryRounds = 0
-        okCount = 0
-        failedIds.clear()
-        groupTotal.clear()
-        groupOk.clear()
-        groupFailed.clear()
+        summary = MountSummary()
         judgeCount.clear()
         callbackWarnCount.clear()
         driftWarnCount.clear()
@@ -140,12 +130,13 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
             runCatching { checkHostVersionOnce(module) }
         }
         // 只在首轮记总数：重试轮传入的是 unresolved 子列表，若逐轮覆盖，判据行会变成
-        // "installed 累计成功数/本轮待挂数"（okCount 跨轮累计），M 失去意义。
+        // "installed 累计成功数/本轮待挂数"（成功数跨轮累计），M 失去意义。
         if (retryRounds == 0) {
-            totalCount = pending.size
+            val groupCounts = LinkedHashMap<String, Int>()
             for (task in pending) {
-                if (task.group.isNotEmpty()) groupTotal[task.group] = (groupTotal[task.group] ?: 0) + 1
+                if (task.group.isNotEmpty()) groupCounts[task.group] = (groupCounts[task.group] ?: 0) + 1
             }
+            summary.begin(pending.size, groupCounts)
         }
         val unresolved = mutableListOf<T>()
         for (task in pending) {
@@ -154,18 +145,12 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
                 module.log(Log.ERROR, TAG, "$hookName 挂载异常（任务隔离）: ${task.description}", it)
                 Result.FAILED
             }
-            when {
+            if (result == Result.NOT_RESOLVED) {
+                unresolved += task   // NOT_RESOLVED：可随类加载重试
+            } else {
                 // 成功口径单一事实源（[Result.installed]）：OK 与 MERGED（与另一挂载点合并）都算已挂载，
                 // 不扣 N、不进失败清单（复审缺陷④）。
-                isInstalled(result) -> {
-                    okCount++
-                    if (task.group.isNotEmpty()) groupOk[task.group] = (groupOk[task.group] ?: 0) + 1
-                }
-                result == Result.FAILED -> {
-                    failedIds += task.description
-                    if (task.group.isNotEmpty()) groupFailed.getOrPut(task.group) { mutableListOf() }.add(task.description)
-                }
-                else -> unresolved += task   // NOT_RESOLVED：可随类加载重试
+                summary.record(MountOutcome(task.id, task.description, task.group, result = result))
             }
         }
         if (unresolved.isEmpty()) {
@@ -173,10 +158,7 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
             return
         }
         if (retryRounds >= MAX_RETRY_ROUNDS) {
-            unresolved.forEach { u ->
-                if (u.group.isNotEmpty()) groupFailed.getOrPut(u.group) { mutableListOf() }.add(u.description)
-            }
-            failedIds += unresolved.map { it.description }
+            unresolved.forEach { u -> summary.markUnmounted(u.description, u.group) }
             module.log(
                 Log.WARN, TAG,
                 "$hookName 部分 hook 最终未挂载（类/方法不存在，已重试 $MAX_RETRY_ROUNDS 轮，放弃）: " +
@@ -235,28 +217,16 @@ class MountEngine(private val hookName: String, private val hostPackage: String)
 
     /** 挂载汇总始终输出，不受 [DEBUG_LOGGING] 门控（Rain "installed N/M" 汇总行模式，真机判据）。 */
     fun logSummary(module: XposedModule) {
-        val failurePart = if (failedIds.isEmpty()) "" else " — 失败: ${failedIds.joinToString()}"
         val hostPart = actualVersion?.let { "（宿主 $it）" } ?: ""
-        module.log(
-            if (failedIds.isEmpty()) Log.INFO else Log.WARN,
-            TAG,
-            "$hookName: installed $okCount/$totalCount$hostPart$failurePart",
-        )
         // 通路汇总（存在非空 group 才输出；单行紧凑 "; " 拼接）。判读单位 = 功能点至少一条通路存活，
         // 全灭（ok=0）才升级 ERROR 附失败明细——部分存活是失效常态，不制造噪音。
-        if (groupTotal.isNotEmpty()) {
-            module.log(
-                Log.INFO, TAG,
-                "$hookName 通路: " + groupTotal.entries.joinToString("; ") { (g, total) -> "$g: ${groupOk[g] ?: 0}/$total" },
-            )
-            groupTotal.forEach { (g, total) ->
-                if ((groupOk[g] ?: 0) == 0) {
-                    module.log(
-                        Log.ERROR, TAG,
-                        "$hookName 通路 $g 全灭 0/$total — 失败: ${groupFailed[g]?.joinToString() ?: "无明细"}",
-                    )
-                }
+        summary.logLines(hookName, hostPart).forEach { line ->
+            val level = when (line.level) {
+                MountLogLevel.INFO -> Log.INFO
+                MountLogLevel.WARN -> Log.WARN
+                MountLogLevel.ERROR -> Log.ERROR
             }
+            module.log(level, TAG, line.text)
         }
     }
 
