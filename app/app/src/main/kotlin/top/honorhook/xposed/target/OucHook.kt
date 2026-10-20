@@ -6,6 +6,7 @@ import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
+import top.honorhook.xposed.data.RemoteConfig
 
 /**
  * 荣耀在线升级客户端 `com.hihonor.ouc`（HnOUC.apk 18.0.3.206，aapt2 实证）：禁止系统更新
@@ -70,14 +71,14 @@ object OucHook : TargetHook {
         val apkPath = param.applicationInfo.sourceDir
 
         val pending = mutableListOf<MountEngine.SimpleTask>()
-        if (top.honorhook.xposed.data.RemoteConfig.isEnabled(FeatureCatalog.KEY_OTA_BLOCK)) {
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_OTA_BLOCK)) {
             OUC_POINTS.forEach { point -> pending += point.toTask() }
         } else {
             logDisabled(module, FeatureCatalog.KEY_OTA_BLOCK, "OucHook")
         }
         if (pending.isEmpty()) return
         /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
-        val session = MountEngine.open("OucHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), top.honorhook.xposed.data.RemoteConfig)
+        val session = MountEngine.open("OucHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), RemoteConfig)
         session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 

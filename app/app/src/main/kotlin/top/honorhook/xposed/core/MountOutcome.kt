@@ -14,8 +14,6 @@ internal data class MountOutcome(
     val description: String,
     /** 功能分组（"" = 探针/载体类，不参与通路汇总）。 */
     val group: String,
-    /** 功能 key（[top.honorhook.FeatureCatalog] 的 key；"" = 不属于任何功能开关）。 */
-    val feature: String = "",
     /** 挂载结果分级。 */
     val result: MountEngine.Result,
 )

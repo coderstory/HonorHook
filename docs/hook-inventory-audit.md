@@ -108,6 +108,8 @@
 
 > **判据行格式（2026-10-20 起）**：`HookName[宿主包名]: installed N/M`（如 `HonorAdsHook[com.hihonor.android.ads]: installed 2/2`）—— 同一 hook 名按包注册多次（HonorAds 5 个包）时靠包名区分归属；`installed N/M` 子串本身不变，按它抓的脚本不受影响。
 
+> **合并口径（2026-10-20 起）**：两个挂载点落到同一方法时**只挂一次**（`MERGED`）⇒ 计成功、不扣 N、不进失败清单；若**占用方的功能开关与本点不同**（`MERGED_CONFLICT`）⇒ 挂上去的是别人的拦截器，本点意图未生效 ⇒ **计失败不计 N**（该点会出现在失败清单里）。判读时看到 `N<M` 且失败清单里躺着「合并」条目，先看是不是这个口径，别当成宿主版本错位去改实现。
+
 - 各目标 `installed N/M` 全命中、无 `failed` 清单；
 - 详情页付费主题仍走 VIP 通道下载（日志 `theme-download-chain 路由触发` H1/H2b 两条，不再有 H2）；
 - 列表/浏览页无 VIP 专属角标（覆盖 `getVipOnly` 直连消费点后）。

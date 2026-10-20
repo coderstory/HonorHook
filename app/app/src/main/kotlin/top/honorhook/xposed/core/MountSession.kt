@@ -90,7 +90,8 @@ class MountSession internal constructor(
                 unresolved += task   // NOT_RESOLVED：可随类加载重试
             } else {
                 // 成功口径单一事实源（[MountEngine.Result.installed]）：OK 与 MERGED（与另一挂载点合并）都算已挂载，
-                // 不扣 N、不进失败清单（复审缺陷④）。
+                // 不扣 N、不进失败清单（复审缺陷④）；**MERGED_CONFLICT（合并到别的功能）例外**：
+                // 挂上去的是别人的拦截器 ⇒ 本点意图未生效 ⇒ 计失败不计 N（[mergedFeatureConflict]）。
                 summary.record(MountOutcome(task.id, task.description, task.group, result = result))
             }
         }

@@ -7,6 +7,7 @@ import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
+import top.honorhook.xposed.data.RemoteConfig
 
 /**
  * 荣耀系统管家服务 `com.hihonor.systemmanager`（17.0.0.414）：病毒检测/查杀/弹窗三路全禁。
@@ -107,14 +108,14 @@ object SysmgrHook : TargetHook {
         val apkPath = param.applicationInfo.sourceDir
 
         val pending = mutableListOf<MountEngine.SimpleTask>()
-        if (top.honorhook.xposed.data.RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSMGR_ANTIVIRUS)) {
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSMGR_ANTIVIRUS)) {
             SYSMGR_POINTS.forEach { point -> pending += point.toTask() }
         } else {
             logDisabled(module, FeatureCatalog.KEY_SYSMGR_ANTIVIRUS, "SysmgrHook")
         }
         if (pending.isEmpty()) return
         /** 共享挂载基建（重试循环/失败分级/汇总日志/方法解析）。 */
-        val session = MountEngine.open("SysmgrHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), top.honorhook.xposed.data.RemoteConfig)
+        val session = MountEngine.open("SysmgrHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), RemoteConfig)
         session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
 
