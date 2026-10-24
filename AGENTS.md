@@ -91,7 +91,8 @@ XHS_Downloader_Android，**AGPL-3.0**）来自 submodule `reference/xhs/XHS_Down
 - hook 回调里任何异常都必须吞掉并记日志，**绝不能炸宿主进程**
 - 挂载日志按 `task.id` 节流，别刷屏
 
-动手前读 `docs/hook-craft.md`（怎么写 hook）与 `docs/reverse-craft.md`（怎么逆向）；每 app 的逆向记录在 `docs/reverse/`。方法论沉淀在 `.claude/skills/`（`honorhook-dev` 是 dev.sh 命令索引）。
+动手前读 `docs/hook-craft.md`（怎么写 hook）与 `docs/reverse-craft.md`（怎么逆向）；每 app 的逆向记录在 `docs/reverse/`。方法论沉淀在 `.claude/skills/`（`honorhook-dev` 是 dev.sh 命令索引）；
+DSH 会话读 `.agents/skills/`（项目级技能根）——两份副本，改完 .claude 跑 `tools/sync-skills.sh`。
 
 ## 放哪里
 

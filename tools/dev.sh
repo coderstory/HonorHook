@@ -2,60 +2,41 @@
 # HonorHook 开发/调试统一入口
 # 目的：所有命令固化于此，禁止在会话里手工拼接 gradle/adb 命令。
 # 用法：tools/dev.sh <子命令>
+# 结构（2026-10-23 拆分）：本文件 = 入口 + 命令路由 + 跨平台通用逻辑；
+#       平台工具链解析拆到 dev-env-{macos,linux,windows}.sh（按 uname 选一加载）。
+# 适配层契约（每个 dev-env-*.sh 必须产出，公共段依赖）：
+#   JAVA_HOME / ANDROID_SDK_LOCAL / ADB / JADX / AAPT2（可空，公共段兜底）
+#   PLATFORM_JADX_JAVA_OPTS（jadx JVM 参数）、PLATFORM_JADX_ARGS（jadx CLI 参数）
+#   PLATFORM_PATH_PREPEND（冒号分隔，追加到 PATH 前部）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ---- 工具链：项目内便携版优先，否则本机安装兜底（macOS 迁移后，原 Windows 硬编码路径已不适用）----
-# JDK 必须带 jlink（打包 release 需要）；brew 的 openjdk@21 经 libexec 下的 Home 才有 bin/jlink
-if [ -x "$ROOT/tools/jdk-21/bin/jlink" ]; then
-  export JAVA_HOME="$ROOT/tools/jdk-21"
-elif [ -x /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/jlink ]; then
-  export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
-elif [ -x /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/jlink ]; then
-  export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
-else
-  export JAVA_HOME="$ROOT/tools/jdk-21"   # 均缺失：保留原路径，由 require 报出明确错误
-fi
-# ---- Android SDK：项目内便携版优先 → brew 前缀 → 本机安装兜底（2026-10-11 加回退）----
-# 背景：e76e045 磁盘清理移除了 tools/android-sdk/（1.85GB 回收），原硬编码路径失效。
-# 与上面 JDK 的三级回退同构：任一路径存在即用，全缺失时保留原路径由 require 报明确错误。
-if [ -d "$ROOT/tools/android-sdk/platforms" ]; then
-  ANDROID_SDK_LOCAL="$ROOT/tools/android-sdk"
-elif [ -d /opt/homebrew/share/android-sdk/platforms ]; then
-  ANDROID_SDK_LOCAL=/opt/homebrew/share/android-sdk
-elif [ -d /usr/local/share/android-sdk/platforms ]; then
-  ANDROID_SDK_LOCAL=/usr/local/share/android-sdk
-elif [ -d "$HOME/Library/Android/sdk/platforms" ]; then
-  ANDROID_SDK_LOCAL="$HOME/Library/Android/sdk"
-else
-  ANDROID_SDK_LOCAL="$ROOT/tools/android-sdk"   # 均缺失：保留原路径，后续 require/die 报出
-fi
+# ---- 平台判定与适配层加载 ----
+case "$(uname -s)" in
+  Darwin)               _PLATFORM=macos ;;
+  MINGW*|MSYS*|CYGWIN*) _PLATFORM=windows ;;
+  *)                    _PLATFORM=linux ;;   # Linux + Termux/DSH 同层，内部再按 $PREFIX 分支
+esac
+# shellcheck disable=SC1090
+. "$SCRIPT_DIR/dev-env-$_PLATFORM.sh"
+
+# ---- Android SDK：适配层给了 ANDROID_SDK_LOCAL，这里统一导出 ----
 export ANDROID_HOME="$ANDROID_SDK_LOCAL"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
-if [ -x "$ROOT/tools/platform-tools/adb" ]; then
-  ADB="$ROOT/tools/platform-tools/adb"
-elif [ -x "$ROOT/tools/platform-tools/adb.exe" ]; then
-  ADB="$ROOT/tools/platform-tools/adb.exe"
-else
-  ADB="$(command -v adb || echo adb)"     # brew android-platform-tools
-fi
-# 逆向工具链（decompile/jadx/aapt2 子命令用；找不到不报错，用时才 require）
+
+# ---- 逆向工具链（decompile/jadx/aapt2 子命令用；找不到不报错，用时才 require）----
 APKTOOL="$ROOT/tools/apktool.jar"
-JADX=""
-if [ -x "$ROOT/tools/jadx/bin/jadx" ]; then
-  JADX="$ROOT/tools/jadx/bin/jadx"                 # macOS/Linux bundle
-elif [ -f "$ROOT/tools/jadx/bin/jadx.bat" ]; then
-  JADX="$ROOT/tools/jadx/bin/jadx.bat"             # Windows bundle
-fi
+JADX="${JADX:-}"
 # build-tools 里取版本最高的一份（36.0.0 < 36.1.0 < 37.0.0 字典序即版本序）
-AAPT2=""
+AAPT2="${AAPT2:-}"
 for c in "$ANDROID_HOME"/build-tools/*/aapt2 "$ANDROID_HOME"/build-tools/*/aapt2.exe; do
   if [ -x "$c" ]; then AAPT2="$c"; fi
 done
+[ -n "$AAPT2" ] || AAPT2="$(command -v aapt2 || true)"   # Termux/DSH: aapt 包
 # ---- PATH 暴露（让按 PATH 探测的工具/脚本认得出本项目的工具链）----
-# 顺序：项目垫片 > jadx bundle > SDK build-tools（取最高版本，aapt2/apksigner/zipalign/dexdump）> JDK > platform-tools
+# 顺序：项目垫片 > jadx bundle > SDK build-tools（取最高版本，aapt2/apksigner/zipalign/dexdump）> JDK > platform-tools > 平台附加
 PATH="$ROOT/tools/bin:$PATH"
 [ -x "$ROOT/tools/jadx/bin/jadx" ] && PATH="$ROOT/tools/jadx/bin:$PATH"
 BT=""
@@ -63,7 +44,13 @@ for d in "$ANDROID_HOME"/build-tools/*/; do [ -d "$d" ] && BT="${d%/}"; done
 [ -n "$BT" ] && PATH="$BT:$PATH"
 [ -x "$JAVA_HOME/bin/java" ] && PATH="$JAVA_HOME/bin:$PATH"
 [ -d "$ROOT/tools/platform-tools" ] && PATH="$ROOT/tools/platform-tools:$PATH"
+[ -n "$PLATFORM_PATH_PREPEND" ] && PATH="$PLATFORM_PATH_PREPEND:$PATH"
 export PATH
+
+# ---- Gradle/AAP 缓存收敛进 tools/（2026-10-23：别写进 $HOME 之外乱撒）----
+export GRADLE_USER_HOME="$ROOT/tools/gradle-home"
+export ANDROID_USER_HOME="$ROOT/tools/android-user"
+mkdir -p "$GRADLE_USER_HOME" "$ANDROID_USER_HOME"
 
 GRADLEW="$ROOT/app/gradlew"
 APK_DEBUG="$ROOT/app/app/build/outputs/apk/debug/app-debug.apk"
@@ -152,7 +139,8 @@ case "${1:-help}" in
     cat <<'EOF'
 HonorHook 开发工具
 
-环境要求：macOS（JDK 21 / adb / python3-Pillow 由 tools/ 或本机安装提供，缺失时脚本自行兜底）
+环境要求：JDK 21 / adb / python3 由 tools/ 或本机安装提供，缺失时脚本自行兜底；
+平台工具链解析见 dev-env-{macos,linux,windows}.sh（按 uname 自动加载）
 
 子命令：
   build            编译 debug APK
@@ -217,7 +205,7 @@ EOF
     # 不 require jlink：debug 编译不需要，缺 jlink 的 JDK 也应能编 debug（release 才要）
     require "$GRADLEW"
     info "编译 debug APK（JAVA_HOME=${JAVA_HOME}）"
-    (cd "$ROOT/app" && "$GRADLEW" :app:assembleDebug --console=plain)
+    (cd "$ROOT/app" && bash "$GRADLEW" :app:assembleDebug --console=plain)
     ls -lh "$APK_DEBUG"
     ;;
 
@@ -341,14 +329,14 @@ EOF
 
   build-release)
     require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
-    (cd "$ROOT/app" && "$GRADLEW" :app:assembleRelease --console=plain)
+    (cd "$ROOT/app" && bash "$GRADLEW" :app:assembleRelease --console=plain)
     ls -lh "$APK_RELEASE"
     ;;
 
   test)
     require "$GRADLEW"
     info "运行 JVM 单元测试（:app:testDebugUnitTest）"
-    (cd "$ROOT/app" && "$GRADLEW" :app:testDebugUnitTest --console=plain)
+    (cd "$ROOT/app" && bash "$GRADLEW" :app:testDebugUnitTest --console=plain)
     ;;
 
   install)
@@ -778,7 +766,7 @@ EOF
     ;;
 
   clean)
-    (cd "$ROOT/app" && "$GRADLEW" :app:clean --console=plain)
+    (cd "$ROOT/app" && bash "$GRADLEW" :app:clean --console=plain)
     ;;
 
   env)
@@ -818,7 +806,9 @@ EOF
     # JADX_ARGS = 透传给 jadx CLI 的参数（如 "-j 4 -r --no-res"）。
     # 注意：shim 把 JAVA_OPTS/JADX_OPTS 都喂给 JVM（bin/jadx 注释自证），CLI 参数只能走这里。
     # shellcheck disable=SC2086
-    JAVA_OPTS="${JAVA_OPTS:-}" "$JADX" --show-bad-code ${JADX_ARGS:-} -d "$out" "$apk"
+    # 内存/线程策略由平台适配层给（PLATFORM_JADX_*）：on-device 锁 2G 单线程（曾 97% 被 LMK 杀），
+    # 桌面机不限；--no-debug-info 全平台减内存。显式 JAVA_OPTS/JADX_ARGS 仍可覆盖。
+    JAVA_OPTS="${JAVA_OPTS:-${PLATFORM_JADX_JAVA_OPTS:-}}" "$JADX" --show-bad-code --no-debug-info ${JADX_ARGS:-${PLATFORM_JADX_ARGS:-}} -d "$out" "$apk"
     ;;
 
   aapt2)

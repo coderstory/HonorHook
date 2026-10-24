@@ -59,3 +59,10 @@ __pycache__/
 .workbuddy/
 tools/android-sdk
 tools/JEB/
+
+# on-device 本机缓存（2026-10-23）
+tools/gradle-home/
+tools/android-user/
+# DSH 项目技能根（.claude/skills 的同步副本，tools/sync-skills.sh 生成）
+.agents/
+libs/xhs-dn-core/build/.transforms/

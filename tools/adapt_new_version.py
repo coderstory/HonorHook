@@ -64,6 +64,8 @@ REPO = Path(__file__).resolve().parent.parent          # lsposed-plugin/
 TARGET_DIR = (REPO / 'app' / 'app' / 'src' / 'main' / 'kotlin'
               / 'top' / 'honorhook' / 'xposed' / 'target')
 JADX_BIN = REPO / 'tools' / 'jadx' / 'bin' / ('jadx.bat' if sys.platform == 'win32' else 'jadx')
+if not JADX_BIN.exists():  # Termux/DSH on-device：便携包未随库走，包管理器装在 $PREFIX/opt/jadx（2026-10-23）
+    JADX_BIN = Path(os.environ.get('PREFIX', '/data/data/com.dsharnessmobile.shell/files/usr')) / 'opt' / 'jadx' / 'bin' / 'jadx'
 BUILDTMP = REPO / '.buildtmp'
 
 # ---------------- 挂载点提取（Hook 源码 → 挂载表） ----------------
@@ -438,9 +440,9 @@ def run_jadx(apk: Path, out_dir: Path, threads: int):
         shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     if sys.platform == 'win32':
-        cmd = ['cmd', '/c', str(JADX_BIN), '--no-res']
+        cmd = ['cmd', '/c', str(JADX_BIN), '--no-res', '--no-debug-info']
     else:
-        cmd = [str(JADX_BIN), '--no-res']
+        cmd = [str(JADX_BIN), '--no-res', '--no-debug-info']
     if threads:
         cmd += ['-j', str(threads)]
     cmd += ['-d', str(out_dir), str(apk)]

@@ -10,8 +10,10 @@
 | 文件 | 用途 |
 |------|------|
 | `dev.sh` | 开发/调试统一入口：构建/安装/部署、日志判据、真机 UI 自动化、反编译、工具链自检（`tools/dev.sh help` 看全量） |
+| `dev-env-{macos,linux,windows}.sh` | 平台工具链适配层（2026-10-23 拆分）：按 uname 被 `dev.sh` 加载，产出 JAVA_HOME/ADB/JADX/AAPT2 等解析变量；linux 层含 Termux/DSH 分支（包管理器路径 + on-device 内存封顶 + JDK 硬编码路径修正） |
 | `adapt_new_version.py` | 宿主新版本适配校验（对基线反编译产物核对挂载点存活） |
-| `rain-decrypt.py` | Rain 参考模块字符串解密（逆向期工具，算法见 skill `reverse-decompile/references/rain-decrypted-strings.md`） |
+| `rain-decrypt.py` | Rain 参考模块字符串解密（逆向期工具，算法见 skill `reverse-decompile/references/rain-decrypted-strings.md`） || `mtmcp.py` | MT 管理器 MCP 客户端（2026-10-23）：on-device 直读 dex/smali，不反编译不吃内存；子命令 outline/smali/strings/names/smaliq/list。依赖手机上 MT 开着其 MCP server（`MT_MCP_URL`，默认 127.0.0.1:8787/mcp） |
+| `check_points.py` | 挂载点存活核对（MT MCP 版，on-device）：对指定 APK 逐点验「类在+方法在+参数数同」，SPEC 为 JSON；退出码可作门禁。桌面机全量路线用 `adapt_new_version.py` |
 | `bin/apktool`、`bin/jadx` | **垫片**：把项目内 jar/bundle 暴露成 PATH 上的可执行名（`dev.sh` 会把它加进 PATH，按 PATH 探测工具链的第三方脚本因此不再误报"缺 apktool/jadx"） |
 
 ## 本地工具链（不入库；`dev.sh` 按"项目内便携版优先 → 本机安装兜底"自解析）
