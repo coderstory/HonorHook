@@ -92,3 +92,31 @@
   教训：收口前必须确认管道只承载目标内容；有疑问先上只读探针。
 - 遗留：开屏 `SplashAdvertisementActivity` 走自有渲染（非 BaseAdView），本轮已加
   onCreate-finish 秒退（见 HonorQinxuanHook splashAd 任务）；若 SDK 更换开屏形态需重对。
+
+## 六、终局架构（2026-10-25 真机全绿：用户确认「没广告了」）
+
+定位过程：运营卡断根后 banner 仍在 → 用户截图 + 「开会员免广告」提示 → 顺藤定位
+`com.hihonor.library.advertisement.manager.AdsManager.isShowAds(Z)` = 全 App 广告展示
+**总判定门**（会员免广告的权益实现点）。
+
+### 最终挂载（HonorQinxuanHook，7 点）
+
+| 点 | 语义 | 层级 |
+|---|---|---|
+| `AdsManager.isShowAds → false` | **广告总判定门恒假**（会员免广告等效实现，不伪造会员态） | 上游总闸 |
+| `OperationsManager.updateBannerData` 不 proceed | 运营 banner 写入断根 | 防线1 |
+| `updateHealthHomepagePopupData` 不 proceed | 首页营销弹窗断根 | 防线1 |
+| `updateOperationsItem` p0 置空 proceed | 运营条目断根（**参数替换型**，suspend 零 null 风险） | 防线1 |
+| ~~updateCommercialInfo/updateSpecialCard 不 proceed~~ | **已撤销**：suspend 返 null 炸启动协程 = 启动白屏（真机实证） | 教训 |
+| `SplashAdvertisementActivity.onCreate` → finish | 开屏 Activity 空壳秒退（BaseAdView 清内容后白屏假死） | 兜底 |
+| ~~getHomeModulesData → empty~~ | **已撤销**：过度拦截，功能卡同管道 → 首页白屏（真机实证） | 教训 |
+
+### 关键认知
+
+1. 「天天赚现金」大 banner 疑似真身 = **全局投放 DeliveryCampaign**（Room 库
+   DeliveryCampaignEntity，`GlobalDeliveryDataHelper.getGlobalDeliveryData`）——isShowAds
+   断后若残留，下一刀挂这里（未需要）。
+2. 两层教训已入手册：**收口前确认管道纯度**（getHomeModulesData 白屏）；**suspend 钩子
+   不 proceed 返 null 炸协程**（update* 白屏）——修正挂法 = 参数替换（置空列表）或仅拦 void。
+3. 会员促销（IAP 收银台内页）维持不挂结论；isShowAds 门断后收银台权益判定不受影响
+   （isShowAds 是广告展示门，非会员态本身——无越权副作用）。
