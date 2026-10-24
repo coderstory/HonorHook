@@ -41,6 +41,8 @@ class XhsPendingTest {
 
         assertEquals("ji9.b", pending.first { it.id == "xhs:batchSave.saveClick.invoke" }.className)
         assertEquals("ab9.r1", pending.first { it.id == "xhs:videoSave.noteSaveEntry" }.className)
+        // 9.50 无 videoStore 闸（基线显式 null）——该版本走 h0/e0
+        assertFalse(pending.any { it.id == "xhs:videoSave.albumSink.videoStore" })
     }
 
     @Test
@@ -53,12 +55,31 @@ class XhsPendingTest {
     }
 
     @Test
-    fun `batch pending always contains the album sink points`() {
-        // 落盘闸是未混淆点（xec.w），跨版本同名 ⇒ 不随版本坐标变化
+    fun `batch pending always contains the album sink points for adapted-less versions`() {
+        // 9.50 时代落盘闸按「未混淆跨版本同名」直挂；9.51 起升格进 XhsPoints 走版本分发
+        // （9.51 的 xec.w 整类消失 → h0/e0 不进 pending，改挂 videoStore 闸，见 XhsPoints 9.51 套注释）
         val pending = XhsBatchSave.buildPending(null)
 
         assertTrue(pending.any { it.id == "xhs:videoSave.albumSink.h0" })
         assertTrue(pending.any { it.id == "xhs:videoSave.albumSink.e0" })
+    }
+
+    @Test
+    fun `batch pending uses the 9_51_0 override coordinates`() {
+        val pending = XhsBatchSave.buildPending("9.51.0")
+
+        assertEquals("g75.h", pending.first { it.id == "xhs:videoSave.downloader.entry" }.className)
+        assertEquals("pb9.o1", pending.first { it.id == "xhs:videoSave.noteSaveEntry" }.className)
+        // videoClick：9.51 起正式不挂载——9.50 它的价值（抢在 r1.b 前拦点击）已被 noteSaveEntry
+        // 上移覆盖（点击 → r1.b 拦 = view 不弹+请求不发+弹卡直下原片，效果等价）；yi9.f 实为
+        // 属性 getter 分发 lambda（完整 smali 证伪点击处理器），见 XhsPoints 9.51 注释
+        assertFalse(pending.any { it.id == "xhs:batchSave.videoSaveClick.invoke" })
+        // xec.w 整类消失：h0/e0 诚实跳过，落盘闸换 videoStore（VideoStorageManager#a）
+        assertFalse(pending.any { it.id == "xhs:videoSave.albumSink.h0" })
+        assertFalse(pending.any { it.id == "xhs:videoSave.albumSink.e0" })
+        val videoStore = pending.first { it.id == "xhs:videoSave.albumSink.videoStore" }
+        assertEquals("dz8.t", videoStore.className)
+        assertEquals(5, videoStore.paramCount)
     }
 
     @Test

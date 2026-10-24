@@ -222,22 +222,36 @@ object XhsBatchSave {
                 description = "X5 保存下载总入口·b75.h#e（CommercialHorizonBridge_VideoDownloader 添加下载任务，h.java:227-330 反编译实证；save→e→XYDownloader 下载→n/fs2.b 拷贝 全链 head）→ 接管中不 proceed：宿主零下载零落盘零进度回调，模块弹卡直下原片",
                 dex = DexHint(strings = listOf("addDownloadTask 强制下载")),
         ) }
-        pending += MountEngine.SimpleTask(
-                className = "xec.w",
+        // 落盘闸坐标走 XhsPoints（9.51 xec.w 整类消失 → override null = 不进 pending，诚实跳过）；
+        // 拦截语义见 mountAlbumSink。
+        XhsPoints.cls(hostVersion, "albumCopy.h0")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = "h0",
                 paramCount = 5,
                 returnType = "boolean",
                 id = "xhs:videoSave.albumSink.h0",
-                description = "X5 视频落盘拷贝断根·公共工具 w.h0(File,relDir,name,delSrc,mime)（未混淆 public final，w.java:730 签名实证）→ DCIM+Camera/+video/mp4 三判据命中不 proceed 返 true 假成功，图片等其余落盘照常放行",
-            )
-        pending += MountEngine.SimpleTask(
-                className = "xec.w",
+                description = "X5 视频落盘拷贝断根·公共工具 w.h0(File,relDir,name,delSrc,mime)（9.50 未混淆 w.java:730 签名实证）→ DCIM+Camera/+video/mp4 三判据命中不 proceed 返 true 假成功，图片等其余落盘照常放行",
+            ) }
+        XhsPoints.cls(hostVersion, "albumCopy.e0")?.let { pending += MountEngine.SimpleTask(
+                className = it,
                 methodName = "e0",
                 paramCount = 4,
                 returnType = "boolean",
                 id = "xhs:videoSave.albumSink.e0",
-                description = "X5 视频落盘拷贝断根·公共工具 w.e0(File,relDir,name,mime)（未混淆，w.java:619 签名实证，内部委托 h0(...,true,...) w.java:621）→ 同 h0 三判据拦截，两分支共用 mountAlbumSink",
-            )
+                description = "X5 视频落盘拷贝断根·公共工具 w.e0(File,relDir,name,mime)（9.50 w.java:619 签名实证，内部委托 h0(...,true,...) w.java:621）→ 同 h0 三判据拦截，两分支共用 mountAlbumSink",
+            ) }
+        // 9.51 起新形态落盘闸：xec.w 消失后，视频拷贝收口到 VideoStorageManager#a(t,?,path,Uri,Z)
+        // （static void，串锚 "saveVideo start copy file."）。语义窄（只服务视频保存链），
+        // 拦截判据 = savePending 窗，无需 h0/e0 的 DCIM/mime 三判据；见 mountAlbumSinkVideoStore。
+        XhsPoints.cls(hostVersion, "albumCopy.videoStore")?.let { pending += MountEngine.SimpleTask(
+                className = it,
+                methodName = "a",
+                paramCount = 5,
+                returnType = "void",
+                id = "xhs:videoSave.albumSink.videoStore",
+                description = "X5 视频落盘拷贝断根·9.51 VideoStorageManager#a → savePending 非空即不 proceed（宿主零拷贝），接管空窗放行原生保底",
+                dex = DexHint(strings = listOf("saveVideo start copy file.", "storeVideo path = nil，")),
+            ) }
         XhsPoints.cls(hostVersion, "aigcEditLaunch")?.let { pending += MountEngine.SimpleTask(
                 className = it,
                 methodName = "invoke",
@@ -350,6 +364,7 @@ object XhsBatchSave {
             }
             "xhs:videoSave.albumSink.h0" -> mountAlbumSink(session, task, module)
             "xhs:videoSave.albumSink.e0" -> mountAlbumSink(session, task, module)
+            "xhs:videoSave.albumSink.videoStore" -> mountAlbumSinkVideoStore(session, task, module)
             else -> mountClick(session, task, module)
         }
 
@@ -484,6 +499,27 @@ object XhsBatchSave {
         val name = args.getOrNull(2) as? String ?: return false
         return dir.contains("DCIM") && name.contains("Camera/") && args.last() == "video/mp4"
     }
+
+    /**
+     * 9.51 落盘闸（2026-10-24）：xec.w 消失后视频拷贝收口到 `VideoStorageManager#a(t,?,path,Uri,Z)`
+     * （static void，把已下载文件拷进 MediaStore Uri；串锚 "saveVideo start copy file."）。
+     * 拦截判据比 h0/e0 简化：a() 只服务视频保存链（VideoStorageManager.saveVideo 专用），语义本就窄，
+     * **savePending 窗非空即拦**（不 proceed = void，宿主零拷贝零假成功问题）；空窗放行原生保底
+     * （失败卡的兑现路径，同 [mountAlbumSink] 的窗语义）。与 h0/e0 并存互不干扰：9.51 走本点、
+     * 旧版本走 h0/e0（XhsPoints 按版本分发，同一轮 pending 只会出现一套）。
+     */
+    private fun mountAlbumSinkVideoStore(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule): MountEngine.Result =
+        session.mount(task, module, hostLoader!!) { chain ->
+            if (!XhsVideoSave.savePendingActive()) {
+                module.log(Log.INFO, MountEngine.TAG,
+                    "$JUDGE_PREFIX 未接管（解析失败/拉黑）→ 放行 VideoStorageManager 原生保底")
+                return@mount chain.proceed()
+            }
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX save_to_album 落盘已断（9.51 VideoStorageManager.a）")
+            session.judge(module, task, JUDGE_PREFIX, "save_to_album 落盘已断（VideoStorageManager.a）")
+            null // void 方法：不 proceed = 不拷贝，无返回值语义可伪造
+        }
 
     /**
      * 分享链接后台解析 → X4 HD 询问发起（a59.q 点击轨两路共用：拦截主路 + 回落路，2026-10-19）。

@@ -370,3 +370,64 @@ ART 对「成员不存在」与「被 hidden-API 黑名单拒绝」抛**同一�
 **2026-10-20 16:48 真机复核（宿主 xhs 9.50.0，新包）**：`XhsHook·X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7`
 （主进程与 `:pushservice` 进程各一轮）—— 与修复前**逐字一致** ⇒ 换版本源对 9.50.x 无任何挂载点影响；
 同轮 installer 复测 `installed 11/11` + 「宿主版本与 hook 基线一致: 14.0.38.301」。
+
+## 9.51.0 适配（2026-10-23，MT MCP 逐点核对）
+
+设备 OTA 到 9.51.0（versionCode 判据行「宿主 9.51.0」实证）。当轮真机判据：
+`X2 2/3`（X2b 失败）· `X5 4/7`（videoSaveClick / albumSink.h0 / albumSink.e0 失败）· X4 1/1；
+saveClick DexKit 漂移命中 ji9.b→yi9.b（救回）。
+
+### 坐标迁移（MT MCP dex outline / smali 检索实证）
+
+| 点 | 9.50 | 9.51 | 证据 |
+|---|---|---|---|
+| x2b | nd8.j | **ce8.j** | 串锚 `disableAiWaterMark is` + `andr_image_save_white_bg_optimized` 在 9.51 的唯一宿主；`b(Context,Z)Bitmap` 签名不变 |
+| saveClick | ji9.b | **yi9.b** | 真机漂移命中行；落表转正 |
+| videoClick | a59.q | **9.51 起正式不挂载（无需）** | ① yi9.f 误判澄清：完整 smali 证伪——它是 3-case 属性 getter 分发 lambda（纯读 g.a/g.b/g.c 字段），非点击处理器，同包同 ctor 是巧合；② 功能上 9.50 它的价值（抢在 r1.b 前拦点击）已被 noteSaveEntry 上移覆盖：9.51 点击 → r1.b(pb9.o1) 拦 = view 不弹+请求不发+弹卡直下原片，效果等价。未来 noteSaveEntry 失效且需前置拦截时再重启此点 |
+| noteSaveEntry | ab9.r1 | **pb9.o1** | 串锚 `save video failed:` 唯一宿主；`b` 9 参同构 |
+| aigcEditLaunch | mg4.b | **rg4.b** | mg4.b 在 9.51 成 0 方法空壳；rg4.b ctor (VideoEditDownloadWidget,I) + 串锚 `tag_video_edit_download_loading` |
+| downloaderEntry | b75.h | b75.h（不变） | 跨 9.49/9.50/9.51 存活 |
+| albumSink h0/e0 | xec.w | **null（诚实跳过）** | xec.w 整类消失；视频拷贝疑似并入 VideoStorageManager（`dz8/t`，"saveVideo start copy file"）但其入口 `a(t,String,String,Uri,Z)` 与原 `(File,relDir,name,delSrc,mime)boolean` 形状不同——错挂会拦全 App 媒体落盘。downloaderEntry 接管时宿主零下载零落盘，落盘闸仅为第二层防线；定位后补（XhsPoints 已把这两点升格进表走版本分发） |
+
+### 教训
+
+- 9.51 的 R8 把「跨版本稳定」的旧 w（xec.w）也删了——「未混淆 = 留在 hook 文件不进表」的口径
+  不再安全，已全部升格进 XhsPoints 走版本分发。
+- 混淆类定位靠**源文件名字符串**（AimAppView.kt / DownloadItemIfVip.java 等 R8 保留的 source 名）
+  + 功能串锚，比盲扫类形状快一个量级。
+
+## 锚覆盖审计（2026-10-24，「小版本大面积失效」的机制化答案）
+
+9.51 适配实证：**强锚点已经在自动跨版本**——旧包在 9.51 上 noteSaveEntry / aigcEditLaunch /
+downloaderEntry 直连类全部消失/变形，却未进失败清单（4/7 的另外 3 个成功）= DexKit 兜底轨按
+内容锚自动命中了新家。真正的手工点只剩 videoClick 一个。
+
+| 点 | 锚 | 跨版本行为 |
+|---|---|---|
+| saveClick | 串（download blocked… / onDownloadClick, noteId=） | 9.51 自动漂移命中 yi9.b，零人工 |
+| downloaderEntry | 串（addDownloadTask 强制下载） | 9.51 自动命中 g75.h |
+| noteSaveEntry | 串（save video failed:） | 9.51 自动命中 pb9.o1 |
+| aigcEditLaunch | 串（tag_video_edit_download_loading） | 9.51 自动命中 rg4.b |
+| X2b | 串×3（disableAiWaterMark is 等） | 9.51 自动命中 ce8.j |
+| X1×3 / X4 / X2a / X2c | 未混淆类 / 运行时注解 | 无需锚 |
+| **videoClick** | **无稳定锚**（lambda 方法体零字符串、字段类型含 R8 名 → classFieldTypes 锚随版本失效） | **唯一必须每版手写坐标的点**（9.51 = yi9.f，靠同包 sibling 惯性 + 实例化点甄别定位） |
+| albumSink | 9.50=h0/e0（xec.w 已消失）；**9.51=VideoStorageManager#dz8.t#a**（串锚 saveVideo start copy file.，已挂 videoStore 点） | 已补 |
+
+**结论**：小版本更新时，强锚点（9/14）由 DexKit 兜底轨自动存活；需要人工的只剩 videoClick 坐标 +
+spec 核对（`tools/check_points.py` 半小时流程）。结构性重构（模板换链/工具类重写）任何机制都救不了，
+但会被诚实 NOT_RESOLVED，不炸宿主。videoClick 若未来想消除手写：需给 DexHint 扩「调用关系」维度
+（invoke 调 NoteFeed.u0 后接下载链的 lambda），属引擎增强项。
+
+### getShortUrl 修复（2026-10-24 真机全绿）
+
+症状：挂载 5/5 全绿但保存必失败——解析链第 2 步 `getShortUrl 失败`（诊断日志补齐后定位 =
+`NoSuchFieldException: No field Companion in i3c.d`）。根因：9.51 服务定位器改名 **i3c.d → z3c.d**
+（`l3c/y` smali 实证 `sget z3c/d;->Companion` + `e(Class)`→ShareService，模式同 9.50；
+z3c.d 类名靠锚串 getShortUrlObservableIfNeed success 所在类 l3c/y 的调用点反查）。
+修复 = hostShortUrl 定位器按序试探 `z3c.d`/`i3c.d`；三处静默 null 分支补诊断日志（本轮教训：
+静默 null 是诊断盲点，失败路径必须留一行）。
+另：9.51 Observable 直发 String（w2c/m check-cast 实证，q1c.q 包装类被 R8 复用成无关类——
+又一起同名异类），既有 String 直发兼容分支接住。
+
+**2026-10-24 10:15 真机复核**：连续 3 篇图文「分享链接解析成功」（图3/图6视频1/图1视频1），
+可下文件数逐篇正确，图片保存主链全通。

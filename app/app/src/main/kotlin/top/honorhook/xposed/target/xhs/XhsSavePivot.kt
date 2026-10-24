@@ -215,7 +215,17 @@ object XhsSavePivot {
     private fun hostShortUrl(longUrl: String, module: XposedModule): String? = runCatching {
         val loader = XhsVideoSave.hostLoaderOrThrow()
         val serviceCls = Class.forName("com.xingin.sharesdk.api.ShareService", true, loader)
-        val companion = Class.forName("i3c.d", true, loader).getDeclaredField("Companion").get(null)
+        // 服务定位器类名随 R8 漂移：9.50 = i3c.d（u2c/y.java:51 锚）；9.51 = z3c.d
+        // （l3c/y smali 实证 sget z3c/d;->Companion 后 e(Class)→ShareService；l3c/y 自带锚串
+        // getShortUrlObservableIfNeed success）。按序试探，新增版本往后追加即可
+        val companion = sequenceOf("z3c.d", "i3c.d").firstNotNullOfOrNull { name ->
+            runCatching {
+                Class.forName(name, true, loader)
+                    .getDeclaredField("Companion")
+                    .apply { isAccessible = true }
+                    .get(null)
+            }.getOrNull()
+        } ?: throw NoSuchFieldException("服务定位器 Companion 未找到（试过 z3c.d / i3c.d）")
         val e = companion.javaClass.methods.first {
             it.name == "e" && it.parameterCount == 1 && it.parameterTypes[0] == Class::class.java
         }
@@ -223,7 +233,12 @@ object XhsSavePivot {
         val service = e.invoke(companion, serviceCls)
         val getShortUrl = serviceCls.methods.first { it.name == "getShortUrl" && it.parameterCount == 1 }
         getShortUrl.isAccessible = true
-        val observable = getShortUrl.invoke(service, longUrl) ?: return@runCatching null
+        val observable = getShortUrl.invoke(service, longUrl) ?: run {
+            // 9.51 诊断（2026-10-24）：三处静默 null 曾无日志，getShortUrl 失败无法定位分支——各补一行
+            module.log(Log.WARN, MountEngine.TAG,
+                "$JUDGE_PREFIX getShortUrl 诊断：Observable=null（service=${service.javaClass.name}）")
+            return@runCatching null
+        }
         // 3s 超时：timeout(long, TimeUnit) 返回同型 Observable（仍 Object 持有，不落 rx 类型）
         val timed = runCatching {
             observable.javaClass
@@ -249,12 +264,21 @@ object XhsSavePivot {
                 .invoke(timed) as? Iterable<*>)?.iterator()
             if (iter != null && iter.hasNext()) iter.next() else null
         }
-        if (emitted == null) return@runCatching null
-        // 发射值 = q1c.q 包装（u2c/y.java:70 qVar.a()）；String 直发形态防御兼容
+        if (emitted == null) {
+            module.log(Log.WARN, MountEngine.TAG,
+                "$JUDGE_PREFIX getShortUrl 诊断：发射值=null（timed=${timed.javaClass.name}；" +
+                    "9.51 疑 AutoDispose scope 空流——blockingFirst(default) 在无生命周期 scope 的 hook 线程拿不到发射）")
+            return@runCatching null
+        }
+        // 发射值 = 短链包装（9.50 = q1c.q#a()；9.51 实证 Observable 直发 String，w2c/m check-cast 实证）
         if (emitted is String) return@runCatching emitted
         val a = emitted.javaClass.methods.firstOrNull {
             it.name == "a" && it.parameterCount == 0 && it.returnType == String::class.java
-        } ?: return@runCatching null
+        } ?: run {
+            module.log(Log.WARN, MountEngine.TAG,
+                "$JUDGE_PREFIX getShortUrl 诊断：发射值非 String 且无 a():String 方法（emitted=${emitted.javaClass.name}）")
+            return@runCatching null
+        }
         a.isAccessible = true
         a.invoke(emitted) as? String
     }.onFailure {
