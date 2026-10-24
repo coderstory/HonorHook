@@ -76,9 +76,12 @@ require() { [ -x "$1" ] || [ -f "$1" ] || die "缺少文件: $1（工具链未�
 pick_python() {
   local c
   if [ -n "${HONORHOOK_PYTHON:-}" ] && [ -x "${HONORHOOK_PYTHON}" ]; then printf '%s\n' "$HONORHOOK_PYTHON"; return 0; fi
+  # 候选必须真实跑通才算数：Windows 商店的 python3 stub 可执行但只会打印「Python was not found」
   for c in "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" \
-           "$(command -v python3 || true)" "$(command -v python || true)"; do
-    if [ -n "$c" ] && [ -x "$c" ]; then printf '%s\n' "$c"; return 0; fi
+           "$(command -v python3 || true)" "$(command -v python || true)" "$(command -v py || true)"; do
+    if [ -n "$c" ] && [ -x "$c" ] && "$c" -c 'pass' >/dev/null 2>&1; then
+      printf '%s\n' "$c"; return 0
+    fi
   done
   return 1
 }
@@ -197,6 +200,7 @@ HonorHook 开发工具
   apkinfo <apk>            aapt2 dump badging 摘要（包名/版本/权限）
   pull-apk <包名>          从设备拉取指定包的 APK（含 split）到 system-files/<包名>/
   wp-probe          拉取当前桌面壁纸视频 → 本地 ffprobe 量化（码率/fps/时长；W16 画质验证闭环）
+  mt-mcp <list|call|raw>   MT 管理器 MCP 直连（tools/mt_mcp.py；call <tool> [json-args]）
   exec <命令...>           带本项目工具链环境（PATH/JAVA_HOME/ANDROID_HOME）执行任意命令
 EOF
     ;;
@@ -870,6 +874,12 @@ EOF
     "$ffprobe_bin" -v error -show_entries \
       format=duration,bit_rate:stream=codec_name,width,height,r_frame_rate,avg_frame_rate,nb_frames \
       -of default=noprint_wrappers=1 "$out/unlock_video.mp4"
+    ;;
+
+  mt-mcp)
+    shift
+    PY_BIN="$(pick_python)" || die "未找到 python（tools/dev.sh env 查看）"
+    "$PY_BIN" "$SCRIPT_DIR/mt_mcp.py" "$@"
     ;;
 
   *)

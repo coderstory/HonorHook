@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cottage
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Handyman
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,6 +43,7 @@ import top.honorhook.ui.component.HonorHookTheme
 import top.honorhook.ui.screen.FeaturesScreen
 import top.honorhook.ui.screen.HomeScreen
 import top.honorhook.ui.screen.SettingsScreen
+import top.honorhook.ui.screen.ToolboxScreen
 import top.honorhook.ui.update.UpdateDialog
 import top.honorhook.ui.update.UpdateState
 import top.yukonga.miuix.kmp.basic.Icon
@@ -132,6 +134,8 @@ private fun AppRoot() {
         listOf(
             NavigationItem(label = Glitch.text("首页"), icon = Icons.Rounded.Cottage),
             NavigationItem(label = Glitch.text("功能"), icon = Icons.Rounded.Extension),
+            // 第 4 tab：工具箱（28 号规格书 §3）——root 开关/冻结/活性自检
+            NavigationItem(label = Glitch.text("工具箱"), icon = Icons.Rounded.Handyman),
             NavigationItem(label = Glitch.text("设置"), icon = Icons.Rounded.Settings),
         )
     }
@@ -159,6 +163,7 @@ private fun AppRoot() {
             when (selectedTab) {
                 0 -> HomeScreen(bottomInnerPadding = bottomBarPadding)
                 1 -> FeaturesScreen(bottomInnerPadding = bottomBarPadding)
+                2 -> ToolboxScreen(bottomInnerPadding = bottomBarPadding)
                 else -> SettingsScreen(bottomInnerPadding = bottomBarPadding)
             }
         }

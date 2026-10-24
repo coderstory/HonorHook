@@ -66,3 +66,6 @@ tools/android-user/
 # DSH 项目技能根（.claude/skills 的同步副本，tools/sync-skills.sh 生成）
 .agents/
 libs/xhs-dn-core/build/.transforms/
+
+# 会话内临时产物（截图/草稿，含真机个人信息，绝不入库）
+scratch/

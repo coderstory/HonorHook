@@ -1,0 +1,17 @@
+{"prop":"msc.launcher.unlock_animation_level","value":"1","result":"no_effect","evidence":"evidence/p1_launcher.png","ts":"2026-10-25T00:30:00+08:00","card":"P1","note":"readback_ok+重启桌面存活；无静态视觉判据（动画档位需录屏对照）"}
+{"prop":"msc.launcher.app_launch_return_anim_level","value":"1","result":"no_effect","evidence":"evidence/p1_launcher.png","ts":"2026-10-25T00:30:00+08:00","card":"P1","note":"readback_ok；同上无视觉判据"}
+{"prop":"msc.launcher_gesture_snapshot_enable","value":"true","result":"untestable","evidence":"","ts":"2026-10-25T00:30:00+08:00","card":"P1","note":"辅助功能/桌面设置无对应 UI 面，语义不明"}
+{"prop":"msc.config.dual_5g_show_switch","value":"true","result":"no_effect","evidence":"t1_data_5g_off_check2.png(设备侧,含个人信息);p21_data_5g_on.png","ts":"2026-10-25T00:30:00+08:00","card":"P2","note":"A/B 定案：开发者选项UI开关OFF+prop=true→移动数据页「启用5G」消失=prop独立无效；唯一控制面=UI开关(show_5g, HwSystemManager/NV通道,44号)；与support_5g_mode成对验证"}
+{"prop":"msc.settings.support_5g_mode","value":"true","result":"no_effect","evidence":"同上成对","ts":"2026-10-25T00:30:00+08:00","card":"P2","note":"同 dual_5g_show_switch"}
+{"prop":"msc.config.dp_pc_mode","value":"true","result":"untestable","evidence":"evidence/暂缺(p22_cast.png在scratch)","ts":"2026-10-25T00:30:00+08:00","card":"P2","note":"无DP底座；cast设置页/更多连接页无「电脑模式」入口"}
+{"prop":"magic.config.enable_egl_cpu_throttle","value":"0","result":"no_effect","evidence":"","ts":"2026-10-25T00:30:00+08:00","card":"P3","note":"readback_only；性能项无 UI 判据（功耗需长测）"}
+{"prop":"persist.sys.hn_screen_freq","value":"3","result":"no_effect","evidence":"evidence/t3_refresh_rate.png","ts":"2026-10-25T00:30:00+08:00","card":"P3","note":"屏幕刷新率页三档(智能185/标准60/高185)无新增，本机本就185Hz满配"}
+{"prop":"persist.sys.hn.forcedark_policy","value":"0","result":"no_effect","evidence":"evidence/t3_forcedark_0.png","ts":"2026-10-25T00:30:00+08:00","card":"P3","note":"深色模式页无可见变化；0/2 语义未分辨"}
+{"prop":"persist.bt.max.a2dp.connections","value":"3","result":"untestable","evidence":"","ts":"2026-10-25T00:30:00+08:00","card":"P3","note":"需双蓝牙设备并发连接，未写prop"}
+{"prop":"msc.camera.livephoto_enable","value":"true","result":"no_effect","evidence":"evidence/t4_cam1_livephoto_v2.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"拍照模式条无「实况」项；判据面或收窄到拍照设置页内子项，二轮复核"}
+{"prop":"msc.camera.video_movie_mode","value":"true","result":"no_effect","evidence":"evidence/t4_cam2_videomovie.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"录像/拍照模式条无电影模式入口；同上待设置页二轮"}
+{"prop":"msc.camera.watermark","value":"true","result":"no_effect","evidence":"evidence/t4_cam3_settings_page3.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"相机设置页无新水印项"}
+{"prop":"msc.camera.honor_watermark","value":"true","result":"no_effect","evidence":"evidence/t4_cam4_honor_wm.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"取景器/模式条无变化；基线为空值，已删除回滚"}
+{"prop":"msc.camera.gesture_recognition","value":"true","result":"no_effect","evidence":"evidence/t4_cam5_gesture.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"无可见变化；手势快门或在拍照设置内"}
+{"prop":"msc.camera.support_720p_21_9","value":"true","result":"no_effect","evidence":"evidence/t4_cam6_720p.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"分辨率面板未复核（录像1080·30快捷位无变化）；基线空值已删"}
+{"prop":"msc.camera.underwater","value":"true","result":"no_effect","evidence":"evidence/t4_cam7_underwater.png","ts":"2026-10-25T00:30:00+08:00","card":"P4","note":"无可见变化；基线空值已删"}
