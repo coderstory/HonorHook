@@ -116,6 +116,7 @@ object FeatureCatalog {
                 Feature(KEY_THEME_AD_OFF, R.string.feature_theme_ad_off_title, R.string.feature_theme_ad_off_desc),
             ),
             baselineVersion = "20.1.63.305",   // aapt2 实证（原 ThemeStoreHook 私有常量上提）
+            extraVersions = setOf("20.1.65.302"),   // 2026-10-23 真机升级版：49 点全存活，仅 3 混淆类改名（ThemeStoreMap_20_1_65_302）
         ),
         Target(
             "com.android.packageinstaller", R.string.target_name_installer,
@@ -248,6 +249,7 @@ object FeatureCatalog {
                 Feature(KEY_XHS_TAKEOVER_SAVE, R.string.feature_xhs_takeover_save_title, R.string.feature_xhs_takeover_save_desc),
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
+            extraVersions = setOf("9.49.1", "9.51.0"),  // 9.51.0 = 2026-10-23 真机升级版（XhsPoints 9.51 套；albumCopy 落盘闸未定位诚实跳过）
         ),
         // 壁纸两宿主：功能入口已归并到「系统桌面」卡（见 launcher Target），此处留壳供
         // scope 页与 baselineVersionOf 查表——hidden 且 features 为空，UI 不出卡。

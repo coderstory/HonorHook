@@ -18,8 +18,9 @@ object ThemeStoreHook : TargetHook {
 
     override val packageName = "com.hihonor.android.thememanager"
 
-    /** 版本选表：默认套 = 基线点（行为与迁移前一致）；适配其他宿主版本时在其上追加精确套。 */
+    /** 版本选表：精确套优先，默认套（基线点）任何版本兜底。 */
     private val versionTables = listOf(
+        HostVersion.Table(versions = setOf("20.1.65.302")) { THEME_POINTS_20_1_65_302 },
         HostVersion.Table(versions = emptySet()) { THEME_POINTS_20_1_63_305 },
     )
 
@@ -38,15 +39,14 @@ object ThemeStoreHook : TargetHook {
             // 数据表 ThemeStoreMap_20_1_63_305.kt 手维护。
             val actual = HostVersion.resolveHostVersion(apkPath, packageName)
             val pick = HostVersion.pick(versionTables, actual)
-            // 盲挂留痕（评审 R7：把隐式行为变显式日志）：默认套任意版本兜底，实际版本偏离基线 = 按基线表盲挂，
-            // 判据以 installed N/M 为准（与 MountEngine.checkHostVersionOnce 的 WARN 互补：那条说风险，这条说行为）。
+            // 盲挂留痕（评审 R7）：精确套未命中（含未知新版本）= 按默认套盲挂；命中精确套则自检口径
+            // 与 InstallerHook 同构（matchedVersion 为期望版本，65.302 命中精确表，不再报基线偏离）。
             val baseline = FeatureCatalog.baselineVersionOf(packageName)
-            if (actual != null && baseline != null && actual != baseline) {
+            if (pick.matchedVersion == null && actual != null && baseline != null) {
                 module.log(Log.INFO, MountEngine.TAG, "宿主 $actual 未适配，按基线 $baseline 挂载表盲挂，判据以 installed N/M 为准")
             }
-            // 期望版本 = 基线：theme 只有默认套，偏离基线就是「按基线盲挂」，自检要报的就是这个偏离。
             /** 共享挂载基建（版本自检/重试循环/失败分级/汇总日志/方法解析）。闸门 = 功能开关（表级过滤下沉到引擎）。 */
-            val session = MountEngine.open("ThemeStoreHook", packageName, apkPath, baseline, RemoteConfig)
+            val session = MountEngine.open("ThemeStoreHook", packageName, apkPath, pick.matchedVersion ?: baseline, RemoteConfig)
             val pending = pick.tasks
                 .map { it.toMountTask() }
 
