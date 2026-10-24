@@ -60,3 +60,17 @@ init(ctx, threadId, iccid, editToMenu, editRoot, menuGroup, params)
 - 「查看应用」推广卡云端未下发无法目检，同 id 同链路（SimpleActionLayout）推断已死，卡出现时补验
 - 验证码服务门禁：`SmartSmsUtilControl.getIntelligentIpMessageEnable`（T1 探针已挂，可观测当前值）；**断网场景用户指示不测**
 - 卡片数据链全貌（T3 定位）：`TedMessage.action` JSON（"menus" 数组，Room DB action 列）→ `TedMsgItemProcessor.doBindCard/doBindTextAction` → `SimpleActionLayout.b` 统一收口。**不 hook getAction()**：TedMessageDao_Impl 落库直读 getter，全局改返回值会洗 DB 列 = 持久突变不可回滚
+
+## 追记：T4 = AIM 富媒体推广按钮（2026-10-23）
+
+**「打开应用」按钮复发实证**：插件 10.0.42.308 起部分卡片走**富媒体模板链**（`duoqu_rich_item_group`
+容器，`card_bg_top/title_view/recycler_view` 布局，`com.hihonor.intelligentmessage:id/*`）——不经
+`SimpleActionLayout`，T3 的 json 置空管不到（真机：T3「json 已置空」判据行在刷、按钮照样出现）。
+
+- 按钮本体 = `com.ted.sms.feature.ui.aim.app.AppDownloadButton : HnProgressButton`
+  （广告 SDK 下载按钮，类名未混淆留名；MT MCP smali 实证唯一消费点 =
+  `AimAppView.kt`（9.51 混淆名 j1，R8 漂移）+ `AimAppLayoutBinding.appButton`）
+- 处置 = 构造后 `setVisibility(GONE)`（视图级补杀：数据源在云端 AimApp 模板，客户端无干净裁剪口；
+  GONE 不留空块，卡片正文不动）。挂载仍经 T2 载体捕获插件 CL，失败复位随会话页重试。
+- 教训：插件「类名可读」不等于「链路不变」——模板容器换链（SimpleActionLayout → AIM 富媒体）
+  才是本次复发根因；后续插件升级先跑 UI dump 看按钮所在容器 id 归属哪条链。

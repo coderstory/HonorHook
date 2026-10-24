@@ -21,8 +21,8 @@ import top.honorhook.xposed.target.logDisabled
  * 拿不到——挂载策略见 [mountMenuFactory] 注释。
  *
  * 功能与开关：
- * - [FeatureCatalog.KEY_MMS_AD_OFF] 广告净化（T2 底部自定义菜单 + T3 卡片按钮/应用推广卡，全部经
- *   同一载体事件驱动挂载，见 [mountMenuFactory]）。验证码功能归 ime 目标（ImeHook），mms 侧无挂载点。
+ * - [FeatureCatalog.KEY_MMS_AD_OFF] 广告净化（T2 底部自定义菜单 + T3 卡片按钮/应用推广卡 + T4 AIM
+ *   富媒体推广按钮，全部经同一载体事件驱动挂载，见 [mountMenuFactory]）。验证码功能归 ime 目标（ImeHook），mms 侧无挂载点。
  *
  * 判据：真机冷启短信 → `MmsHook: installed N/M`；广告净化另有两条主轨生效行
  * （`mms-hook 生效: mms:TedMenuProcessor.findMenus` / `mms:SimpleActionLayout.b`——两轨同为
@@ -78,6 +78,18 @@ object MmsHook : TargetHook {
 
     /** TedMenuProcessor 桥接持有字段名（jadx 实证；仅 HW 分支形态用到，取不到按字段扫描兜底）。 */
     private const val FIELD_PROCESSOR = "processor"
+
+    /**
+     * T4 目标：AIM 富媒体卡的应用推广按钮（「打开应用」）。2026-10-23 真机实证：插件 10.0.42.308 起，
+     * 富媒体模板（duoqu_rich_item_group 容器，card_bg/title_view/recycler_view 布局）不经
+     * [CLS_SIMPLE_ACTION_LAYOUT]——T3 的 json 置空管不到它；按钮本体是广告 SDK 下载按钮
+     * `AppDownloadButton : HnProgressButton`（类名未混淆、跨版本留名；MT MCP smali 实证
+     * 唯一消费点 = `AimAppView.kt`(混淆名漂移) + `AimAppLayoutBinding.appButton`）。
+     * 处置 = 构造后 setVisibility(GONE)（视图级补杀：数据源在云端 AimApp 模板，客户端无干净
+     * 裁剪口；GONE 不留空块，卡片正文不动）。HnProgressButton 属 com.hihonor.adsdk——与
+     * themestore S3 的 HnAds.init 同源。
+     */
+    private const val CLS_AIM_APP_BUTTON = "com.ted.sms.feature.ui.aim.app.AppDownloadButton"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_MMS_AD_OFF)) {
@@ -167,6 +179,7 @@ object MmsHook : TargetHook {
             session.judge(module, task, JUDGE_PREFIX, "处理器=${processor.javaClass.name}")
             installMenuKill(session, module, processor, loader)
             installCardKill(session, module, processor, loader)
+            installAimButtonKill(session, module, processor, loader)
             result
         }
 
@@ -284,6 +297,59 @@ object MmsHook : TargetHook {
         }
     }
 
+    /** T4 任务描述（判据日志用；不进 pending 表，挂载由载体回调事件驱动，同 [findMenusTask]）。 */
+    private val aimButtonTask = MountEngine.SimpleTask(
+        className = CLS_AIM_APP_BUTTON,
+        methodName = "<init>",
+        paramCount = 2,  // 签名实证（MT MCP smali，插件 10.0.42.308）：<init>(Landroid/content/Context;Landroid/util/AttributeSet;)V——唯一实例化构造
+        returnType = "void",
+        id = ID_AIM_APP_BUTTON,
+        description = "T4：AIM 应用推广按钮（打开应用）构造后置 GONE（视图级补杀，卡片正文不动）",
+    )
+
+    /** T4 一次幂标志（同 T2/T3：仅成功置位，失败复位随载体重试）。 */
+    private val aimButtonTried = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * T4 AIM 应用推广按钮补杀（2026-10-23）：插件 10.0.42.308 的富媒体模板渲染不经
+     * [CLS_SIMPLE_ACTION_LAYOUT]（T3 管不到）；「打开应用」按钮 = `AppDownloadButton`
+     * （继承广告 SDK HnProgressButton，类名未混淆留名）。锚定**唯一 2 参构造**，
+     * after 语义 proceed 后 setVisibility(GONE)——不碰卡片正文与其它 AIM 模板
+     * （取件提醒等保留），GONE 不留空块。异常全吞（PROTECTIVE 兜底 + onFailure 复位重试）。
+     */
+    private fun installAimButtonKill(session: MountSession, module: XposedModule, processor: Any, hostLoader: ClassLoader) {
+        if (!aimButtonTried.compareAndSet(false, true)) return
+        runCatching {
+            val pluginCl = pluginClassLoaderOf(processor, hostLoader)
+                ?: run {
+                    module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX T4 未捕获插件 ClassLoader（处理器=${processor.javaClass.name}），AIM 推广按钮原样显示")
+                    aimButtonTried.set(false)
+                    return
+                }
+            val ctor = runCatching {
+                val cls = pluginCl.loadClass(CLS_AIM_APP_BUTTON)
+                cls.getDeclaredConstructor(android.content.Context::class.java, android.util.AttributeSet::class.java)
+            }.getOrNull() ?: run {
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX T4 未解析（$CLS_AIM_APP_BUTTON.<init>(2参)，插件版本差异？），AIM 推广按钮原样显示")
+                aimButtonTried.set(false)
+                return
+            }
+            module.hook(ctor)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .setId(ID_AIM_APP_BUTTON)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    (chain.thisObject as? android.view.View)?.visibility = android.view.View.GONE
+                    session.judge(module, aimButtonTask, JUDGE_PREFIX)
+                    result
+                }
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX T4 已挂载: $CLS_AIM_APP_BUTTON.<init> → 构造后 GONE")
+        }.onFailure { t ->
+            aimButtonTried.set(false)
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX T4 挂载异常（AIM 推广按钮原样显示，不 crash）: ${t.message}", t)
+        }
+    }
+
     /**
      * 从菜单处理器对象取插件 ClassLoader：Honor 分支返回值即 TedMenuProcessor（定义 CL 即插件
      * CL，≠ 宿主 CL）直取；HW 分支返回 HwMenuProcessorProxy——优先按 jadx 实证字段名
@@ -322,4 +388,7 @@ object MmsHook : TargetHook {
 
     /** T3 主轨任务 id（插件侧 SimpleActionLayout.b）。 */
     private const val ID_SIMPLE_ACTION = "mms:SimpleActionLayout.b"
+
+    /** T4 主轨任务 id（插件侧 AppDownloadButton 构造）。 */
+    private const val ID_AIM_APP_BUTTON = "mms:AppDownloadButton.<init>"
 }
