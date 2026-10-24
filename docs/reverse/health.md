@@ -77,3 +77,18 @@
 3. **用户分组投放**：`queryUserGroup` 暗示营销按人群下发——不同设备看到的卡不同，A/B 时注意。
 4. **HealthService 包**（priv-app 数据服务）未分析——如营销推送由它触发需另查（本轮判定纯 UI 侧）。
 5. 会员促销气泡（IAP）是否纳入：待用户拍板。
+
+## 五、2026-10-24 下午轮次：运营位断根真机验证
+
+探针取证结论：`cardEntityToModel` 链只承载**功能卡**（运动记录 1005/消耗 1008/步数 1007/
+锻炼时长 1020/身体能量 1023/活动小时数 1021/温度 1013，type=-1），营销卡不在此链。
+「天天赚现金」真身 = 服务端运营配置 → `BannerDataRepository.getBannerCards` →
+`OperationsManager` 5 个 `update*` 写入口（banner 卡/商业信息/首页弹窗/运营条目/特殊卡）。
+
+- 拦截：5 个 `update*` 全部不 proceed（写入断根，suspend 返回 null 按 Unit 语义）。
+  真机判据：`HonorQinxuanHook installed 6/6` + 触发时五连 `qinxuan-hook 生效` 行（16:33 实测）。
+- **撤销记录**：第一版曾挂 `getHomeModulesData → Observable.empty()` 当营销总入口，真机
+  **过度拦截**——功能卡同管道 → 首页白屏。已撤销，撤销原因留档 HonorQinxuanHook 注释。
+  教训：收口前必须确认管道只承载目标内容；有疑问先上只读探针。
+- 遗留：开屏 `SplashAdvertisementActivity` 走自有渲染（非 BaseAdView），本轮已加
+  onCreate-finish 秒退（见 HonorQinxuanHook splashAd 任务）；若 SDK 更换开屏形态需重对。

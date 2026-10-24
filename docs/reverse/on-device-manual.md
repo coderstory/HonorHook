@@ -83,3 +83,43 @@ SPEC 格式（`check_points.py`）：`[{"class":"…","points":[["方法名",参
 | `tools/adapt_new_version.py` | 桌面机全量反编译路线的适配核对（jadx） |
 | `tools/sync-skills.sh` | `.claude/skills` → `.agents/skills` 同步（DSH 读后者） |
 | `tools/dev.sh env / build / test / modlog` | 工具链解析 / 构建 / 单测 / 判据日志 |
+
+## 七、MT MCP 使用坑（2026-10-24 实战补录）
+
+| 坑 | 表现 | 处置 |
+|---|---|---|
+| 会话过期 | 一段时间不动后 outline/list 报 Invalid locator / Missing session | `mt_apk_session_create` 重建即可（`mtmcp.py` 已自动重试） |
+| 瞬时 PATH_NOT_FOUND | workspace_open 明明文件在却报不存在 | 退避重试（`mtmcp.py` 已内置 3 次退避） |
+| MT 被杀/切后台 | 所有调用 `Connection refused`（8787 不监听） | 把 MT 管理器打开（保持后台存活）再继续 |
+| outline 窗口截断 | 大类只返回前 N 方法 →「方法不存在」假阴性 | 翻页 `pagination.hasMore + mt_apk_continue`（check_points.py 已内置）；或 dex_method 检索交叉验证 |
+| MT 服务卡顿 | 调用超时（真机后台被限流） | 隔几秒重试；避免在 App 前台高频调用时叠请求 |
+
+## 八、Android 15 执行限制（on-device 工具链新增坑）
+
+| 坑 | 表现 | 处置 |
+|---|---|---|
+| **非 PIE 静态 ELF 被拒** | Android 15 linker 报 `unexpected e_type: 2`（gh/CLI 官方静态二进制全中） | 用 **Termux 仓库的 PIE 构建**（`apt-get download gh` + `dpkg -x` 解包，绕过 dpkg 路径重写缺陷） |
+| **App 目录 `#!` 脚本 exec 被拒** | Go 程序（gh）fork/exec 任何 shell 包装脚本 → `permission denied`（SELinux execute_no_trans） | 让 Go 程序 exec **真 ELF**：把 `$PREFIX/bin/git.real` 拷到 PATH 前部目录；gh 更省事的做法 = 永远带 `-R <owner>/<repo>` 或 `export GH_REPO=…`，根本不 fork git |
+| DSH 的 `usr/bin/git` 是包装脚本 | 直接 exec 它必死（shebang `#!/system/bin/sh` 不可达） | 真 ELF = `$PREFIX/bin/git.real`（包装脚本只是重定位 GIT_EXEC_PATH） |
+
+## 九、定位手段补充：资源 id 数值反查消费类
+
+服务端下发的 UI 元素（营销卡/入口行）文案在 dex/资源表**都搜不到**（响应体不入包）。
+此时从 UI dump 拿 view-id 名（如 `operationsRecyclerView`），三步反查到消费类：
+
+```
+resource_table_names 搜 id 名 → 得数值 id（如 0x7f0a1bad）
+→ smali 全文搜该数值常量 → 命中 R$id定义类 + 消费类（如 com.hihonor.module.home.R$id）
+→ 消费包内 outline/追链 → 定位 adapter/convert/manager（未混淆方法名直读语义）
+```
+
+本轮实战：`天天赚现金` 卡（服务端下发）→ operationsRecyclerView → `module.home.OperationsManager`
+→ 5 个 `update*` 写入口断根。**写入口断根优于响应裁剪**：写入方法全是 private void/suspend，
+不 proceed 零返回值风险；响应裁剪要懂 bean 结构还要防误伤功能卡。
+
+### 两条配套教训
+
+- **探针先行**：字段实际值没有运行时证据时，先挂只读探针列清单（cardEntityToModel 探针
+  实测列出 7 张功能卡的 name/cardId/type），数据在手再写过滤条件——不猜字段值。
+- **过度拦截会白屏**：`getHomeModulesData → empty` 当「营销总入口」收口，实测功能卡同管道
+  → 首页内容区白屏。撤销记录留在 HonorQinxuanHook 注释里。收口前必须确认管道**只**承载目标内容。
