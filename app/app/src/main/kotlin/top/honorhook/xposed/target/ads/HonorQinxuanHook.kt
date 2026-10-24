@@ -65,35 +65,11 @@ class HonorQinxuanHook(override val packageName: String) : TargetHook {
             ),
             MountEngine.SimpleTask(
                 className = CLS_OPERATIONS_MANAGER,
-                methodName = "updateCommercialInfo",
-                paramCount = 2,
-                returnType = "java.lang.Object",
-                id = "qinxuan:OperationsManager.updateCommercialInfo",
-                description = "商业信息 Flow 写入口断根（suspend）",
-            ),
-            MountEngine.SimpleTask(
-                className = CLS_OPERATIONS_MANAGER,
                 methodName = "updateHealthHomepagePopupData",
                 paramCount = 1,
                 returnType = "void",
                 id = "qinxuan:OperationsManager.updateHealthHomepagePopupData",
                 description = "首页营销弹窗写入口断根（现金奖励待领取等）",
-            ),
-            MountEngine.SimpleTask(
-                className = CLS_OPERATIONS_MANAGER,
-                methodName = "updateOperationsItem",
-                paramCount = 3,
-                returnType = "java.lang.Object",
-                id = "qinxuan:OperationsManager.updateOperationsItem",
-                description = "运营条目列表写入口断根（suspend）",
-            ),
-            MountEngine.SimpleTask(
-                className = CLS_OPERATIONS_MANAGER,
-                methodName = "updateSpecialCard",
-                paramCount = 2,
-                returnType = "java.lang.Object",
-                id = "qinxuan:OperationsManager.updateSpecialCard",
-                description = "特殊卡写入口断根（suspend）",
             ),
         )
         // 开屏广告 Activity：BaseAdView 清内容后它仍空壳停留（计时结束才走）= 白屏假死，
