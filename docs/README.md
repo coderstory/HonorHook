@@ -16,6 +16,7 @@
 | 内容 | 文件 |
 |---|---|
 | 目标总表（13 行 host 对）+ 能力边界 + 已放弃目标结论 + 各 app 逆向记录 | [`reverse/README.md`](reverse/README.md) |
+| **2026-10-24 全系统调研交接**（新会话入口：设备铁律/三层法/三轮调研成果/开发路线/未竟清单。62 份报告在 `research/2026-10-24-system-audit/`——含 13 份拿走即写码规格书：22 融合状态栏 / 26 胶囊注入 / 28 工具箱 / 51 相机电影模式 / 52 OTA 拦截 / 53 应用市场 / 54 pushagent / 55 通知 / 56 桌面网关 / 57 负一屏 / 58 锁屏时钟 / 61 hiview / 43 验证剧本） | [`research/HANDOFF-2026-10-24.md`](research/HANDOFF-2026-10-24.md) |
 | **壁纸管线**（wallpapereditor + livewallpaper.paradise 两宿主合一文档。§一–八 = 已放弃路线「视频单独设桌面」W1–W8 留档；§九–十一 = 现行 W16–W19 四点——转码码率 / 时间轴去限 / 桌面循环 / 隐藏暂停，2026-10-18 全验证） | [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) |
 | 主题商店**设计**（需求 / 策略与理由 / 判据 / 未解决项） | [`theme-store.md`](theme-store.md) |
 | 挂载点**口径、判据快照（M/N 单一事实源）、已决删除决策、勿删观察项、真机回归教训** | [`hook-inventory-audit.md`](hook-inventory-audit.md) |
