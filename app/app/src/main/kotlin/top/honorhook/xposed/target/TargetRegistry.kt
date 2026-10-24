@@ -2,6 +2,7 @@ package top.honorhook.xposed.target
 
 import top.honorhook.xposed.target.ads.HonorAdsHook
 import top.honorhook.xposed.target.ads.HonorOpsAdHook
+import top.honorhook.xposed.target.ads.HonorQinxuanHook
 import top.honorhook.xposed.target.exam8.Exam8Hook
 import top.honorhook.xposed.target.ime.ImeHook
 import top.honorhook.xposed.target.jd.JdHook
@@ -59,6 +60,12 @@ object TargetRegistry {
         register(HonorTrackingHook("com.hihonor.quickgame"))
         register(HonorTrackingHook("com.hihonor.youku.video"))
         register(HonorTrackingHook("com.hihonor.cloudmusic"))
+        // 运动健康（2026-10-24，docs/reverse/health.md）：adsdk+埋点通杀已核对存在；
+        // 另有内嵌亲选电商（cn.honor.qinxuan 496 类，自建 View 不经 BaseAdView）→ HonorQinxuanHook 收口。
+        // osoperationsdk 不存在于 health，HonorOpsAdHook 不注册（挂了只产生 NOT_RESOLVED 噪音）。
+        register(HonorAdsHook("com.hihonor.health"))
+        register(HonorTrackingHook("com.hihonor.health"))
+        register(HonorQinxuanHook("com.hihonor.health"))
         // 京东开屏（第 9 目标）：hookBefore JDHomeManager.a 短路 = SplashFragment 永不挂载。
         register(JdHook)
         // MFA身份验证器开屏（第 10 目标）：360 加固，框架 Activity.onCreate 收口 + 类名门控跳页。
