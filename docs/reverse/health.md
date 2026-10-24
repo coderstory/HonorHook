@@ -120,3 +120,26 @@
    不 proceed 返 null 炸协程**（update* 白屏）——修正挂法 = 参数替换（置空列表）或仅拦 void。
 3. 会员促销（IAP 收银台内页）维持不挂结论；isShowAds 门断后收银台权益判定不受影响
    （isShowAds 是广告展示门，非会员态本身——无越权副作用）。
+
+## 七、钩子职责梳理（为什么不能只留 isShowAds 一个）
+
+用户问「是不是只需要一个 hook」——答案：**不是**。三个正交面，互不覆盖（真机日志实证）：
+
+| 面 | 数据链 | isShowAds 门是否覆盖 | 对应 hook |
+|---|---|---|---|
+| **广告**（开屏/横幅/插屏，adsdk） | isShowAds 判定 → adsdk 拉取渲染 | ✅ 总门即为此设 | `isShowAds → false` |
+| **运营位**（banner 图卡「天天赚现金」/条目行「天天领红包」/弹窗「现金奖励」） | 服务端运营配置 → BannerDataRepository(DB 读 getBannerCards + OperationsManager update* 写 Flow)——**不走 isShowAds**（18:05 实证：isShowAds 已挂，getBannerCards 生效行照打） | ❌ | `getBannerCards 置空` + `updateBannerData/updateOperationsItem/updateSpecialCard.empty/updateHealthHomepagePopupData` 断根 |
+| **开屏空壳假死** | SplashAdvertisementActivity 生命周期（BaseAdView 清内容后 Activity 不退出）——Activity 拉起与否不在 isShowAds 判定内 | ❌ | `onCreate → finish` |
+
+### 各 hook 移除后果（都是实证过的）
+
+- 移除 isShowAds → 广告全回（会员免广告失效）
+- 移除 updateOperationsItem 置空 → 「天天领红包」入口行回归（17:59 截图已消 = 当前在拦）
+- 移除 getBannerCards 置空 → 「天天赚现金」图卡回归（18:05 前的状态）
+- 移除 splash finish → 开屏白屏假死回归（12:49 前的状态）
+- 已撤销的 3 个（getHomeModulesData empty / update* suspend 不 proceed）→ 白屏，勿复活
+
+### 可精简项
+
+updateBannerData（Flow 写）与 getBannerCards（DB 读）是同源两链，当前双拦最稳；
+若未来要减点，先删 updateBannerData（读侧断根后写侧收益存疑），**删后必须真机回归**。
