@@ -152,7 +152,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 item { RootMissingCard() }
             }
 
-            item { ActivityCard(probe) }
+            item { ActivityCard(probe, rootOk) }
 
             // —— 开关区 ——
             item {
@@ -385,7 +385,20 @@ private fun RootMissingCard() {
 }
 
 @Composable
-private fun ActivityCard(probe: RootShell.ProbeResult?) {
+private fun ActivityCard(probe: RootShell.ProbeResult?, rootOk: Boolean) {
+    // F3 收尾（28 号 §5）：趁 root 读 LSPosed 框架日志里本模块的 installed N/M 判据
+    var hookLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(rootOk) {
+        if (!rootOk) return@LaunchedEffect
+        hookLines = withContext(Dispatchers.IO) {
+            when (val r = RootShell.exec(
+                "grep -h coderstory.honorhook /data/adb/lspd/log/modules_*.log 2>/dev/null | grep -E 'installed [0-9]+/[0-9]+' | tail -4",
+            )) {
+                is RootShell.Result.Ok -> r.stdout.trim().lineSequence().filter { it.isNotBlank() }.toList()
+                else -> emptyList()
+            }
+        }
+    }
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
@@ -407,6 +420,24 @@ private fun ActivityCard(probe: RootShell.ProbeResult?) {
                 else -> "LSPosed：未激活（模块未被框架加载）"
             }
             Text(fwLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+            if (hookLines.isNotEmpty()) {
+                Text(
+                    text = Glitch.text("挂载判据（最近 4 条 installed N/M）："),
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                hookLines.forEach { line ->
+                    Text(
+                        // 原行：… ] (目标包)[模块指纹] Hook名[目标包]: installed N/M
+                        text = "· ${line.substringAfter("] (").substringBefore(")")}  ${line.substringAfterLast("] ")}",
+                        fontSize = 11.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
