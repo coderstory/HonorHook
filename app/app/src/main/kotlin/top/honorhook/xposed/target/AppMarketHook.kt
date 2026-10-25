@@ -53,6 +53,30 @@ object AppMarketHook : TargetHook {
             paramCount = 2, returnType = "void", value = null,
             description = "悬浮推送展示（h(String,String) void）",
         ),
+        // —— 红点/自动提醒族（53 号 P1「杀自动留手动」；MT MCP zscugmnm 工作区核签 2026-10-25）——
+        // 三个 notify 实现全是 private static →Z，返 false = 不创建通知；install-success 通知走别的方法不受影响。
+        // 方法名是 R8 单字母（OTA 必漂移）→ dexStrings 为各方法独占日志串，DexKit 宽松轨按「类+串」唯一匹配兜底。
+        HookPoint(
+            id = "market:notif.notifyMultiIcon", kind = "CONST", feature = FeatureCatalog.KEY_MARKET_PURIFY,
+            className = "$PKG.slientcheck.checkupdate.au.UpdateNotificationManager", methodName = "B",
+            paramCount = 4, returnType = "boolean", value = false,
+            dexStrings = listOf("notifyAppUpdateMultiIcon: throwable"),
+            description = "更新提醒通知（多图标队列样式，B(I,NotificationInfo,Creator,ArrayList)→Z 返 false）",
+        ),
+        HookPoint(
+            id = "market:notif.notifyQueueStyle", kind = "CONST", feature = FeatureCatalog.KEY_MARKET_PURIFY,
+            className = "$PKG.slientcheck.checkupdate.au.UpdateNotificationManager", methodName = "C",
+            paramCount = 2, returnType = "boolean", value = false,
+            dexStrings = listOf("notifyAppUpdateAndSilentIconQueueButtonStyle: throwable"),
+            description = "更新提醒通知（静默图标队列样式，C(NotificationInfo,UpdateNotificationManager\$a)→Z 返 false）",
+        ),
+        HookPoint(
+            id = "market:notif.createNotify", kind = "CONST", feature = FeatureCatalog.KEY_MARKET_PURIFY,
+            className = "$PKG.slientcheck.checkupdate.au.UpdateNotificationManager", methodName = "D",
+            paramCount = 3, returnType = "boolean", value = false,
+            dexStrings = listOf("createNotify notifyType = "),
+            description = "通知创建总入口（D(I,NotificationInfo,Creator)→Z 返 false，独占 createNotify 日志串）",
+        ),
     )
 
     internal fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
@@ -82,7 +106,7 @@ object AppMarketHook : TargetHook {
         session.attemptMount(pending, module, loader) { task -> mountOne(session, module, loader, task) }
     }
 
-    /** onReceive 短路：闹钟不进 = 自动检查链不发生；手动刷新（UI 触发）不走 Receiver，保留。 */
+    /** 统一短路：void→null（入口不执行），boolean→false（通知族返 false=不创建；53 号「notifyAppUpdate 系返 false」）。 */
     private fun mountOne(
         session: MountSession,
         module: XposedModule,
@@ -90,7 +114,11 @@ object AppMarketHook : TargetHook {
         task: MountEngine.SimpleTask,
     ): MountEngine.Result =
         session.mount(task, module, loader) { chain ->
-            session.judge(module, task, "market-hook", "闹钟自启已拦截")
-            null
+            session.judge(module, task, "market-hook", "已拦截")
+            when (task.returnType) {
+                "void" -> null
+                "boolean" -> false
+                else -> null
+            }
         }
 }

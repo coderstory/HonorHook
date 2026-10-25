@@ -3,7 +3,7 @@
 宿主：`com.hihonor.appmarket` **16.1.9.302**（aapt2 实证，2026-10-25 真机拉取 base.apk 到 system-files/）。
 规格来源：`docs/research/2026-10-24-system-audit/53-应用市场净化规格书.md`。本档是 53 号在本版落地的实证修正。
 
-## Hook 点现状（AppMarketHook.MARKET_POINTS，4 点）
+## Hook 点现状（AppMarketHook.MARKET_POINTS，7 点）
 
 | id | 类#方法 | 签名 | 判据 |
 |---|---|---|---|
@@ -11,6 +11,11 @@
 | market:dlg.OperationDialog.k0 | operation.ui.OperationDialog#k0 | (FragmentActivity,OperationVO,Runnable)→void（jadx L326） | 同上 |
 | market:dlg.ToolPagePop.g0 | operation.toolpage.ToolPageActivityPopDialog#g0 | ()→void，private final（jadx L87） | 同上 |
 | market:dlg.FloatingPush.h | operation.FloatingPushHandler#h | (String,String)→void（jadx L246） | 同上 |
+| market:notif.notifyMultiIcon | UpdateNotificationManager#B | (I,NotificationInfo,Creator$a,ArrayList)→Z 返 false，private static（MT MCP 核签，140 insns） | 同上 |
+| market:notif.notifyQueueStyle | UpdateNotificationManager#C | (NotificationInfo,UpdateNotificationManager$a)→Z 返 false（99 insns） | 同上 |
+| market:notif.createNotify | UpdateNotificationManager#D | (I,NotificationInfo,Creator$a)→Z 返 false（131 insns，独占 createNotify 串） | 同上 |
+
+**更新提醒通知族钉死说明**：B/C/D 是 R8 单字母名（OTA 必漂移），每点带 `dexStrings`（各方法独占日志串）走 DexKit 宽松轨兜底；返 false = 不创建通知，install-success 通知走其它方法不受影响。
 
 ## §缓期清单（签名不可靠，不硬挂）
 
@@ -23,11 +28,10 @@
    tryFetchWindowConfig 等是 suspend 函数（字节码 `(..., Continuation) → Object` + 状态机 invokeSuspend），
    jadx 16.1.9.302 反编译退化为寄存器输出，挂点选择（公有 suspend vs 内部 invokeSuspend）
    需要 MT MCP 离线核签后再定（勿给非空型 null——53 号注意原文）。
-3. **UpdateNotificationManager 通知族 / UpdateBadgeManager / MessageCenterBadgeManager（红点族 P1）**：
-   类名真，但方法已被混淆成单字母（b()/f()/a()，仅日志串 "notifyAppUpdate:" 残留）——
-   53 号「notifyAppUpdate 前缀方法」的锚在本版不成立。Badge 两类与 Splash 同为 DebugMetadata 幽灵名。
-   补点路径：DexHint(strings=["notifyAppUpdate", "notifyAppUpdateMultiIcon"]) 宽松轨 + instanceOnly，
-   或核签后按真名直挂。
+3. **UpdateNotificationManager 通知族**：✅ 已核签落地 3 点（B/C/D，见上表）。UpdateBadgeManager /
+   MessageCenterBadgeManager 仍是 DebugMetadata 幽灵名（外层类 6 dex 零命中）。
+4. **checkNotifyAppUpdate 调度入口**：`UpdateNotificationManager$checkNotifyAppUpdate$1`（SuspendLambda）真类在，
+   invokeSuspend 返 null 语义未核（勿给非空型 null——53 号注意原文），缓期待 xref 追踪。
 4. **MainFrameFragmentTemp 推荐流（P2）**：类名真（classes2/3/4），checkPersonalizedAdsForHomePage/
    loadPersonalizedAdsInfo 串在场；方法签名待核，且勿动 NewMainViewModel 主链（白屏风险）。
 
