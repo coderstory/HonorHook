@@ -112,7 +112,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { ota = OtaSentinel.check(context) } }
 
     var search by rememberSaveable { mutableStateOf("") }
-    var onlyFrozen by rememberSaveable { mutableStateOf(false) }
+    var filter by remember { mutableStateOf(FreezeFilter.ALL) }
     var showA by rememberSaveable { mutableStateOf(false) }
     var showFolded by rememberSaveable { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<String>()) }
@@ -153,6 +153,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             }
 
             item { ActivityCard(probe, rootOk) }
+            item { HistoryCard(context, queue) }
 
             // —— 开关区 ——
             item {
@@ -196,10 +197,10 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     rootOk = rootOk,
                     apps = apps,
                     selectedCount = selected.size,
-                    onlyFrozen = onlyFrozen,
+                    filter = filter,
                     running = running,
                     onSearch = { search = it },
-                    onFilter = { onlyFrozen = !onlyFrozen },
+                    onFilter = { filter = it },
                     onPreset = {
                         val installed = (apps ?: emptyList()).map { it.pkg }.toSet()
                         val targets = GovernanceList.PURE_PRESET.filter { it in installed }
@@ -222,7 +223,12 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 )
             }
             val visibleApps = (apps ?: emptyList()).filter { app ->
-                app.selectable && (!onlyFrozen || app.frozen) && (search.isBlank() ||
+                app.selectable && when (filter) {
+                    FreezeFilter.ALL -> true
+                    FreezeFilter.B -> app.entry?.tier == GovernanceList.Tier.B
+                    FreezeFilter.C -> app.entry?.tier == GovernanceList.Tier.C
+                    FreezeFilter.FROZEN -> app.frozen
+                } && (search.isBlank() ||
                     app.label.contains(search, true) || app.pkg.contains(search, true))
             }
             items(visibleApps, key = { it.pkg }) { app ->
@@ -571,15 +577,18 @@ private fun SwitchListCard(
     }
 }
 
+/** 冻结区档位过滤（28 号 §3 chips：B/C/已冻结；A 档不进列表只折叠展示）。 */
+private enum class FreezeFilter(val label: String) { ALL("全部"), B("B 可选冻"), C("C 建议冻"), FROZEN("已冻结") }
+
 @Composable
 private fun FreezeHeaderCard(
     rootOk: Boolean,
     apps: List<AppInfo>?,
     selectedCount: Int,
-    onlyFrozen: Boolean,
+    filter: FreezeFilter,
     running: Boolean,
     onSearch: (String) -> Unit,
-    onFilter: () -> Unit,
+    onFilter: (FreezeFilter) -> Unit,
     onPreset: () -> Unit,
     onFreezeSelected: () -> Unit,
 ) {
@@ -596,12 +605,16 @@ private fun FreezeHeaderCard(
                 fontSize = 12.sp,
                 color = colorScheme.onSurfaceVariantSummary,
             )
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    text = Glitch.text(if (onlyFrozen) "看全部" else "只看已冻结"),
-                    enabled = rootOk && !running,
-                    onClick = onFilter,
-                )
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FreezeFilter.entries.forEach { f ->
+                    TextButton(
+                        text = Glitch.text(if (f == filter) "· ${f.label}" else f.label),
+                        enabled = rootOk && !running,
+                        onClick = { onFilter(f) },
+                    )
+                }
+            }
+            Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
                     text = Glitch.text("纯净模式精选"),
                     enabled = rootOk && !running,
@@ -688,6 +701,11 @@ private fun ConfirmDialog(
         summary = null,
         onDismissRequest = onCancel,
     ) {
+        // 28 号 §7：B 档有真实功能代价，批量冻结含 B 档时强制二次勾选
+        val hasBTier = actions.any {
+            it is ToolAction.Freeze && GovernanceList.lookup(it.pkg)?.tier == GovernanceList.Tier.B
+        }
+        var bConfirmed by remember { mutableStateOf(false) }
         Column {
             Text(
                 text = Glitch.text("将执行 ${actions.size} 项：\n") +
@@ -695,6 +713,23 @@ private fun ConfirmDialog(
                     Glitch.text("\n\n冻结批会先自动存快照。失败不中断，逐项回读验收。"),
                 fontSize = 13.sp,
             )
+            if (hasBTier) {
+                Row(
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .fillMaxWidth()
+                        .clickable { bConfirmed = !bConfirmed },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SafeSwitch(checked = bConfirmed, enabled = true) { bConfirmed = it }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = Glitch.text("确认冻结 B 档：有真实功能代价，解冻需 root 在场"),
+                        fontSize = 12.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
             Row(modifier = Modifier.padding(top = 12.dp)) {
                 TextButton(
                     text = Glitch.text("取消"),
@@ -706,9 +741,65 @@ private fun ConfirmDialog(
                 TextButton(
                     text = Glitch.text(if (running) "执行中…" else "执行"),
                     onClick = onConfirm,
-                    enabled = !running,
+                    enabled = !running && (!hasBTier || bConfirmed),
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryCard(context: Context, queue: ToolQueue) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { open = !open },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = Glitch.text("执行记录与快照"),
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp,
+                        color = colorScheme.onSurface,
+                    )
+                    val pending = queue.pending().size
+                    Text(
+                        text = Glitch.text(if (pending > 0) "待执行 $pending 项（点开查看）" else "点开查看队列与快照"),
+                        fontSize = 12.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                    )
+                }
+            }
+            if (open) {
+                queue.items().takeLast(8).reversed().forEach { item ->
+                    val state = when (item.state) {
+                        ToolQueue.Core.State.PENDING -> Glitch.text("待执行")
+                        ToolQueue.Core.State.DONE -> "✓"
+                        ToolQueue.Core.State.FAILED -> "× ${item.error}"
+                    }
+                    Text(
+                        text = "$state ${describeAction(item.action)}",
+                        fontSize = 11.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val snaps = SnapshotStore.all(context).take(3)
+                if (snaps.isNotEmpty()) {
+                    Text(
+                        text = Glitch.text("快照（filesDir/toolbox/snapshots/）："),
+                        fontSize = 12.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    snaps.forEach { s ->
+                        Text("· ${s.name}（${s.length() / 1024}KB）", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                    }
+                }
             }
         }
     }

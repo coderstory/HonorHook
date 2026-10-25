@@ -37,4 +37,10 @@ object SnapshotStore {
         File(context.filesDir, "toolbox/snapshots").listFiles()
             ?.filter { it.name.startsWith("dumpsys-pkg-") }
             ?.maxByOrNull { it.name }
+
+    fun all(context: Context): List<File> =
+        File(context.filesDir, "toolbox/snapshots").listFiles()
+            ?.filter { it.name.startsWith("dumpsys-pkg-") }
+            ?.sortedByDescending { it.name }
+            ?: emptyList()
 }

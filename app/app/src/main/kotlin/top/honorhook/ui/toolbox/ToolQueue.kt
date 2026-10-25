@@ -48,6 +48,14 @@ class ToolQueue(context: Context) {
         fun items(): List<Item> = synchronized(lock) { items.toList() }
         fun pending(): List<Item> = synchronized(lock) { items.filter { it.state == State.PENDING } }
 
+        /** 历史末 N 行（时间倒序显示用，读文件失败返回空——root 失效后仍可看）。 */
+        fun historyTail(lines: Int = 15): List<String> {
+            val f = File(historyDir, "log.jsonl")
+            if (!f.exists()) return emptyList()
+            return runCatching { f.readLines().filter { it.isNotBlank() }.takeLast(lines) }
+                .getOrDefault(emptyList())
+        }
+
         /** 逐项串行执行；单项失败不中断（28 号 §7 ①：失败不中断+失败清单）。 */
         suspend fun runPending(onProgress: (Item) -> Unit = {}): Summary {
             var done = 0
