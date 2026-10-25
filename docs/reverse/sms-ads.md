@@ -13,6 +13,7 @@
 | 引擎命名空间 | `com.ted.sms.*`（plugin/feature/framework/db/links/model），部分可读；广告管线在 `defpackage/*`（R8 混淆） |
 | 菜单存储 | Room DB：`com.ted.sms.db.TedMenuDao(_Impl)`，云端下发落地本地 |
 | 内嵌 SDK | `com.hihonor.dlinstall.*`（应用市场推广 SDK，日志 tag `AM_SDK`）——「查看应用」卡片的下载跳转引擎 |
+| 类加载 | 插件 base.apk 经 `LinkerDexClassLoader`（parent = 宿主 CL）映射进 mms 进程：插件 dex 优先，`com.hihonor.linker.`/`org.json.` 等白名单包走宿主 ⇒ 宿主/插件拿到同一份 org.json Class（hook 返空 JSONArray 类型对齐的依据） |
 
 ## 二、三个广告面（真机 UI dump + intent 实证）
 
@@ -51,6 +52,7 @@ init(ctx, threadId, iccid, editToMenu, editRoot, menuGroup, params)
 
 修正（实测推翻调研期判断）：
 - `HwMenuProcessorProxy` 桥接是**死代码**——`SmartSmsSwitcher.isHihonorSmartSms()` 见插件包已装即走 Honor 分支，Hw* 从不实例化（第一版载体 installed 2/2 但零触发，换载体后全链生效）
+- 载体返回值两形态（jadx 实证，2026-10-26 自 MmsHook 注释下沉）：Honor 分支返回**插件 TedMenuProcessor 本尊**（经 host 加载的 `IMenuProcessor` 接口直连，无包装）；HW 分支返回 `HwMenuProcessorProxy`（`processor` 字段持插件对象）。两形态都可从返回值对象捕获插件 CL（分支无关）；`HwMenuProcessorProxy.init` 因分支门控在本机不可达，不能作挂载载体
 - DexKit 兜底对插件类不适用：engine 只扫 mms apk；插件类名跨 APK 反射留名，直连即中
 - **卡片按钮（left_button/right_button）与 menuJson 无关**（T2 后真机 dump 仍在）——数据链待 T3 定位；「查看应用」推广卡同归 T3
 
@@ -59,7 +61,7 @@ init(ctx, threadId, iccid, editToMenu, editRoot, menuGroup, params)
 - **验证码卡 = `tedCard.code == "0EFF76FF"`**：T3 实证该卡动作区由 `SimpleActionLayout.c()` 从 `tedCard.subTitle` **本地合成**复制按钮（不经 json menus）——引擎自带本地复制路径，T4 任务 = 服务关时让它渲染/工作。T3 对该 code 放行原 json，不与 KEY_MMS_CODE_FREE 抢地盘
 - 「查看应用」推广卡云端未下发无法目检，同 id 同链路（SimpleActionLayout）推断已死，卡出现时补验
 - 验证码服务门禁：`SmartSmsUtilControl.getIntelligentIpMessageEnable`（T1 探针已挂，可观测当前值）；**断网场景用户指示不测**
-- 卡片数据链全貌（T3 定位）：`TedMessage.action` JSON（"menus" 数组，Room DB action 列）→ `TedMsgItemProcessor.doBindCard/doBindTextAction` → `SimpleActionLayout.b` 统一收口。**不 hook getAction()**：TedMessageDao_Impl 落库直读 getter，全局改返回值会洗 DB 列 = 持久突变不可回滚
+- 卡片数据链全貌（T3 定位，jadx 实证；2026-10-26 自 MmsHook 注释下沉补全细节）：云端消息落地 `TedMessage.action`（JSON，`menus` 数组，Room DB action 列）→ `TedMsgItemProcessor.doBindCard`（`PC.i(msg)`=`getAction()` → `N5.a(str)`）或 `doBindTextAction`（`bindSimpleActionLayout(str)`）→ 全部 N5 卡片视图（SmsCard/SignCard/VerifyCard/TrainCard 布局内嵌的 `action` 子视图）统一收口到 `SimpleActionLayout.b(msgId, json, smsNumber, tedCard)` → 解析 `menus` 渲染 leftButton/rightButton/textSlogan/banner。真机 UI dump 的 `left_button`/`right_button`（1元30G/抢100G/查看应用）只可能是本布局——AimButtonLayout 无 `left_button` id，底部菜单项是另一 binding（T2 已杀）。**不 hook getAction()**：TedMessageDao_Impl 落库直读 getter（`statement.k(12,..)`），全局改返回值会洗 DB 列 = 持久突变不可回滚
 
 ## 追记：T4 = AIM 富媒体推广按钮（2026-10-23）
 
@@ -72,5 +74,7 @@ init(ctx, threadId, iccid, editToMenu, editRoot, menuGroup, params)
   `AimAppView.kt`（9.51 混淆名 j1，R8 漂移）+ `AimAppLayoutBinding.appButton`）
 - 处置 = 构造后 `setVisibility(GONE)`（视图级补杀：数据源在云端 AimApp 模板，客户端无干净裁剪口；
   GONE 不留空块，卡片正文不动）。挂载仍经 T2 载体捕获插件 CL，失败复位随会话页重试。
+- `HnProgressButton` 属 `com.hihonor.adsdk`——与 themestore S3 的 HnAds.init 同源（2026-10-26
+  自 MmsHook 注释下沉）。
 - 教训：插件「类名可读」不等于「链路不变」——模板容器换链（SimpleActionLayout → AIM 富媒体）
   才是本次复发根因；后续插件升级先跑 UI dump 看按钮所在容器 id 归属哪条链。

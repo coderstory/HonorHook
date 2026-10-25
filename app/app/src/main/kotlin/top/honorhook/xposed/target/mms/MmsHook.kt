@@ -15,10 +15,9 @@ import top.honorhook.xposed.target.logDisabled
 /**
  * 荣耀短信 com.hihonor.mms（基线 19.0.9.304）。
  *
- * 架构（docs/reverse/sms-ads.md §一，真机实证）：宿主单进程；intelligentmessage 插件 base.apk
- * 经 `LinkerDexClassLoader`（parent = 宿主 CL，插件 dex 优先、`com.hihonor.linker.`/`org.json.` 等
- * 白名单走宿主）映射进 mms 进程。**插件类（com.ted.sms.*）不在宿主 dex**，`defaultClassLoader`
- * 拿不到——挂载策略见 [mountMenuFactory] 注释。
+ * 架构实证全量见 docs/reverse/sms-ads.md §一（单进程插件式注入：intelligentmessage base.apk 经
+ * `LinkerDexClassLoader` 映射进 mms 进程）。结论：**插件类（com.ted.sms.*）不在宿主 dex**，
+ * `defaultClassLoader` 拿不到——挂载策略见 [mountMenuFactory] 注释。
  *
  * 功能与开关：
  * - [FeatureCatalog.KEY_MMS_AD_OFF] 广告净化（T2 底部自定义菜单 + T3 卡片按钮/应用推广卡 + T4 AIM
@@ -40,14 +39,11 @@ object MmsHook : TargetHook {
     private const val CLS_SMART_SMS_UTIL = "com.smartsms.hwcontroller.SmartSmsUtilControl"
 
     /**
-     * T2 载体：智能信息菜单处理器统一出口，**未混淆**（mms 自身 dex，静态 0 参返 Optional）。
-     * 每次会话页 MenuControll 构造必经（MenuControll.java:40），返回值即菜单处理器实例：
-     * - Honor 分支（SmartSmsSwitcher：`pkg_smartsms` 插件包已装即 true；本机插件包在，应走此
-     *   分支，真机判据 = 载体 judge 行的 `处理器=com.ted.sms.plugin.TedMenuProcessor`）→
-     *   返回值是**插件 TedMenuProcessor 本尊**（经 host 加载的 IMenuProcessor 接口直连，无包装）；
-     * - HW 分支 → 返回 HwMenuProcessorProxy（其 processor 字段持插件对象）。
+     * T2 载体：智能信息菜单处理器统一出口，**未混淆**（跨 APK 反射留名）；mms 自身 dex，
+     * 静态 0 参返 Optional，每次会话页 MenuControll 构造必经（MenuControll.java:40）。返回值
+     * 两种分支形态（Honor：插件 TedMenuProcessor 本尊；HW：HwMenuProcessorProxy 持 processor
+     * 字段桥接）——形态细节与 HW 分支在本机为死代码的实测，见 docs/reverse/sms-ads.md §四；
      * 两种形态都由 [pluginClassLoaderOf] 从返回值对象捕获插件 CL（分支无关）。
-     * 注：HwMenuProcessorProxy.init 在本设备是死代码（分支门控），不能作载体。
      */
     private const val CLS_MENU_FACTORY = "com.smartsms.hwcontroller.SmartSmsProcessorFactory"
 
@@ -55,15 +51,10 @@ object MmsHook : TargetHook {
     private const val CLS_TED_MENU_PROCESSOR = "com.ted.sms.plugin.TedMenuProcessor"
 
     /**
-     * T3 主轨目标：卡片动作区渲染收口（类名/方法名可读，插件 dex；jadx 实证 public final）。
-     *
-     * 数据链（docs/reverse/sms-ads.md T3 补充，jadx 实证）：云端消息落地 `TedMessage.action`
-     * （JSON，`menus` 数组）→ `TedMsgItemProcessor.doBindCard`（`PC.i(msg)`=`getAction()` →
-     * `N5.a(str)`）或 `doBindTextAction`（`bindSimpleActionLayout(str)`）→ 全部 N5 卡片视图
-     * （SmsCard/SignCard/VerifyCard/TrainCard 布局内嵌的 `action` 子视图）与本布局统一收口到
-     * `b(msgId, json, smsNumber, tedCard)` → 解析 `menus` 渲染 leftButton/rightButton/textSlogan/banner。
-     * 真机 UI dump 的 `left_button`/`right_button`（1元30G/抢100G/查看应用）只可能是本布局
-     * （AimButtonLayout 无 `left_button` id，底部菜单项是另一 binding，T2 已杀）。
+     * T3 主轨目标：卡片动作区渲染收口（插件 dex，全类唯一 4 参 b，jadx 实证 public final）。
+     * 数据链全貌（TedMessage.action → doBindCard/doBindTextAction → N5 卡片视图族 → b()
+     * 统一收口，含 AimButtonLayout 无 left_button id 的布局排除论证）见
+     * docs/reverse/sms-ads.md §五「卡片数据链全貌」。
      */
     private const val CLS_SIMPLE_ACTION_LAYOUT = "com.ted.sms.feature.ui.action.SimpleActionLayout"
 
@@ -80,14 +71,11 @@ object MmsHook : TargetHook {
     private const val FIELD_PROCESSOR = "processor"
 
     /**
-     * T4 目标：AIM 富媒体卡的应用推广按钮（「打开应用」）。2026-10-23 真机实证：插件 10.0.42.308 起，
-     * 富媒体模板（duoqu_rich_item_group 容器，card_bg/title_view/recycler_view 布局）不经
-     * [CLS_SIMPLE_ACTION_LAYOUT]——T3 的 json 置空管不到它；按钮本体是广告 SDK 下载按钮
-     * `AppDownloadButton : HnProgressButton`（类名未混淆、跨版本留名；MT MCP smali 实证
-     * 唯一消费点 = `AimAppView.kt`(混淆名漂移) + `AimAppLayoutBinding.appButton`）。
-     * 处置 = 构造后 setVisibility(GONE)（视图级补杀：数据源在云端 AimApp 模板，客户端无干净
-     * 裁剪口；GONE 不留空块，卡片正文不动）。HnProgressButton 属 com.hihonor.adsdk——与
-     * themestore S3 的 HnAds.init 同源。
+     * T4 目标：AIM 富媒体卡的应用推广按钮（「打开应用」）。插件 10.0.42.308 起富媒体模板不经
+     * [CLS_SIMPLE_ACTION_LAYOUT]（T3 的 json 置空管不到它），按钮本体是广告 SDK 下载按钮
+     * （类名未混淆、跨版本留名）。模板链实证与复发根因见 docs/reverse/sms-ads.md 追记 T4；
+     * 处置 = 构造后 setVisibility(GONE)（视图级补杀：云端数据源无干净裁剪口；GONE 不留空块，
+     * 卡片正文不动）。
      */
     private const val CLS_AIM_APP_BUTTON = "com.ted.sms.feature.ui.aim.app.AppDownloadButton"
 
@@ -143,28 +131,20 @@ object MmsHook : TargetHook {
     /**
      * T2 菜单全杀——载体挂载 + 主轨实装。
      *
-     * 选型（主轨 vs 备轨，逆向实证见 docs/reverse/sms-ads.md §三）：
-     * - 主轨 = hook 插件侧 `TedMenuProcessor.findMenus`（private static）返**空 JSONArray**：
-     *   `init` 里 `menuJson.length()==0 → return -201`，-201 是引擎自带的干净退出路径
-     *   （MenuControll 只见结果码，menuGroup 保持初始 GONE，无 UI 残留）——「改数据源，不改逻辑」。
-     * - 备轨 = `HwMenuProcessorProxy.init` 直返 -201（mms 侧改返回值）。选主轨：数据源层切入，
-     *   引擎自己的 filterMenus/-201 语义全程保留；且按 SmartSmsSwitcher 分支逻辑，本设备
-     *   （荣耀 + 插件包已装）走 Honor 分支，Hw* 桥接类不会被实例化（第一版载体即因此
-     *   mounted 0 命中，实测 installed 2/2 但拦截零触发后换轨），备轨点在本机是死代码。
+     * 选型（详证见 docs/reverse/sms-ads.md §三/§四）：主轨 hook 插件侧 `TedMenuProcessor.findMenus`
+     * 返**空 JSONArray** → init 里 length()==0 走引擎自带 -201 干净退出（menuGroup 保持 GONE、
+     * 无 UI 残留）——「改数据源，不改逻辑」；备轨 `HwMenuProcessorProxy.init` 直返 -201 在本机
+     * 是死代码（SmartSmsSwitcher 见插件包已装走 Honor 分支，第一版实测零触发后弃）。
      *
-     * 载体时序：本 hook 在 `SmartSmsProcessorFactory.getMenuProcessor`（每次会话页
-     * MenuControll 构造必经）proceed 后捕获插件 CL 并挂主轨—— TedMenuProcessor 实例在
-     * proceed 内创建，其 init（含 findMenus 调用）经 MenuControll 异步 post 到后台线程，
-     * 晚于本拦截内的主轨挂载，零竞态。载体本体放行不改行为；Optional 为空（插件未就绪）
-     * 时不置一次幂标志，随下次会话页重试。
+     * 载体时序（约束）：本 hook 在 getMenuProcessor proceed 后捕获插件 CL 并挂主轨——
+     * TedMenuProcessor 的 init（含 findMenus 调用）经 MenuControll 异步 post 到后台线程，
+     * 晚于本拦截内的主轨挂载，零竞态；Optional 为空（插件未就绪）不置一次幂标志，随下次
+     * 会话页重试。
      *
-     * 插件 ClassLoader 捕获（核心难题）：插件类由 `LinkerDexClassLoader` 加载，宿主
-     * defaultClassLoader 不可达；且 `LitePluginManager` 会为广告拦截引擎另造第二个同 apk
-     * loader——必须从**运行中对象**取定义 CL 才保证拿到渲染链正在用的那份 Class。
-     *
-     * DexKit 兜底说明：主轨目标类名/方法名可读（跨 APK 反射留名），直连反射即可命中；
-     * MountEngine 的 DexKit 轨扫的是 mms 自身 apk，扫不到插件 dex——若未来插件混淆改名，
-     * 属版本适配问题（adapt_new_version.py 流程），本点诚实 NOT_RESOLVED 不误伤。
+     * 插件 CL 捕获（核心约束）：插件类由 `LinkerDexClassLoader` 加载且 `LitePluginManager` 会
+     * 为广告拦截引擎另造第二个同 apk loader——必须从**运行中对象**取定义 CL 才保证拿到渲染链
+     * 正在用的那份 Class。DexKit 轨只扫 mms 自身 apk，扫不到插件 dex；插件若混淆改名属版本
+     * 适配问题（adapt_new_version.py 流程），本点诚实 NOT_RESOLVED 不误伤。
      */
     private fun mountMenuFactory(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         session.mount(task, module, loader) { chain ->
