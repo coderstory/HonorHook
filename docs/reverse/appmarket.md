@@ -15,7 +15,13 @@
 | market:notif.notifyQueueStyle | UpdateNotificationManager#C | (NotificationInfo,UpdateNotificationManager$a)→Z 返 false（99 insns） | 同上 |
 | market:notif.createNotify | UpdateNotificationManager#D | (I,NotificationInfo,Creator$a)→Z 返 false（131 insns，独占 createNotify 串） | 同上 |
 
-**更新提醒通知族钉死说明**：B/C/D 是 R8 单字母名（OTA 必漂移），每点带 `dexStrings`（各方法独占日志串）走 DexKit 宽松轨兜底；返 false = 不创建通知，install-success 通知走其它方法不受影响。
+**更新提醒通知族钉死说明（链路级实证，2026-10-25 MT MCP xref）**：
+- 调用链 `checkNotifyAppUpdate 协程 → c(NotificationInfo,ea5)→Z → f(NotificationInfo,Channel)→Z → B/C/D`
+- B/C/D 全部 `invoke-static`（无 thisObject 依赖，static 拦截返 false 合法）；f 内每调用点只包一次
+  Kotlin `Result.constructor-impl(Boolean.valueOf(...))`，**无重试循环**；f 自身的
+  `maxNumberLimit → return false` 证明 false = 「不发通知」的原生语义
+- B/C/D 是 R8 单字母名（OTA 必漂移），每点带 `dexStrings`（各方法独占日志串）走 DexKit 宽松轨兜底
+- 弹窗三点 k0/g0/h 为 show 入口短路（void 不执行 = 不展示）；Runnable 参数是点击行为，不 show 不消费，无泄漏面
 
 ## §缓期清单（签名不可靠，不硬挂）
 
@@ -30,7 +36,7 @@
    需要 MT MCP 离线核签后再定（勿给非空型 null——53 号注意原文）。
 3. **UpdateNotificationManager 通知族**：✅ 已核签落地 3 点（B/C/D，见上表）。UpdateBadgeManager /
    MessageCenterBadgeManager 仍是 DebugMetadata 幽灵名（外层类 6 dex 零命中）。
-4. **checkNotifyAppUpdate 调度入口**：`UpdateNotificationManager$checkNotifyAppUpdate$1`（SuspendLambda）真类在，
+4. **checkNotifyAppUpdate 调度入口（未挂）**：`UpdateNotificationManager$checkNotifyAppUpdate$1`（SuspendLambda）真类在，
    invokeSuspend 返 null 语义未核（勿给非空型 null——53 号注意原文），缓期待 xref 追踪。
 4. **MainFrameFragmentTemp 推荐流（P2）**：类名真（classes2/3/4），checkPersonalizedAdsForHomePage/
    loadPersonalizedAdsInfo 串在场；方法签名待核，且勿动 NewMainViewModel 主链（白屏风险）。
