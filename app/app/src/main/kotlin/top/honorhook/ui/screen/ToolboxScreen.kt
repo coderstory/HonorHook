@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.History
@@ -42,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -370,14 +373,30 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.2 工作台）：HOME 磁贴台 + 四个功能页，磁贴点进、返回栏回台。 */
 private enum class HubView { HOME, PURIFY, SWITCH, FREEZE, LOG }
 
-/** 二级页返回栏。 */
+/** 二级页返回栏（对齐设计稿：返回箭头 + 「工具箱」，胶囊可点区）。 */
 @Composable
 private fun BackBar(onBack: () -> Unit) {
-    TextButton(
-        text = Glitch.text("‹  工具箱"),
-        onClick = onBack,
-        modifier = Modifier.padding(top = 4.dp),
-    )
+    Row(
+        modifier = Modifier
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onBack)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.AutoMirrored.Rounded.ArrowBack,
+            contentDescription = null,
+            tint = colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = Glitch.text(" 工具箱"),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = colorScheme.primary,
+        )
+    }
 }
 
 /** 二级页大标题。 */
@@ -498,9 +517,50 @@ private fun RecentCard(queue: ToolQueue, onOpen: () -> Unit) {
     }
 }
 
+/** 状态圆点色（iOS 系绿/琥珀，小尺寸点在深浅色下均可读）。 */
+private val StatusOk = Color(0xFF34C759)
+private val StatusWarn = Color(0xFFFF9500)
+
+/** 状态 chip（对齐设计稿：圆点 + 短标签的浅底胶囊）。 */
+@Composable
+private fun StatusChip(label: String, ok: Boolean) {
+    Row(
+        modifier = Modifier
+            .background(colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(13.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(7.dp).background(if (ok) StatusOk else StatusWarn, RoundedCornerShape(4.dp)))
+        Text(label, fontSize = 11.sp, color = colorScheme.onSurface)
+    }
+}
+
+/** 筛选胶囊 chip（对齐设计稿：选中 = 主题色浅底加粗）。 */
+@Composable
+private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(15.dp))
+            .background(
+                if (selected) colorScheme.primary.copy(alpha = 0.14f)
+                else colorScheme.onSurface.copy(alpha = 0.06f),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 7.dp),
+    ) {
+        Text(
+            label,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) colorScheme.primary else colorScheme.onSurface,
+        )
+    }
+}
+
 /**
- * 状态摘要卡（v1.3.1：原 运行环境/OTA 告警/root 失效 三卡合一）。
- * root/LSPosed/OTA 防线各一行结论；挂载判据（F3，趁 root 读 lspd 日志最近 4 条）折叠进本卡。
+ * 状态摘要卡（v1.3.1：原 运行环境/OTA 告警/root 失效 三卡合一；v1.3.3 对齐设计稿 chips 化）。
+ * 三枚状态 chip（root/LSPosed/OTA）+ 异常详情行 + 挂载判据折叠（F3，趁 root 读 lspd 日志最近 4 条）。
  */
 @Composable
 private fun SummaryCard(probe: RootShell.ProbeResult?, rootOk: Boolean, ota: OtaSentinel.Report?) {
@@ -526,34 +586,59 @@ private fun SummaryCard(probe: RootShell.ProbeResult?, rootOk: Boolean, ota: Ota
                 fontSize = 15.sp,
                 color = colorScheme.onSurface,
             )
-            val rootLine = when {
-                probe == null -> "root：检测中…"
-                probe.available -> "root：可用（${probe.suPath}）"
-                else -> "⚠ root：不可用（${probe.failure}）——开关与冻结只读"
-            }
-            Text(rootLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
             val fw = FrameworkState.active
-            val fwLine = when {
-                fw == null -> "LSPosed：检测中…"
-                fw -> "LSPosed：已激活（${FrameworkState.frameworkName} ${FrameworkState.frameworkVersion} API${FrameworkState.apiVersion}）"
-                else -> "LSPosed：未激活（模块未被框架加载）"
+            Row(
+                modifier = Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusChip(
+                    if (probe == null) "root 检测中" else if (probe.available) "root 可用" else "root 不可用",
+                    ok = probe?.available == true,
+                )
+                StatusChip(
+                    when {
+                        fw == null -> "LSPosed 检测中"
+                        fw -> "LSPosed 已激活"
+                        else -> "LSPosed 未激活"
+                    },
+                    ok = fw == true,
+                )
+                StatusChip(
+                    when {
+                        ota == null -> "OTA 检查中"
+                        ota.shouldWarn -> "OTA 告警"
+                        else -> "OTA 防线正常"
+                    },
+                    ok = ota != null && !ota.shouldWarn,
+                )
             }
-            Text(fwLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
-            // OTA 防线一行结论（原 OtaWarnCard 收敛；正常时也显式报平安）
-            val otaLine = when {
-                ota == null -> "OTA 防线：检查中…"
-                ota.shouldWarn -> "⚠ OTA 防线：" + listOfNotNull(
-                    ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "六键失守 ${it.joinToString()}" },
-                    ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "有推送活动 ${it.joinToString()}" },
-                ).joinToString("；").ifEmpty { "触发告警" } + "（超线固件拒升）"
-                else -> "OTA 防线：正常（内核>6.6.118 或 SP>2026-08-01 一律拒升）"
+            // 正常态：版本凭据一行（凭据不丢）；异常态：原因与处置各行其是
+            if (probe != null && probe.available && fw != null && fw) {
+                Text(
+                    text = "root ${probe.suPath} · LSPosed ${FrameworkState.frameworkVersion} API${FrameworkState.apiVersion} · 超线固件拒升（内核>6.6.118 / SP>2026-08-01）",
+                    fontSize = 11.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
-            Text(otaLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
             if (!rootOk && probe != null) {
                 Text(
-                    text = Glitch.text("本机 root 为临时态：重启即失，重新提权后再来。已存快照与执行历史不受影响。"),
+                    text = Glitch.text("⚠ root 不可用（${probe.failure}）：开关与冻结只读。本机 root 为临时态，重启即失；已存快照与执行历史不受影响。"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            if (ota != null && ota.shouldWarn) {
+                Text(
+                    text = Glitch.text("⚠ OTA：" + listOfNotNull(
+                        ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "六键失守 ${it.joinToString()}" },
+                        ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "有推送活动 ${it.joinToString()}" },
+                    ).joinToString("；")),
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
             if (hookLines.isNotEmpty()) {
@@ -634,7 +719,7 @@ private fun PrivateDnsCard(
                     color = colorScheme.onSurface,
                 )
                 Text(
-                    text = Glitch.text("dns.adguard-dns.com；两键成对，当前：${if (mode.isBlank()) "未设置" else mode}"),
+                    text = Glitch.text("dns.adguard-dns.com · 需网络放行 DoT（853 端口），系统提示「无法访问」时请关闭此开关；当前：${if (mode.isBlank()) "未设置" else mode}"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                 )
@@ -738,13 +823,9 @@ private fun FreezeHeaderCard(
                 fontSize = 12.sp,
                 color = colorScheme.onSurfaceVariantSummary,
             )
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FreezeFilter.entries.forEach { f ->
-                    TextButton(
-                        text = Glitch.text(if (f == filter) "· ${f.label}" else f.label),
-                        enabled = rootOk && !running,
-                        onClick = { onFilter(f) },
-                    )
+                    FilterChip(label = f.label, selected = f == filter, onClick = { onFilter(f) })
                 }
             }
             Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
