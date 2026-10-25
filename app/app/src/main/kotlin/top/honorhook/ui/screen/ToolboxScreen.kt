@@ -1,7 +1,9 @@
 package top.honorhook.ui.screen
 
 import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,10 +19,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AcUnit
+import androidx.compose.material.icons.rounded.Campaign
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.ToggleOn
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +64,7 @@ import top.honorhook.ui.toolbox.SnapshotStore
 import top.honorhook.ui.toolbox.ToolAction
 import top.honorhook.ui.toolbox.ToolQueue
 import top.honorhook.ui.toolbox.ToolSwitchTable
+import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -67,14 +78,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
- * 工具箱 v1.3.1（2026-10-25 用户拍板重设计）：状态摘要 + 三分段导航（净化/开关/冻结）。
- * - 状态摘要卡：root/LSPosed/OTA 防线各一行结论 + 挂载判据折叠（原 运行环境/OTA告警/root失效 三卡合一）。
- * - 净化段：营销一键关 + 私有 DNS（高频治理动作独占一屏）。
- * - 开关段：只收 settings 持久层（resetprop 会话层已全数排除——43 号真机实证全 no_effect）。
- * - 冻结段：B/C 档白名单（GovernanceList 硬拦截，A 档折叠灰显）+ 快照 + 执行记录（治理审计入口）。
+ * 工具箱 v1.3.2（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2×2 功能磁贴 + 两级页面。
+ * - 首页：运行状态摘要卡（root/LSPosed/OTA 一行结论 + 挂载判据折叠）+ 四磁贴（营销一键关/
+ *   应用冻结/系统开关/执行记录，副标题实时计数）+ 最近执行预览。
+ * - 二级页：磁贴点进、返回栏回台；冻结/开关沿用 v1.3.1 组件，营销页 = 一键卡 + 私有 DNS。
+ * - 开关行只显「标题 + 功能描述」——key=value 属面板数据不上屏（2026-10-25 拍板：用户看不懂）。
  * - 执行一律进 ToolQueue 事务化队列：冻结批自动快照 + 失败不中断 + 回读判据。
  * - root 失效：全控件只读（状态摘要卡显式说明；已冻结列表与快照免 root 可看）。
- * - 灵动胶囊线已删（2026-10-25 拍板弃置；恢复路径见 docs/research/HANDOFF-2026-10-25.md）。
  */
 
 /** miuix Switch 无 enabled 参：禁用时吞回调（视觉不作降，足够传达只读语义）。 */
@@ -118,7 +128,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     var filter by remember { mutableStateOf(FreezeFilter.ALL) }
     var showA by rememberSaveable { mutableStateOf(false) }
     var showFolded by rememberSaveable { mutableStateOf(false) }
-    var segment by rememberSaveable { mutableStateOf(ToolSegment.PURIFY) }
+    var view by rememberSaveable { mutableStateOf(HubView.HOME) }
     var selected by remember { mutableStateOf(setOf<String>()) }
 
     var confirmTitle by remember { mutableStateOf("") }
@@ -146,13 +156,17 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 .padding(horizontal = 12.dp),
             contentPadding = innerPadding,
         ) {
-            // —— 状态摘要（原 运行环境/OTA告警/root失效 三卡合一）+ 分段导航 ——
-            item { SummaryCard(probe, rootOk, ota) }
-            item { SegmentBar(segment = segment, onSelect = { segment = it }) }
+            when (view) {
+                // —— 工作台首页：状态摘要 + 磁贴 + 最近执行 ——
+                HubView.HOME -> {
+                    item { SummaryCard(probe, rootOk, ota) }
+                    item { HubTiles(switchValues, apps, context, queue, onOpen = { view = it }) }
+                    item { RecentCard(queue, onOpen = { view = HubView.LOG }) }
+                }
 
-            when (segment) {
-                // —— 净化段：高频治理动作独占一屏 ——
-                ToolSegment.PURIFY -> {
+                // —— 净化页：一键动作 ——
+                HubView.PURIFY -> {
+                    item { BackBar { view = HubView.HOME } }
                     item {
                         AdsGroupCard(rootOk, switchValues, running) { actions ->
                             request(actions, Glitch.text("营销一键关"))
@@ -165,8 +179,10 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     }
                 }
 
-                // —— 开关段：settings 持久层 ——
-                ToolSegment.SWITCH -> {
+                // —— 开关页：标题 + 功能描述行 ——
+                HubView.SWITCH -> {
+                    item { BackBar { view = HubView.HOME } }
+                    item { DetailTitle("系统开关") }
                     item {
                         SwitchListCard(
                             entries = ToolSwitchTable.ENTRIES.filter { it.group == null && (!it.folded || showFolded) },
@@ -193,8 +209,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     }
                 }
 
-                // —— 冻结段：白名单 + 快照 + 执行记录 ——
-                ToolSegment.FREEZE -> {
+                // —— 冻结页：v1.3.1 组件沿用 ——
+                HubView.FREEZE -> {
+                    item { BackBar { view = HubView.HOME } }
                     item {
                         FreezeHeaderCard(
                             rootOk = rootOk,
@@ -258,7 +275,13 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    item { HistoryCard(context, queue) }
+                }
+
+                // —— 记录页：快照 + 执行历史（默认展开） ——
+                HubView.LOG -> {
+                    item { BackBar { view = HubView.HOME } }
+                    item { DetailTitle("执行记录") }
+                    item { HistoryCard(context, queue, initialOpen = true) }
                 }
             }
 
@@ -344,22 +367,133 @@ private fun describeAction(a: ToolAction): String = when (a) {
     is ToolAction.Switch -> "写入 ${a.key}=${a.value}"
 }
 
-/** 工具箱三分段（v1.3.1）：净化/开关/冻结——单屏单任务，替代 v1.3.0 的全量平铺。 */
-private enum class ToolSegment(val label: String) { PURIFY("净化"), SWITCH("开关"), FREEZE("冻结") }
+/** 工具箱二级视图（v1.3.2 工作台）：HOME 磁贴台 + 四个功能页，磁贴点进、返回栏回台。 */
+private enum class HubView { HOME, PURIFY, SWITCH, FREEZE, LOG }
 
-/** 分段导航条：等宽铺满，选中项带「·」前缀（同冻结区 filter chips 的视觉语言）。 */
+/** 二级页返回栏。 */
 @Composable
-private fun SegmentBar(segment: ToolSegment, onSelect: (ToolSegment) -> Unit) {
-    Row(
-        modifier = Modifier.padding(top = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+private fun BackBar(onBack: () -> Unit) {
+    TextButton(
+        text = Glitch.text("‹  工具箱"),
+        onClick = onBack,
+        modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+/** 二级页大标题。 */
+@Composable
+private fun DetailTitle(title: String) {
+    Text(
+        text = Glitch.text(title),
+        fontWeight = FontWeight.Bold,
+        fontSize = 24.sp,
+        color = colorScheme.onSurface,
+    )
+}
+
+/**
+ * 工作台 2×2 功能磁贴（v1.3.2）：副标题实时计数——营销键开数 / 冻结数 / 开关项数 / 记录数。
+ * 快照与队列读取沿用 HistoryCard 既有口径（filesDir/toolbox/snapshots/ 与 ToolQueue）。
+ */
+@Composable
+private fun HubTiles(
+    values: Map<String, String>,
+    apps: List<AppInfo>?,
+    context: Context,
+    queue: ToolQueue,
+    onOpen: (HubView) -> Unit,
+) {
+    val adsOn = ToolSwitchTable.ADS_GROUP.count { values[it.key] == "1" }
+    val frozen = (apps ?: emptyList()).count { it.frozen }
+    val switchCount = ToolSwitchTable.ENTRIES.count { it.group == null }
+    val snaps = SnapshotStore.all(context).size
+    val logCount = queue.items().size
+
+    @Composable
+    fun Tile(
+        icon: androidx.compose.ui.graphics.vector.ImageVector,
+        title: String,
+        sub: String,
+        onClick: () -> Unit,
     ) {
-        ToolSegment.entries.forEach { s ->
-            TextButton(
-                text = Glitch.text(if (s == segment) "· ${s.label}" else s.label),
-                onClick = { onSelect(s) },
-                modifier = Modifier.weight(1f),
+        Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+            Column(Modifier.padding(16.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(13.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = colorScheme.primary, modifier = Modifier.size(22.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = Glitch.text(title),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
+                    color = colorScheme.onSurface,
+                )
+                Text(sub, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+            }
+        }
+    }
+
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.Campaign, "营销一键关", "11 键 · 当前开 $adsOn") { onOpen(HubView.PURIFY) }
+            }
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档") { onOpen(HubView.FREEZE) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.ToggleOn, "系统开关", "$switchCount 项可调") { onOpen(HubView.SWITCH) }
+            }
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.History, "执行记录", "$snaps 份快照 · $logCount 条") { onOpen(HubView.LOG) }
+            }
+        }
+    }
+}
+
+/** 工作台首页最近执行预览（最多 3 条；点开进执行记录页）。 */
+@Composable
+private fun RecentCard(queue: ToolQueue, onOpen: () -> Unit) {
+    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth().clickable(onClick = onOpen)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                text = Glitch.text("最近执行"),
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                color = colorScheme.onSurface,
             )
+            val recent = queue.items().takeLast(3).reversed()
+            if (recent.isEmpty()) {
+                Text(
+                    text = Glitch.text("暂无记录——开关与冻结的执行都会落在这里"),
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            } else {
+                recent.forEach { item ->
+                    val state = when (item.state) {
+                        ToolQueue.Core.State.PENDING -> Glitch.text("待执行")
+                        ToolQueue.Core.State.DONE -> "✓"
+                        ToolQueue.Core.State.FAILED -> "×"
+                    }
+                    Text(
+                        text = "$state ${describeAction(item.action)}",
+                        fontSize = 12.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -467,12 +601,13 @@ private fun AdsGroupCard(
                 fontSize = 12.sp,
                 color = colorScheme.onSurfaceVariantSummary,
             )
-            TextButton(
-                text = Glitch.text("全部关闭（写 0）"),
-                enabled = enabled && !running && onCount > 0,
+            Button(
                 onClick = { onRequest(entries.map { ToolAction.Switch(it.table, it.key, "0") }) },
+                enabled = enabled && !running && onCount > 0,
                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-            )
+            ) {
+                Text(Glitch.text("全部关闭（写 0）"))
+            }
         }
     }
 }
@@ -554,13 +689,14 @@ private fun SwitchListCard(
                         if (e.summary.isNotBlank()) {
                             Text(e.summary, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
                         }
-                        Text(
-                            text = "key=${e.key}  当前=${current.ifBlank { "未设置" }}  ${e.note}",
-                            fontSize = 11.sp,
-                            color = colorScheme.onSurfaceVariantSummary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        // 单向开关是功能约束（用户需知），保留提示；key/当前值属面板数据不上屏
+                        if (e.offValue == null) {
+                            Text(
+                                text = Glitch.text("单向：只开不关，恢复走系统设置"),
+                                fontSize = 11.sp,
+                                color = colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
                     }
                     Spacer(Modifier.width(12.dp))
                     SafeSwitch(
@@ -747,8 +883,8 @@ private fun ConfirmDialog(
 }
 
 @Composable
-private fun HistoryCard(context: Context, queue: ToolQueue) {
-    var open by rememberSaveable { mutableStateOf(false) }
+private fun HistoryCard(context: Context, queue: ToolQueue, initialOpen: Boolean = false) {
+    var open by rememberSaveable { mutableStateOf(initialOpen) }
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(
