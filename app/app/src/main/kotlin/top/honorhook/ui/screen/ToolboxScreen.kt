@@ -170,6 +170,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,
+                topInset = innerPadding.calculateTopPadding(),
                 apps = apps,
                 running = running,
                 selected = selected,
@@ -276,13 +277,13 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         }
         selected = next
         bulkNote = if (opt == BulkOption.NONE) Glitch.text("已清空勾选")
-        else Glitch.text("已勾选 ${next.size} 项（${opt.label}）")
+        else Glitch.text("已勾选 ${next.size} 项 · ${opt.label}")
     }
     if (freezeMenuOpen) {
         WindowDialog(
             show = true,
-            title = Glitch.text("批量勾选（影响勾选，不过滤列表）"),
-            summary = null,
+            title = Glitch.text("批量勾选"),
+            summary = Glitch.text("选中后自动勾选名单内的应用，列表显示不变；「可选冻结」的部分应用有功能代价"),
             onDismissRequest = { freezeMenuOpen = false },
         ) {
             BulkOption.entries.forEach { opt ->
@@ -384,7 +385,7 @@ private enum class HubView(val title: String) {
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
 private enum class BulkOption(val label: String) {
-    PRESET("纯净模式精选"), TIER_B("B 可选冻"), TIER_C("C 建议冻"), ALL("全部勾选"), NONE("清空勾选"),
+    PRESET("纯净模式精选"), TIER_B("可选冻结（有功能代价）"), TIER_C("建议冻结"), ALL("全部勾选"), NONE("清空勾选"),
 }
 
 /**
@@ -394,6 +395,7 @@ private enum class BulkOption(val label: String) {
 @Composable
 private fun FreezePane(
     rootOk: Boolean,
+    topInset: androidx.compose.ui.unit.Dp,
     apps: List<AppInfo>?,
     running: Boolean,
     selected: Set<String>,
@@ -417,7 +419,8 @@ private fun FreezePane(
         modifier = Modifier
             .fillMaxHeight()
             .padding(horizontal = 12.dp)
-            .padding(top = 4.dp),
+            // 必须消费顶栏 inset：否则固定区（搜索/按钮）被顶栏盖住（真机实证「搜索栏消失」bug）
+            .padding(top = topInset + 4.dp),
     ) {
         // 固定区：搜索框（不随列表滚动）
         InputField(
@@ -452,7 +455,7 @@ private fun FreezePane(
                         modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        text = Glitch.text("批量勾选（按名单，不过滤列表）"),
+                        text = Glitch.text("按名单批量勾选"),
                         fontSize = 14.sp,
                         color = colorScheme.onSurface,
                     )
@@ -501,7 +504,7 @@ private fun FreezePane(
             }
             item {
                 TextButton(
-                    text = Glitch.text(if (showA) "收起禁碰名单（A 档）" else "展开禁碰名单（A 档）"),
+                    text = Glitch.text(if (showA) "收起禁碰名单" else "展开禁碰名单"),
                     onClick = { onToggleA(!showA) },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -615,22 +618,22 @@ private fun SummaryCard(
                 )
                 StatusChip(
                     when {
-                        ota == null -> "OTA 检查中"
-                        ota.shouldWarn -> "OTA 告警"
-                        else -> "OTA 防线正常"
+                        ota == null -> "更新防护检查中"
+                        ota.shouldWarn -> "更新防护异常"
+                        else -> "更新防护正常"
                     },
                     ok = ota != null && !ota.shouldWarn,
                 )
             }
             Text(
-                text = Glitch.text("root 为临时态（重启即失）"),
+                text = Glitch.text("root 为临时授权，手机重启后失效"),
                 fontSize = 11.sp,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 8.dp),
             )
             if (!rootOk && probe != null) {
                 Text(
-                    text = Glitch.text("⚠ root 不可用（${probe.failure}）：开关与冻结只读；已存快照与执行历史不受影响。"),
+                    text = Glitch.text("⚠ root 不可用（${probe.failure}）：开关和冻结暂时用不了；已保存的记录和备份不受影响。"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
@@ -638,9 +641,9 @@ private fun SummaryCard(
             }
             if (ota != null && ota.shouldWarn) {
                 Text(
-                    text = Glitch.text("⚠ OTA：" + listOfNotNull(
-                        ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "六键失守 ${it.joinToString()}" },
-                        ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "有推送活动 ${it.joinToString()}" },
+                    text = Glitch.text("⚠ 更新防护：" + listOfNotNull(
+                        ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "有 ${it.size} 项防护开关被系统改回（${it.joinToString()}）" },
+                        ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "检测到系统更新推送活动（${it.joinToString()}）" },
                     ).joinToString("；")),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
@@ -862,7 +865,7 @@ private fun ConfirmDialog(
             Text(
                 text = Glitch.text("将执行 ${actions.size} 项：\n") +
                     actions.joinToString("\n") { describeAction(it) } +
-                    Glitch.text("\n\n冻结批会先自动存快照。失败不中断，逐项回读验收。"),
+                    Glitch.text("\n\n冻结前会自动备份，随时可恢复；失败不中断，每项都会检查结果。"),
                 fontSize = 13.sp,
             )
             if (hasBTier) {
@@ -944,7 +947,7 @@ private fun HistoryCard(context: Context, queue: ToolQueue, asPage: Boolean = fa
                 val snaps = SnapshotStore.all(context).take(3)
                 if (snaps.isNotEmpty()) {
                     Text(
-                        text = Glitch.text("快照（filesDir/toolbox/snapshots/）："),
+                        text = Glitch.text("备份快照："),
                         fontSize = 12.sp,
                         color = colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.padding(top = 6.dp),
