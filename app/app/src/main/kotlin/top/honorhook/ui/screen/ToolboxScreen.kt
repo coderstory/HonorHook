@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.Glitch
+import top.honorhook.ui.capsule.CapsulePoster
 import top.honorhook.ui.scope.RootShell
 import top.honorhook.ui.scope.SafeCommands
 import top.honorhook.ui.toolbox.AppInfo
@@ -154,6 +155,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
 
             item { ActivityCard(probe, rootOk) }
             item { HistoryCard(context, queue) }
+            item { CapsuleCard() }
 
             // —— 开关区 ——
             item {
@@ -800,6 +802,55 @@ private fun HistoryCard(context: Context, queue: ToolQueue) {
                         Text("· ${s.name}（${s.length() / 1024}KB）", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** 灵动胶囊 C 路测试卡（26 号规格书场景 1+4：倒计时/文本胶囊，app 侧零 hook 投递）。 */
+@Composable
+private fun CapsuleCard() {
+    val context = LocalContext.current
+    var status by remember { mutableStateOf<String?>(null) }
+    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                text = Glitch.text("灵动胶囊"),
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                color = colorScheme.onSurface,
+            )
+            Text(
+                text = Glitch.text("通知通道零 hook 投递（C 路）；需荣耀桌面胶囊开关开启"),
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+            )
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = Glitch.text("30s 倒计时"),
+                    onClick = {
+                        status = when (val r = CapsulePoster.postCountdown(context, "倒计时", 30)) {
+                            is CapsulePoster.Result.Ok -> "已投递（id=${r.notificationId}），看灵动胶囊"
+                            is CapsulePoster.Result.Failed -> "失败@${r.step}：${r.message}"
+                        }
+                    },
+                )
+                TextButton(
+                    text = Glitch.text("文本胶囊"),
+                    onClick = {
+                        status = when (val r = CapsulePoster.postText(context, "Re:荣耀 在线")) {
+                            is CapsulePoster.Result.Ok -> "已投递（id=${r.notificationId}），看灵动胶囊"
+                            is CapsulePoster.Result.Failed -> "失败@${r.step}：${r.message}"
+                        }
+                    },
+                )
+                TextButton(
+                    text = Glitch.text("撤销"),
+                    onClick = { CapsulePoster.cancel(context); status = "已撤销" },
+                )
+            }
+            status?.let {
+                Text(it, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
             }
         }
     }
