@@ -84,9 +84,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
- * 工具箱 v1.3.2（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2×2 功能磁贴 + 两级页面。
- * - 首页：运行状态摘要卡（root/LSPosed/OTA 一行结论 + 挂载判据折叠）+ 四磁贴（营销一键关/
- *   应用冻结/系统开关/执行记录，副标题实时计数）+ 最近执行预览。
+ * 工具箱 v1.3.5（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2×2 功能磁贴 + 两级页面。
+ * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 四磁贴（营销一键关/
+ *   应用冻结/系统开关/执行记录，副标题实时计数）。
  * - 二级页：磁贴点进、返回栏回台；冻结/开关沿用 v1.3.1 组件，营销页 = 一键卡 + 私有 DNS。
  * - 开关行只显「标题 + 功能描述」——key=value 属面板数据不上屏（2026-10-25 拍板：用户看不懂）。
  * - 执行一律进 ToolQueue 事务化队列：冻结批自动快照 + 失败不中断 + 回读判据。
@@ -192,12 +192,11 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             contentPadding = innerPadding,
         ) {
             when (view) {
-                // —— 工作台首页：状态摘要 + 磁贴 + 最近执行 ——
-                HubView.HOME -> {
-                    item { SummaryCard(probe, rootOk, ota) }
-                    item { HubTiles(switchValues, apps, context, queue, onOpen = { view = it }) }
-                    item { RecentCard(queue, onOpen = { view = HubView.LOG }) }
-                }
+                    // —— 工作台首页：状态摘要 + 磁贴（最近执行预览已删——与执行记录磁贴同数据源，同屏双份冗余） ——
+                    HubView.HOME -> {
+                        item { SummaryCard(probe, rootOk, ota) }
+                        item { HubTiles(switchValues, apps, context, queue, onOpen = { view = it }) }
+                    }
 
                 // —— 净化页：一键动作 ——
                 HubView.PURIFY -> {
@@ -562,46 +561,6 @@ private fun HubTiles(
             }
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.History, "执行记录", "$snaps 份快照 · $logCount 条") { onOpen(HubView.LOG) }
-            }
-        }
-    }
-}
-
-/** 工作台首页最近执行预览（最多 3 条；点开进执行记录页）。 */
-@Composable
-private fun RecentCard(queue: ToolQueue, onOpen: () -> Unit) {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth().clickable(onClick = onOpen)) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = Glitch.text("最近执行"),
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            val recent = queue.items().takeLast(3).reversed()
-            if (recent.isEmpty()) {
-                Text(
-                    text = Glitch.text("暂无记录——开关与冻结的执行都会落在这里"),
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            } else {
-                recent.forEach { item ->
-                    val state = when (item.state) {
-                        ToolQueue.Core.State.PENDING -> Glitch.text("待执行")
-                        ToolQueue.Core.State.DONE -> "✓"
-                        ToolQueue.Core.State.FAILED -> "×"
-                    }
-                    Text(
-                        text = "$state ${describeAction(item.action)}",
-                        fontSize = 12.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
             }
         }
     }
