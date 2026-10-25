@@ -64,7 +64,7 @@ class RegistryConsistencyTest {
             "com.hihonor.cloudmusic",
         ).forEach { pkg ->
             assertTrue(
-                "SDK 通杀包 $pkg 在 scope.list 中（实测 18 行含它）且应有注册 hook，find 为空 = 注册漏了",
+                "SDK 通杀包 $pkg 在 scope.list 中（全 24 行含它；2026-10-26 T11 校正，原「实测 18 行」为过时数字）且应有注册 hook，find 为空 = 注册漏了",
                 TargetRegistry.find(pkg).isNotEmpty(),
             )
         }

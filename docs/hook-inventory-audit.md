@@ -10,6 +10,8 @@
 
 ## 一、口径与当前基线
 
+- **作用域包数口径（2026-10-26，T11 统一）**：**24 包**（scope.list 全量）/ 22 个已注册 TargetHook 实现 / 33 个注册实例——以 `RegistryConsistencyTest` 动态断言为准（此前 AGENTS.md「22/20」、测试注释「18 行」等漂移数字已清；另 MiHealthHook 已实现未注册，属死代码，不计入）。
+
 ### 版本对照（**别搞反**：代码基线是 hook 编写时反编译的那版，设备实际是跑在真机上的那版）
 
 | 目标 | 代码基线（`HOST_VERSION_BASELINE`） | 设备实际（2026-10-11 快照） | 关系 |
@@ -120,6 +122,8 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 | 壁纸三 hook（Transcode / Loop / Timeline） | 无近期判据 | 需触发壁纸编辑或应用才注入 |
 
 > M 随代码变更、N 随宿主版本：**改完 hook 回来更新本表**。
+
+> **「应 M 值」脚本化评估结论（2026-10-26，T11）**：**不可脚本化，维持人工维护，勿再评估**。原因：源码 id 字面量与运行期任务非一一对应（mms 4 id ↔ `installed 2/2`）、M 随宿主版本分档（installer 22.326=8 / 37.301=11 / 38.301=11）且受开关过滤影响、MERGED/MERGED_CONFLICT 合并口径需人工判读——脚本只能数声明 id，推不出运行期 M。
 
 > **判据行格式（2026-10-20 起）**：`HookName[宿主包名]: installed N/M`（如 `HonorAdsHook[com.hihonor.calendar]: installed 2/2`）—— 同一 hook 名按包注册多次（HonorAds 5 个包）时靠包名区分归属；`installed N/M` 子串本身不变，按它抓的脚本不受影响。
 

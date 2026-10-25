@@ -1,6 +1,6 @@
 # AGENTS.md — HonorHook
 
-荣耀 LSPosed 模块（libxposed API 102，包名 `top.honorhook`）。一个 APK 两个运行面：**hook 侧**注入 22 个作用域包（20 个已注册 `TargetHook`，SDK 通杀类按包分别注册；只改内存态）、**UI 侧** Miuix Compose 面板经远端 prefs 下发开关。
+荣耀 LSPosed 模块（libxposed API 102，包名 `top.honorhook`）。一个 APK 两个运行面：**hook 侧**注入 24 个作用域包（22 个已注册 `TargetHook` 实现 / 33 个注册实例，SDK 通杀类按包分别注册；口径以 `RegistryConsistencyTest` 动态断言为准，只改内存态）、**UI 侧** Miuix Compose 面板经远端 prefs 下发开关。
 
 详细背景见 `README.md`（功能台账 + 验证清单）、`CLAUDE.md`（纪律）、`docs/README.md`（文档索引）。
 
