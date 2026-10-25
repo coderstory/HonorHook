@@ -363,7 +363,18 @@ private suspend fun executeWithQueue(
 private fun describeAction(a: ToolAction): String = when (a) {
     is ToolAction.Freeze -> "冻结 ${a.pkg}"
     is ToolAction.Unfreeze -> "解冻 ${a.pkg}"
-    is ToolAction.Switch -> "写入 ${a.key}=${a.value}"
+    // 确认清单/失败明细面向用户：按开关表反查标题说人话（关闭/开启/清空/设置），
+    // 表外键（理论不可达）兜底回键值表示
+    is ToolAction.Switch -> {
+        val e = ToolSwitchTable.ENTRIES.firstOrNull { it.key == a.key && it.table == a.table }
+        when {
+            e == null -> "写入 ${a.key}=${a.value}"
+            a.value.isBlank() -> "清空 ${e.title}"
+            a.value == e.offValue -> "关闭 ${e.title}"
+            a.value == e.onValue -> "开启 ${e.title}"
+            else -> "设置 ${e.title}"
+        }
+    }
 }
 
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
