@@ -24,15 +24,11 @@ import java.net.URI
  * （见 XhsBatchSave.downloadAll/downloadOne）；本 object 的 q/100 直链仅供 X3 继续用（[toOriginal]），
  * 旧 markQualityFailed 粘性降级随 X5 调用点一并删除。
  *
- * **X3 为什么保留 `?imageView2/2/format/jpg/q/100`**（2026-10-14 真机 curl 实测）：
- * 只保 token、剥光 query 时 CDN 回的是**同尺寸但高压缩重编码**，画质损失大。同一张 4284x5712 图：
- *  - 剥光参数（旧实现）                            1,727,058 B
- *  - `?imageView2/2/w/4284/format/jpg/q/100`      11,114,503 B
- *  - 另一 token 剥光参数                           4,917,390 B
- *  - 另一 token `?imageView2/2/format/jpg/q/100`  12,014,146 B
- *  - 客户端自存同张                                10,186,338 B
- * 两次实测口径一致：**`?imageView2/2/format/jpg/q/100`（连 w 都不用给）返回全尺寸最高画质**；
- * 加 `w/<声明宽度>` 结果相同。X3 无回落兜底（改的是宿主解码源），恒追加该 query（[QUALITY_QUERY]）。
+ * **X3 为什么保留 `?imageView2/2/format/jpg/q/100`**：只保 token、剥光 query 时 CDN 回的是**同尺寸
+ * 但高压缩重编码**，画质损失大（2026-10-14 真机 curl 实测，两张 token 五组字节对照——裸链 1.7MB
+ * 量级 vs q/100 11MB 量级 vs 客户端自存——见 docs/reverse/xhs.md §三 X3 规则 3 与 X5「换 host +
+ * 剥 query 实证」条，2026-10-26 自源码注释下沉指针化）。**连 `w` 都不用给**：加 `w/<声明宽度>`
+ * 结果相同。X3 无回落兜底（改的是宿主解码源），恒追加该 query（[QUALITY_QUERY]）。
  */
 object XhsImageUrl {
 

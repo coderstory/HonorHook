@@ -139,12 +139,16 @@ XHS-Downloader 的重建：URL 第 6 段起取 token、剥离 `!` 后缀 → `ht
 
 **X5 `mh9.b`（图片长按面板「保存」点击 lambda）→ 追加弹窗 → 外挂直下（2026-10-14 定稿）**
 - 挂点与锚同前表。交互：**先 proceed 后弹窗**——本张原生保存（fresh token）→ 追加卡片（自绘：圆角卡 + XHS 红主按钮 + 深色自适应）「已保存本张（原图）/ 检测到本篇还有 N 张」[保存全部/不用了]；单图笔记零打扰。
-- **外挂数据链（四版演进终局，前四版死因存档勿复活）**：
+- **外挂数据链（五版演进，1~4 版死因存档勿复活）**：
   1. 画廊三击——400ms 窗口 + 双击缩放冲突（用户否决）
   2. 拦截-重放本张——dispatch token 一次性，事后重放被下游身份过滤静默丢弃
   3. app 内存找图集（controller 图搜/adapter.setItems 快照）——sheet 图里图集实证为空；MultiTypeAdapter.setItems 真机不存在
-  4. **外挂解析（定稿）**：X4 interceptor 旁路 `/api/sns/v1/note/imagefeed`（逐图 feed，进图浏览必发）+ `/note/detailfeed`，收 `images_list[]` 的 `original` 直链（优先）/`url`；noteId 三轨 = body `"note_id"` → URL query `note_id` → 沿用最近值；触发端点**精确匹配**（宽前缀 /note/ 会收进 user/posted 污染；homefeed 会灌整条信息流——实测 62 张污染）；单笔记 >30 张护栏丢弃。
-  5. 直下：模块自己 HttpURLConnection（UA+Referer+302 跟随）→ MediaStore `Pictures/小红书`；URL 原图化 = 剥 `?`/`!` 参数，**换 host 已实证安全**（见下）。
+  4. okhttp 旁路采集（2026-10-14 定稿，2026-10-19 废）：X4 interceptor 旁路 `/api/sns/v1/note/imagefeed`（逐图 feed，进图浏览必发）+ `/note/detailfeed`，收 `images_list[]` 的 `original` 直链（优先）/`url`；noteId 三轨 = body `"note_id"` → URL query `note_id` → 沿用最近值；触发端点**精确匹配**（宽前缀 /note/ 会收进 user/posted 污染；homefeed 会灌整条信息流——实测 62 张污染）；单笔记 >30 张护栏丢弃。
+  5. **分享链接管线（2026-10-19 现行定稿；2026-10-26 自 XhsBatchSave 头注下沉补录）**：第 4 版死于
+     save-hostile 笔记服务端剥直链、noteId 归属 lookback 脆、采集正则与宿主载荷形态耦合——分享页
+     `__INITIAL_STATE__` 是唯一全量无剥离数据源（上游 XhsNoteParser 消费）⇒ 保存点击 hook →
+     分享链接 → 上游下载器管线（现行数据流见 §9.3）。
+  6. 直下：模块自己 HttpURLConnection（UA+Referer+302 跟随）→ MediaStore `Pictures/小红书`；URL 原图化 = 剥 `?`/`!` 参数，**换 host 已实证安全**（见下）。
 - **换 host + 剥 query 实证（2026-10-14，三条真机 URL）**：token 取 3 例——根级 `1040g0083269625nml6105pou5a8jchgaphip3tg`、`notes_pre_post/1040g3k0325ubij8hk64g5nlvfu908d75654m610`、`spectrum/1040g34o32617jo6fk6105qh81qbgfs01n02n15g`。同一 token 对 `sns-na-i6` / `sns-img-bd` / `ci.xiaohongshu.com` / `sns-img-qc` 四 host **返回字节完全相同**（644,430B / 1,956,636B / 159,039B）⇒ 换 host 无损，原「未实证」作废。剥 query 即原图：`notes_pre_post/…` 无参 1,956,636B vs 签名预览 644,430B。**但只剥 query 不够——必须补回 `?imageView2/2/format/jpg/q/100`（2026-10-14 订正，真机 curl 实测）**：只保 token 时 CDN 回**同尺寸但高压缩重编码**（画质损失大），同一张 4284x5712 图：token A 裸链 1,727,058B / 加该 query（`w/4284` 同结果）= 11,114,503B；token B 裸链 4,917,390B / 加该 query = 12,014,146B；客户端自存同张 10,186,338B ⇒ `XhsImageUrl` AUTO 分支恒在 token 后追加该 query（`toOriginal`），裸链另存 `toBare` 供下载失败回落。**注意 Content-Type**：原图可能回 `application/octet-stream`（非 `image/*`）⇒ 下载端**禁按 Content-Type 白名单拒收**（改用黑名单拒 `text/*` 错误页）。落地实现 `XhsImageUrl.kt`（host 固定 `sns-img-bd.xhscdn.com`）。
 - **X5 真机实录（2026-10-14，4 图笔记）**：长按图片 →「保存」命中 `mh9.b` → 原生保存本张（客户端落 `/sdcard/DCIM/Camera_XHS_<ts><token路径>.jpg` 1,228,638B，**1728x2304**，X3 原图直链生效）→ 追加卡「检测到本篇还有 4 张」（采集自 `imagefeed`，首张 host 实测 `sns-na-i1.xhscdn.com`，改写后走 `sns-img-bd`）→「保存全部」→ 模块直下 **4/4** 落 `Pictures/小红书`（4.77/2.87/2.83/3.08 MB；首张 1728x2304 = 与客户端同分辨率，但为 CDN **原始字节**，远大于客户端重压的 1.23MB）。
 - 弹窗 Activity 来源：controller 图搜（Lazy 主动 getValue 解包 + Dialog 轨——LCBBottomSheetDialog.context）。
@@ -286,6 +290,10 @@ h1()→b1()、U1()→S1()；**短包名身份跨版本不可信，选点必须�
 不降级）：本案 d49.q 假阳性即实例。候选方案（基建改动，另行拍板）：混淆名 task 强制配锚点；或无锚点
 采纳时「DexKit 命中类名 ≠ 声明类名」降级 WARN。
 
+**2026-10-20 已修（2026-10-26 自 XhsBatchSave 头注下沉）**：`DexHitSelector.pickStrict` 统一
+「无内容锚点不猜 + 唯一命中才采纳」，再遇误绑漂移 WARN 留痕（declaringClass 与声明不符）；
+a59.q 点位同时补兜底锚 classFieldTypes = int + NoteFeed。
+
 ### 待用户真机验证
 
 装新包 → 开 xhs → 看 modlog：`X1 3/3 · X2 3/3 · X3 1/1 · X4 1/1 · X5 2/2`；功能现象：图片长按保存
@@ -316,6 +324,13 @@ judge 行（9.50.0 现版本两点都出不来）。
 作者关闭下载（服务端 disable）：拒绝体 `{"result":0,"success":true,"msg":"","data":{"msg":"…","disable":true}}`
 ——**保留 disable 只清 data.msg**（toast 消失）+ HD 卡直下原片。**禁伪造 success/disable 语义**
 （21:22、22:47 两轮假成功体均致宿主 fallback 自下载 = 双下载，反例档案见 masterplan §四）。
+
+**落盘闸演进（2026-10-26 自 XhsBatchSave.mountAlbumSink 注释下沉）**：第一版逐类挂 `b75.n#execute`
+（2026-10-19 21:35 真机 X5 3/3 挂上）断不了根——DCIM 仍落 `Camera_xhs_<ts>.mp4` 且无断根判据行 =
+该批走了另一拷贝路 `fs2/b.java:51 w.e0(file, DCIM, "Camera/"+name, "video/mp4")`，逐类挂 = 打地鼠
+⇒ 改挂**公共工具 `xec.w`**（public final 未混淆，所有落盘必经，跨版本稳）：`h0`（w.java:730，
+b75/n.java:35 调方）与 `e0`（w.java:619，fs2/b.java:51 调方，内部委托 `h0(..., true, ...)`）同挂。
+9.51 起 xec.w 整类消失 → 诚实 null + VideoStorageManager#a 新闸（见 §「9.51.0 适配」表）。
 
 ### 9.3 数据流（现行，采集器已全删）
 
@@ -386,7 +401,7 @@ saveClick DexKit 漂移命中 ji9.b→yi9.b（救回）。
 | videoClick | a59.q | **9.51 起正式不挂载（无需）** | ① yi9.f 误判澄清：完整 smali 证伪——它是 3-case 属性 getter 分发 lambda（纯读 g.a/g.b/g.c 字段），非点击处理器，同包同 ctor 是巧合；② 功能上 9.50 它的价值（抢在 r1.b 前拦点击）已被 noteSaveEntry 上移覆盖：9.51 点击 → r1.b(pb9.o1) 拦 = view 不弹+请求不发+弹卡直下原片，效果等价。未来 noteSaveEntry 失效且需前置拦截时再重启此点 |
 | noteSaveEntry | ab9.r1 | **pb9.o1** | 串锚 `save video failed:` 唯一宿主；`b` 9 参同构 |
 | aigcEditLaunch | mg4.b | **rg4.b** | mg4.b 在 9.51 成 0 方法空壳；rg4.b ctor (VideoEditDownloadWidget,I) + 串锚 `tag_video_edit_download_loading` |
-| downloaderEntry | b75.h | b75.h（不变） | 跨 9.49/9.50/9.51 存活 |
+| downloaderEntry | b75.h | **g75.h** | ⚠️ 9.51 的 b75.h 是同名 SuspendLambda（R8 跨版本名字复用），按类名存在性查会误判存活；真身 = 串锚 `addDownloadTask 强制下载` 唯一宿主 g75.h，e 仍 13 参但改 static（首参 receiver，合成尾 I/Object 计数不变）。（2026-10-26 自 XhsPoints 注释下沉订正：本行原记「b75.h 不变/跨版本存活」系同期误判） |
 | albumSink h0/e0 | xec.w | **null（诚实跳过）** | xec.w 整类消失；视频拷贝疑似并入 VideoStorageManager（`dz8/t`，"saveVideo start copy file"）但其入口 `a(t,String,String,Uri,Z)` 与原 `(File,relDir,name,delSrc,mime)boolean` 形状不同——错挂会拦全 App 媒体落盘。downloaderEntry 接管时宿主零下载零落盘，落盘闸仅为第二层防线；定位后补（XhsPoints 已把这两点升格进表走版本分发） |
 
 ### 教训

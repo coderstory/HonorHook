@@ -37,9 +37,9 @@ import java.util.regex.Pattern
  *
  * **2026-10-19 X5 重构**：video_info_v2/图集/分享三路**旁路采集**（harvestVideoSources /
  * harvestStreams / harvestNoteImages 及其全部正则与缓存表）随「保存按钮 hook → 分享链接 →
- * 上游下载器管线」定案删除——视频候选只来自 X5 点击轨的分享链接解析（XhsSavePivot →
- * [offerHdDownloadFromNote]），本类只留 [harvestNoteShare]（share_info 缓存，XhsSavePivot 单链输入
- * [shareLinkOf]）。
+ * 上游下载器管线」定案删除（删除范围与理由见 docs/reverse/xhs.md §9.3）——视频候选只来自 X5
+ * 点击轨的分享链接解析（XhsSavePivot → [offerHdDownloadFromNote]），本类只留 [harvestNoteShare]
+ * （share_info 缓存，XhsSavePivot 单链输入 [shareLinkOf]）。
  *
  * 防重：同一 Builder 实例不重复注入（interceptors.contains 判代理身份）。
  * 失败分级：FAILED（okhttp 缺失说明目标结构大改，重试无意义）。
@@ -546,9 +546,9 @@ object XhsVideoSave {
      * 改写 /note/video/save 响应：disable:true→false、status 统一 2（无则插入）。命中返回新 Response，
      * 未命中/异常返回 null（原响应不动）。
      *
-     * **换链（download_url 替换）分支已删**（2026-10-19，随 videoSources 采集删除）：实测 E1——换链
-     * 日志出现但客户端仍落服务器原档 sizeof，即客户端根本不消费响应内 download_url；且唯一可信源
-     * origin_video_key 经 E6/E7 实证不在 app 网络层 ⇒ swapUrl() 恒 null（V-10 起死分支）。
+     * **换链（download_url 替换）分支已删**（2026-10-19，随 videoSources 采集删除）：客户端不消费
+     * 响应内 download_url（E1 真机实证），且 origin_video_key 不在 app 网络层（E6/E7）⇒ swapUrl()
+     * 恒 null 死分支——实证全案见 docs/reverse/xhs.md §三 X4「客户端不吃 download_url」/§五差异表。
      * 高清交付由外挂直下（scheduleHdVideoDownload / X5 点击轨）承担。
      */
     private fun patchVideoSaveResponse(url: String, body: String, response: Any, module: XposedModule): Any? {

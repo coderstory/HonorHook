@@ -19,18 +19,16 @@ import java.lang.reflect.Modifier
  *   - X2a `MediaSaveConfig.c()` → true：`@kd.c("disable_watermark")` getter，未混淆直连，
  *     9.33.4→9.49.1 方法号零漂移（jadx 双版本对照），9.50.0 仍存活零漂移（findings-x2b
  *     实证：注解 :18、`public final boolean c()` :46）。合成入口 nd8.j.a 的 z（作者水印）由此关。
- *   - X2b `nd8.j.b(Context, boolean)` → null：AI 水标位图构造（inflate→view→Bitmap）。
- *     混淆名，9.50.0 R8 全量重命名 qc8.j→nd8.j（同 classes6.dex 内换包，方法名/签名/方法体
- *     语义与 9.49.1 逐字节级对齐；dexdump c6.txt:901382 类头实证，b() 方法体 inflate id
- *     0x7f0c0f79→0x7f0c1b79 平移、alpha 0.56 同旧，findings-x2b 2026-10-19）。串锚 = 同类
- *     方法体日志串 "disableAiWaterMark is "（nd8.j.a 实读，全 APK 唯一）+
- *     "andr_image_save_white_bg_optimized"（全 APK 唯一）+ tag "SaveImagesHelper"（跨类，
- *     作 conjunction）。NOT_RESOLVED 降级 = AIGC 帖仍画 AI 标签，可接受（作者水印走
- *     X2a/X2c 不受影响）。
- *   - X2c ImageBean disable_ai getter → true：**方法号已实证漂移**（9.33.4 u() → 9.49.1 v()；
- *     savefix 1.2.3 裸挂 u() 在 9.49.1 会撞到 u0()（original String getter）类型炸）。故
- *     **运行时注解反射定位**（[discoverDisableAiGetter]）：扫 `@kd.c("disable_ai")` 字段，
- *     再用「字段置真探针」找读它的无参 boolean getter——注解串不漂，字段名/方法号全免疫。
+ *   - X2b `nd8.j.b(Context, boolean)` → null：AI 水标位图构造（inflate→view→Bitmap），混淆名。
+ *     版本坐标与迁名实证（9.49.1 qc8.j → 9.50.0 nd8.j → 9.51 ce8.j，dexdump/inflate id 平移
+ *     细节）见 docs/reverse/xhs.md §八对照表与 §「9.51.0 适配」表，坐标分发走 [XhsPoints]；
+ *     串锚 = 同类方法体日志串 "disableAiWaterMark is " + "andr_image_save_white_bg_optimized"
+ *     （各全 APK 唯一）+ tag "SaveImagesHelper"（跨类，作 conjunction）。NOT_RESOLVED 降级 =
+ *     AIGC 帖仍画 AI 标签，可接受（作者水印走 X2a/X2c 不受影响）。
+ *   - X2c ImageBean disable_ai getter → true：**方法号跨版本漂移实证**（savefix 裸挂 u() 在新版本
+ *     撞同名 String getter 类型炸的翻车全案见 docs/reverse/xhs.md §三 X2c）⇒ **运行时注解反射定位**
+ *     （[discoverDisableAiGetter]）：扫 `@kd.c("disable_ai")` 字段，再用「差分探针」找读它的无参
+ *     boolean getter——注解串不漂，字段名/方法号全免疫。
  *     适配盲区：adapt_new_version.py 无静态挂载点可核对，本 target 点数少计 1（doc 口径）。
  */
 object XhsWatermark {

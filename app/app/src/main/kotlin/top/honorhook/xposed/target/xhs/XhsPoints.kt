@@ -12,12 +12,10 @@ import top.honorhook.xposed.core.HostVersion
  * （或在 [baseline] 换新基线 + 旧版本降为 override 套）。点在某版本不存在/未定位 = 值 null，
  * 挂载处跳过该点（逻辑层回落既有兜底轨），`installed N/M` 的 N 随之变化可判。
  *
- * 差异账本（9.49.1 → 9.50.0，23ce86a 与 2026-10-19/20 适配实证）：
- * - saveClick：mh9.b → ji9.b（X5 图片长按面板，双串锚两版同在）
- * - videoClick：d49.q → a59.q（X5 视频保存点击轨，classFieldTypes 锚两版同构）
- * - x2b：qc8.j → nd8.j（AI 水标位图，findings-x2b）
- * - noteSaveEntry / aigcEditLaunch / downloaderEntry：9.50.0 反编译新发现（ab9.r1#b / mg4.b#invoke /
- *   b75.h#e），9.49.1 未定位 → null（旧宿主走 videoClick 轨 + X4 拦截 + 落盘闸 = 9.49 期行为）
+ * 差异账本：逐版本坐标迁移与证据（file:line / dexdump / smali 实证）见 docs/reverse/xhs.md
+ * §八「新挂载点对照」（9.49.1→9.50.0）与 §「9.51.0 适配」坐标迁移表——本表只存结论坐标，
+ * 不复制论证（2026-10-26 下沉后口径；9.49.1 的三个 null 点 = 该版未定位，旧宿主走 videoClick
+ * 轨 + X4 拦截 + 落盘闸 = 9.49 期行为）。
  */
 object XhsPoints {
 
@@ -47,24 +45,18 @@ object XhsPoints {
             "aigcEditLaunch" to null,
             "downloaderEntry" to null,
         ),
-        // 9.51.0（2026-10-23 真机升级，MT MCP 逐点核对）：
+        // 9.51.0（2026-10-23 真机升级，MT MCP 逐点核对；逐点证据、yi9.f 误判澄清与 xec.w 消失定位
+        // 全案见 docs/reverse/xhs.md §「9.51.0 适配」坐标迁移表，2026-10-26 下沉后只留结论）：
         // - saveClick：ji9.b → yi9.b（真机 DexKit 漂移命中实证后落表，运行时兜底轨可退役一程）
-        // - videoClick：a59.q → **9.51 起正式不挂载（不是跳过，是无需）**。 yi9.f 误判澄清（完整 smali
-        //   实证）：它是个 3-case 属性 getter 分发 lambda（case→g.a/g.b/g.c 纯读字段），非点击处理器——
-        //   同包同 ctor 是巧合。且 9.50 videoClick 的价值（抢在 r1.b 前拦点击）已被 noteSaveEntry
-        //   上移覆盖：9.51 点击 → r1.b(pb9.o1) 拦截 = view 不弹+请求不发+弹卡直下原片，效果等价，
-        //   点击轨再挂一层只剩冗余。若未来 noteSaveEntry 失效且点击轨又需前置拦截，再重启此点
-        // - x2b：nd8.j → ce8.j（串锚 disableAiWaterMark is / andr_image_save_white_bg_optimized
-        //   两串 9.51 唯一宿主；b(Context,Z)Bitmap 签名不变）
-        // - noteSaveEntry：ab9.r1 → pb9.o1（串锚 "save video failed:" 唯一宿主；b 9 参签名同构）
-        // - aigcEditLaunch：mg4.b → rg4.b（mg4.b 9.51 成 0 方法空壳；新家 ctor (VideoEditDownloadWidget,I)）
-        // - downloaderEntry：b75.h → g75.h（⚠️ 9.51 的 b75.h 是同名 SuspendLambda——R8 跨版本名字
-        //   复用，按类名存在性查会误判存活；真身 = 串锚 addDownloadTask 唯一宿主 g75.h，
-        //   e 仍 13 参但改 static：首参多出 receiver，合成尾 I/Object 计数不变）
-        // - albumCopy.h0/e0（xec.w 落盘闸）：xec.w 在 9.51 整类消失，新家未定位（视频拷贝疑似并入
-        //   VideoStorageManager dz8/t#a，但形状 (…,Uri,Z) 与原 (File,relDir,name,delSrc,mime) 不同，
-        //   错挂会拦全 App 媒体落盘）→ null 诚实跳过：downloaderEntry 接管时宿主零下载零落盘，
-        //   落盘闸只是防漏网第二层；后续反编译定位后补
+        // - videoClick：**9.51 起不挂载（无需，非跳过）**——点击拦截价值已被 noteSaveEntry（pb9.o1）
+        //   上移覆盖，效果等价；未来 noteSaveEntry 失效且需前置拦截时再重启此点
+        // - x2b：nd8.j → ce8.j；noteSaveEntry：ab9.r1 → pb9.o1；aigcEditLaunch：mg4.b → rg4.b
+        //   （mg4.b 成 0 方法空壳）——串锚/签名细节见 doc 迁移表
+        // - downloaderEntry：b75.h → g75.h。⚠️ 坑（留在源码）：9.51 的 b75.h 是同名 SuspendLambda
+        //   （R8 跨版本名字复用），按类名存在性查会误判存活；真身认串锚 addDownloadTask 唯一宿主，
+        //   e 仍 13 参但改 static（首参 receiver，合成尾 I/Object 计数不变）
+        // - albumCopy.h0/e0：xec.w 整类消失、新家未定位（形状不同，错挂会拦全 App 媒体落盘）→
+        //   null 诚实跳过（downloaderEntry 接管时宿主零下载零落盘，闸只是第二层防线）
         "9.51.0" to mapOf(
             "saveClick" to "yi9.b",
             "videoClick" to null,

@@ -30,26 +30,19 @@ import java.net.URL
  * 解析分享页出 ResolvedNote：图片 → 本文件现有外挂直下管线（downloadAll/downloadOne）；
  * 视频 → X4 HD 询问（offerHdDownloadFromNote 映射候选）。解析/选档逻辑全部在上游，本文件只做接线。
  *
- * 前几版死因存档（勿复活）：
- * 1. 画廊三击——400ms 窗口苛刻 + 双击缩放冲突（用户否决）
- * 2. 拦截-重放本张——dispatch token 一次性，事后重放被下游身份过滤静默丢弃
- * 3. app 内存找图集（controller 图搜 / adapter.setItems 快照）——sheet 控制器图里图集列表
- *    实证为空（三轮 census），MultiTypeAdapter.setItems 真机不存在（串池类名≠运行时类）
- * 4. okhttp 旁路采集图集/视频流（imagefeed images_list / video_info_v2 逐流）——2026-10-14 定稿、
- *    2026-10-19 删除：save-hostile 笔记服务端剥直链、归属 lookback 脆、采集正则与宿主载荷形态
- *    耦合；分享页 __INITIAL_STATE__ 是唯一全量无剥离数据源（上游 XhsNoteParser 消费）
+ * 前几版死因存档（勿复活；四版死因全量见 docs/reverse/xhs.md §三 X5「外挂数据链」演进清单）：
+ * 画廊三击 / 拦截-重放本张 / app 内存找图集 / okhttp 旁路采集（2026-10-14 定稿、2026-10-19 删：
+ * save-hostile 笔记服务端剥直链 + noteId 归属 lookback 脆 + 采集正则与宿主载荷形态耦合——分享页
+ * __INITIAL_STATE__ 是唯一全量无剥离数据源，上游 XhsNoteParser 消费）。
  *
- * 挂载点 `ji9.b`（图片长按面板「保存」点击 lambda；9.49.1 为 mh9.b，9.50.0 R8 迁名后旧类留
- * class_data_off=0 空壳——loadClass 成功但 declaredMethods 空 ⇒ 直连 0 候选 + 串锚随迁 ⇒ NOT_RESOLVED，
- * findings-x5 2026-10-19）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，分享链接解析出
+ * 挂载点 `ji9.b`（图片长按面板「保存」点击 lambda；9.49.1 为 mh9.b，迁名后空壳机制与坐标全案见
+ * docs/reverse/xhs.md §八死因定案）：**模块全接管（不 proceed ⇒ 宿主原保存逻辑不执行）**，分享链接解析出
  * 全部原图——1 张静默直下、≥2 张弹确认卡；链接不可得才 `proceed()` 回落宿主原生保存
  * （2026-10-15 定案保留：先 proceed 本张原生保存再追加会重复一张、模块零介入，见 git 历史）。
  * 视频点 a59.q（9.49.1 为 d49.q）：9.50.0 真机「存活 1 点」实为 **DexKit 无锚点兜底误绑假阳性**
- * （d49 包已换语义为分享引导族，误绑其 invoke lambda，arg 非 String ⇒ isSave=false 静默放行，视频
- * 反馈卡实际失效）。误绑根因 = MethodResolver「pkg 非空即绕过无锚点闸门 + firstOrNull 即采纳」——
- * **2026-10-20 已修**：`DexHitSelector.pickStrict` 统一「无内容锚点不猜 + 唯一命中才采纳」，
- * 本点兜底锚也补上（classFieldTypes = int + NoteFeed）；真机再遇误绑，漂移 WARN 会留痕
- * （declaringClass 与声明不符）。
+ * （视频反馈卡实死），全案见 doc §八死因定案；根因（MethodResolver 无锚即采纳）**2026-10-20 已修**：
+ * `DexHitSelector.pickStrict` 统一「无内容锚点不猜 + 唯一命中才采纳」，本点兜底锚也补上
+ * （classFieldTypes = int + NoteFeed）；真机再遇误绑，漂移 WARN 会留痕（declaringClass 与声明不符）。
  */
 object XhsBatchSave {
 
@@ -455,12 +448,10 @@ object XhsBatchSave {
         }
 
     /**
-     * 视频落盘拷贝断根·公共工具挂（2026-10-19 改方案）：逐类挂 `b75.n#execute`（X5 3/3 挂上，21:35
-     * 真机）断不了根——DCIM 仍落 `Camera_xhs_<ts>.mp4` 且无断根判据行 = 该批走了**另一拷贝路**
-     * `fs2/b.java:51 w.e0(file, DCIM, "Camera/"+name, "video/mp4")`，逐类挂 = 打地鼠。改挂**公共
-     * 工具 `xec.w`**（public final 未混淆，所有落盘必经，跨版本稳）：`h0`（w.java:730，b75/n.java:35
-     * 调方）与 `e0`（w.java:619，fs2/b.java:51 调方，内部委托 `h0(..., true, ...)` w.java:621 实证）
-     * 同挂，两分支共用本 intercept。
+     * 视频落盘拷贝断根·公共工具挂：第一版逐类挂 `b75.n#execute` 断不了根（打地鼠，演进全案
+     * 2026-10-26 下沉 docs/reverse/xhs.md §9.2「落盘闸演进」），改挂**公共工具 `xec.w`**（public
+     * final 未混淆，所有落盘必经，跨版本稳）：`h0`（w.java:730）与 `e0`（w.java:619，内部委托
+     * `h0(..., true, ...)` w.java:621 实证）同挂，两分支共用本 intercept。
      *
      * 过滤语义（[isVideoAlbumCopy] 四判据全满足才拦）：args[1] 含 "DCIM" && args[2] 含 "Camera/"
      * && 末参 == "video/mp4" && **无换链放行窗** → 不 proceed 返 true（假成功——b75.n 拿到成功后回调
@@ -844,14 +835,32 @@ object XhsBatchSave {
 
     /** 追加询问（≥2 张）：图集来自分享链接解析（XhsSavePivot → 上游 ResolvedNote）；确认后外挂直下。分流见 [mountClick]。 */
     private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule) {
-        // 全量 URL 不截断（2026-10-15 原图链路诊断）：PC 端 curl 比对需完整 token/query
-        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 " + urls.first() + "）")
+        // T8（P2-2，2026-10-26）：完整 URL 只挂 [MountEngine.DEBUG_LOGGING]。xsec_token 等签名 query 是
+        // 笔记访问的完整凭证，模块日志文件可被其他 root 应用读取，常态不得整串落盘；而 2026-10-15
+        // 原图链路诊断（PC 端 curl 比对）需完整 token/query——token 脱敏后无法重组可 curl 的 URL，
+        // 故诊断用途靠 debug 门控保留完整版，不做「常态脱敏还承诺可比对」的伪兼容。常态打脱敏版
+        // （host + 路径形态 + 末段 token 前 4 位，query 整体丢弃）：仍能定位「是哪条 URL / 哪个 host」。
+        val first = urls.first()
+        val shown = if (MountEngine.DEBUG_LOGGING) first else maskedUrlForLog(first)
+        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 $shown）")
         runCatching {
             showStyledDialog(activity, urls.size) { downloadAll(activity, urls, module) }
         }.onFailure {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 追加弹窗失败: ${it.message}")
         }
     }
+
+    /** URL 常态日志脱敏（T8，仅 [maybeShowBatchDialog] 用）：query 整体丢弃（xsec_token/签名参数在
+     *  query），路径末段（xhs 图链的 token 主体）截前 4 字符——保留 host 与路径分段形态即可定位
+     *  URL 归属，不承诺重组。解析异常兜底占位符，绝不向宿主抛。 */
+    private fun maskedUrlForLog(url: String): String = runCatching {
+        val noQuery = url.substringBefore('?')
+        val host = noQuery.substringBefore("//") + "//" + noQuery.substringAfter("//").substringBefore('/', "")
+        val segs = noQuery.substringAfter("//").substringAfter('/', "").split('/').filter { it.isNotBlank() }
+        val tail = segs.lastOrNull().orEmpty()
+        val head = segs.dropLast(1).joinToString("/")
+        if (head.isEmpty()) "$host/${tail.take(4)}…" else "$host/$head/${tail.take(4)}…"
+    }.getOrDefault("<unparseable>")
 
     /**
      * 程序化自绘弹窗（宿主进程内无模块资源，全代码绘制）：圆角卡片 + 小红书红实心主按钮 +
