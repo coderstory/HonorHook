@@ -174,6 +174,7 @@ HonorHook 开发工具
   wait-hook        清空日志后轮询等待 installed 判据（最长 3 分钟）
   hook-test        清日志 → 强停并拉起主题商店 → 抓挂载判据
   relaunch <pkg>   强停指定包并冷启动，随后抓 installed 判据（验证指定宿主的挂载）
+  meminfo <pkg>... 宿主进程内存取数原语：Native Heap / TOTAL PSS / 线程数（注入前后对照流程见 docs/perf-baseline.md）
   logcat           原始全量 logcat dump（最近缓冲）
   clear-log        清空设备 logcat 缓冲
   log-file         拉取 hook 侧判据日志文件 honorhook.log
@@ -328,6 +329,28 @@ EOF
       info "$(basename "$apk")：$(ls -lh "$apk" | awk '{print $5}')"
       unzip -l "$apk" 2>/dev/null | awk 'NR>3 && $1!="" {print $1, $4}' | sort -rn | head -8
       echo "  —— 合计（未压缩）: $(unzip -l "$apk" 2>/dev/null | awk '{s+=$1} END {printf "%.0f KB", s/1024}')"
+    done
+    ;;
+
+  meminfo)
+    # T6（P1-3 #11）挂载开销度量原语：只取数不下结论；注入前后对照流程见 docs/perf-baseline.md。
+    # 线程数走 su——adb 无 root 读不了其他进程的 /proc/<pid>/task（SELinux 限制）。
+    require "$ADB"
+    [ -n "$2" ] || die "用法：tools/dev.sh meminfo <包名> [包名...]（进程须在运行，先 relaunch 拉起）"
+    shift
+    mkdir -p "$LOG_OUT"
+    for pkg in "$@"; do
+      pid="$("$ADB" shell pidof "$pkg" 2>/dev/null | tr -d '\r' | awk '{print $1}' || true)"
+      if [ -z "$pid" ]; then
+        warn "${pkg}：进程未运行（先 tools/dev.sh relaunch ${pkg} 冷启动）"
+        continue
+      fi
+      out="$LOG_OUT/meminfo_${pkg}_$(stamp).txt"
+      "$ADB" shell dumpsys meminfo "$pkg" 2>/dev/null | tr -d '\r' > "$out"
+      info "${pkg} (pid ${pid}) —— 全量 dump 已落 ${out}"
+      grep -E "Native Heap|TOTAL PSS" "$out" | head -4 || warn "未取到关键行，看全量 dump"
+      threads="$("$ADB" shell su -c "ls /proc/${pid}/task | wc -l" 2>/dev/null | tr -d '\r' || true)"
+      echo "线程数: ${threads:-未知}"
     done
     ;;
 
