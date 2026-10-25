@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
+import top.honorhook.ui.FeatureStore.SetEnabledResult
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.StatusChip
 import top.honorhook.ui.component.StatusOk
@@ -580,6 +582,12 @@ private fun FeatureListScreen(
     // 逐个列反而引导用户降级）
     val supportedText = target.supportedVersions.lastOrNull()
 
+    // 行内「未生效：下发失败」标注（key → 最近一次操作下发失败）：只记 WRITE_FAILED（框架已连
+    // 但远端写入抛异常）——未连接场景由上方 SwitchSemanticsCard 常驻 banner 叙述（两态分立，
+    // 不双份提示）。开关视觉态由 FeatureStore 事务回滚（states 镜像自动弹回旧值），标注只补
+    // 「为什么弹回」。生命周期随本页：标注是对「那一次操作」的反馈，重试成功或离开本页即消失。
+    val failedPushes = remember { mutableStateMapOf<String, Boolean>() }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -672,21 +680,39 @@ private fun FeatureListScreen(
                     ) {
                         // 不加图标：每个开关都重复同一个目标应用图标反而是噪声，
                         // 左侧色条（开=primary / 关=primaryContainer）已经能表达状态。
-                        SwitchPreference(
-                            title = stringResource(feature.titleRes),
-                            // 用户要求：二级菜单每个选项都带功能说明
-                            summary = stringResource(feature.descRes),
-                            checked = effectiveOn,
-                            onCheckedChange = { FeatureStore.setEnabled(feature.key, it) },
-                            enabled = !gatedOff,
-                            // 卡片内边距：原来只设了 horizontal，内容贴着上下边缘很挤
-                            insideMargin = PaddingValues(
-                                start = 9.dp,
-                                end = 9.dp,
-                                top = 14.dp,
-                                bottom = 14.dp,
-                            ),
-                        )
+                        Column {
+                            SwitchPreference(
+                                title = stringResource(feature.titleRes),
+                                // 用户要求：二级菜单每个选项都带功能说明
+                                summary = stringResource(feature.descRes),
+                                checked = effectiveOn,
+                                onCheckedChange = { checked ->
+                                    when (FeatureStore.setEnabled(feature.key, checked)) {
+                                        // 开关弹回由 FeatureStore 回滚 states 完成；标注只指向「那一次操作」
+                                        SetEnabledResult.WRITE_FAILED -> failedPushes[feature.key] = true
+                                        // OK：重试成功清标注；NOT_CONNECTED：banner 接管叙述，行内不标
+                                        else -> failedPushes.remove(feature.key)
+                                    }
+                                },
+                                enabled = !gatedOff,
+                                // 卡片内边距：原来只设了 horizontal，内容贴着上下边缘很挤
+                                insideMargin = PaddingValues(
+                                    start = 9.dp,
+                                    end = 9.dp,
+                                    top = 14.dp,
+                                    bottom = 14.dp,
+                                ),
+                            )
+                            // 行内失败标注（T4）：只在 WRITE_FAILED 后出现，不挡操作——开关仍可再拨
+                            if (failedPushes[feature.key] == true) {
+                                Text(
+                                    text = "未生效：下发失败",
+                                    fontSize = 11.sp,
+                                    color = VersionTagRed,
+                                    modifier = Modifier.padding(start = 9.dp, end = 9.dp, bottom = 10.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -758,7 +784,8 @@ private fun EmptyHint(text: String) {
  * 色板取饱和度/亮度一致的一组，颜色之间跳变明显且在浅色/深色背景下都能看清。
  */
 
-/** 「未适配」文字红色（Miuix colorScheme 无 error 槽，审计要求固定值；色值与 accentPalette 首色相同 = 历史遗留）。 */
+/** 「未适配」文字红色（Miuix colorScheme 无 error 槽，审计要求固定值；色值与 accentPalette 首色相同 = 历史遗留）。
+ *  行内「未生效：下发失败」标注同用此红——同为卡片内 11sp 警示红字，无语义分立需求。 */
 private val VersionTagRed = Color(0xFFEF5350)
 
 /**
