@@ -1,10 +1,12 @@
 package top.honorhook.ui.screen
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,9 +28,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Campaign
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material3.Icon
@@ -113,19 +115,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     }
     val rootOk = probe?.available == true
 
-    // 挂载判据原始行（工程诊断）：首页状态卡只显计数摘要，原始行进「执行记录」页（v1.3.3 映射表定案）
-    val hookLines by produceState<List<String>>(initialValue = emptyList(), rootOk) {
-        if (!rootOk) return@produceState
-        value = withContext(Dispatchers.IO) {
-            when (val r = RootShell.exec(
-                "grep -h coderstory.honorhook /data/adb/lspd/log/modules_*.log 2>/dev/null | grep -E 'installed [0-9]+/[0-9]+' | tail -4",
-            )) {
-                is RootShell.Result.Ok -> r.stdout.trim().lineSequence().filter { it.isNotBlank() }.toList()
-                else -> emptyList()
-            }
-        }
-    }
-
     // 开关区现值：免 root 读三表（表名定位在执行器做，这里只展示）
     var switchValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     fun refreshValues() {
@@ -142,11 +131,12 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { ota = OtaSentinel.check(context) } }
 
     var search by rememberSaveable { mutableStateOf("") }
-    var filter by remember { mutableStateOf(FreezeFilter.ALL) }
     var showA by rememberSaveable { mutableStateOf(false) }
     var showFolded by rememberSaveable { mutableStateOf(false) }
     var view by rememberSaveable { mutableStateOf(HubView.HOME) }
     var selected by remember { mutableStateOf(setOf<String>()) }
+    var freezeMenuOpen by remember { mutableStateOf(false) }
+    var bulkNote by remember { mutableStateOf<String?>(null) }
 
     var confirmTitle by remember { mutableStateOf("") }
     var confirmActions by remember { mutableStateOf<List<ToolAction>>(emptyList()) }
@@ -160,13 +150,41 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         confirmOpen = true
     }
 
+    // 统一二级页导航（照 FeatureListScreen 标准样式）：顶栏=二级标题+返回箭头；
+    // 侧滑/返回键回工作台而非退出 app（2026-10-25 用户指正）
+    BackHandler(enabled = view != HubView.HOME) { view = HubView.HOME }
+
     Scaffold(
-        topBar = { TopAppBar(title = Glitch.text("工具箱"), scrollBehavior = scrollBehavior) },
+        topBar = {
+            TopAppBar(
+                title = Glitch.text(if (view == HubView.HOME) "工具箱" else view.title),
+                navigationIcon = { if (view != HubView.HOME) MiuixBackButton { view = HubView.HOME } },
+                scrollBehavior = scrollBehavior,
+            )
+        },
         popupHost = { },
         contentWindowInsets = WindowInsets.systemBars
             .add(WindowInsets.displayCutout)
             .only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
+        if (view == HubView.FREEZE) {
+            FreezePane(
+                rootOk = rootOk,
+                apps = apps,
+                running = running,
+                selected = selected,
+                onSelectedChange = { selected = it },
+                search = search,
+                onSearchChange = { search = it },
+                showA = showA,
+                onToggleA = { showA = it },
+                bottomInnerPadding = bottomInnerPadding,
+                onUnfreeze = { app -> request(listOf(ToolAction.Unfreeze(app.pkg)), "解冻 ${app.label}") },
+                onFreezeSelected = { request(selected.map { ToolAction.Freeze(it) }, Glitch.text("冻结所选")) },
+                onOpenBulkMenu = { freezeMenuOpen = true },
+                bulkNote = bulkNote,
+            )
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxHeight()
@@ -176,14 +194,13 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             when (view) {
                 // —— 工作台首页：状态摘要 + 磁贴 + 最近执行 ——
                 HubView.HOME -> {
-                    item { SummaryCard(probe, rootOk, ota, hookLines) }
+                    item { SummaryCard(probe, rootOk, ota) }
                     item { HubTiles(switchValues, apps, context, queue, onOpen = { view = it }) }
                     item { RecentCard(queue, onOpen = { view = HubView.LOG }) }
                 }
 
                 // —— 净化页：一键动作 ——
                 HubView.PURIFY -> {
-                    item { BackBar { view = HubView.HOME } }
                     item {
                         AdsGroupCard(rootOk, switchValues, running) { actions ->
                             request(actions, Glitch.text("营销一键关"))
@@ -196,10 +213,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     }
                 }
 
-                // —— 开关页：标题 + 功能描述行 ——
+                // —— 开关页：功能描述行 ——
                 HubView.SWITCH -> {
-                    item { BackBar { view = HubView.HOME } }
-                    item { DetailTitle("系统开关") }
                     item {
                         SwitchListCard(
                             entries = ToolSwitchTable.ENTRIES.filter { it.group == null && (!it.folded || showFolded) },
@@ -226,80 +241,12 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     }
                 }
 
-                // —— 冻结页：v1.3.1 组件沿用 ——
-                HubView.FREEZE -> {
-                    item { BackBar { view = HubView.HOME } }
-                    item {
-                        FreezeHeaderCard(
-                            rootOk = rootOk,
-                            apps = apps,
-                            selectedCount = selected.size,
-                            filter = filter,
-                            running = running,
-                            onSearch = { search = it },
-                            onFilter = { filter = it },
-                            onPreset = {
-                                val installed = (apps ?: emptyList()).map { it.pkg }.toSet()
-                                val targets = GovernanceList.PURE_PRESET.filter { it in installed }
-                                request(targets.map { ToolAction.Freeze(it) }, Glitch.text("纯净模式精选集"))
-                            },
-                            onFreezeSelected = {
-                                request(selected.map { ToolAction.Freeze(it) }, Glitch.text("冻结所选"))
-                            },
-                        )
-                    }
-                    item {
-                        InputField(
-                            query = search,
-                            onQueryChange = { search = it },
-                            onSearch = { },
-                            expanded = false,
-                            onExpandedChange = { },
-                            label = Glitch.text("搜索系统应用"),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    val visibleApps = (apps ?: emptyList()).filter { app ->
-                        app.selectable && when (filter) {
-                            FreezeFilter.ALL -> true
-                            FreezeFilter.B -> app.entry?.tier == GovernanceList.Tier.B
-                            FreezeFilter.C -> app.entry?.tier == GovernanceList.Tier.C
-                            FreezeFilter.FROZEN -> app.frozen
-                        } && (search.isBlank() ||
-                            app.label.contains(search, true) || app.pkg.contains(search, true))
-                    }
-                    items(visibleApps, key = { it.pkg }) { app ->
-                        FreezeRow(
-                            app = app,
-                            enabled = rootOk && !running,
-                            checked = app.pkg in selected,
-                            onCheck = { on -> selected = if (on) selected + app.pkg else selected - app.pkg },
-                            onUnfreeze = { request(listOf(ToolAction.Unfreeze(app.pkg)), "解冻 ${app.label}") },
-                        )
-                    }
-                    if (showA) {
-                        items(
-                            (apps ?: emptyList()).filter { GovernanceList.isRedLine(it.pkg) },
-                            key = { "redline-${it.pkg}" },
-                        ) { app ->
-                            RedLineRow(app)
-                        }
-                    }
-                    item {
-                        TextButton(
-                            text = Glitch.text(if (showA) "收起禁碰名单（A 档）" else "展开禁碰名单（A 档）"),
-                            onClick = { showA = !showA },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
+                // 冻结页走 FreezePane 独立布局（固定搜索 + 滚动列表，见上）
+                HubView.FREEZE -> {}
 
-                // —— 记录页：快照 + 执行历史（默认展开）+ 挂载判据原始行 ——
+                // —— 记录页：执行历史与快照（顶栏即页面标题，卡内不再重复标题） ——
                 HubView.LOG -> {
-                    item { BackBar { view = HubView.HOME } }
-                    item { DetailTitle("执行记录") }
-                    item { HistoryCard(context, queue, initialOpen = true) }
-                    item { CriteriaCard(hookLines) }
+                    item { HistoryCard(context, queue, asPage = true) }
                 }
             }
 
@@ -313,9 +260,44 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 )
             }
         }
+        }
     }
 
     // —— 确认流（摘要 → 快照 → 执行 → 结果）——
+    // 批量勾选弹层（WindowDialog 必须在页面顶层与 ConfirmDialog 同级渲染——Scaffold 内容区内不显示，真机实证）
+    fun applyBulk(opt: BulkOption) {
+        val selectableApps = (apps ?: emptyList()).filter { it.selectable }
+        val installedSet = selectableApps.map { it.pkg }.toSet()
+        val next = when (opt) {
+            BulkOption.PRESET -> GovernanceList.PURE_PRESET.toSet().intersect(installedSet)
+            BulkOption.TIER_B -> selectableApps.filter { it.entry?.tier == GovernanceList.Tier.B }.map { it.pkg }.toSet()
+            BulkOption.TIER_C -> selectableApps.filter { it.entry?.tier == GovernanceList.Tier.C }.map { it.pkg }.toSet()
+            BulkOption.ALL -> installedSet
+            BulkOption.NONE -> emptySet()
+        }
+        selected = next
+        bulkNote = if (opt == BulkOption.NONE) Glitch.text("已清空勾选")
+        else Glitch.text("已勾选 ${next.size} 项（${opt.label}）")
+    }
+    if (freezeMenuOpen) {
+        WindowDialog(
+            show = true,
+            title = Glitch.text("批量勾选（影响勾选，不过滤列表）"),
+            summary = null,
+            onDismissRequest = { freezeMenuOpen = false },
+        ) {
+            BulkOption.entries.forEach { opt ->
+                TextButton(
+                    text = Glitch.text(opt.label),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        applyBulk(opt)
+                        freezeMenuOpen = false
+                    },
+                )
+            }
+        }
+    }
     if (confirmOpen) {
         val resultText = runResult
         if (resultText != null) {
@@ -385,44 +367,137 @@ private fun describeAction(a: ToolAction): String = when (a) {
     is ToolAction.Switch -> "写入 ${a.key}=${a.value}"
 }
 
-/** 工具箱二级视图（v1.3.2 工作台）：HOME 磁贴台 + 四个功能页，磁贴点进、返回栏回台。 */
-private enum class HubView { HOME, PURIFY, SWITCH, FREEZE, LOG }
-
-/** 二级页返回栏（对齐设计稿：返回箭头 + 「工具箱」，胶囊可点区）。 */
-@Composable
-private fun BackBar(onBack: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .padding(top = 4.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onBack)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.AutoMirrored.Rounded.ArrowBack,
-            contentDescription = null,
-            tint = colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = Glitch.text(" 工具箱"),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = colorScheme.primary,
-        )
-    }
+/** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
+private enum class HubView(val title: String) {
+    HOME("工具箱"), PURIFY("营销一键关"), SWITCH("系统开关"), FREEZE("应用冻结"), LOG("执行记录"),
 }
 
-/** 二级页大标题。 */
+/** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
+private enum class BulkOption(val label: String) {
+    PRESET("纯净模式精选"), TIER_B("B 可选冻"), TIER_C("C 建议冻"), ALL("全部勾选"), NONE("清空勾选"),
+}
+
+/**
+ * 冻结页独立布局：搜索框与批量勾选/冻结所选固定不滚动，应用列表滚动。
+ * 页面外壳（顶栏返回、BackHandler）由 ToolboxScreen 统一提供。
+ */
 @Composable
-private fun DetailTitle(title: String) {
-    Text(
-        text = Glitch.text(title),
-        fontWeight = FontWeight.Bold,
-        fontSize = 24.sp,
-        color = colorScheme.onSurface,
-    )
+private fun FreezePane(
+    rootOk: Boolean,
+    apps: List<AppInfo>?,
+    running: Boolean,
+    selected: Set<String>,
+    onSelectedChange: (Set<String>) -> Unit,
+    search: String,
+    onSearchChange: (String) -> Unit,
+    showA: Boolean,
+    onToggleA: (Boolean) -> Unit,
+    bottomInnerPadding: androidx.compose.ui.unit.Dp,
+    onUnfreeze: (AppInfo) -> Unit,
+    onFreezeSelected: () -> Unit,
+    onOpenBulkMenu: () -> Unit,
+    bulkNote: String?,
+) {
+    val selectableApps = (apps ?: emptyList()).filter { it.selectable }
+    val visibleApps = selectableApps.filter { app ->
+        search.isBlank() || app.label.contains(search, true) || app.pkg.contains(search, true)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .padding(horizontal = 12.dp)
+            .padding(top = 4.dp),
+    ) {
+        // 固定区：搜索框（不随列表滚动）
+        InputField(
+            query = search,
+            onQueryChange = onSearchChange,
+            onSearch = { },
+            expanded = false,
+            onExpandedChange = { },
+            label = Glitch.text("搜索系统应用"),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // 固定区：批量勾选下拉触发 + 冻结所选
+        Row(
+            modifier = Modifier.padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Card(
+                onClick = onOpenBulkMenu,
+                showIndication = true,
+                insideMargin = PaddingValues(horizontal = 14.dp, vertical = 11.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.FilterList,
+                        contentDescription = null,
+                        tint = colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = Glitch.text("批量勾选（按名单，不过滤列表）"),
+                        fontSize = 14.sp,
+                        color = colorScheme.onSurface,
+                    )
+                }
+            }
+            TextButton(
+                text = Glitch.text("冻结所选 (${selected.size})"),
+                enabled = rootOk && !running && selected.isNotEmpty(),
+                onClick = onFreezeSelected,
+            )
+        }
+        bulkNote?.let {
+            Text(
+                text = it,
+                fontSize = 11.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        // 滚动区：应用行 + A 档
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                top = 8.dp,
+                bottom = bottomInnerPadding +
+                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
+                    WindowInsets.captionBar.asPaddingValues().calculateBottomPadding() + 12.dp,
+            ),
+        ) {
+            items(visibleApps, key = { it.pkg }) { app ->
+                FreezeRow(
+                    app = app,
+                    enabled = rootOk && !running,
+                    checked = app.pkg in selected,
+                    onCheck = { on -> onSelectedChange(if (on) selected + app.pkg else selected - app.pkg) },
+                    onUnfreeze = { onUnfreeze(app) },
+                )
+            }
+            if (showA) {
+                items(
+                    (apps ?: emptyList()).filter { GovernanceList.isRedLine(it.pkg) },
+                    key = { "redline-${it.pkg}" },
+                ) { app ->
+                    RedLineRow(app)
+                }
+            }
+            item {
+                TextButton(
+                    text = Glitch.text(if (showA) "收起禁碰名单（A 档）" else "展开禁碰名单（A 档）"),
+                    onClick = { onToggleA(!showA) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -532,39 +607,15 @@ private fun RecentCard(queue: ToolQueue, onOpen: () -> Unit) {
     }
 }
 
-/** 筛选胶囊 chip（对齐设计稿：选中 = 主题色浅底加粗）。 */
-@Composable
-private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(15.dp))
-            .background(
-                if (selected) colorScheme.primary.copy(alpha = 0.14f)
-                else colorScheme.onSurface.copy(alpha = 0.06f),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 7.dp),
-    ) {
-        Text(
-            label,
-            fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) colorScheme.primary else colorScheme.onSurface,
-        )
-    }
-}
-
 /**
- * 状态摘要卡（v1.3.3 对齐设计稿 V3）：三枚状态 chip + 一行摘要（挂载判据计数 · root 临时态）。
- * 映射表定案：原始判据行 → 「执行记录」页 [CriteriaCard]；版本凭据行 → 砍（首页已有 LSPosed 版本）；
- * root/OTA 异常详情行 → 保留（设计稿只画了正常态，异常分支是合法补充）。
+ * 状态摘要卡（v1.3.4）：三枚状态 chip + root 临时态一行说明。
+ * 挂载判据整线已删（2026-10-25 用户拍板：工程诊断数据不上用户界面）。
  */
 @Composable
 private fun SummaryCard(
     probe: RootShell.ProbeResult?,
     rootOk: Boolean,
     ota: OtaSentinel.Report?,
-    hookLines: List<String>,
 ) {
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -601,14 +652,8 @@ private fun SummaryCard(
                     ok = ota != null && !ota.shouldWarn,
                 )
             }
-            // 设计稿 V3 状态卡底线：一行摘要（判据计数 + root 临时态提醒）
-            val okCount = hookLines.count { line ->
-                val tail = line.substringAfterLast("installed ")
-                tail.substringBefore("/").trim() == tail.substringAfter("/").trim()
-            }
             Text(
-                text = if (hookLines.isEmpty()) Glitch.text("挂载判据 · 无记录 · root 为临时态（重启即失）")
-                else Glitch.text("挂载判据 ${okCount}/${hookLines.size} 宿主全生效 · root 为临时态（重启即失）"),
+                text = Glitch.text("root 为临时态（重启即失）"),
                 fontSize = 11.sp,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 8.dp),
@@ -631,41 +676,6 @@ private fun SummaryCard(
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-            }
-        }
-    }
-}
-
-/** 挂载判据原始行（工程诊断，v1.3.3 从首页状态卡迁入记录页）。 */
-@Composable
-private fun CriteriaCard(lines: List<String>) {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = Glitch.text("挂载判据（工程诊断）"),
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            if (lines.isEmpty()) {
-                Text(
-                    text = Glitch.text("无记录（root 不可用时不采集）"),
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            } else {
-                lines.forEach { line ->
-                    Text(
-                        // 原行：… ] (目标包)[模块指纹] Hook名[目标包]: installed N/M
-                        text = "· ${line.substringAfter("] (").substringBefore(")")}  ${line.substringAfterLast("] ")}",
-                        fontSize = 11.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
             }
         }
     }
@@ -802,55 +812,6 @@ private fun SwitchListCard(
     }
 }
 
-/** 冻结区档位过滤（28 号 §3 chips：B/C/已冻结；A 档不进列表只折叠展示）。 */
-private enum class FreezeFilter(val label: String) { ALL("全部"), B("B 可选冻"), C("C 建议冻"), FROZEN("已冻结") }
-
-@Composable
-private fun FreezeHeaderCard(
-    rootOk: Boolean,
-    apps: List<AppInfo>?,
-    selectedCount: Int,
-    filter: FreezeFilter,
-    running: Boolean,
-    onSearch: (String) -> Unit,
-    onFilter: (FreezeFilter) -> Unit,
-    onPreset: () -> Unit,
-    onFreezeSelected: () -> Unit,
-) {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = Glitch.text("系统应用冻结"),
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            Text(
-                text = Glitch.text("只收录治理名单 B/C 档；冻结前自动存快照，解冻需 root 在场"),
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-            )
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FreezeFilter.entries.forEach { f ->
-                    FilterChip(label = f.label, selected = f == filter, onClick = { onFilter(f) })
-                }
-            }
-            Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    text = Glitch.text("纯净模式精选"),
-                    enabled = rootOk && !running,
-                    onClick = onPreset,
-                )
-                TextButton(
-                    text = Glitch.text("冻结所选($selectedCount)"),
-                    enabled = rootOk && !running && selectedCount > 0,
-                    onClick = onFreezeSelected,
-                )
-            }
-        }
-    }
-}
-
 @Composable
 private fun FreezeRow(
     app: AppInfo,
@@ -970,12 +931,13 @@ private fun ConfirmDialog(
     }
 }
 
+/** 执行记录卡；LOG 页模式（asPage=true）不渲染折叠头——顶栏已是页面标题（2026-10-25 去重）。 */
 @Composable
-private fun HistoryCard(context: Context, queue: ToolQueue, initialOpen: Boolean = false) {
-    var open by rememberSaveable { mutableStateOf(initialOpen) }
+private fun HistoryCard(context: Context, queue: ToolQueue, asPage: Boolean = false) {
+    var open by rememberSaveable { mutableStateOf(asPage) }
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Row(
+            if (!asPage) Row(
                 modifier = Modifier.fillMaxWidth().clickable { open = !open },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
