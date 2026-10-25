@@ -85,7 +85,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 工具箱 v1.3.5（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2×2 功能磁贴 + 两级页面。
- * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 四磁贴（营销一键关/
+ * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 四磁贴（营销推荐/
  *   应用冻结/系统开关/执行记录，副标题实时计数）。
  * - 二级页：磁贴点进、返回栏回台；冻结/开关沿用 v1.3.1 组件，营销页 = 一键卡 + 私有 DNS。
  * - 开关行只显「标题 + 功能描述」——key=value 属面板数据不上屏（2026-10-25 拍板：用户看不懂）。
@@ -202,7 +202,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 HubView.PURIFY -> {
                     item {
                         AdsGroupCard(rootOk, switchValues, running) { actions ->
-                            request(actions, Glitch.text("营销一键关"))
+                            request(actions, Glitch.text("营销推荐：全部关闭"))
                         }
                     }
                     item {
@@ -368,7 +368,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
-    HOME("工具箱"), PURIFY("营销一键关"), SWITCH("系统开关"), FREEZE("应用冻结"), LOG("执行记录"),
+    HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), LOG("执行记录"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -549,7 +549,7 @@ private fun HubTiles(
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Campaign, "营销一键关", "11 键 · 当前开 $adsOn") { onOpen(HubView.PURIFY) }
+                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个系统开关 · 当前开 $adsOn") { onOpen(HubView.PURIFY) }
             }
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档") { onOpen(HubView.FREEZE) }
@@ -652,13 +652,13 @@ private fun AdsGroupCard(
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = Glitch.text("营销一键关"),
+                text = Glitch.text("营销推荐"),
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp,
                 color = colorScheme.onSurface,
             )
             Text(
-                text = Glitch.text("11 个营销/推荐键，当前开 $onCount 个。可能被云端回写，隔天复查。"),
+                text = Glitch.text("一键关闭荣耀系统里的 11 个营销/推荐开关（个性化推送、智慧推荐、负一屏推荐流、系统广告总开关、位置上报等）。写入系统设置，全局生效；可能被云端回写，隔天复查。当前开 $onCount 个。"),
                 fontSize = 12.sp,
                 color = colorScheme.onSurfaceVariantSummary,
             )
@@ -667,7 +667,7 @@ private fun AdsGroupCard(
                 enabled = enabled && !running && onCount > 0,
                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
             ) {
-                Text(Glitch.text("全部关闭（写 0）"))
+                Text(Glitch.text("全部关闭"))
             }
         }
     }
