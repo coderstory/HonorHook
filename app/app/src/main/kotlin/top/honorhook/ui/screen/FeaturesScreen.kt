@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -65,6 +66,9 @@ import kotlinx.coroutines.withContext
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
 import top.honorhook.ui.FrameworkState
+import top.honorhook.ui.component.StatusChip
+import top.honorhook.ui.component.StatusOk
+import top.honorhook.ui.component.StatusWarn
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -72,8 +76,6 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.ChevronForward
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -121,15 +123,20 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
     // calendar/weather/browser/quickgame/youku/cloudmusic 的埋点与广告 SDK）非真实 app，
     // 跳过安装过滤恒显示。getApplicationInfo 依赖 QUERY_ALL_PACKAGES（已在 manifest 声明）。
     // 走 IO 线程：逐包跨进程查询不该压在组合期主线程上；null = 尚未返回（加载态）。
-    val installedTargets by produceState<List<FeatureCatalog.Target>?>(initialValue = null) {
+    // v2 分组双列：一次 IO 同时取「已装目标」与「版本名映射」（卡片副标；虚拟目标无版本走「系统级」）
+    val installed by produceState<Pair<List<FeatureCatalog.Target>, Map<String, String>>?>(initialValue = null) {
         value = withContext(Dispatchers.IO) {
             val pm = context.packageManager
-            FeatureCatalog.targets.filter { target ->
+            val targets = FeatureCatalog.targets.filter { target ->
                 !target.hidden && (
                     target.iconKey != null ||
                         runCatching { pm.getApplicationInfo(target.packageName, 0) }.isSuccess
                     )
             }
+            val versions = targets.associate { t ->
+                t.packageName to (runCatching { pm.getPackageInfo(t.packageName, 0).versionName }.getOrNull() ?: "")
+            }
+            targets to versions
         }
     }
 
@@ -169,16 +176,44 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
                 )
             }
             when {
-                installedTargets == null -> item { EmptyHint(Glitch.text("正在读取设备上已安装的应用…")) }
-                installedTargets!!.isEmpty() -> item {
+                installed == null -> item { EmptyHint(Glitch.text("正在读取设备上已安装的应用…")) }
+                installed!!.first.isEmpty() -> item {
                     EmptyHint(Glitch.text("设备上没有检测到支持的应用。\n本模块只支持荣耀系统应用和指定第三方应用，装上后会自动显示在这里。"))
                 }
-                else -> items(count = installedTargets!!.size) { index ->
-                    val target = installedTargets!![index]
-                    TargetGroupCard(
-                        target = target,
-                        onClick = { onOpenTarget(target) },
-                    )
+                else -> {
+                    val (targets, versions) = installed!!
+                    // 分组规则：荣耀/安卓系 + 虚拟净化目标 = 系统应用；其余 = 第三方
+                    val system = targets.filter {
+                        it.iconKey != null ||
+                            it.packageName.startsWith("com.hihonor.") ||
+                            it.packageName.startsWith("com.android.")
+                    }
+                    val third = targets.filterNot { it in system }
+                    val disabledCount = targets.sumOf { t ->
+                        t.features.count { !FeatureStore.isEnabled(it.key) }
+                    }
+                    // 总览胶囊（设计稿分组双列方案）
+                    item {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            StatusChip("${targets.size} 个目标生效", ok = true)
+                            if (disabledCount > 0) StatusChip("$disabledCount 项已关", ok = false)
+                        }
+                    }
+                    if (system.isNotEmpty()) {
+                        item { GroupLabel(Glitch.text("系统应用")) }
+                        system.chunked(2).forEach { pair ->
+                            item { FeatureCardRow(pair, versions, onOpenTarget) }
+                        }
+                    }
+                    if (third.isNotEmpty()) {
+                        item { GroupLabel(Glitch.text("第三方应用")) }
+                        third.chunked(2).forEach { pair ->
+                            item { FeatureCardRow(pair, versions, onOpenTarget) }
+                        }
+                    }
                 }
             }
         }
@@ -308,64 +343,100 @@ private fun AppIconSlot(
     }
 }
 
-/** 目标分组卡 —— 照抄 KernelSU `GroupItem`。 */
+/** 分组标签（v2 分组双列）。 */
 @Composable
-private fun TargetGroupCard(target: FeatureCatalog.Target, onClick: () -> Unit) {
-    val isInDark = isInDarkTheme()
+private fun GroupLabel(label: String) {
+    Text(
+        text = label,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = colorScheme.onSurfaceVariantSummary,
+        modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+    )
+}
 
-    // 状态标签配色沿用 GroupItem 的语义分层
-    val customBg = colorScheme.secondaryContainer.copy(alpha = 0.8f)
-    val customFg = colorScheme.onSecondaryContainer
-    val activeBg = colorScheme.tertiaryContainer.copy(alpha = 0.6f)
-    val activeFg = colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
-    val countBg = if (isInDark) Color.White.copy(alpha = 0.4f) else Color.Black.copy(alpha = 0.3f)
-    val countFg = if (isInDark) Color.Black.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.8f)
+/** 一行两张卡；奇数张末位补空位保持等宽。 */
+@Composable
+private fun FeatureCardRow(
+    pair: List<FeatureCatalog.Target>,
+    versions: Map<String, String>,
+    onOpen: (FeatureCatalog.Target) -> Unit,
+) {
+    Row(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        pair.forEach { target ->
+            Box(Modifier.weight(1f)) {
+                FeatureGridCard(target, versions[target.packageName], onClick = { onOpen(target) })
+            }
+        }
+        if (pair.size == 1) Spacer(Modifier.weight(1f))
+    }
+}
 
+/**
+ * 双列目标卡（v2 分组双列）：图标 + 名称 + 版本副标 / 状态点 + 「N 项全开」。
+ * 映射表：原 4/4 计数标签 → 状态行；「已启用」标签 → 状态点颜色；右箭头 → 砍（整卡可点）。
+ */
+@Composable
+private fun FeatureGridCard(target: FeatureCatalog.Target, version: String?, onClick: () -> Unit) {
     val enabledCount = target.features.count { FeatureStore.isEnabled(it.key) }
-
+    val all = target.features.size
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 12.dp),
         onClick = onClick,
         showIndication = true,
-        insideMargin = PaddingValues(start = 10.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+        insideMargin = PaddingValues(12.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AppIconSlot(
-                packageName = target.packageName,
-                fallbackText = Glitch.text(stringResource(target.nameRes)),
-                iconKey = target.iconKey,
-                modifier = Modifier
-                    .padding(end = 10.dp)
-                    .size(48.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = Glitch.text(stringResource(target.nameRes)),
-                    modifier = Modifier.basicMarquee(),
-                    fontWeight = FontWeight(550),
-                    color = colorScheme.onSurface,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
-            Column(
-                modifier = Modifier.padding(start = 16.dp),
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                StatusTag(
-                    label = Glitch.text("$enabledCount/${target.features.size}"),
-                    backgroundColor = if (enabledCount > 0) activeBg else countBg,
-                    contentColor = if (enabledCount > 0) activeFg else countFg,
+                AppIconSlot(
+                    packageName = target.packageName,
+                    fallbackText = Glitch.text(stringResource(target.nameRes)),
+                    iconKey = target.iconKey,
+                    modifier = Modifier.size(38.dp),
                 )
-                if (enabledCount > 0) {
-                    StatusTag(label = Glitch.text("已启用"), backgroundColor = customBg, contentColor = customFg)
+                Column {
+                    Text(
+                        text = Glitch.text(stringResource(target.nameRes)),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colorScheme.onSurface,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = version?.takeIf { it.isNotBlank() } ?: Glitch.text("系统级"),
+                        fontSize = 11.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
-            ArrowRightIcon()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(7.dp).background(
+                        if (enabledCount == all) StatusOk else StatusWarn,
+                        RoundedCornerShape(4.dp),
+                    ),
+                )
+                Text(
+                    text = if (enabledCount == all) Glitch.text("$all 项全开")
+                    else Glitch.text("已关 ${all - enabledCount} 项"),
+                    fontSize = 11.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                )
+            }
         }
     }
 }
@@ -744,19 +815,4 @@ internal fun StatusTag(
             softWrap = false,
         )
     }
-}
-
-/** 右箭头（照抄 GroupItem 末尾的箭头，RTL 时翻转）。 */
-@Composable
-private fun ArrowRightIcon() {
-    val layoutDirection = LocalLayoutDirection.current
-    Image(
-        modifier = Modifier
-            .graphicsLayer { if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f }
-            .padding(start = 8.dp)
-            .size(width = 10.dp, height = 16.dp),
-        imageVector = MiuixIcons.ChevronForward,
-        contentDescription = null,
-        colorFilter = ColorFilter.tint(colorScheme.onSurfaceVariantActions),
-    )
 }

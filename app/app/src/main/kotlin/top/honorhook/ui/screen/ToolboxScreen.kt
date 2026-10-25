@@ -55,6 +55,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.ui.FrameworkState
+import top.honorhook.ui.component.StatusChip
 import top.honorhook.ui.Glitch
 import top.honorhook.ui.scope.RootShell
 import top.honorhook.ui.scope.SafeCommands
@@ -112,6 +113,19 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     }
     val rootOk = probe?.available == true
 
+    // 挂载判据原始行（工程诊断）：首页状态卡只显计数摘要，原始行进「执行记录」页（v1.3.3 映射表定案）
+    val hookLines by produceState<List<String>>(initialValue = emptyList(), rootOk) {
+        if (!rootOk) return@produceState
+        value = withContext(Dispatchers.IO) {
+            when (val r = RootShell.exec(
+                "grep -h coderstory.honorhook /data/adb/lspd/log/modules_*.log 2>/dev/null | grep -E 'installed [0-9]+/[0-9]+' | tail -4",
+            )) {
+                is RootShell.Result.Ok -> r.stdout.trim().lineSequence().filter { it.isNotBlank() }.toList()
+                else -> emptyList()
+            }
+        }
+    }
+
     // 开关区现值：免 root 读三表（表名定位在执行器做，这里只展示）
     var switchValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     fun refreshValues() {
@@ -162,7 +176,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             when (view) {
                 // —— 工作台首页：状态摘要 + 磁贴 + 最近执行 ——
                 HubView.HOME -> {
-                    item { SummaryCard(probe, rootOk, ota) }
+                    item { SummaryCard(probe, rootOk, ota, hookLines) }
                     item { HubTiles(switchValues, apps, context, queue, onOpen = { view = it }) }
                     item { RecentCard(queue, onOpen = { view = HubView.LOG }) }
                 }
@@ -280,11 +294,12 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     }
                 }
 
-                // —— 记录页：快照 + 执行历史（默认展开） ——
+                // —— 记录页：快照 + 执行历史（默认展开）+ 挂载判据原始行 ——
                 HubView.LOG -> {
                     item { BackBar { view = HubView.HOME } }
                     item { DetailTitle("执行记录") }
                     item { HistoryCard(context, queue, initialOpen = true) }
+                    item { CriteriaCard(hookLines) }
                 }
             }
 
@@ -517,25 +532,6 @@ private fun RecentCard(queue: ToolQueue, onOpen: () -> Unit) {
     }
 }
 
-/** 状态圆点色（iOS 系绿/琥珀，小尺寸点在深浅色下均可读）。 */
-private val StatusOk = Color(0xFF34C759)
-private val StatusWarn = Color(0xFFFF9500)
-
-/** 状态 chip（对齐设计稿：圆点 + 短标签的浅底胶囊）。 */
-@Composable
-private fun StatusChip(label: String, ok: Boolean) {
-    Row(
-        modifier = Modifier
-            .background(colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(13.dp))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(7.dp).background(if (ok) StatusOk else StatusWarn, RoundedCornerShape(4.dp)))
-        Text(label, fontSize = 11.sp, color = colorScheme.onSurface)
-    }
-}
-
 /** 筛选胶囊 chip（对齐设计稿：选中 = 主题色浅底加粗）。 */
 @Composable
 private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
@@ -559,25 +555,17 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 状态摘要卡（v1.3.1：原 运行环境/OTA 告警/root 失效 三卡合一；v1.3.3 对齐设计稿 chips 化）。
- * 三枚状态 chip（root/LSPosed/OTA）+ 异常详情行 + 挂载判据折叠（F3，趁 root 读 lspd 日志最近 4 条）。
+ * 状态摘要卡（v1.3.3 对齐设计稿 V3）：三枚状态 chip + 一行摘要（挂载判据计数 · root 临时态）。
+ * 映射表定案：原始判据行 → 「执行记录」页 [CriteriaCard]；版本凭据行 → 砍（首页已有 LSPosed 版本）；
+ * root/OTA 异常详情行 → 保留（设计稿只画了正常态，异常分支是合法补充）。
  */
 @Composable
-private fun SummaryCard(probe: RootShell.ProbeResult?, rootOk: Boolean, ota: OtaSentinel.Report?) {
-    var hookLines by remember { mutableStateOf<List<String>>(emptyList()) }
-    LaunchedEffect(rootOk) {
-        if (!rootOk) return@LaunchedEffect
-        hookLines = withContext(Dispatchers.IO) {
-            when (val r = RootShell.exec(
-                "grep -h coderstory.honorhook /data/adb/lspd/log/modules_*.log 2>/dev/null | grep -E 'installed [0-9]+/[0-9]+' | tail -4",
-            )) {
-                is RootShell.Result.Ok -> r.stdout.trim().lineSequence().filter { it.isNotBlank() }.toList()
-                else -> emptyList()
-            }
-        }
-    }
-    var showCriteria by rememberSaveable { mutableStateOf(false) }
-
+private fun SummaryCard(
+    probe: RootShell.ProbeResult?,
+    rootOk: Boolean,
+    ota: OtaSentinel.Report?,
+    hookLines: List<String>,
+) {
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
@@ -613,18 +601,21 @@ private fun SummaryCard(probe: RootShell.ProbeResult?, rootOk: Boolean, ota: Ota
                     ok = ota != null && !ota.shouldWarn,
                 )
             }
-            // 正常态：版本凭据一行（凭据不丢）；异常态：原因与处置各行其是
-            if (probe != null && probe.available && fw != null && fw) {
-                Text(
-                    text = "root ${probe.suPath} · LSPosed ${FrameworkState.frameworkVersion} API${FrameworkState.apiVersion} · 超线固件拒升（内核>6.6.118 / SP>2026-08-01）",
-                    fontSize = 11.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+            // 设计稿 V3 状态卡底线：一行摘要（判据计数 + root 临时态提醒）
+            val okCount = hookLines.count { line ->
+                val tail = line.substringAfterLast("installed ")
+                tail.substringBefore("/").trim() == tail.substringAfter("/").trim()
             }
+            Text(
+                text = if (hookLines.isEmpty()) Glitch.text("挂载判据 · 无记录 · root 为临时态（重启即失）")
+                else Glitch.text("挂载判据 ${okCount}/${hookLines.size} 宿主全生效 · root 为临时态（重启即失）"),
+                fontSize = 11.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
             if (!rootOk && probe != null) {
                 Text(
-                    text = Glitch.text("⚠ root 不可用（${probe.failure}）：开关与冻结只读。本机 root 为临时态，重启即失；已存快照与执行历史不受影响。"),
+                    text = Glitch.text("⚠ root 不可用（${probe.failure}）：开关与冻结只读；已存快照与执行历史不受影响。"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
@@ -641,23 +632,39 @@ private fun SummaryCard(probe: RootShell.ProbeResult?, rootOk: Boolean, ota: Ota
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            if (hookLines.isNotEmpty()) {
-                TextButton(
-                    text = Glitch.text(if (showCriteria) "收起挂载判据" else "挂载判据（最近 4 条 installed N/M）"),
-                    onClick = { showCriteria = !showCriteria },
-                    modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+        }
+    }
+}
+
+/** 挂载判据原始行（工程诊断，v1.3.3 从首页状态卡迁入记录页）。 */
+@Composable
+private fun CriteriaCard(lines: List<String>) {
+    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                text = Glitch.text("挂载判据（工程诊断）"),
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                color = colorScheme.onSurface,
+            )
+            if (lines.isEmpty()) {
+                Text(
+                    text = Glitch.text("无记录（root 不可用时不采集）"),
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
-                if (showCriteria) {
-                    hookLines.forEach { line ->
-                        Text(
-                            // 原行：… ] (目标包)[模块指纹] Hook名[目标包]: installed N/M
-                            text = "· ${line.substringAfter("] (").substringBefore(")")}  ${line.substringAfterLast("] ")}",
-                            fontSize = 11.sp,
-                            color = colorScheme.onSurfaceVariantSummary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+            } else {
+                lines.forEach { line ->
+                    Text(
+                        // 原行：… ] (目标包)[模块指纹] Hook名[目标包]: installed N/M
+                        text = "· ${line.substringAfter("] (").substringBefore(")")}  ${line.substringAfterLast("] ")}",
+                        fontSize = 11.sp,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
             }
         }
