@@ -1,12 +1,6 @@
 package top.honorhook.ui.screen
 
-import android.app.NotificationManager
 import android.content.Context
-import android.content.Intent
-import android.os.Build
-import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,7 +43,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.Glitch
-import top.honorhook.ui.capsule.CapsulePoster
 import top.honorhook.ui.scope.RootShell
 import top.honorhook.ui.scope.SafeCommands
 import top.honorhook.ui.toolbox.AppInfo
@@ -74,11 +67,14 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
- * 工具箱 v1.3.0（28 号规格书 §3）：活性 / 开关 / 冻结 三区分段 + root 状态。
- * - 开关区只收 settings 持久层（resetprop 会话层已全数排除——43 号真机实证全 no_effect）。
- * - 冻结区安全默认：只有 B/C 档显式收录的包可选（GovernanceList 硬拦截），A 档折叠灰显。
+ * 工具箱 v1.3.1（2026-10-25 用户拍板重设计）：状态摘要 + 三分段导航（净化/开关/冻结）。
+ * - 状态摘要卡：root/LSPosed/OTA 防线各一行结论 + 挂载判据折叠（原 运行环境/OTA告警/root失效 三卡合一）。
+ * - 净化段：营销一键关 + 私有 DNS（高频治理动作独占一屏）。
+ * - 开关段：只收 settings 持久层（resetprop 会话层已全数排除——43 号真机实证全 no_effect）。
+ * - 冻结段：B/C 档白名单（GovernanceList 硬拦截，A 档折叠灰显）+ 快照 + 执行记录（治理审计入口）。
  * - 执行一律进 ToolQueue 事务化队列：冻结批自动快照 + 失败不中断 + 回读判据。
- * - root 失效：全控件只读 + 引导卡（已冻结列表与快照免 root 可看）。
+ * - root 失效：全控件只读（状态摘要卡显式说明；已冻结列表与快照免 root 可看）。
+ * - 灵动胶囊线已删（2026-10-25 拍板弃置；恢复路径见 docs/research/HANDOFF-2026-10-25.md）。
  */
 
 /** miuix Switch 无 enabled 参：禁用时吞回调（视觉不作降，足够传达只读语义）。 */
@@ -122,6 +118,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     var filter by remember { mutableStateOf(FreezeFilter.ALL) }
     var showA by rememberSaveable { mutableStateOf(false) }
     var showFolded by rememberSaveable { mutableStateOf(false) }
+    var segment by rememberSaveable { mutableStateOf(ToolSegment.PURIFY) }
     var selected by remember { mutableStateOf(setOf<String>()) }
 
     var confirmTitle by remember { mutableStateOf("") }
@@ -149,119 +146,120 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 .padding(horizontal = 12.dp),
             contentPadding = innerPadding,
         ) {
-            ota?.let { report ->
-                if (report.shouldWarn) {
-                    item { OtaWarnCard(report) }
-                }
-            }
+            // —— 状态摘要（原 运行环境/OTA告警/root失效 三卡合一）+ 分段导航 ——
+            item { SummaryCard(probe, rootOk, ota) }
+            item { SegmentBar(segment = segment, onSelect = { segment = it }) }
 
-            if (!rootOk) {
-                item { RootMissingCard() }
-            }
-
-            item { ActivityCard(probe, rootOk) }
-            item { HistoryCard(context, queue) }
-            item { CapsuleCard() }
-
-            // —— 开关区 ——
-            item {
-                AdsGroupCard(rootOk, switchValues, running) { actions ->
-                    request(actions, Glitch.text("营销一键关"))
-                }
-            }
-            item {
-                PrivateDnsCard(rootOk, switchValues, running) { actions ->
-                    request(actions, Glitch.text("私有 DNS"))
-                }
-            }
-            item {
-                SwitchListCard(
-                    entries = ToolSwitchTable.ENTRIES.filter { it.group == null && (!it.folded || showFolded) },
-                    values = switchValues,
-                    enabled = rootOk && !running,
-                    onToggle = { entry, turnOn ->
-                        val value = if (turnOn) entry.onValue else entry.offValue
-                        if (value == null) {
-                            runResult = Glitch.text("「${entry.title}」是单向开关：只开不关")
-                        } else {
-                            request(listOf(ToolAction.Switch(entry.table, entry.key, value)), entry.title)
+            when (segment) {
+                // —— 净化段：高频治理动作独占一屏 ——
+                ToolSegment.PURIFY -> {
+                    item {
+                        AdsGroupCard(rootOk, switchValues, running) { actions ->
+                            request(actions, Glitch.text("营销一键关"))
                         }
-                    },
-                )
-            }
-            if (!showFolded) {
-                item {
-                    TextButton(
-                        text = Glitch.text("更多开关（含高风险）"),
-                        onClick = { showFolded = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    }
+                    item {
+                        PrivateDnsCard(rootOk, switchValues, running) { actions ->
+                            request(actions, Glitch.text("私有 DNS"))
+                        }
+                    }
                 }
-            }
 
-            // —— 冻结区 ——
-            item {
-                FreezeHeaderCard(
-                    rootOk = rootOk,
-                    apps = apps,
-                    selectedCount = selected.size,
-                    filter = filter,
-                    running = running,
-                    onSearch = { search = it },
-                    onFilter = { filter = it },
-                    onPreset = {
-                        val installed = (apps ?: emptyList()).map { it.pkg }.toSet()
-                        val targets = GovernanceList.PURE_PRESET.filter { it in installed }
-                        request(targets.map { ToolAction.Freeze(it) }, Glitch.text("纯净模式精选集"))
-                    },
-                    onFreezeSelected = {
-                        request(selected.map { ToolAction.Freeze(it) }, Glitch.text("冻结所选"))
-                    },
-                )
-            }
-            item {
-                InputField(
-                    query = search,
-                    onQueryChange = { search = it },
-                    onSearch = { },
-                    expanded = false,
-                    onExpandedChange = { },
-                    label = Glitch.text("搜索系统应用"),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            val visibleApps = (apps ?: emptyList()).filter { app ->
-                app.selectable && when (filter) {
-                    FreezeFilter.ALL -> true
-                    FreezeFilter.B -> app.entry?.tier == GovernanceList.Tier.B
-                    FreezeFilter.C -> app.entry?.tier == GovernanceList.Tier.C
-                    FreezeFilter.FROZEN -> app.frozen
-                } && (search.isBlank() ||
-                    app.label.contains(search, true) || app.pkg.contains(search, true))
-            }
-            items(visibleApps, key = { it.pkg }) { app ->
-                FreezeRow(
-                    app = app,
-                    enabled = rootOk && !running,
-                    checked = app.pkg in selected,
-                    onCheck = { on -> selected = if (on) selected + app.pkg else selected - app.pkg },
-                    onUnfreeze = { request(listOf(ToolAction.Unfreeze(app.pkg)), "解冻 ${app.label}") },
-                )
-            }
-            if (showA) {
-                items(
-                    (apps ?: emptyList()).filter { GovernanceList.isRedLine(it.pkg) },
-                    key = { "redline-${it.pkg}" },
-                ) { app ->
-                    RedLineRow(app)
+                // —— 开关段：settings 持久层 ——
+                ToolSegment.SWITCH -> {
+                    item {
+                        SwitchListCard(
+                            entries = ToolSwitchTable.ENTRIES.filter { it.group == null && (!it.folded || showFolded) },
+                            values = switchValues,
+                            enabled = rootOk && !running,
+                            onToggle = { entry, turnOn ->
+                                val value = if (turnOn) entry.onValue else entry.offValue
+                                if (value == null) {
+                                    runResult = Glitch.text("「${entry.title}」是单向开关：只开不关")
+                                } else {
+                                    request(listOf(ToolAction.Switch(entry.table, entry.key, value)), entry.title)
+                                }
+                            },
+                        )
+                    }
+                    if (!showFolded) {
+                        item {
+                            TextButton(
+                                text = Glitch.text("更多开关（含高风险）"),
+                                onClick = { showFolded = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                 }
-            }
-            item {
-                TextButton(
-                    text = Glitch.text(if (showA) "收起禁碰名单（A 档）" else "展开禁碰名单（A 档）"),
-                    onClick = { showA = !showA },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+
+                // —— 冻结段：白名单 + 快照 + 执行记录 ——
+                ToolSegment.FREEZE -> {
+                    item {
+                        FreezeHeaderCard(
+                            rootOk = rootOk,
+                            apps = apps,
+                            selectedCount = selected.size,
+                            filter = filter,
+                            running = running,
+                            onSearch = { search = it },
+                            onFilter = { filter = it },
+                            onPreset = {
+                                val installed = (apps ?: emptyList()).map { it.pkg }.toSet()
+                                val targets = GovernanceList.PURE_PRESET.filter { it in installed }
+                                request(targets.map { ToolAction.Freeze(it) }, Glitch.text("纯净模式精选集"))
+                            },
+                            onFreezeSelected = {
+                                request(selected.map { ToolAction.Freeze(it) }, Glitch.text("冻结所选"))
+                            },
+                        )
+                    }
+                    item {
+                        InputField(
+                            query = search,
+                            onQueryChange = { search = it },
+                            onSearch = { },
+                            expanded = false,
+                            onExpandedChange = { },
+                            label = Glitch.text("搜索系统应用"),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    val visibleApps = (apps ?: emptyList()).filter { app ->
+                        app.selectable && when (filter) {
+                            FreezeFilter.ALL -> true
+                            FreezeFilter.B -> app.entry?.tier == GovernanceList.Tier.B
+                            FreezeFilter.C -> app.entry?.tier == GovernanceList.Tier.C
+                            FreezeFilter.FROZEN -> app.frozen
+                        } && (search.isBlank() ||
+                            app.label.contains(search, true) || app.pkg.contains(search, true))
+                    }
+                    items(visibleApps, key = { it.pkg }) { app ->
+                        FreezeRow(
+                            app = app,
+                            enabled = rootOk && !running,
+                            checked = app.pkg in selected,
+                            onCheck = { on -> selected = if (on) selected + app.pkg else selected - app.pkg },
+                            onUnfreeze = { request(listOf(ToolAction.Unfreeze(app.pkg)), "解冻 ${app.label}") },
+                        )
+                    }
+                    if (showA) {
+                        items(
+                            (apps ?: emptyList()).filter { GovernanceList.isRedLine(it.pkg) },
+                            key = { "redline-${it.pkg}" },
+                        ) { app ->
+                            RedLineRow(app)
+                        }
+                    }
+                    item {
+                        TextButton(
+                            text = Glitch.text(if (showA) "收起禁碰名单（A 档）" else "展开禁碰名单（A 档）"),
+                            onClick = { showA = !showA },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    item { HistoryCard(context, queue) }
+                }
             }
 
             item {
@@ -346,61 +344,32 @@ private fun describeAction(a: ToolAction): String = when (a) {
     is ToolAction.Switch -> "写入 ${a.key}=${a.value}"
 }
 
+/** 工具箱三分段（v1.3.1）：净化/开关/冻结——单屏单任务，替代 v1.3.0 的全量平铺。 */
+private enum class ToolSegment(val label: String) { PURIFY("净化"), SWITCH("开关"), FREEZE("冻结") }
+
+/** 分段导航条：等宽铺满，选中项带「·」前缀（同冻结区 filter chips 的视觉语言）。 */
 @Composable
-private fun OtaWarnCard(report: OtaSentinel.Report) {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = Glitch.text("OTA 防线告警"),
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            if (report.violatedSix.isNotEmpty()) {
-                Text(
-                    text = Glitch.text("六键失守：${report.violatedSix.joinToString()}"),
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            if (report.sentinelChanged.isNotEmpty()) {
-                Text(
-                    text = Glitch.text("哨兵变化（有推送活动）：${report.sentinelChanged.joinToString()}"),
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            Text(
-                text = Glitch.text("内核>6.6.118 或 SP>2026-08-01 的固件一律拒升"),
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
+private fun SegmentBar(segment: ToolSegment, onSelect: (ToolSegment) -> Unit) {
+    Row(
+        modifier = Modifier.padding(top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        ToolSegment.entries.forEach { s ->
+            TextButton(
+                text = Glitch.text(if (s == segment) "· ${s.label}" else s.label),
+                onClick = { onSelect(s) },
+                modifier = Modifier.weight(1f),
             )
         }
     }
 }
 
+/**
+ * 状态摘要卡（v1.3.1：原 运行环境/OTA 告警/root 失效 三卡合一）。
+ * root/LSPosed/OTA 防线各一行结论；挂载判据（F3，趁 root 读 lspd 日志最近 4 条）折叠进本卡。
+ */
 @Composable
-private fun RootMissingCard() {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = Glitch.text("Root 不可用"),
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            Text(
-                text = Glitch.text("开关与冻结全部只读。本机 root 为临时态：重启即失，重新提权后再来。已存的快照与执行历史不受影响。"),
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ActivityCard(probe: RootShell.ProbeResult?, rootOk: Boolean) {
-    // F3 收尾（28 号 §5）：趁 root 读 LSPosed 框架日志里本模块的 installed N/M 判据
+private fun SummaryCard(probe: RootShell.ProbeResult?, rootOk: Boolean, ota: OtaSentinel.Report?) {
     var hookLines by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(rootOk) {
         if (!rootOk) return@LaunchedEffect
@@ -413,18 +382,20 @@ private fun ActivityCard(probe: RootShell.ProbeResult?, rootOk: Boolean) {
             }
         }
     }
+    var showCriteria by rememberSaveable { mutableStateOf(false) }
+
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = Glitch.text("运行环境"),
+                text = Glitch.text("运行状态"),
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp,
                 color = colorScheme.onSurface,
             )
             val rootLine = when {
-                probe == null -> "检测中…"
-                probe.available -> "root 可用（${probe.suPath}）"
-                else -> "root 不可用（${probe.failure}）"
+                probe == null -> "root：检测中…"
+                probe.available -> "root：可用（${probe.suPath}）"
+                else -> "⚠ root：不可用（${probe.failure}）——开关与冻结只读"
             }
             Text(rootLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
             val fw = FrameworkState.active
@@ -434,22 +405,40 @@ private fun ActivityCard(probe: RootShell.ProbeResult?, rootOk: Boolean) {
                 else -> "LSPosed：未激活（模块未被框架加载）"
             }
             Text(fwLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
-            if (hookLines.isNotEmpty()) {
+            // OTA 防线一行结论（原 OtaWarnCard 收敛；正常时也显式报平安）
+            val otaLine = when {
+                ota == null -> "OTA 防线：检查中…"
+                ota.shouldWarn -> "⚠ OTA 防线：" + listOfNotNull(
+                    ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "六键失守 ${it.joinToString()}" },
+                    ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "有推送活动 ${it.joinToString()}" },
+                ).joinToString("；").ifEmpty { "触发告警" } + "（超线固件拒升）"
+                else -> "OTA 防线：正常（内核>6.6.118 或 SP>2026-08-01 一律拒升）"
+            }
+            Text(otaLine, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+            if (!rootOk && probe != null) {
                 Text(
-                    text = Glitch.text("挂载判据（最近 4 条 installed N/M）："),
+                    text = Glitch.text("本机 root 为临时态：重启即失，重新提权后再来。已存快照与执行历史不受影响。"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
                 )
-                hookLines.forEach { line ->
-                    Text(
-                        // 原行：… ] (目标包)[模块指纹] Hook名[目标包]: installed N/M
-                        text = "· ${line.substringAfter("] (").substringBefore(")")}  ${line.substringAfterLast("] ")}",
-                        fontSize = 11.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+            }
+            if (hookLines.isNotEmpty()) {
+                TextButton(
+                    text = Glitch.text(if (showCriteria) "收起挂载判据" else "挂载判据（最近 4 条 installed N/M）"),
+                    onClick = { showCriteria = !showCriteria },
+                    modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                )
+                if (showCriteria) {
+                    hookLines.forEach { line ->
+                        Text(
+                            // 原行：… ] (目标包)[模块指纹] Hook名[目标包]: installed N/M
+                            text = "· ${line.substringAfter("] (").substringBefore(")")}  ${line.substringAfterLast("] ")}",
+                            fontSize = 11.sp,
+                            color = colorScheme.onSurfaceVariantSummary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -811,84 +800,4 @@ private fun HistoryCard(context: Context, queue: ToolQueue) {
             }
         }
     }
-}
-
-/** 灵动胶囊 C 路测试卡（26 号规格书场景 1+4：倒计时/文本胶囊，app 侧零 hook 投递）。 */
-@Composable
-private fun CapsuleCard() {
-    val context = LocalContext.current
-    var status by remember { mutableStateOf<String?>(null) }
-
-    // Android 13+ 通知是运行时权限：未授权时 notify() 表面成功但 NMS 全量静默 block（真机实证
-    // numEnqueuedByApp=16 / numPostedByApp=0，设置页开关恒灰）。先查 areNotificationsEnabled，
-    // 未授权走系统弹窗、授权当次补发；拒绝或 <33（无弹窗）时跳系统应用通知设置页兜底。
-    var pendingPost by remember { mutableStateOf<(() -> CapsulePoster.Result)?>(null) }
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        val post = pendingPost
-        pendingPost = null
-        if (granted && post != null) {
-            status = describeResult(post())
-        } else {
-            jumpAppNotificationSettings(context)
-            status = "通知未授权，已跳系统通知设置页"
-        }
-    }
-    fun ensureThenPost(post: () -> CapsulePoster.Result) {
-        val nm = context.getSystemService(NotificationManager::class.java)
-        if (nm?.areNotificationsEnabled() == true) {
-            status = describeResult(post())
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pendingPost = post
-            permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            jumpAppNotificationSettings(context)
-            status = "通知被系统关闭，已跳系统通知设置页"
-        }
-    }
-
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = Glitch.text("灵动胶囊"),
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            Text(
-                text = Glitch.text("通知通道零 hook 投递（C 路）；需荣耀桌面胶囊开关开启"),
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-            )
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    text = Glitch.text("30s 倒计时"),
-                    onClick = { ensureThenPost { CapsulePoster.postCountdown(context, "倒计时", 30) } },
-                )
-                TextButton(
-                    text = Glitch.text("文本胶囊"),
-                    onClick = { ensureThenPost { CapsulePoster.postText(context, "Re:荣耀 在线") } },
-                )
-                TextButton(
-                    text = Glitch.text("撤销"),
-                    onClick = { CapsulePoster.cancel(context); status = "已撤销" },
-                )
-            }
-            status?.let {
-                Text(it, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
-            }
-        }
-    }
-}
-
-private fun describeResult(r: CapsulePoster.Result): String = when (r) {
-    is CapsulePoster.Result.Ok -> "已投递（id=${r.notificationId}），看灵动胶囊"
-    is CapsulePoster.Result.Failed -> "失败@${r.step}：${r.message}"
-}
-
-private fun jumpAppNotificationSettings(context: Context) {
-    context.startActivity(
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-    )
 }

@@ -132,9 +132,6 @@ dependencies {
     // 设置页的 SwitchPreference / ArrowPreference / OverlayDropdownPreference
     implementation(libs.miuix.preference)
     implementation(libs.miuix.icons.android)
-    // 灵动胶囊 C 路：setHnExtrasParcelable 是 Honor hidden API，Android 17 meta-reflection 豁免已封，
-    // 用 LSPosed 官方同款 HiddenApiBypass（JNI 路径，26 号规格书「LSPosed 兜底」的实现载体）
-    implementation(libs.hiddenapibypass)
     // 液态玻璃：Backdrop/LayerBackdrop/blur/vibrancy/lens（FloatingBottomBar 的 lens 折射高光）
     implementation(libs.miuix.blur)
     // 动态取色：种子色 → M3 色板（KernelSU 主题页的关键色/配色风格/色规范）
