@@ -20,9 +20,11 @@ junit = "4.13.2"
 # kotlinx-coroutines：:xhs-dn-core（上游下载器模块）里的挂起函数需要。
 # 1.9.0 = 现状解析值（此前经 compose 依赖树隐式可见），显式声明后版本不漂。
 kotlinxCoroutines = "1.9.0"
+hiddenApiBypass = "4.3"
 
 [libraries]
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+hiddenapibypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version.ref = "hiddenApiBypass" }
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
 # 模块宿主 App 经该服务与 LSPosed 通信：远程 prefs 下发 + 真实激活状态（照 LSPFRIDA/HyperChanger）
 libxposed-service = { group = "io.github.libxposed", name = "service", version.ref = "libxposed" }

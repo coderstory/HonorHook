@@ -96,24 +96,29 @@ object CapsulePoster {
     }
 
     /**
-     * hidden API 豁免（ExemptAll 标准手法，本进程内生效无需 root）。
-     * setHnExtrasParcelable 是 Honor hidden API，命中 NonSdkApi 拦截（真机烟测实证
-     * 「失败@setHnExtrasParcelable」）；meta-reflection 双跳拿到 VMRuntime#setHiddenApiExemptions
-     * 后放行全部 L 前缀。失败不抛（豁免不成=回原拦截路径，错误如实上报）。
+     * hidden API 豁免：主路 HiddenApiBypass（LSPosed 管理器同款 JNI 路径）——
+     * setHnExtrasParcelable 是 Honor hidden API，真机烟测实证 Android 17 上
+     * VMRuntime meta-reflection 豁免已被封（「失败@setHnExtrasParcelable」），Bypass 仍有效。
+     * 备路保留 meta 手法兼容旧版本。失败不抛，结果随 Failed 上报诊断。
      */
     fun tryExemptHiddenApi(): String {
         return runCatching {
-            val getDeclaredMethod = Class::class.java.getDeclaredMethod(
-                "getDeclaredMethod", String::class.java, arrayOf<Class<*>>().javaClass,
-            )
-            val vmRuntime = Class.forName("dalvik.system.VMRuntime")
-            val setHiddenApiExemptions = getDeclaredMethod.invoke(
-                vmRuntime, "setHiddenApiExemptions", arrayOf<Array<String>>().javaClass,
-            ) as java.lang.reflect.Method
-            val runtime = vmRuntime.getDeclaredMethod("getRuntime").invoke(null)
-            setHiddenApiExemptions.invoke(runtime, arrayOf("L"))
-            "OK"
-        }.getOrElse { "FAIL ${it.javaClass.simpleName}: ${it.message}" }
+            org.lsposed.hiddenapibypass.HiddenApiBypass.addHiddenApiExemptions("")
+            "OK(bypass)"
+        }.recoverCatching { primary ->
+            runCatching {
+                val getDeclaredMethod = Class::class.java.getDeclaredMethod(
+                    "getDeclaredMethod", String::class.java, arrayOf<Class<*>>().javaClass,
+                )
+                val vmRuntime = Class.forName("dalvik.system.VMRuntime")
+                val setHiddenApiExemptions = getDeclaredMethod.invoke(
+                    vmRuntime, "setHiddenApiExemptions", arrayOf<Array<String>>().javaClass,
+                ) as java.lang.reflect.Method
+                val runtime = vmRuntime.getDeclaredMethod("getRuntime").invoke(null)
+                setHiddenApiExemptions.invoke(runtime, arrayOf("L"))
+                "OK(vmruntime)"
+            }.getOrElse { "FAIL bypass=${primary.javaClass.simpleName}: ${primary.message}" }
+        }.getOrDefault("FAIL unknown")
     }
 
     private fun post(context: Context, capsule: Any): Result {
@@ -130,7 +135,7 @@ object CapsulePoster {
             Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = if (Build.VERSION.SDK_INT >= 26) {
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(context, CHANNEL_ID)
         } else {
             @Suppress("DEPRECATION") Notification.Builder(context)
@@ -140,20 +145,32 @@ object CapsulePoster {
             .setContentText("灵动胶囊 C 路投递")
             .setOngoing(true)
             .setContentIntent(launch)
-            .build()
 
-        // 核心一步：塞私有 hnExtras（反射 setHnExtrasParcelable；hidden API 拦截在此如实暴露）
-        val setResult = runCatching {
+        // 双保险喂法：
+        // ① setRequestPromotedOngoing(true)——public Builder 方法（写标准 extras android.requestPromotedOngoing），
+        //   SystemUI isCapsuleData 判定 isPromotedOngoing()=true 直接当胶囊（无 hidden API 风险；
+        //   isPromotedOngoing 六条件：ongoing+title+可提升 style+非 group+非自定义视图，全部满足）
+        // ② setHnExtrasParcelable——Honor 私有 hnExtras 带自定义 CapsuleData（image_text_timer 模板）
+        val promoted = runCatching {
+            Notification.Builder::class.java
+                .getMethod("setRequestPromotedOngoing", Boolean::class.java)
+                .invoke(builder, true)
+        }
+        val notification = builder.build()
+        val hnSet = runCatching {
             Notification::class.java
                 .getMethod("setHnExtrasParcelable", String::class.java, android.os.Parcelable::class.java)
                 .invoke(notification, EXTRAS_KEY, capsule as android.os.Parcelable)
         }
-        setResult.getOrElse {
+        hnSet.getOrElse {
             val cause = (it as? java.lang.reflect.InvocationTargetException)?.cause ?: it
-            return Result.Failed(
-                "setHnExtrasParcelable",
-                "[豁免=$exemptLog] ${cause.javaClass.simpleName}: ${cause.message ?: ""}",
-            )
+            // promoted 成功时 hnExtras 失败可降级容忍（系统仍按 promoted-ongoing 处理）
+            if (!promoted.isSuccess) {
+                return Result.Failed(
+                    "setHnExtrasParcelable",
+                    "[豁免=$exemptLog promoted=false] ${cause.javaClass.simpleName}: ${cause.message ?: ""}",
+                )
+            }
         }
 
         return runCatching {
