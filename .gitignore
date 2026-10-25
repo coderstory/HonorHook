@@ -65,7 +65,9 @@ tools/gradle-home/
 tools/android-user/
 # DSH 项目技能根（.claude/skills 的同步副本，tools/sync-skills.sh 生成）
 .agents/
-libs/xhs-dn-core/build/.transforms/
+# 2026-10-26 P0-2 整改（#8）：build 产物曾 506 文件误入库；整目录忽略防再犯。
+# generated/xhsdn 白名单同步产物由 syncXhsDnUpstream 构建期从 submodule 重建，无需 track。
+libs/xhs-dn-core/build/
 
 # 会话内临时产物（截图/草稿，含真机个人信息，绝不入库）
 scratch/
