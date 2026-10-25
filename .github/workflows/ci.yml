@@ -57,10 +57,11 @@ jobs:
         if: github.ref_name == 'dev'
         run: ./app/gradlew -p app assembleDebug --stacktrace
 
-      # 单测门禁：仅 dev 分支跑（master release 构建不执行测试）
-      - name: Run tests
+      # 单测门禁（P1-2 整改 #10）：dev 与 master 都跑测试，统一收敛为 testDebugUnitTest
+      # （与 tools/dev.sh test 口径对齐、缩短门禁；master 的测试步骤在 release 构建之前）
+      - name: Run tests (dev)
         if: github.ref_name == 'dev'
-        run: ./app/gradlew -p app test --stacktrace
+        run: ./app/gradlew -p app testDebugUnitTest --stacktrace
 
       - name: Upload debug APK (dev)
         if: github.ref_name == 'dev'
@@ -75,6 +76,12 @@ jobs:
       # 版本 = version.properties（唯一事实源，skill release 写）；在线更新按 tag 语义版本比大小（UpdateChecker）
       # 签名：稳定 keystore 从 Secrets 注入（签名跨 run 一致 = 在线更新可覆盖安装；
       # debug keystore 在 CI 每次随机生成，不可用于发布）。
+      # master 单测门禁（P1-2 整改 #10）：发布链路不再零测试——
+      # 测试红则后续 Build release / 发 Release / 同步 XMRepo 全部不执行
+      - name: Run tests (master)
+        if: github.ref_name == 'master'
+        run: ./app/gradlew -p app testDebugUnitTest --stacktrace
+
       - name: Decode signing keystore (master)
         if: github.ref_name == 'master'
         env:
