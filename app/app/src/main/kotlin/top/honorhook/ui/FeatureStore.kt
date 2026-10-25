@@ -60,7 +60,7 @@ object FeatureStore {
 
     /**
      * 强停前调用：远端 prefs 不随模块卸载清除，重装后本地被清空而远端残留旧值，
-     * 会出现Glitch.text("界面显示开、hook 读到关")（SystemUI 曾因此静默失效）。
+     * 会出现"界面显示开、hook 读到关"（SystemUI 曾因此静默失效）。
      */
     fun pushAllToRemote(): PushResult {
         val all = FeatureCatalog.targets.flatMap { it.features }

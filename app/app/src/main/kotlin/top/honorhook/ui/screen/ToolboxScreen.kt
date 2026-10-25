@@ -56,7 +56,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.StatusChip
-import top.honorhook.ui.Glitch
 import top.honorhook.ui.scope.RootShell
 import top.honorhook.ui.scope.SafeCommands
 import top.honorhook.ui.toolbox.AppInfo
@@ -155,7 +154,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = Glitch.text(if (view == HubView.HOME) "工具箱" else view.title),
+                title = if (view == HubView.HOME) "工具箱" else view.title,
                 navigationIcon = { if (view != HubView.HOME) MiuixBackButton { view = HubView.HOME } },
                 scrollBehavior = scrollBehavior,
             )
@@ -179,7 +178,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 onToggleA = { showA = it },
                 bottomInnerPadding = bottomInnerPadding,
                 onUnfreeze = { app -> request(listOf(ToolAction.Unfreeze(app.pkg)), "解冻 ${app.label}") },
-                onFreezeSelected = { request(selected.map { ToolAction.Freeze(it) }, Glitch.text("冻结所选")) },
+                onFreezeSelected = { request(selected.map { ToolAction.Freeze(it) }, "冻结所选") },
                 onOpenBulkMenu = { freezeMenuOpen = true },
                 bulkNote = bulkNote,
             )
@@ -201,12 +200,12 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 HubView.PURIFY -> {
                     item {
                         AdsGroupCard(rootOk, switchValues, running) { actions ->
-                            request(actions, Glitch.text("营销推荐：全部关闭"))
+                            request(actions, "营销推荐：全部关闭")
                         }
                     }
                     item {
                         PrivateDnsCard(rootOk, switchValues, running) { actions ->
-                            request(actions, Glitch.text("私有 DNS"))
+                            request(actions, "私有 DNS")
                         }
                     }
                 }
@@ -221,7 +220,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             onToggle = { entry, turnOn ->
                                 val value = if (turnOn) entry.onValue else entry.offValue
                                 if (value == null) {
-                                    runResult = Glitch.text("「${entry.title}」是单向开关：只开不关")
+                                    runResult = "「${entry.title}」是单向开关：只开不关"
                                 } else {
                                     request(listOf(ToolAction.Switch(entry.table, entry.key, value)), entry.title)
                                 }
@@ -231,7 +230,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     if (!showFolded) {
                         item {
                             TextButton(
-                                text = Glitch.text("更多开关（含高风险）"),
+                                text = "更多开关（含高风险）",
                                 onClick = { showFolded = true },
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -274,19 +273,19 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             BulkOption.NONE -> emptySet()
         }
         selected = next
-        bulkNote = if (opt == BulkOption.NONE) Glitch.text("已清空勾选")
-        else Glitch.text("已勾选 ${next.size} 项 · ${opt.label}")
+        bulkNote = if (opt == BulkOption.NONE) "已清空勾选"
+        else "已勾选 ${next.size} 项 · ${opt.label}"
     }
     if (freezeMenuOpen) {
         WindowDialog(
             show = true,
-            title = Glitch.text("批量勾选"),
-            summary = Glitch.text("选中后自动勾选名单内的应用，列表显示不变；「可选冻结」的部分应用有功能代价"),
+            title = "批量勾选",
+            summary = "选中后自动勾选名单内的应用，列表显示不变；「可选冻结」的部分应用有功能代价",
             onDismissRequest = { freezeMenuOpen = false },
         ) {
             BulkOption.entries.forEach { opt ->
                 TextButton(
-                    text = Glitch.text(opt.label),
+                    text = opt.label,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
                         applyBulk(opt)
@@ -301,14 +300,14 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         if (resultText != null) {
             WindowDialog(
                 show = true,
-                title = Glitch.text("执行结果"),
+                title = "执行结果",
                 summary = null,
                 onDismissRequest = { if (!running) { runResult = null; confirmOpen = false } },
             ) {
                 Text(resultText)
                 Spacer(Modifier.height(8.dp))
                 TextButton(
-                    text = Glitch.text("关闭"),
+                    text = "关闭",
                     onClick = {
                         runResult = null
                         confirmOpen = false
@@ -427,7 +426,7 @@ private fun FreezePane(
             onSearch = { },
             expanded = false,
             onExpandedChange = { },
-            label = Glitch.text("搜索系统应用"),
+            label = "搜索系统应用",
             modifier = Modifier.fillMaxWidth(),
         )
         // 固定区：批量勾选下拉触发 + 冻结所选
@@ -453,14 +452,14 @@ private fun FreezePane(
                         modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        text = Glitch.text("按名单批量勾选"),
+                        text = "按名单批量勾选",
                         fontSize = 14.sp,
                         color = colorScheme.onSurface,
                     )
                 }
             }
             TextButton(
-                text = Glitch.text("冻结所选 (${selected.size})"),
+                text = "冻结所选 (${selected.size})",
                 enabled = rootOk && !running && selected.isNotEmpty(),
                 onClick = onFreezeSelected,
             )
@@ -502,7 +501,7 @@ private fun FreezePane(
             }
             item {
                 TextButton(
-                    text = Glitch.text(if (showA) "收起禁碰名单" else "展开禁碰名单"),
+                    text = if (showA) "收起禁碰名单" else "展开禁碰名单",
                     onClick = { onToggleA(!showA) },
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -548,7 +547,7 @@ private fun HubTiles(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = Glitch.text(title),
+                    text = title,
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp,
                     color = colorScheme.onSurface,
@@ -591,7 +590,7 @@ private fun SummaryCard(
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = Glitch.text("运行状态"),
+                text = "运行状态",
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp,
                 color = colorScheme.onSurface,
@@ -624,14 +623,14 @@ private fun SummaryCard(
                 )
             }
             Text(
-                text = Glitch.text("root 为临时授权，手机重启后失效"),
+                text = "root 为临时授权，手机重启后失效",
                 fontSize = 11.sp,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 8.dp),
             )
             if (!rootOk && probe != null) {
                 Text(
-                    text = Glitch.text("⚠ root 不可用（${probe.failure}）：开关和冻结暂时用不了；已保存的记录和备份不受影响。"),
+                    text = "⚠ root 不可用（${probe.failure}）：开关和冻结暂时用不了；已保存的记录和备份不受影响。",
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
@@ -639,10 +638,10 @@ private fun SummaryCard(
             }
             if (ota != null && ota.shouldWarn) {
                 Text(
-                    text = Glitch.text("⚠ 更新防护：" + listOfNotNull(
+                    text = "⚠ 更新防护：" + listOfNotNull(
                         ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "有 ${it.size} 项防护开关被系统改回（${it.joinToString()}）" },
                         ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "检测到系统更新推送活动（${it.joinToString()}）" },
-                    ).joinToString("；")),
+                    ).joinToString("；"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
@@ -664,13 +663,13 @@ private fun AdsGroupCard(
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
-                text = Glitch.text("营销推荐"),
+                text = "营销推荐",
                 fontWeight = FontWeight.Medium,
                 fontSize = 15.sp,
                 color = colorScheme.onSurface,
             )
             Text(
-                text = Glitch.text("一键关闭荣耀系统里的 11 个营销/推荐开关（个性化推送、智慧推荐、负一屏推荐流、系统广告总开关、位置上报等）。写入系统设置，全局生效；可能被云端回写，隔天复查。当前开 $onCount 个。"),
+                text = "一键关闭荣耀系统里的 11 个营销/推荐开关（个性化推送、智慧推荐、负一屏推荐流、系统广告总开关、位置上报等）。写入系统设置，全局生效；可能被云端回写，隔天复查。当前开 $onCount 个。",
                 fontSize = 12.sp,
                 color = colorScheme.onSurfaceVariantSummary,
             )
@@ -679,7 +678,7 @@ private fun AdsGroupCard(
                 enabled = enabled && !running && onCount > 0,
                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
             ) {
-                Text(Glitch.text("全部关闭"))
+                Text("全部关闭")
             }
         }
     }
@@ -701,13 +700,13 @@ private fun PrivateDnsCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = Glitch.text("私有 DNS 去遥测"),
+                    text = "私有 DNS 去遥测",
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp,
                     color = colorScheme.onSurface,
                 )
                 Text(
-                    text = Glitch.text("dns.adguard-dns.com · 需网络放行 DoT（853 端口），系统提示「无法访问」时请关闭此开关；当前：${if (mode.isBlank()) "未设置" else mode}"),
+                    text = "dns.adguard-dns.com · 需网络放行 DoT（853 端口），系统提示「无法访问」时请关闭此开关；当前：${if (mode.isBlank()) "未设置" else mode}",
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                 )
@@ -755,7 +754,7 @@ private fun SwitchListCard(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = Glitch.text(if (e.risk == ToolSwitchTable.Risk.HIGH) "⚠ ${e.title}" else e.title),
+                            text = if (e.risk == ToolSwitchTable.Risk.HIGH) "⚠ ${e.title}" else e.title,
                             fontSize = 15.sp,
                             color = colorScheme.onSurface,
                         )
@@ -765,7 +764,7 @@ private fun SwitchListCard(
                         // 单向开关是功能约束（用户需知），保留提示；key/当前值属面板数据不上屏
                         if (e.offValue == null) {
                             Text(
-                                text = Glitch.text("单向：只开不关，恢复走系统设置"),
+                                text = "单向：只开不关，恢复走系统设置",
                                 fontSize = 11.sp,
                                 color = colorScheme.onSurfaceVariantSummary,
                             )
@@ -802,7 +801,7 @@ private fun FreezeRow(
                     Text(app.pkg, fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
                 }
                 Text(
-                    text = Glitch.text("已冻结 · 点解冻"),
+                    text = "已冻结 · 点解冻",
                     modifier = Modifier.clickable(enabled = enabled) { onUnfreeze() },
                     fontSize = 13.sp,
                     color = colorScheme.primary,
@@ -850,7 +849,7 @@ private fun ConfirmDialog(
 ) {
     WindowDialog(
         show = true,
-        title = Glitch.text(title),
+        title = title,
         summary = null,
         onDismissRequest = onCancel,
     ) {
@@ -861,9 +860,9 @@ private fun ConfirmDialog(
         var bConfirmed by remember { mutableStateOf(false) }
         Column {
             Text(
-                text = Glitch.text("将执行 ${actions.size} 项：\n") +
+                text = "将执行 ${actions.size} 项：\n" +
                     actions.joinToString("\n") { describeAction(it) } +
-                    Glitch.text("\n\n冻结前会自动备份，随时可恢复；失败不中断，每项都会检查结果。"),
+                    "\n\n冻结前会自动备份，随时可恢复；失败不中断，每项都会检查结果。",
                 fontSize = 13.sp,
             )
             if (hasBTier) {
@@ -877,7 +876,7 @@ private fun ConfirmDialog(
                     SafeSwitch(checked = bConfirmed, enabled = true) { bConfirmed = it }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = Glitch.text("确认冻结 B 档：有真实功能代价，解冻需 root 在场"),
+                        text = "确认冻结 B 档：有真实功能代价，解冻需 root 在场",
                         fontSize = 12.sp,
                         color = colorScheme.onSurfaceVariantSummary,
                     )
@@ -885,14 +884,14 @@ private fun ConfirmDialog(
             }
             Row(modifier = Modifier.padding(top = 12.dp)) {
                 TextButton(
-                    text = Glitch.text("取消"),
+                    text = "取消",
                     onClick = onCancel,
                     enabled = !running,
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
                 TextButton(
-                    text = Glitch.text(if (running) "执行中…" else "执行"),
+                    text = if (running) "执行中…" else "执行",
                     onClick = onConfirm,
                     enabled = !running && (!hasBTier || bConfirmed),
                     modifier = Modifier.weight(1f),
@@ -914,14 +913,14 @@ private fun HistoryCard(context: Context, queue: ToolQueue, asPage: Boolean = fa
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = Glitch.text("执行记录与快照"),
+                        text = "执行记录与快照",
                         fontWeight = FontWeight.Medium,
                         fontSize = 15.sp,
                         color = colorScheme.onSurface,
                     )
                     val pending = queue.pending().size
                     Text(
-                        text = Glitch.text(if (pending > 0) "待执行 $pending 项（点开查看）" else "点开查看队列与快照"),
+                        text = if (pending > 0) "待执行 $pending 项（点开查看）" else "点开查看队列与快照",
                         fontSize = 12.sp,
                         color = colorScheme.onSurfaceVariantSummary,
                     )
@@ -930,7 +929,7 @@ private fun HistoryCard(context: Context, queue: ToolQueue, asPage: Boolean = fa
             if (open) {
                 queue.items().takeLast(8).reversed().forEach { item ->
                     val state = when (item.state) {
-                        ToolQueue.Core.State.PENDING -> Glitch.text("待执行")
+                        ToolQueue.Core.State.PENDING -> "待执行"
                         ToolQueue.Core.State.DONE -> "✓"
                         ToolQueue.Core.State.FAILED -> "× ${item.error}"
                     }
@@ -945,7 +944,7 @@ private fun HistoryCard(context: Context, queue: ToolQueue, asPage: Boolean = fa
                 val snaps = SnapshotStore.all(context).take(3)
                 if (snaps.isNotEmpty()) {
                     Text(
-                        text = Glitch.text("备份快照："),
+                        text = "备份快照：",
                         fontSize = 12.sp,
                         color = colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.padding(top = 6.dp),

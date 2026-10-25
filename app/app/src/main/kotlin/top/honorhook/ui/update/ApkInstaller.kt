@@ -15,7 +15,6 @@ import kotlinx.coroutines.selects.select
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import top.honorhook.ui.Glitch
 
 object ApkInstaller {
 
@@ -139,7 +138,7 @@ object ApkInstaller {
                         }
                     }
                 }
-                // 提前断流时读到 EOF 也算Glitch.text("读完")，半截 APK 进系统安装器必失败；
+                // 提前断流时读到 EOF 也算"读完"，半截 APK 进系统安装器必失败；
                 // 抛错让 download() 的逐源循环换下一源（probed 直连路径则走调用方 catch → Error 态）
                 if (total > 0 && done != total) error("下载不完整: $done/$total")
                 // total 未知（无 Content-Length，P4）：读完流即成功，进度补 100%，别停在 0

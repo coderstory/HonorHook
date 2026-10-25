@@ -71,8 +71,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // 彩蛋：每次打开摇一次骰子（两个效果各 1%，可能同时命中）；早于 setContent 即可，无需重组
-        Glitch.roll()
         // 框架状态是异步问出来的：兜底计时，1.5s 还没绑上服务才判「未激活」，
         // 免得冷启动先闪一个错误的「未激活」再跳成「工作中」
         FrameworkState.armResolveTimeout()
@@ -132,11 +130,11 @@ private fun AppRoot() {
 
     val items = remember {
         listOf(
-            NavigationItem(label = Glitch.text("首页"), icon = Icons.Rounded.Cottage),
-            NavigationItem(label = Glitch.text("功能"), icon = Icons.Rounded.Extension),
+            NavigationItem(label = "首页", icon = Icons.Rounded.Cottage),
+            NavigationItem(label = "功能", icon = Icons.Rounded.Extension),
             // 第 4 tab：工具箱（28 号规格书 §3）——root 开关/冻结/活性自检
-            NavigationItem(label = Glitch.text("工具箱"), icon = Icons.Rounded.Handyman),
-            NavigationItem(label = Glitch.text("设置"), icon = Icons.Rounded.Settings),
+            NavigationItem(label = "工具箱", icon = Icons.Rounded.Handyman),
+            NavigationItem(label = "设置", icon = Icons.Rounded.Settings),
         )
     }
 

@@ -66,12 +66,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.honorhook.ui.Glitch
 
 /**
  * 设置 Tab —— **照抄 KernelSU `SettingsMiuix.kt`**：
  * ```
- * Scaffold(topBar = TopAppBar(Glitch.text("设置"), scrollBehavior)) {
+ * Scaffold(topBar = TopAppBar("设置"), scrollBehavior)) {
  *   LazyColumn(padding(horizontal = 12.dp), contentPadding = innerPadding) {
  *     Card(padding(top = 12.dp)) { SwitchPreference(...) ; ArrowPreference(主题设置) }
  *     Card(padding(top = 12.dp)) { ArrowPreference(运行日志) ; ArrowPreference(关于) }
@@ -109,18 +108,18 @@ private fun SettingsMain(
     val updateSummary = run {
         val latest = UpdateState.latest
         when {
-            UpdateState.checking -> Glitch.text("检查中…")
+            UpdateState.checking -> "检查中…"
             latest != null && UpdateChecker.isNewer(latest, BuildConfig.VERSION_NAME) ->
-                Glitch.text("发现新版本 ${latest.tag}")
-            latest != null -> Glitch.text("已是最新（v${BuildConfig.VERSION_NAME}）")
-            else -> Glitch.text("当前 v${BuildConfig.VERSION_NAME}")
+                "发现新版本 ${latest.tag}"
+            latest != null -> "已是最新（v${BuildConfig.VERSION_NAME}）"
+            else -> "当前 v${BuildConfig.VERSION_NAME}"
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = Glitch.text("设置"),
+                title = "设置",
                 scrollBehavior = scrollBehavior,
             )
         },
@@ -147,13 +146,13 @@ private fun SettingsMain(
                             .fillMaxWidth(),
                     ) {
                         ArrowPreference(
-                            title = Glitch.text("重启目标应用"),
-                            summary = Glitch.text("把相关应用关掉后重新打开"),
+                            title = "重启目标应用",
+                            summary = "把相关应用关掉后重新打开",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.RestartAlt,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = Glitch.text("重启目标应用"),
+                                    contentDescription = "重启目标应用",
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -168,13 +167,13 @@ private fun SettingsMain(
                             .fillMaxWidth(),
                     ) {
                         ArrowPreference(
-                            title = Glitch.text("主题设置"),
-                            summary = Glitch.text("主题色、深浅色与液态玻璃"),
+                            title = "主题设置",
+                            summary = "主题色、深浅色与液态玻璃",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.Palette,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = Glitch.text("主题设置"),
+                                    contentDescription = "主题设置",
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -191,13 +190,13 @@ private fun SettingsMain(
                             .fillMaxWidth(),
                     ) {
                         ArrowPreference(
-                            title = Glitch.text("检查更新"),
+                            title = "检查更新",
                             summary = updateSummary,
                             startAction = {
                                 Icon(
                                     Icons.Rounded.SystemUpdateAlt,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = Glitch.text("检查更新"),
+                                    contentDescription = "检查更新",
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -205,12 +204,12 @@ private fun SettingsMain(
                             onClick = { UpdateState.checkAsync(manual = true) },
                         )
                         ArrowPreference(
-                            title = Glitch.text("关于"),
+                            title = "关于",
                             startAction = {
                                 Icon(
                                     Icons.Rounded.Info,
                                     modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = Glitch.text("关于"),
+                                    contentDescription = "关于",
                                     tint = colorScheme.onBackground,
                                 )
                             },
@@ -250,14 +249,14 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
 
     WindowDialog(
         show = true,
-        title = Glitch.text("重启目标应用"),
+        title = "重启目标应用",
         summary = null,
         onDismissRequest = { if (!restartRunning) onDismiss() },
     ) {
         val result = report
         when {
             result != null -> RestartResult(result, push, onDismiss)
-            restartRunning -> Text(Glitch.text("正在执行…"))
+            restartRunning -> Text("正在执行…")
             else -> RestartPicker(
                 selected = selected,
                 onToggle = { pkg, on -> selected = if (on) selected + pkg else selected - pkg },
@@ -280,8 +279,8 @@ private fun RestartScopeDialog(onDismiss: () -> Unit) {
 }
 
 private val RESTART_SIDE_EFFECT = mapOf(
-    "com.hihonor.android.launcher" to Glitch.text("桌面会重新加载一下（图标和小部件会闪一下）"),
-    "com.android.systemui" to Glitch.text("状态栏与导航栏会重建：短暂闪一下"),
+    "com.hihonor.android.launcher" to "桌面会重新加载一下（图标和小部件会闪一下）",
+    "com.android.systemui" to "状态栏与导航栏会重建：短暂闪一下",
 )
 
 @Composable
@@ -300,8 +299,8 @@ private fun RestartPicker(
         ) {
             FeatureCatalog.targets.forEach { target ->
                 CheckboxPreference(
-                    title = Glitch.text(stringResource(target.nameRes)),
-                    summary = Glitch.text(RESTART_SIDE_EFFECT[target.packageName] ?: target.packageName),
+                    title = stringResource(target.nameRes),
+                    summary = RESTART_SIDE_EFFECT[target.packageName] ?: target.packageName,
                     checked = target.packageName in selected,
                     onCheckedChange = { onToggle(target.packageName, it) },
                 )
@@ -312,13 +311,13 @@ private fun RestartPicker(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(
-                text = Glitch.text("取消"),
+                text = "取消",
                 onClick = onCancel,
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
             TextButton(
-                text = Glitch.text("执行"),
+                text = "执行",
                 onClick = onConfirm,
                 enabled = selected.isNotEmpty(),
                 modifier = Modifier.weight(1f),
@@ -334,38 +333,38 @@ private fun RestartResult(
     onDismiss: () -> Unit,
 ) {
     Column {
-        Text(text = Glitch.text("已关闭 ${result.stopped.size} 个，${result.runningCount} 个正在运行"))
+        Text(text = "已关闭 ${result.stopped.size} 个，${result.runningCount} 个正在运行")
         push?.let {
             Text(
                 text = if (!it.connected) {
-                    Glitch.text("LSPosed 没连上：开关没能同步过去，功能还在按之前的设置运行")
+                    "LSPosed 没连上：开关没能同步过去，功能还在按之前的设置运行"
                 } else {
-                    Glitch.text("已同步 ${it.sent}/${it.total} 个开关")
+                    "已同步 ${it.sent}/${it.total} 个开关"
                 },
             )
         }
         result.failure?.let { Text(text = failureText(it)) }
         if (result.notRunning.isNotEmpty()) {
-            Text(text = Glitch.text("未运行（无需处理）：${result.notRunning.joinToString()}"))
+            Text(text = "未运行（无需处理）：${result.notRunning.joinToString()}")
         }
         if (result.failed.isNotEmpty()) {
-            Text(text = Glitch.text("执行失败：${result.failed.joinToString()}"))
+            Text(text = "执行失败：${result.failed.joinToString()}")
         }
         Row(modifier = Modifier.padding(top = 8.dp)) {
-            TextButton(text = Glitch.text("关闭"), onClick = onDismiss, modifier = Modifier.weight(1f))
+            TextButton(text = "关闭", onClick = onDismiss, modifier = Modifier.weight(1f))
         }
     }
 }
 
 private fun failureText(failure: ScopeRestarter.Failure): String = when (failure) {
-    ScopeRestarter.Failure.NO_SU -> Glitch.text("未能获取 Root 授权")
-    ScopeRestarter.Failure.NOT_GRANTED -> Glitch.text("Root 未授权本应用：请在 Root 管理器中允许 ${BuildConfig.APPLICATION_ID} 后重试")
-    ScopeRestarter.Failure.TIMEOUT -> Glitch.text("命令执行超时（5 秒），请重试")
+    ScopeRestarter.Failure.NO_SU -> "未能获取 Root 授权"
+    ScopeRestarter.Failure.NOT_GRANTED -> "Root 未授权本应用：请在 Root 管理器中允许 ${BuildConfig.APPLICATION_ID} 后重试"
+    ScopeRestarter.Failure.TIMEOUT -> "命令执行超时（5 秒），请重试"
 }
 
 /**
  * 关于页的信息行：**纯展示**，不带右箭头也不可点。
- * 原先用 `ArrowPreference` + 空 `onClick`，右箭头会给出Glitch.text("点进去还有东西")的错觉。
+ * 原先用 `ArrowPreference` + 空 `onClick`，右箭头会给出"点进去还有东西"的错觉。
  */
 /** 关于页条目卡：一张卡一项（原来三项挤在同一张卡里，改成三张独立的卡）。 */
 @Composable
@@ -397,7 +396,7 @@ private fun AboutPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = Glitch.text("关于"),
+                title = "关于",
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,
             )
@@ -421,9 +420,9 @@ private fun AboutPage(
                     modifier = Modifier.padding(top = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    AboutCard(Glitch.text("Re:荣耀"), Glitch.text("版本 ${appVersionLabel()}"))
-                    AboutCard(Glitch.text("作者"), Glitch.text("©${java.time.Year.now().value} CoderStory"))
-                    AboutCard(Glitch.text("第三方库"), Glitch.text("LSPosed API · Compose · Miuix · DexKit · XHS 下载器"))
+                    AboutCard("Re:荣耀", "版本 ${appVersionLabel()}")
+                    AboutCard("作者", "©${java.time.Year.now().value} CoderStory")
+                    AboutCard("第三方库", "LSPosed API · Compose · Miuix · DexKit · XHS 下载器")
                 }
                 Spacer(
                     Modifier.height(

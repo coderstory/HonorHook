@@ -59,7 +59,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.honorhook.ui.Glitch
 
 /**
  * 首页 —— **逐行照抄 KernelSU `HomeMiuix.kt`**：
@@ -90,7 +89,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = Glitch.text("Re:荣耀"),
+                title = "Re:荣耀",
                 scrollBehavior = scrollBehavior,
             )
         },
@@ -123,20 +122,17 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             // 默认「工作中」：服务绑定是异步的，绑定结果出来前不预设「未激活」
                             // （那等于在还不知道的时候先下结论）。只有确认没绑上才说「未激活」。
                             workingText = when {
-                                Glitch.cardRed -> Glitch.text("老色批已爆炸")
-                                activeState == false -> Glitch.text("未激活")
-                                else -> Glitch.text("工作中")
+                                activeState == false -> "未激活"
+                                else -> "工作中"
                             },
-                            versionText = Glitch.text(
-                                when {
-                                    active -> listOf(frameworkName, frameworkVersion)
-                                        .filter { it.isNotBlank() }
-                                        .joinToString(" ")
-                                        .ifBlank { "LSPosed" }
-                                    activeState == null -> "LSPosed"
-                                    else -> "未连接 LSPosed（已安装但未激活，或模块未启用）"
-                                },
-                            ),
+                            versionText = when {
+                                active -> listOf(frameworkName, frameworkVersion)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ")
+                                    .ifBlank { "LSPosed" }
+                                activeState == null -> "LSPosed"
+                                else -> "未连接 LSPosed（已安装但未激活，或模块未启用）"
+                            },
                         )
 
                         InfoCard()
@@ -191,7 +187,6 @@ private fun StatusCard(
     // 底色和文字却是「工作中」——自相矛盾。
     val inactive = confirmed && !active
     val containerColor = when {
-        Glitch.cardRed -> Color(0xFFFF1744)
         inactive -> Color(0xFFFFDAD6)
         else -> when {
             isDynamicColor -> colorScheme.secondaryContainer
@@ -293,20 +288,20 @@ private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPad
 private fun InfoCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, Glitch.text("模块版本"), Glitch.text(appVersionLabel()))
-            InfoRow(Icons.Filled.DeveloperBoard, Glitch.text("模块包名"), Glitch.text(BuildConfig.APPLICATION_ID))
+            InfoRow(Icons.Filled.Tag, "模块版本", appVersionLabel())
+            InfoRow(Icons.Filled.DeveloperBoard, "模块包名", BuildConfig.APPLICATION_ID)
             InfoRow(
-                Icons.Filled.Smartphone, Glitch.text("系统版本"),
-                Glitch.text("Android ${Build.VERSION.RELEASE}"),
+                Icons.Filled.Smartphone, "系统版本",
+                "Android ${Build.VERSION.RELEASE}",
             )
             InfoRow(
-                Icons.Filled.Fingerprint, Glitch.text("设备"),
-                Glitch.text("${Build.MANUFACTURER} ${Build.MODEL}"),
+                Icons.Filled.Fingerprint, "设备",
+                "${Build.MANUFACTURER} ${Build.MODEL}",
             )
-            // 系统架构原来复用了 DeveloperBoard（与Glitch.text("插件包名")同一个图标），换成 Memory
+            // 系统架构原来复用了 DeveloperBoard（与"插件包名"同一个图标），换成 Memory
             InfoRow(
-                Icons.Filled.Memory, Glitch.text("系统架构"),
-                Glitch.text(Build.SUPPORTED_ABIS.firstOrNull() ?: "未知"),
+                Icons.Filled.Memory, "系统架构",
+                Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
                 bottomPadding = 0.dp,
             )
         }

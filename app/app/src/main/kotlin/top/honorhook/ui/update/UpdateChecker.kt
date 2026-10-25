@@ -12,7 +12,6 @@ import top.honorhook.BuildConfig
 import top.honorhook.VersionName
 import java.net.HttpURLConnection
 import java.net.URL
-import top.honorhook.ui.Glitch
 
 /** 一个 GitHub release（tag 契约 = CI ci.yml 的 `v<versionName>`，语义版本，仅 skill `release` 发布时 +1）。 */
 data class Release(
@@ -123,13 +122,13 @@ object UpdateState {
                                 }
                             }
                         } else if (manual) {
-                            notice = Glitch.text("已是最新版本 v${BuildConfig.VERSION_NAME}")
+                            notice = "已是最新版本 v${BuildConfig.VERSION_NAME}"
                         }
                     }
                 }
                 .onFailure { e ->
                     withContext(Dispatchers.Main) {
-                        if (manual) notice = Glitch.text("检查失败：${e.message ?: "网络错误"}")
+                        if (manual) notice = "检查失败：${e.message ?: "网络错误"}"
                     }
                 }
             withContext(Dispatchers.Main) { checking = false }
