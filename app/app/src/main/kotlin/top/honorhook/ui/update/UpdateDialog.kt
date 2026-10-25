@@ -50,12 +50,14 @@ fun UpdateDialog(onDismiss: () -> Unit) {
             try {
                 val dest = File(context.cacheDir, "update/app-release.apk")
                 withContext(Dispatchers.IO) {
-                    // 探测进行中先等它出结果（TLS 探活 ~2s），拿不到再走逐源兜底链
+                    // 探测进行中先等它出结果（TLS 探活 ~2s），拿不到再走逐源兜底链。
+                    // 两条路径都带 release.sha256：下载完成即在 ApkInstaller 内强制校验，
+                    // 缺哈希/不匹配抛 IntegrityException，文案（「校验失败，已删除下载文件」等）直达下方 Error 态
                     val probed = UpdateState.awaitProbe()
                     if (probed != null) {
-                        ApkInstaller.downloadFrom(probed, dest) { p -> phase = Phase.Downloading(p) }
+                        ApkInstaller.downloadFrom(probed, dest, release.sha256) { p -> phase = Phase.Downloading(p) }
                     } else {
-                        ApkInstaller.download(release.apkUrl, dest) { p -> phase = Phase.Downloading(p) }
+                        ApkInstaller.download(release.apkUrl, dest, release.sha256) { p -> phase = Phase.Downloading(p) }
                     }
                 }
                 phase = Phase.Ready(dest)

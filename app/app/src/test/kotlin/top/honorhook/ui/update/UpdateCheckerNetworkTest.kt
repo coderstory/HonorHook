@@ -21,6 +21,11 @@ class UpdateCheckerNetworkTest {
         assertTrue("tag 应符合 v<versionName> 契约: ${r.tag}", r.tag.matches(Regex("^v\\d+\\.\\d+\\.\\d+$")))
         assertEquals("version 应为去掉 v 的语义版本: ${r.version}", r.tag.removePrefix("v"), r.version)
         assertTrue("release 应附带 APK: ${r.apkUrl}", r.apkUrl.endsWith(".apk"))
+        // fail-closed 前提：GitHub 对（存量）资产同样返回 asset.digest——拿不到哈希下载层会拒绝
+        assertTrue(
+            "release 资产应带 digest（sha256:<hex>）: ${r.sha256}",
+            r.sha256?.matches(Regex("^[0-9a-f]{64}$")) == true,
+        )
 
         // 与本地版本号对比不抛异常（任一方向都合法）
         val newer = UpdateChecker.isNewer(r, "1.0.0")

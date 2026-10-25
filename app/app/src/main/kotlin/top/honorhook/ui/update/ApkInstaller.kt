@@ -8,20 +8,27 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+
+/**
+ * 完整性拒绝（无可信哈希 / SHA-256 不匹配）。区别于网络异常：换源重试对它无意义——
+ * 哈希只信 API 主源（api.github.com 直连），不匹配即篡改或缺配证据，fail-closed 直接终止。
+ */
+class IntegrityException(message: String, val detail: String? = null) : Exception(message)
 
 object ApkInstaller {
 
     private const val TAG = "HonorHookUpdate"
 
-    /** 下载源候选：直连 + GitHub 加速镜像前缀（镜像可用性时变，逐个试到成功；全挂走浏览器兜底）。 */
-    private val SOURCE_PREFIXES = listOf(
+    /**
+     * 下载源候选，顺序=优先级：直连（空前缀）恒首位，镜像只作直连失败的逐个降级
+     * （可用性时变，全挂走浏览器兜底）。internal 供 JVM 测试钉住直连首位。
+     */
+    internal val SOURCE_PREFIXES = listOf(
         "",
         "https://ghfast.top/",
         "https://gh-proxy.com/",
@@ -30,14 +37,21 @@ object ApkInstaller {
         "https://gh.llkk.cc/",
     )
 
-    /** 流式下载到 dest（父目录自动建）。源逐个尝试（直连不通换镜像），半截文件清理。 */
-    fun download(url: String, dest: File, onProgress: (Int) -> Unit) {
+    private val HEX64_RE = Regex("^[0-9a-f]{64}$")
+
+    /** 流式下载到 dest（父目录自动建）。直连优先逐源尝试（直连不通换镜像），半截文件清理；
+     *  每源成功后强校验 SHA-256，不匹配删文件抛 [IntegrityException]（不换源：不匹配=篡改证据）。 */
+    fun download(url: String, dest: File, expectedSha256: String?, onProgress: (Int) -> Unit) {
+        // 前置拒绝在循环外：缺哈希一条源都不试、不落一个字节（fail-closed，2026-10-26 拍板）
+        requireValidSha256(expectedSha256)
         var lastErr: Exception? = null
         for (prefix in SOURCE_PREFIXES) {
             try {
                 Log.i(TAG, "download try ${prefix.ifEmpty { "direct" }}")
-                downloadFrom(prefix + url, dest, onProgress)
+                downloadFrom(prefix + url, dest, expectedSha256, onProgress)
                 return
+            } catch (e: IntegrityException) {
+                throw e
             } catch (e: Exception) {
                 lastErr = e
                 dest.delete()
@@ -47,28 +61,30 @@ object ApkInstaller {
     }
 
     /**
-     * 并行探测所有源，赛马返回最先握手成功者；全挂返回 null。
-     * 判定 = TCP+TLS 握手成功（connect()）；select 首个成功即返回并 cancel 其余，
-     * 单源 4s 超时封顶——awaitAll 旧版曾被死镜像拖满 10s，用户点下载干等。
+     * 探测可用下载源，直连优先（2026-10-26 反转旧「并行赛马取最先握手成功」：CDN 镜像握手
+     * 普遍快于直连，赛马事实偏好镜像；元数据主源是 api.github.com 直连，下载面保持同生态）。
+     * 按候选序逐个探测（[selectSource]），首个握手成功者胜出；单源 4s 超时封顶，全挂返回 null。
      */
-    suspend fun probeSources(url: String, timeoutMs: Int = 4_000): String? = coroutineScope {
-        val jobs = SOURCE_PREFIXES.map { prefix ->
-            prefix to async(Dispatchers.IO) { probeOne(prefix, url, timeoutMs) }
+    suspend fun probeSources(url: String, timeoutMs: Int = 4_000): String? = withContext(Dispatchers.IO) {
+        val winner = selectSource(SOURCE_PREFIXES) { prefix -> probeOne(prefix, url, timeoutMs) }
+        if (winner == null) {
+            Log.i(TAG, "probe done: 0/${SOURCE_PREFIXES.size} 通")
+            null
+        } else {
+            Log.i(TAG, "probe winner ${winner.first.ifEmpty { "direct" }}")
+            winner.second
         }
-        var pending = jobs
-        while (pending.isNotEmpty()) {
-            val (donePrefix, ok) = select<Pair<String, String?>> {
-                pending.forEach { (prefix, job) -> job.onAwait { res -> prefix to res } }
-            }
-            pending = pending.filter { it.first != donePrefix }
-            if (ok != null) {
-                pending.forEach { (_, job) -> job.cancel() }
-                Log.i(TAG, "probe winner ${donePrefix.ifEmpty { "direct" }}")
-                return@coroutineScope ok
-            }
+    }
+
+    /**
+     * 候选源选择器（纯函数，JVM 可测）：按序逐个探测，首个 probe 返回非 null 者胜出，全失败返回 null。
+     * 顺序即优先级——直连（空前缀）恒在首位 ⇒ 直连成功时镜像零探测。
+     */
+    internal fun selectSource(candidates: List<String>, probe: (String) -> String?): Pair<String, String>? {
+        for (c in candidates) {
+            probe(c)?.let { return c to it }
         }
-        Log.i(TAG, "probe done: 0/${SOURCE_PREFIXES.size} 通")
-        null
+        return null
     }
 
     /** 单源探测：握手成功返回完整 URL，失败返回 null（日志含耗时与原因）。 */
@@ -96,8 +112,12 @@ object ApkInstaller {
         }
     }
 
-    /** 单 URL 下载；手动跟随 302（browser_download_url 会跳 objects.githubusercontent.com）。 */
-    fun downloadFrom(url: String, dest: File, onProgress: (Int) -> Unit) {
+    /**
+     * 单 URL 下载 + 完整性强校验（所有下载路径的唯一咽喉：探测直连与逐源兜底都过这里）；
+     * 手动跟随 302（browser_download_url 会跳 objects.githubusercontent.com）。
+     */
+    fun downloadFrom(url: String, dest: File, expectedSha256: String?, onProgress: (Int) -> Unit) {
+        val want = requireValidSha256(expectedSha256)
         var u = url
         var redirects = 0
         while (true) {
@@ -143,12 +163,56 @@ object ApkInstaller {
                 if (total > 0 && done != total) error("下载不完整: $done/$total")
                 // total 未知（无 Content-Length，P4）：读完流即成功，进度补 100%，别停在 0
                 if (total <= 0) onProgress(100)
-                Log.i(TAG, "download done $done bytes")
+                try {
+                    verifySha256(dest, want)
+                } catch (e: IntegrityException) {
+                    Log.w(TAG, "sha256 mismatch ${e.detail ?: ""}")
+                    throw e
+                }
+                Log.i(TAG, "download done $done bytes sha256 ok")
                 return
             } finally {
                 conn.disconnect()
             }
         }
+    }
+
+    /**
+     * fail-closed 前置（2026-10-26 拍板）：哈希缺失或格式错一律拒绝下载、明确报错，不静默放行。
+     * 更新器只服务已装用户——fail-open 等于给「镜像接管」留静默后门。
+     * 返回规范化 64 位小写 hex（parseDigest 已小写，这里兜 trim/大小写防御）。
+     */
+    internal fun requireValidSha256(expected: String?): String {
+        val want = expected?.trim()?.lowercase()
+        if (want == null || !HEX64_RE.matches(want)) {
+            throw IntegrityException("缺少 SHA-256 校验值，已取消下载")
+        }
+        return want
+    }
+
+    /** 下载完成后的强校验：不匹配删文件并抛错——篡改件绝不进 install()。internal 供 JVM 测试直钉。 */
+    internal fun verifySha256(file: File, expectedHex: String) {
+        val got = sha256Of(file)
+        if (got != expectedHex.trim().lowercase()) {
+            file.delete()
+            throw IntegrityException(
+                "校验失败，已删除下载文件",
+                detail = "want=${expectedHex.lowercase()} got=$got file=${file.name}",
+            )
+        }
+    }
+
+    private fun sha256Of(file: File): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     /** 触发系统安装器；未授「安装未知应用」时跳授权页并返回 false（授权后重新下载入口再点）。 */
