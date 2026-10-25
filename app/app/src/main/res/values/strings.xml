@@ -103,9 +103,7 @@
     <string name="feature_tracking_block_desc">阻止日历、天气、浏览器、游戏中心、优酷视频、云音乐等应用上报你的使用记录和设备标识</string>
 
     <string name="feature_ota_block_title">禁止自动检测与提示</string>
-    <string name="feature_ota_block_desc">系统更新不再在后台自动检测和下载，不再弹出升级提醒通知；在设置里手动检查更新不受影响</string>
-    <string name="feature_ota_block_guide_title">屏蔽升级引导页</string>
-    <string name="feature_ota_block_guide_desc">解锁手机后弹出的全屏「发现新版本」页面不再出现</string>
+    <string name="feature_ota_block_desc">系统更新不再在后台自动检测和下载，不再弹出升级提醒通知；解锁后弹出的全屏「发现新版本」引导页也不再出现；在设置里手动检查更新不受影响</string>
 
     <string name="feature_sysmgr_antivirus_title">病毒检测全禁用</string>
     <string name="feature_sysmgr_antivirus_desc">安装应用时不再检测风险、不再弹出「发现病毒应用」弹窗，后台闲时病毒扫描也一并跳过</string>

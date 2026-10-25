@@ -192,12 +192,13 @@ object FeatureCatalog {
             ),
             baselineVersion = "18.0.3.230",  // 2026-10-13 荣耀 OTA（真机日志 dumpsys 实证）；挂载点 11/11 全活（manifest 稳定组件名）
         ),
+        // 升级引导（2026-10-25 归并）：与 ouc 同键（KEY_OTA_BLOCK）——UI 侧两个开关控同一状态本就冗余，
+        // 入口并入「系统更新」卡；Target 留壳供 scope 页与 baselineVersionOf 查表（壁纸壳同款）。
         Target(
             "com.hihonor.android.upgradeguide", R.string.target_name_upgradeguide,
-            listOf(
-                Feature(KEY_OTA_BLOCK, R.string.feature_ota_block_guide_title, R.string.feature_ota_block_guide_desc),
-            ),
+            listOf(),
             baselineVersion = "16.0.0.005",  // aapt2 实证（HnUpgradeGuide.apk 拉自真机 2026-10-12）
+            hidden = true,
         ),
         Target(
             "com.hihonor.mms", R.string.target_name_mms,
