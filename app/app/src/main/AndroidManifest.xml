@@ -18,6 +18,12 @@
          只是声明权，安装前还有「允许安装未知应用」的用户授权页，见 ApkInstaller.install）。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- 灵动胶囊 C 路（CapsulePoster 从本 app 进程发通知）：Android 13+ 通知是运行时权限。
+         2026-10-25 真机实证：targetSdk≥33 且不声明时，权限系统把 uid 级 OP_POST_NOTIFICATION
+         钉死 ignore（root appops set 也会被权限同步打回），设置页「允许通知」恒灰不可点、
+         NMS 全量静默 block（numEnqueuedByApp=16 / numPostedByApp=0）。声明后由运行时弹窗解锁。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。
 

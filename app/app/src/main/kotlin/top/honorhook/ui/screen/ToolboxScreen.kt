@@ -1,6 +1,12 @@
 package top.honorhook.ui.screen
 
+import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -812,6 +818,34 @@ private fun HistoryCard(context: Context, queue: ToolQueue) {
 private fun CapsuleCard() {
     val context = LocalContext.current
     var status by remember { mutableStateOf<String?>(null) }
+
+    // Android 13+ 通知是运行时权限：未授权时 notify() 表面成功但 NMS 全量静默 block（真机实证
+    // numEnqueuedByApp=16 / numPostedByApp=0，设置页开关恒灰）。先查 areNotificationsEnabled，
+    // 未授权走系统弹窗、授权当次补发；拒绝或 <33（无弹窗）时跳系统应用通知设置页兜底。
+    var pendingPost by remember { mutableStateOf<(() -> CapsulePoster.Result)?>(null) }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val post = pendingPost
+        pendingPost = null
+        if (granted && post != null) {
+            status = describeResult(post())
+        } else {
+            jumpAppNotificationSettings(context)
+            status = "通知未授权，已跳系统通知设置页"
+        }
+    }
+    fun ensureThenPost(post: () -> CapsulePoster.Result) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        if (nm?.areNotificationsEnabled() == true) {
+            status = describeResult(post())
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pendingPost = post
+            permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            jumpAppNotificationSettings(context)
+            status = "通知被系统关闭，已跳系统通知设置页"
+        }
+    }
+
     Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
@@ -828,21 +862,11 @@ private fun CapsuleCard() {
             Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
                     text = Glitch.text("30s 倒计时"),
-                    onClick = {
-                        status = when (val r = CapsulePoster.postCountdown(context, "倒计时", 30)) {
-                            is CapsulePoster.Result.Ok -> "已投递（id=${r.notificationId}），看灵动胶囊"
-                            is CapsulePoster.Result.Failed -> "失败@${r.step}：${r.message}"
-                        }
-                    },
+                    onClick = { ensureThenPost { CapsulePoster.postCountdown(context, "倒计时", 30) } },
                 )
                 TextButton(
                     text = Glitch.text("文本胶囊"),
-                    onClick = {
-                        status = when (val r = CapsulePoster.postText(context, "Re:荣耀 在线")) {
-                            is CapsulePoster.Result.Ok -> "已投递（id=${r.notificationId}），看灵动胶囊"
-                            is CapsulePoster.Result.Failed -> "失败@${r.step}：${r.message}"
-                        }
-                    },
+                    onClick = { ensureThenPost { CapsulePoster.postText(context, "Re:荣耀 在线") } },
                 )
                 TextButton(
                     text = Glitch.text("撤销"),
@@ -854,4 +878,17 @@ private fun CapsuleCard() {
             }
         }
     }
+}
+
+private fun describeResult(r: CapsulePoster.Result): String = when (r) {
+    is CapsulePoster.Result.Ok -> "已投递（id=${r.notificationId}），看灵动胶囊"
+    is CapsulePoster.Result.Failed -> "失败@${r.step}：${r.message}"
+}
+
+private fun jumpAppNotificationSettings(context: Context) {
+    context.startActivity(
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
 }
