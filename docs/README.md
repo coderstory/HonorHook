@@ -27,6 +27,7 @@
 |---|---|
 | **待办任务收件箱**（迭代候选 / 待验证 / 老 bug / 设备环境） | [`TODO.md`](TODO.md) |
 | **变更清单 / 实施计划**（改动前先出清单，只改清单内的） | [`plans/2026-10-20-hook-core-hardening.md`](plans/2026-10-20-hook-core-hardening.md) |
+| **审计整改 + 彩蛋清理计划**（2026-10-25 意见书 2×P0+3×P1+5×P2 的执行清单，含重审纠偏——与意见书冲突处以本计划为准；状态跟踪在计划内） | [`plans/2026-10-25-audit-remediation.md`](plans/2026-10-25-audit-remediation.md) |
 | [`ui-miuix-overview.md`](ui-miuix-overview.md) | 宿主 UI（Miuix Compose）结构与开关下发通道 |
 | [`hook-philosophy-manifesto.md`](hook-philosophy-manifesto.md) | hook 设计哲学（哲学表述版 + 工程条款版，七条原则与审计应用） |
 
