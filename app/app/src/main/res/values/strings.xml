@@ -124,4 +124,7 @@
     <string name="feature_wallpaper_timeline_unlimited_desc">编辑页时间轴不再限制最长 10 秒，可选完整视频</string>
     <string name="feature_wallpaper_loop_title">视频壁纸循环播放</string>
     <string name="feature_wallpaper_loop_desc">桌面壁纸视频播完自动从头续播，锁屏播完停止</string>
+    <string name="target_name_appmarket">应用市场净化</string>
+    <string name="feature_market_purify_title">拦自动更新提醒与闹钟自启</string>
+    <string name="feature_market_purify_desc">拦掉市场的自动更新提醒通知、假未读红点与定时闹钟自启；手动检查更新和搜索不受影响（首期：闹钟自启收口，其余点随版本适配补齐）</string>
 </resources>

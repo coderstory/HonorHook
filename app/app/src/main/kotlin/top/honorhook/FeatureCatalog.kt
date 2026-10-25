@@ -66,6 +66,7 @@ object FeatureCatalog {
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
     const val KEY_OTA_BLOCK = "ota.block"
+    const val KEY_MARKET_PURIFY = "market.purify"
 
     data class Feature(
         val key: String,
@@ -234,6 +235,13 @@ object FeatureCatalog {
                 Feature(KEY_MFA_SPLASH, R.string.feature_mfa_splash_title, R.string.feature_mfa_splash_desc),
             ),
             baselineVersion = "1.0.5",  // dumpsys 实证 2026-10-12（docs/reverse/mfa-authenticator.md）
+        ),
+        Target(
+            "com.hihonor.appmarket", R.string.target_name_appmarket,
+            listOf(
+                Feature(KEY_MARKET_PURIFY, R.string.feature_market_purify_title, R.string.feature_market_purify_desc),
+            ),
+            baselineVersion = "16.1.9.302",  // aapt2 实证（2026-10-25 真机拉取，docs/reverse/appmarket.md）
         ),
         Target(
             "com.hihonor.systemmanager", R.string.target_name_sysmgr,

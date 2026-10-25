@@ -1,5 +1,6 @@
 package top.honorhook.xposed.target
 
+import top.honorhook.xposed.target.AppMarketHook
 import top.honorhook.xposed.target.ads.HonorAdsHook
 import top.honorhook.xposed.target.ads.HonorOpsAdHook
 import top.honorhook.xposed.target.ads.HonorQinxuanHook
@@ -40,6 +41,8 @@ object TargetRegistry {
         register(SystemUiHook)
         // 系统更新阻断（ota.block 一个开关管两个包，同 ads.block 跨包先例）
         register(OucHook)
+        // 应用市场净化（53 号，首期 AlarmCheckReceiver 单点；缓期点见 docs/reverse/appmarket.md）
+        register(AppMarketHook)
         register(UpgradeGuideHook)
         // 荣耀短信（第 7 目标，T1 骨架：只观测不干预）。
         register(MmsHook)
