@@ -26,6 +26,8 @@ import android.provider.Settings
  */
 object CapsulePoster {
 
+    /** 最近一次豁免结果（诊断用，随 Failed 上报）。 */
+    @Volatile var exemptLog: String = ""
     const val EXTRAS_KEY = "smart_island_capsule_data"
     private const val CHANNEL_ID = "capsule_demo"
     private const val NOTIFICATION_ID = 0x1A16
@@ -93,7 +95,29 @@ object CapsulePoster {
         context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
     }
 
+    /**
+     * hidden API 豁免（ExemptAll 标准手法，本进程内生效无需 root）。
+     * setHnExtrasParcelable 是 Honor hidden API，命中 NonSdkApi 拦截（真机烟测实证
+     * 「失败@setHnExtrasParcelable」）；meta-reflection 双跳拿到 VMRuntime#setHiddenApiExemptions
+     * 后放行全部 L 前缀。失败不抛（豁免不成=回原拦截路径，错误如实上报）。
+     */
+    fun tryExemptHiddenApi(): String {
+        return runCatching {
+            val getDeclaredMethod = Class::class.java.getDeclaredMethod(
+                "getDeclaredMethod", String::class.java, arrayOf<Class<*>>().javaClass,
+            )
+            val vmRuntime = Class.forName("dalvik.system.VMRuntime")
+            val setHiddenApiExemptions = getDeclaredMethod.invoke(
+                vmRuntime, "setHiddenApiExemptions", arrayOf<Array<String>>().javaClass,
+            ) as java.lang.reflect.Method
+            val runtime = vmRuntime.getDeclaredMethod("getRuntime").invoke(null)
+            setHiddenApiExemptions.invoke(runtime, arrayOf("L"))
+            "OK"
+        }.getOrElse { "FAIL ${it.javaClass.simpleName}: ${it.message}" }
+    }
+
     private fun post(context: Context, capsule: Any): Result {
+        exemptLog = tryExemptHiddenApi()
         val nm = context.getSystemService(NotificationManager::class.java)
             ?: return Result.Failed("NotificationManager", "不可用")
         if (Build.VERSION.SDK_INT >= 26) {
@@ -125,9 +149,10 @@ object CapsulePoster {
                 .invoke(notification, EXTRAS_KEY, capsule as android.os.Parcelable)
         }
         setResult.getOrElse {
+            val cause = (it as? java.lang.reflect.InvocationTargetException)?.cause ?: it
             return Result.Failed(
                 "setHnExtrasParcelable",
-                "${it.message ?: it.javaClass.simpleName}（hidden API 拦截或非 MagicOS）",
+                "[豁免=$exemptLog] ${cause.javaClass.simpleName}: ${cause.message ?: ""}",
             )
         }
 
