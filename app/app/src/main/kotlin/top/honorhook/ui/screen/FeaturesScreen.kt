@@ -95,23 +95,38 @@ fun FeaturesScreen(bottomInnerPadding: Dp = 0.dp) {
     // 在 targets 里供 scope 页/版本查表），索引同样基于 visibleTargets，二者必须同源。
     val visibleTargets = FeatureCatalog.targets.filterNot { it.hidden }
     var selectedTargetIndex by rememberSaveable { mutableStateOf(-1) }
+    // 安全类功能聚合页（T10/#18）：独立于目标卡的第二入口，状态同源 FeatureStore（开关双入口所见即一致）
+    var showSecurity by rememberSaveable { mutableStateOf(false) }
     val target = selectedTargetIndex.takeIf { it >= 0 }?.let { visibleTargets.getOrNull(it) }
-    BackHandler(enabled = target != null) { selectedTargetIndex = -1 }
-    if (target == null) {
-        TargetListScreen(bottomInnerPadding) { selectedTargetIndex = visibleTargets.indexOf(it) }
-    } else {
-        // 二级页占满整个内容区，同样要避开悬浮底栏
-        FeatureListScreen(
-            target = target,
-            onBack = { selectedTargetIndex = -1 },
+    BackHandler(enabled = target != null || showSecurity) {
+        if (target != null) selectedTargetIndex = -1 else showSecurity = false
+    }
+    when {
+        target != null ->
+            // 二级页占满整个内容区，同样要避开悬浮底栏
+            FeatureListScreen(
+                target = target,
+                onBack = { selectedTargetIndex = -1 },
+                bottomInnerPadding = bottomInnerPadding,
+            )
+        showSecurity -> SecurityListScreen(
+            onBack = { showSecurity = false },
             bottomInnerPadding = bottomInnerPadding,
         )
+        else -> TargetListScreen(
+            bottomInnerPadding,
+            onOpenSecurity = { showSecurity = true },
+        ) { selectedTargetIndex = visibleTargets.indexOf(it) }
     }
 }
 
 /** 一级列表 —— 照抄 KernelSU `SuperUserMiuix` 的 `GroupItem` 卡。 */
 @Composable
-private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatalog.Target) -> Unit) {
+private fun TargetListScreen(
+    bottomInnerPadding: Dp,
+    onOpenSecurity: () -> Unit,
+    onOpenTarget: (FeatureCatalog.Target) -> Unit,
+) {
     val scrollBehavior = MiuixScrollBehavior()
     val context = LocalContext.current
 
@@ -166,6 +181,21 @@ private fun TargetListScreen(bottomInnerPadding: Dp, onOpenTarget: (FeatureCatal
                 SwitchSemanticsCard(
                     // 只讲"开关到底下没下发到进程"（框架未激活＝假反馈）；生效时机提示卡已按用户要求全局删除
                     noticeWhenInactive = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                )
+            }
+            // 安全类功能置顶卡（T10/#18）：这五项默认开启且关的是安全防护本身，必须比目标卡更醒目。
+            // 常驻置顶（不随安装过滤）：三项宿主均为系统应用恒在装。
+            item {
+                val features = securityFeatures()
+                val enabledCount = features.count { FeatureStore.isEnabled(it.key) }
+                SecurityGroupCard(
+                    enabledCount = enabledCount,
+                    total = features.size,
+                    onClick = onOpenSecurity,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
@@ -704,6 +734,202 @@ private fun FeatureListScreen(
                                 ),
                             )
                             // 行内失败标注（T4）：只在 WRITE_FAILED 后出现，不挡操作——开关仍可再拨
+                            if (failedPushes[feature.key] == true) {
+                                Text(
+                                    text = "未生效：下发失败",
+                                    fontSize = 11.sp,
+                                    color = VersionTagRed,
+                                    modifier = Modifier.padding(start = 9.dp, end = 9.dp, bottom = 10.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 安全类功能 key 清单（T10/#18，P2-4）：跨 installer / sysmgr / ouc 三个目标的五项——
+ * 它们默认开启，且关掉的正是荣耀的安全防护本身（安装检测、病毒扫描、系统更新通道），
+ * 影响面与其余「净化类」功能不同类，必须聚合呈现 + 显著标注。
+ * 只作 UI 聚合视图（第二入口）；各目标卡的完整功能列表与「已启用 N/M」计数不变——
+ * 开关状态同源 [FeatureStore.states]，双入口所见即一致。key 一律走 [FeatureCatalog] 常量（铁律）。
+ */
+private val SECURITY_FEATURE_KEYS = listOf(
+    FeatureCatalog.KEY_INSTALLER_NO_INTERCEPT,
+    FeatureCatalog.KEY_INSTALLER_NO_SAFE_PROMPT,
+    FeatureCatalog.KEY_INSTALLER_SKIP_CHECK,
+    FeatureCatalog.KEY_SYSMGR_ANTIVIRUS,
+    FeatureCatalog.KEY_OTA_BLOCK,
+)
+
+/** 按清单从目录解析 Feature（key 不在目录 = 清单写错，跳过并靠 total 计数暴露）。 */
+private fun securityFeatures(): List<FeatureCatalog.Feature> =
+    SECURITY_FEATURE_KEYS.mapNotNull { key ->
+        FeatureCatalog.targets.asSequence().flatMap { it.features }.firstOrNull { it.key == key }
+    }
+
+/**
+ * 一级页安全类置顶卡：盾形图标 + 「默认开启」警示。配色沿用 [SwitchSemanticsCard] 的
+ * 警示语言（tertiaryContainer）——本页里「红系容器」= 需要用户知道的事。
+ */
+@Composable
+private fun SecurityGroupCard(
+    enabledCount: Int,
+    total: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(onClick = onClick, showIndication = true, modifier = modifier) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AppIconSlot(
+                packageName = "",
+                fallbackText = "安",
+                iconKey = "shield",
+                modifier = Modifier.size(38.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "安全类功能",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colorScheme.onSurface,
+                )
+                Text(
+                    text = "默认开启 · 关闭的是安全检测、病毒扫描与更新通道，点开逐项调整",
+                    fontSize = 11.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = "$enabledCount/$total",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
+}
+
+/**
+ * 安全类功能聚合页（T10/#18）：头部说明卡（默认开启警示 + 关闭后的生效时机）+ 五个开关行。
+ * 行结构照抄 [FeatureListScreen]（左侧色条 + SwitchPreference + T4 失败行内标注），无 gatedOff
+ * ——这五项不存在互斥/父子门控。
+ */
+@Composable
+private fun SecurityListScreen(onBack: () -> Unit, bottomInnerPadding: Dp = 0.dp) {
+    val scrollBehavior = MiuixScrollBehavior()
+    val features = remember { securityFeatures() }
+    val enabledCount = features.count { FeatureStore.isEnabled(it.key) }
+    val failedPushes = remember { mutableStateMapOf<String, Boolean>() }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = "安全类功能",
+                navigationIcon = { MiuixBackButton(onBack) },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        popupHost = { },
+        contentWindowInsets = WindowInsets.systemBars
+            .add(WindowInsets.displayCutout)
+            .only(WindowInsetsSides.Horizontal),
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxHeight()
+                .scrollEndHaptic()
+                .overScrollVertical()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            contentPadding = PaddingValues(
+                top = innerPadding.calculateTopPadding() + 6.dp,
+                bottom = bottomInnerPadding +
+                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp,
+            ),
+            overscrollEffect = null,
+        ) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = "以下功能随安装默认开启",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "它们关闭的是荣耀的应用安全检测、病毒扫描或系统更新通道——包括安全补丁。" +
+                                "需要保留哪项防护，在这里逐项关闭；关闭后目标应用下次启动生效。",
+                            fontSize = 12.sp,
+                            color = colorScheme.onSurfaceVariantSummary,
+                        )
+                        Text(
+                            text = "已开启 $enabledCount/${features.size} 项",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+            items(count = features.size) { index ->
+                val feature = features[index]
+                val enabled = FeatureStore.isEnabled(feature.key)
+                Row(
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val accent = rememberAccentColor(feature.key)
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .width(6.dp)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (enabled) accent else accent.copy(alpha = 0.45f)
+                            )
+                    )
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 6.dp, end = 12.dp),
+                    ) {
+                        Column {
+                            SwitchPreference(
+                                title = stringResource(feature.titleRes),
+                                summary = stringResource(feature.descRes),
+                                checked = enabled,
+                                onCheckedChange = { checked ->
+                                    when (FeatureStore.setEnabled(feature.key, checked)) {
+                                        SetEnabledResult.WRITE_FAILED -> failedPushes[feature.key] = true
+                                        else -> failedPushes.remove(feature.key)
+                                    }
+                                },
+                                insideMargin = PaddingValues(
+                                    start = 9.dp,
+                                    end = 9.dp,
+                                    top = 14.dp,
+                                    bottom = 14.dp,
+                                ),
+                            )
                             if (failedPushes[feature.key] == true) {
                                 Text(
                                     text = "未生效：下发失败",
