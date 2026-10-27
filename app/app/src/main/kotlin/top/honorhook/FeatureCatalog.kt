@@ -63,6 +63,13 @@ object FeatureCatalog {
     const val KEY_WALLPAPER_LOOP = "wallpaper.loop"
 
     const val KEY_IME_CODE_FREE = "ime.code_free"
+    const val KEY_IME_SPLASH_AD_OFF = "ime.splash_ad_off"
+
+    /** TEMP(2026-10-28)：付费皮肤越权验证 PoC（安全披露取证用），验证完整条删除。 */
+    const val KEY_IME_SKIN_PAY_BYPASS = "ime.skin_pay_bypass"
+
+    /** 皮肤商店推广条目过滤（2026-10-28）。 */
+    const val KEY_IME_STORE_AD_OFF = "ime.store_ad_off"
 
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
@@ -169,6 +176,7 @@ object FeatureCatalog {
                 Feature(KEY_WALLPAPER_LOOP, R.string.feature_wallpaper_loop_title, R.string.feature_wallpaper_loop_desc),
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
+            extraVersions = setOf("18.0.0.259"),  // 2026-10-20 设备升级版；无独立版本表（同套挂载点），5/5 挂载全活（10-20/10-27 两轮真机判据）
         ),
         Target(
             "com.android.systemui", R.string.target_name_systemui,
@@ -213,6 +221,10 @@ object FeatureCatalog {
             "com.sohu.inputmethod.sogou.honor", R.string.target_name_ime,
             listOf(
                 Feature(KEY_IME_CODE_FREE, R.string.feature_ime_code_free_title, R.string.feature_ime_code_free_desc),
+                Feature(KEY_IME_SPLASH_AD_OFF, R.string.feature_ime_splash_ad_off_title, R.string.feature_ime_splash_ad_off_desc),
+                // TEMP(2026-10-28)：披露取证用 PoC 开关，验证完随 KEY_IME_SKIN_PAY_BYPASS 一并删除
+                Feature(KEY_IME_SKIN_PAY_BYPASS, R.string.feature_ime_skin_pay_bypass_title, R.string.feature_ime_skin_pay_bypass_desc),
+                Feature(KEY_IME_STORE_AD_OFF, R.string.feature_ime_store_ad_off_title, R.string.feature_ime_store_ad_off_desc),
             ),
             baselineVersion = "10.32.44.202608251503",  // pm dump 实证 versionName（设备 AAK-AN00 2026-10-12；原 ImeHook 私有常量上提）
         ),
@@ -231,6 +243,7 @@ object FeatureCatalog {
                 Feature(KEY_JD_SPLASH, R.string.feature_jd_splash_title, R.string.feature_jd_splash_desc),
             ),
             baselineVersion = "16.1.0",  // dumpsys 实证 2026-10-12（dex 级锚点核对见 docs/reverse/jd.md §二·2）
+            extraVersions = setOf("16.1.50"),  // 2026-10-23 升级版；单点开屏跳过跨版本成立，installed 1/1×6 进程（2026-10-27 真机判据）
         ),
         Target(
             "com.aimazhishi.mfa.authenticator", R.string.target_name_mfa,
@@ -252,6 +265,7 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
+            extraVersions = setOf("17.0.0.455", "17.0.0.457"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3（无独立版本表，同套挂载点）
         ),
         Target(
             "com.xingin.xhs", R.string.target_name_xhs,

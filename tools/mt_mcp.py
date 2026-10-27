@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """MT MCP 直连客户端（streamable HTTP JSON-RPC）。
 
-MT 管理器逆向助手的 MCP 服务跑在手机端（192.168.3.105:8787/mcp）。
+MT 管理器逆向助手的 MCP 服务跑在手机端（本机回环 127.0.0.1:8787/mcp；
+旧值 192.168.3.105:8787 = Mac 侧 LAN 地址，2026-10-27 起 DSH 直接跑在目标机上，已作废）。
 ZCode 里已注册为原生 MCP（~/.zcode/cli/config.json mcp.servers.mt，新会话自动连接）；
 本脚本用于脚本管道与调试，也是注册失效时的兜底通道。
 
@@ -14,7 +15,7 @@ import json
 import sys
 import urllib.request
 
-URL = "http://192.168.3.105:8787/mcp"
+URL = "http://127.0.0.1:8787/mcp"
 INIT_PARAMS = {
     "protocolVersion": "2025-03-26",
     "capabilities": {},

@@ -5,7 +5,7 @@
 > 逐点逆向依据 = [`reverse/`](reverse/) 下对应 app 的记录，设计理由 = [`theme-store.md`](theme-store.md)。
 > 复核点数（**全命名空间**，勿再漏 `cloud:` / `adsource:` / `btn-hide:` / `ad-request:` / `ad-source:` / `ab-request:`）：
 > `grep -rhoE '"[a-zA-Z0-9-]+:[A-Za-z0-9_.$]+"' app/app/src/main/kotlin/top/honorhook/xposed/target/ | sort -u | wc -l`
-> 当前结果（2026-10-20 复核）：合计 **142**（theme 49 / installer 11 + 旧版表 8 / systemui 7 / exam8 10 / launcher 5 / ouc 11 / ime 5 / mms 4 / xhs 14 / wallpaper 4 / ads 3 = ads 2 + ops 1 / tracking 3 / sysmgr 3 / settings 2 / jd 1 / mfauth 1 / upgradeguide 1 / mihealth 1【已关线未注册】）。
+> 当前结果（2026-10-27 复核）：合计 **161**（较 10-20 的 142：+appmarket 7 / ime +1（T5 开屏总闸）/ systemui +1（极客中心）等 v1.2.x 增量；theme 49 / installer 11 + 旧版表 8 / systemui 8 / exam8 10 / launcher 5 / ouc 11 / **ime 6** / mms 4 / xhs 15 / wallpaper 4 / ads 11 = ads+ops+tracking 按包注册 / sysmgr 3 / settings 2 / jd 1 / mfauth 1 / upgradeguide 1 / mihealth 1【已关线未注册】；分目录去重之和 105 + 顶层散件 56 = 161）。
 > ⚠️ 该命令是**全库去重**计数（逐文件去重之和 152；10 个 id 同时出现在源码与旧版表，如 `installer:SafeModeCard.*`，故分列之和 > 142）；且数的是**源码 id 字面量**（代理口径，与运行期任务非一一对应，例：mms 4 id ↔ `installed 2/2`）⇒ 逐 hook 的应 M 以 §五 判据快照为准。
 
 ## 一、口径与当前基线
@@ -34,6 +34,8 @@ noteSaveEntry 覆盖；图片保存主链修复 getShortUrl 服务定位器 i3c.
 详见 `docs/reverse/xhs.md` 9.51 节）；短信 T4（AIM 推广按钮 GONE）挂载实证（22:42）；
 其余与 10-20 快照一致（installer 14.0.38.301 / launcher 18.0.0.259 / sysmgr 17.0.0.455 /
 settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
+
+**2026-10-27 复核（现行设备）**：24 scope 包 dumpsys 全量直读（root `su -c`，adb 通道不在位时的等价只读取法）+ 当日冷启动判据（明细见 §五 重采注记）。变化项：**sysmgr 457（SysmgrHook 3/3）**、**京东 16.1.50（JdHook 1/1）**、日历 20.0.9.325（三 hook 全绿）、快游戏 16.0.34.320（用户停用无判据）、**appmarket 16.1.9.302（v1.2.2 新目标 `AppMarketHook` 7/7 首采，此前 §五 漏行已补）**；其余与 10-24 快照一致。
 
 **2026-10-20 复核（现行设备）**：主题商店 `20.1.63.305`（`49/49` 全绿）；**包管理器 `14.0.38.301`**（代码基线 `14.0.37.301`；升级当时 `installed 1/11` → 同日 16:33 真机复测 **`installed 11/11`**，11 点**全部直连命中**——同一会话内无「挂载点漂移命中」行、无「宿主版本读取失败」行 ⇒ 38.301 精确表逐点正确；**挂载层 11/11 已达成，行为层 2026-10-20 由用户真机实测通过**）；**系统桌面 `18.0.0.259`**（`5/5` 挂载全活，仅版本自检 WARN）；**系统管家 `17.0.0.455`**（`3/3` 挂载全活，WARN）；其余与基线一致。
 
@@ -94,7 +96,13 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 
 ## 五、应验判据
 
-### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；2026-10-20 复核）
+### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；2026-10-27 复核）
+
+> **最近一次重采：2026-10-27 21:11–21:52**（模块 1.2.2 当日判据；adb 通道不在位，改走本机 KernelSU root `su -c dumpsys package <pkg>` 直读版本 + `monkey` 冷启动采判据，判据行仍从 LSPosed 框架日志抓）。
+>
+> **当日版本复核（24 scope 包全量）**：较 10-24 快照变化的宿主 = **系统管家 17.0.0.455→17.0.0.457**、**京东 16.1.0→16.1.50**（10-23 夜间更新还带来日历 20.0.9.325 / 快游戏 16.0.34.320 / 应用市场 16.1.9.302；小红书 9.51.0 同夜但 10-24 已核）；其余（theme 20.1.65.302 / installer 14.0.38.301 / launcher 18.0.0.259 / settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1 / ime 10.32.44 / 天气 18.1.6.312 / 云音乐 3.7.30）与既有记录一致。
+>
+> **结论：更新后的宿主挂载层全绿**——SysmgrHook 3/3（457，仅版本自检 WARN）、JdHook 1/1（16.1.50，6 进程各一行，仅 WARN）、日历三 hook 2/2·1/1·3/3（20.0.9.325）、XhsHook X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.51.0）、AppMarketHook 7/7（16.1.9.302 首采）；theme 49/49 / installer 11/11 / settings 2/2 / launcher 5/5 / systemui 4/4（v1.2.2 单行新口径）/ ouc 11/11 / mms 2/2 / ime 5/5 / 天气 ads 2/2·tracking 2/3（旧账）/ 云音乐 tracking 3/3 当日复测一致。**快游戏与荣耀浏览器 enabled=3（用户停用）无进程 ⇒ 无判据行**；壁纸三 hook / UpgradeGuideHook 无新判据；Exam8Hook / 健康/优酷未安装。行为层（京东开屏跳过、系统管家弹窗抑制）待用户下次自然使用时顺带确认。
 
 > **最近一次重采：2026-10-20 18:41–18:43**（新判据行格式 `HookName[包名]: installed N/M`；模块 1.1.7 覆盖安装 + `enable-module` 后，逐目标 `tools/dev.sh relaunch <pkg>` 强停冷启动，判据行用 `tools/dev.sh modlog-grep 'installed'` 从 LSPosed 框架日志抓）。
 >
@@ -104,21 +112,22 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 
 | hook | 最近实测 | 备注 |
 |---|---|---|
-| `ThemeStoreHook` | 49/49 | 宿主 = 基线 |
+| `ThemeStoreHook` | 49/49 | 宿主 20.1.65.302（精确表命中；2026-10-27 复测一致） |
 | `InstallerHook` | **11/11** | 宿主 `14.0.38.301`（2026-10-20 **18:51 真机，新判据行格式** `InstallerHook[com.android.packageinstaller]: installed 11/11`）：11 点**全直连命中**，无失败清单、无漂移命中行；随后 `宿主版本与 hook 基线一致: 14.0.38.301`（精确表命中 ⇒ 自检一致）。**M = 开关过滤后的点数，随选表路径变化**：22.326 = 8 / 37.301（基线源码路径）= 11 / 38.301 = 11。**挂载层 11/11 已达成，行为层 2026-10-20 由用户真机实测通过**。冷启动方式：`am start -n com.android.packageinstaller/com.android.packageinstaller.PackageInstallerActivity`（无需真实走安装流程） |
 | `SettingsHook` | 2/2 | |
 | `OucHook` | 11/11 | 三个宿主进程（ouc / dataupdateservice / pluginupdateservice）均命中 |
 | `UpgradeGuideHook` | 无近期判据 | 引导页不出现即不注入 |
 | `MmsHook` | 2/2 | |
-| `ImeHook` | 5/5 | |
+| `ImeHook` | 6/6 | T5 开屏总闸并入（2026-10-27，`ime:px5.b` 直连命中；feature=`ime.splash_ad_off`，M 随开关过滤；pitfall 见 `docs/reverse/sogou-ime.md` §一） |
 | `Exam8Hook` | 设备未安装 | 最后已知 10/10 |
 | `LauncherHook` | 5/5 | 宿主 `18.0.0.259`（超基线，仅 WARN）；同包 `HonorAdsHook` 2/2、`HonorTrackingHook` 2/3 |
-| `SystemUiHook` | 3/3 + U6 3/3 + U7 3/3 | 宿主未变 |
-| `JdHook` / `MfaAuthHook` | 1/1 / 1/1 | |
-| `SysmgrHook` | 3/3 | 宿主 `17.0.0.455`（超基线，仅 WARN） |
+| `SystemUiHook` | 4/4 | v1.2.2 起单行新口径（极客中心图标点并入，M 3→4）；宿主 17.0.0.1 未变，2026-10-27 实测 |
+| `AppMarketHook` | 7/7 | 宿主 `16.1.9.302`（2026-10-27 21:37 首采；v1.2.2 应用市场净化 7 点，逆向档案 `docs/reverse/appmarket.md`，基线即本版） |
+| `JdHook` / `MfaAuthHook` | 1/1 / 1/1 | 京东宿主 `16.1.50`（2026-10-27 21:51，6 进程各一行 1/1；仅版本 WARN vs 基线 16.1.0）；MFA 1.0.5 未变 |
+| `SysmgrHook` | 3/3 | 宿主 `17.0.0.457`（2026-10-27 21:12 实测；455→457 OTA 后挂载全活，仅版本自检 WARN vs 基线 414） |
 | `XhsHook` | X1 3/3 · X2 3/3 · X4 1/1 · X5 7/7 | X5 的 4/5 已随 v1.1.6 修复；2026-10-20 16:48 换版本源（`resolveHostVersion`）后**复测逐字一致**（宿主 9.50.0，走基线坐标不变）。**M 按宿主版本分档**：9.50.0 = 上表数值；**9.49.1 覆盖套只有 X5 变 ⇒ X5 M=4**（noteSave / aigcEdit / downloader 三点该版本无此坐标 ⇒ 显式缺席，不是失效；X1/X2/X4 与版本无关，M 不变）——旧宿主自查时勿把 N<M 判成宿主版本错位 |
-| `HonorAdsHook` / `HonorOpsAdHook` | 2/2 / 1/1 | 按 scope 逐包注册；**判据行按包分列**：`HonorAdsHook` 注册 5 个包（`com.hihonor.calendar` / `com.hihonor.android.totemweather` / `com.honor.browser` / `com.hihonor.quickgame` / `com.hihonor.youku.video`）⇒ 5 行 `installed 2/2`；`HonorOpsAdHook` 仅日历 ⇒ 1 行 `installed 1/1`。本行的 2/2、1/1 是**单包口径**（声明级共 3 点 = ads 2 + ops 1） |
-| `HonorTrackingHook` | 日历 3/3；桌面·天气 2/3；云音乐 3/3 | 2/3 = 已知旧账「Ex 工厂收口」1 点（`_instance_ex_tag` 类不存在）；2026-10-20 18:41 重采仍 2/3，且**安装前的旧模块在 17:23 同样是 2/3** ⇒ **非回退**，历史同进程常态；对应 WARN「类/方法不存在，已重试 2 轮，放弃」 |
+| `HonorAdsHook` / `HonorOpsAdHook` | 2/2 / 1/1 | 按 scope 逐包注册；**判据行按包分列**：`HonorAdsHook` 注册 5 个包（`com.hihonor.calendar` / `com.hihonor.android.totemweather` / `com.honor.browser` / `com.hihonor.quickgame` / `com.hihonor.youku.video`）⇒ 5 行 `installed 2/2`；`HonorOpsAdHook` 仅日历 ⇒ 1 行 `installed 1/1`。本行的 2/2、1/1 是**单包口径**（声明级共 3 点 = ads 2 + ops 1）；2026-10-27：日历 `20.0.9.325` 2/2·1/1、天气 `18.1.6.312` 2/2 实测一致；快游戏 `16.0.34.320` / 荣耀浏览器 `3.7.1.301` enabled=3（用户停用）无判据行，优酷未安装 |
+| `HonorTrackingHook` | 日历 3/3；桌面·天气 2/3；云音乐 3/3 | 2/3 = 已知旧账「Ex 工厂收口」1 点（`_instance_ex_tag` 类不存在）；2026-10-20 18:41 重采仍 2/3，且**安装前的旧模块在 17:23 同样是 2/3** ⇒ **非回退**，历史同进程常态；对应 WARN「类/方法不存在，已重试 2 轮，放弃」；2026-10-27：日历 `20.0.9.325` 3/3、云音乐 `3.7.30` 3/3、天气 2/3（旧账未变） |
 | 壁纸三 hook（Transcode / Loop / Timeline） | 无近期判据 | 需触发壁纸编辑或应用才注入 |
 
 > M 随代码变更、N 随宿主版本：**改完 hook 回来更新本表**。
