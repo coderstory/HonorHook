@@ -430,6 +430,10 @@ U4 点保留的唯一实际职责 = wakeScreenOn 侧（屏灭时不为隐藏通�
 | 充电 | `pkg==com.hihonor.systemmanager && id==200001` | 插充电器后真机活跃条目：title「极速充电」text「加速充电中，设备温度会升高」action「本次关闭」，ONGOING。**2026-10-17 实证**：普通「正在通过 USB 充电」同发 id=200001——用户确认全档隐藏，同 id 全杀即预期语义（勿当误杀收紧）；2026-10-19 实证补：普通态「正在通过USB为此设备充电」实为 **com.android.settings id=1000002 channel=SETTINGS_USB**（探针+截图），此前「同 id=200001」结论作废——已并入充电锚（pkg+channel+id 三等值；id=1000002 是充电/传输文件/USB音频共用单槽，settings-jadx UsbSettingsService.java 实证，整槽隐藏为用户拍板档 1；tethering（另一 id）/手机助手/反向充（usb_settings_notification_channel）不收） |
 | 热点 | `pkg==android && group=="TetheredNotification"` | 热点开时真机活跃条目：title「1 台设备」text「已共享 275 MB」，group 为 AOSP framework 硬编码串 |
 | USB 调试 | `pkg==android && channel=="DEVELOPER_IMPORTANT"` | **探针+dumpsys 实证 2026-10-13**：id=26、channel=`DEVELOPER_IMPORTANT`（AOSP DevelopmentSettings 发帖）；extras 里 `usbdevicemanager.adb.tv` 是 tv 扩展字段**不是渠道 id**——静态推断「channelId 含 adb」据此落空（隐藏不住的根因）。**2026-10-17 客户误杀反馈收紧**：裸 id==26 与 contains("adb") 宽匹配均删，只留渠道等值（id 空间被 system_server 其他通知共用；真机实证渠道锚独立命中，判据 `隐藏USB调试通知(android/id=26/channel=DEVELOPER_IMPORTANT)`）。⚠️ 过滤器只在 post/update 时跑，systemui 重启重绑阴影**不重判**老记录：改规则后需重发帖（切一次 USB 调试开关）才生效 |
+| 极客中心 | `pkg==com.hihonor.geekcenter && id==100` | **dumpsys+MT MCP smali 实证 2026-10-27**（geekcenter 12.0.0.001，`system-files/com.hihonor.geekcenter/`）：状态栏图标 = 极客模式常驻通知（title「极客模式已开启」ONGOING，icon `0x7f0805bb`=res `jeek_icon` 与 dumpsys 逐位吻合）；发帖方 `GeekNotificationManager`（c1.a）`notify(I)` 仅三档——100=极客模式常驻、101=温度告警、102=电量告警，渠道恒 `geek_alert_channel`（NMS 打码进不了锚，探针可读）。锚取 pkg+id 双等值：id 空间 per-app 无误杀面；**只收 100**，101/102 告警语义不收；极客模式关停时宿主 `cancel(100)` 自清无需补撤。同 §8.2 的重判限制：改开关后需极客模式开关一次重发帖才生效。⚠️ **本条对状态栏图标无效的实证（2026-10-27 真机）**：荣耀把 `NotificationIconsInteractor.filteredNotifSet` 直连 `ActiveNotificationListRepository.activeNotifications`（原始活跃列表，绕过 shouldFilterOut 的 renderList）⇒ 通知在 Shade 隐了、左上角图标照渲染（13:21:56 判据命中 + 图标仍在）——状态栏图标另走 U8 收口（**diagU8 探针实证 2026-10-27：极客图标是 StatusBarIconController 槽位
+  体系的系统图标 `gee`**，非通知图标；收口点 = `StatusBarIconControllerImpl.setIcon(String,StatusBarIconHolder)`
+  对 `slot=="gee"` 短路。选点迭代 v1 IconManager.setIcon / v2 icon 容器 onViewAdded 均真机 0 命中，
+  留档防重蹈） |
 
 - NMS 对渠道 id 强制打码（`dumpsys --noredact` / `cmd notification get` 均为 `***`，隐私补丁）⇒ 充电/热点不用渠道做锚点；**渠道 id 唯一证据源 = 模块内建探针**（`probeNotifIdentity`，每 key 一条、封顶 40 条，打 pkg/id/group/channel/title）。
 - 充电发帖方是**系统管家**（非 powergenie，初判错误）；普通充电态「正在通过 USB 充电」同 id 已实证（2026-10-17），用户确认全档隐藏。
@@ -472,10 +476,12 @@ tools/dev.sh modlog SystemUiHook   # LSPosed 日志判据
 - **SystemUI 是 persistent 应用**：`am force-stop` 无效（pid 不变），须 root kill
   （`su -c 'killall com.android.systemui'`，2026-10-12 实证；`dev.sh enable-module` 的
   force-stop 只对普通作用域包有效）。
-- `SystemUiHook: installed N/N`（U1/U2/U4/U4b/U5 全开时 N=5）
+- `SystemUiHook: installed N/N`（U1/U2/U4/U4b/U5/U8 全开时 N=6）
 - 通知探针行：插充电器 / 开热点 / 插 USB 线各触发一次，`systemui-hook 通知探针:` 行给出全量身份
   （收紧 USB 调试渠道 id 与充电普通态 id 的依据；热点渠道已实证 = `sap_capsule_channel_id`）
-- 判据行：`隐藏充电通知(...)` / `隐藏热点通知(...)` / `隐藏USB调试通知(...)` / `电量 N% 放行手电筒`
+- 判据行：`隐藏充电通知(...)` / `隐藏热点通知(...)` / `隐藏USB调试通知(...)` / `隐藏极客中心通知(...)` / `极客槽位已短路` / `电量 N% 放行手电筒`
+  ⚠️ 判据有每任务 2 条的节流上限（JUDGE_LOG_PER_TASK）：U4 任务被热点等高频命中打满后，后续命中
+  （如极客中心）不再打行——**没判据行 ≠ 没生效**，以行为效果为准
 - **已真机验证（2026-10-12）**：热点通知从下拉通知中心消失（U4b 命中即生效；状态栏「热点已开启」
   chip 是状态图标非通知，保留属预期）。
 - 未验证：充电（系统管家）与 USB 调试条目的实际消失效果、充电普通态 id、USB 调试渠道 id、

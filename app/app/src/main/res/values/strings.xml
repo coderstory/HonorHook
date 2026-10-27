@@ -88,6 +88,8 @@
     <string name="feature_systemui_hide_hotspot_notif_desc">隐藏热点共享的通知（已连接设备数、已共享流量）</string>
     <string name="feature_systemui_hide_adb_notif_title">隐藏 USB 调试通知</string>
     <string name="feature_systemui_hide_adb_notif_desc">隐藏「USB 调试已连接」系统通知</string>
+    <string name="feature_systemui_hide_geek_notif_title">隐藏极客中心图标</string>
+    <string name="feature_systemui_hide_geek_notif_desc">隐藏极客模式的常驻通知（「极客模式已开启」），状态栏左上角不再显示极客中心图标；温度/电量告警通知不受影响</string>
     <string name="feature_systemui_flashlight_ignore_low_batt_title">手电筒忽略低电量</string>
     <string name="feature_systemui_flashlight_ignore_low_batt_desc">电量低于 5% 时仍可从下拉瓷贴或桌面小部件打开手电筒。注意：这样会绕过厂商的低电量保护，电量能一直用到手机自动关机</string>
 

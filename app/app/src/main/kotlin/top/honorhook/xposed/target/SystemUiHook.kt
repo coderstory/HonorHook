@@ -74,6 +74,26 @@ object SystemUiHook : TargetHook {
     /** U5：手电筒低电量门宿主类（canOpenFlashLight 覆写所在；基类 StatusBar 同名方法是恒 true 的 stub，无需另挂）。 */
     private const val CLS_HW_PHONE_STATUSBAR = "com.android.systemui.statusbar.phone.HwPhoneStatusBar"
 
+    /**
+     * U8 极客中心状态栏图标（2026-10-27 真机四轮实证定案）。
+     *
+     * 真相：极客图标**不是通知图标**，是 StatusBarIconController 槽位体系的系统图标——
+     * diagU8 探针（14:20:14 重启实测）打出 SBCI.setIcon slot 序列 uni/eye/vpn/wir/per/
+     * geekmode/blu/ala/vol/cas/dat/loc/nfc/net，`geekmode` 即极客槽（geek_status 设置驱动，
+     * dex.json ObserverGeekState 同源）。所以 U4/U4b 通知过滤判据全绿而图标照渲染。
+     *
+     * 选点迭代（前两版打偏，留档防重蹈）：
+     *   v1 IconManager.setIcon：真机 0 命中（只有 ConnectedDisplays 调）；
+     *   v2 NotificationIconContainer.onViewAdded：真机 0 命中（图标不走 icon 容器，探针实证）；
+     *   v3（本版）StatusBarIconControllerImpl.setIcon(String,StatusBarIconHolder) 对 slot=="geekmode"
+     *      短路——AOSP 命名类未混淆，槽位恒定（若 OTA 改名 fail-open 不误杀）。
+     *      状态栏/锁屏等全部消费方同源生效；通知本体照发（Shade 侧由 U4/U4b 收）。
+     */
+    private const val CLS_SBCI = "com.android.systemui.statusbar.phone.ui.StatusBarIconControllerImpl"
+
+    /** 极客槽位名（diagU8 探针 2026-10-27 实测完整值 slot=geekmode；OTA 改名时 fail-open）。 */
+    private const val GEEK_SLOT = "geekmode"
+
     /** 充电通知发帖方 = 系统管家（dumpsys 实证 2026-10-12：id=200001 title「极速充电」action「本次关闭」）。 */
     private const val CHARGE_NOTIF_PKG = "com.hihonor.systemmanager"
     private const val CHARGE_NOTIF_ID = 200001
@@ -94,6 +114,16 @@ object SystemUiHook : TargetHook {
      *  直读 Notification 字段可读）。2026-10-17 客户误杀反馈：裸 id==26 与 contains("adb") 宽匹配
      *  均删，只留渠道等值——id 空间被 system_server 其他通知共用，宽匹配误杀。 */
     private const val ADB_NOTIF_CHANNEL = "DEVELOPER_IMPORTANT"
+
+    /** 极客中心常驻通知（dumpsys 实证 2026-10-27：pkg=com.hihonor.geekcenter id=100，
+     *  title「极客模式已开启」flags=ONGOING_EVENT|AUTO_CANCEL，icon 0x7f0805bb 即 res jeek_icon）。
+     *  MT MCP smali 实证（geekcenter 12.0.0.001）：发帖方 = GeekNotificationManager（c1.a），
+     *  notify(I) 仅三档——100=极客模式常驻（title_for_foreground）、101=温度告警、102=电量告警，
+     *  渠道恒 "geek_alert_channel"；极客模式关停时宿主 cancel(100) 自清，无需我们补撤。
+     *  锚 = pkg+id 双等值：id 空间 per-app（非 pkg=android 共享池），无误杀面；渠道经 NMS 打码
+     *  （dumpsys 恒 ***），不进锚只进探针。101/102 是告警语义，不收（用户未要求）。 */
+    private const val GEEK_NOTIF_PKG = "com.hihonor.geekcenter"
+    private const val GEEK_NOTIF_ID = 100
 
     /** 手电筒低电量阈值（与宿主同款 5%，仅用于判据日志打点，不影响放行语义）。 */
     private const val LOW_BATTERY_THRESHOLD = 5
@@ -189,12 +219,13 @@ object SystemUiHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_HIDE_5G, "SystemUiHook")
         }
 
-        // U4 系统通知隐藏 ×3（充电/热点/USB 调试）：3 个 key 共用一个管线收口挂载点，
+        // U4 系统通知隐藏 ×4（充电/热点/USB 调试/极客中心）：4 个 key 共用一个管线收口挂载点，
         //   身份匹配在 hook 回调里逐 key 判（matchesHiddenNotif），任一开即挂。
         val notifKeys = listOf(
             FeatureCatalog.KEY_SYSTEMUI_HIDE_CHARGE_NOTIF,
             FeatureCatalog.KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF,
             FeatureCatalog.KEY_SYSTEMUI_HIDE_ADB_NOTIF,
+            FeatureCatalog.KEY_SYSTEMUI_HIDE_GEEK_NOTIF,
         )
         if (notifKeys.any { RemoteConfig.isEnabled(it) }) {
             pending += MountEngine.SimpleTask(
@@ -231,6 +262,22 @@ object SystemUiHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT, "SystemUiHook")
         }
 
+        // U8 极客中心状态栏图标（槽位短路，geek key 门控；见 CLS_SBCI 注释）
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_GEEK_NOTIF)) {
+            pending += MountEngine.SimpleTask(
+                className = CLS_SBCI,
+                methodName = "setIcon",
+                paramCount = 2,
+                returnType = "void",
+                id = ID_GEEK_SLOT_SET_ICON,
+                description = "U8 极客中心状态栏图标隐藏（StatusBarIconControllerImpl 槽位 geekmode 短路）",
+                dex = DexHint(paramTypes = listOf(
+                    "java.lang.String",
+                    "com.android.systemui.statusbar.phone.StatusBarIconHolder",
+                )),
+            )
+        }
+
         if (pending.isEmpty()) return
         /** 共享挂载基建（重试循环/失败分级/汇总日志）。 */
         val session = MountEngine.open("SystemUiHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName))
@@ -251,6 +298,7 @@ object SystemUiHook : TargetHook {
     private const val ID_FILTER_NOTIF = "systemui:hwNotificationFilterImpl.shouldFilterOut"
     private const val ID_SHADE_HIDE = "systemui:hwNotificationFeatureImpl.isDisableShownInShade"
     private const val ID_FLASHLIGHT_LOW_BATT = "systemui:hwPhoneStatusBar.canOpenFlashLight"
+    private const val ID_GEEK_SLOT_SET_ICON = "systemui:sbci.setIcon"
 
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
     private val unreadableWarned = AtomicBoolean(false)
@@ -272,6 +320,7 @@ object SystemUiHook : TargetHook {
             ID_FILTER_NOTIF -> mountHideSystemNotifs(session, task, module, loader)
             ID_SHADE_HIDE -> mountHideInNotificationCenter(session, task, module, loader)
             ID_FLASHLIGHT_LOW_BATT -> mountFlashlightLowBatt(session, task, module, loader)
+            ID_GEEK_SLOT_SET_ICON -> mountGeekSlotShortCircuit(session, task, module, loader)
             else -> mountHideSim2(session, task, module, loader)
         }
 
@@ -466,7 +515,7 @@ object SystemUiHook : TargetHook {
 
     /**
      * U4 身份匹配：返回「功能名(pkg/锚点)」用于判据日志，未命中返回 null。
-     * 三条规则（dumpsys 实证 2026-10-12；渠道 id 被 NMS 强制打码，充电/热点故不用渠道做锚点）：
+     * 四条规则（dumpsys 实证 2026-10-12；渠道 id 被 NMS 强制打码，充电/热点/极客中心故不用渠道做锚点）：
      *   充电    pkg==系统管家 && id==200001（真机活跃条目 title「极速充电」；普通充电态「正在通过
      *           USB 充电」2026-10-17 实证同 id——用户确认全档隐藏，同 id 全杀即预期语义）
      *   热点    pkg==android && group=="TetheredNotification"（AOSP framework 硬编码 group 串，最稳锚点）
@@ -485,6 +534,12 @@ object SystemUiHook : TargetHook {
             // 全档隐藏（2026-10-17 用户确认）：快充「极速充电」与普通「正在通过 USB 充电」同发
             // id=200001，均属隐藏需求，同 id 全杀是预期语义，勿当误杀收紧。
             return "充电通知($pkg/$notifId)"
+        }
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_GEEK_NOTIF) &&
+            pkg == GEEK_NOTIF_PKG && notifId == GEEK_NOTIF_ID
+        ) {
+            // 只收 id=100（极客模式常驻指示）；101/102 是温/电告警语义，不收（见常量处实证注释）。
+            return "极客中心通知($pkg/$notifId)"
         }
         val group = sbn.callOrNull("getGroup") as? String
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF) &&
@@ -557,5 +612,22 @@ object SystemUiHook : TargetHook {
                 session.judge(module, task, JUDGE_PREFIX, "电量 ${level}% 放行手电筒")
             }
             true
+        }
+
+    /**
+     * U8 极客中心状态栏图标隐藏：setIcon(slot, holder) 命中极客槽（slot=="geekmode"）短路——
+     * 不 proceed 即该槽位图标永不进状态栏；极客模式关停时宿主改走 removeIcon 同样无害。
+     * 返回类型 void：回调必须显式 null。判据走 judge 节流（每任务 2 条）。任何异常吞掉放行宿主。
+     */
+    private fun mountGeekSlotShortCircuit(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            val slot = runCatching { chain.getArg(0) as? String }.getOrNull()
+            if (slot == GEEK_SLOT && RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_GEEK_NOTIF)) {
+                session.judge(module, task, JUDGE_PREFIX, "极客槽位已短路")
+                null   // 短路：gee 槽图标不进状态栏
+            } else {
+                chain.proceed()
+                null
+            }
         }
 }

@@ -45,6 +45,7 @@ object FeatureCatalog {
     const val KEY_SYSTEMUI_HIDE_CHARGE_NOTIF = "systemui.hide_charge_notif"
     const val KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF = "systemui.hide_hotspot_notif"
     const val KEY_SYSTEMUI_HIDE_ADB_NOTIF = "systemui.hide_adb_notif"
+    const val KEY_SYSTEMUI_HIDE_GEEK_NOTIF = "systemui.hide_geek_notif"
     const val KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT = "systemui.flashlight_ignore_low_batt"
 
     const val KEY_MMS_AD_OFF = "mms.ad_off"
@@ -181,6 +182,7 @@ object FeatureCatalog {
                 Feature(KEY_SYSTEMUI_HIDE_CHARGE_NOTIF, R.string.feature_systemui_hide_charge_notif_title, R.string.feature_systemui_hide_charge_notif_desc),
                 Feature(KEY_SYSTEMUI_HIDE_HOTSPOT_NOTIF, R.string.feature_systemui_hide_hotspot_notif_title, R.string.feature_systemui_hide_hotspot_notif_desc),
                 Feature(KEY_SYSTEMUI_HIDE_ADB_NOTIF, R.string.feature_systemui_hide_adb_notif_title, R.string.feature_systemui_hide_adb_notif_desc),
+                Feature(KEY_SYSTEMUI_HIDE_GEEK_NOTIF, R.string.feature_systemui_hide_geek_notif_title, R.string.feature_systemui_hide_geek_notif_desc),
                 Feature(KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT, R.string.feature_systemui_flashlight_ignore_low_batt_title, R.string.feature_systemui_flashlight_ignore_low_batt_desc),
             ),
             baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
