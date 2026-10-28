@@ -307,18 +307,12 @@ object ImeHook : TargetHook {
                         val info = chain.args?.getOrNull(2)
                         val sid = info?.javaClass?.getDeclaredField("skinId")?.get(info) as? String
                         if (sid.isNullOrBlank()) return@mount chain.proceed()
-                        var cos = cosUrlMap[sid]
+                        // 主线程禁网：只查预取表；缺失则放行原逻辑（打判据便于观测）
+                        val cos = cosUrlMap[sid]
                         if (cos == null) {
-                            val sc = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0") ?: return@mount chain.proceed()
-                            val det = fetchUrl("https://srv.android.shouji.sogou.com/v1/skin/detail?skin_id=$sid&from=detail&req_id=poc&device_type=1&supportvideo=1&supportgyroscope=0&is_full_screen=1", sc)
-                            val u = det?.let { org.json.JSONObject(it).optJSONObject("data")?.optString("ssf_download_url") }
-                                ?.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com")
-                            if (u != null && u.endsWith(".ssf")) {
-                                cos = u
-                                cosUrlMap[sid] = u
-                            }
+                            session.judge(module, task, JUDGE_PREFIX, "COS 直链缺失（预取未覆盖）：$sid")
+                            return@mount chain.proceed()
                         }
-                        if (cos == null) return@mount chain.proceed()
                         val cls = info.javaClass
                         cls.getDeclaredField("ssfDownloadUrl").set(info, cos)
                         cls.getDeclaredField("skinId").set(info, "")
@@ -409,7 +403,27 @@ object ImeHook : TargetHook {
                             org.json.JSONObject(body).optJSONObject("data")
                                 ?.takeIf { it.optString("content_title") == "套装内容" }
                                 ?.optString("id")?.takeIf { it.isNotBlank() }
-                                ?.let { lastSuitId = it }
+                                ?.let { id ->
+                                    lastSuitId = id
+                                    // 预取：套装内全部主题的 COS 直链入表（本处在 okhttp 线程，可联网）
+                                    val sc = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0")
+                                    val items = refetchSuitItems(id)
+                                    if (items != null) {
+                                        val arr = org.json.JSONObject(items).getJSONObject("data").getJSONArray("list")
+                                        for (i in 0 until arr.length()) {
+                                            val it2 = arr.optJSONObject(i) ?: continue
+                                            if (it2.optInt("type") != 2000) continue
+                                            val sid = it2.optString("id")
+                                            if (sid.isBlank() || cosUrlMap.containsKey(sid)) continue
+                                            val sc2 = sc ?: continue
+                                            val det = fetchUrl("https://srv.android.shouji.sogou.com/v1/skin/detail?skin_id=$sid&from=detail&req_id=poc&device_type=1&supportvideo=1&supportgyroscope=0&is_full_screen=1", sc2)
+                                            val u = det?.let { o -> org.json.JSONObject(o).optJSONObject("data")?.optString("ssf_download_url") }
+                                                ?.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com")
+                                            if (u != null && u.endsWith(".ssf")) cosUrlMap[sid] = u
+                                        }
+                                        module.log(Log.INFO, "SkinPoC", "预取套装 $id 直链完成，映射表 ${cosUrlMap.size} 条")
+                                    }
+                                }
                         }
                     }
                     // 快路径：无广告/列表标记的响应零成本放行
@@ -600,7 +614,14 @@ object ImeHook : TargetHook {
                     sc) ?: continue
                 val url = org.json.JSONObject(det).optJSONObject("data")?.optString("ssf_download_url")
                 if (!url.isNullOrBlank() && url.endsWith(".ssf")) {
-                    info.put("fileAdd", url.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com"))
+                    val cos = url.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com")
+                    info.put("fileAdd", cos)
+                    // 关键：补齐 ThemePreviewItem 反序列化字段——套装数据缺 ssf_download_url（只有
+                    // 死链 fileAdd）→ ssfUrl=null → R() 判「非网络主题」→ 不下载直接皮肤包错误。
+                    // ssf_download_url=COS 直链；skin_id/md5 置空 → R0 走下载分支、跳过本地校验。
+                    info.put("ssf_download_url", cos)
+                    if (!info.has("skin_id")) info.put("skin_id", "")
+                    if (!info.has("md5")) info.put("md5", "")
                 }
             }
             jo.toString()
