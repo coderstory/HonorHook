@@ -77,9 +77,7 @@ object ImeHook : TargetHook {
      * 下载用的 ssf_download_url 本就在详情响应里。r1 为 R8 名 → 类名未混淆可直连。
      * 验证完整段删除。
      */
-    private const val CLS_THEME_PREVIEW = "com.sogou.theme.ThemePreviewActivity"
 
-    private const val CLS_JSON = "org.json.JSONObject"
 
     /**
      * TEMP(2026-10-28)：新版皮肤详情页（用户实际路径，logcat 实证跳转链
@@ -87,13 +85,11 @@ object ImeHook : TargetHook {
      * 付费状态机 N1(SmartThemeDetailModel)I：0=购买/7=裂变/9=售罄/8=已获赠(payment==2)/
      * 3=启用(payment≥1)/1、2=免费。恒返 3 = 「已购买(￥x)」启用态。
      */
-    private const val CLS_SMART_DETAIL = "com.sogou.theme.SmartThemeSkinDetailActivity"
 
     /**
      * TEMP(2026-10-28)：套装皮肤详情（CostumeSuitDetailActivity.java:866/460 jadx 实证）：
      * getPayStatus() 1=已购买(可安装) 2=已获赠 0=待购买；未混淆公共 bean，直连稳定。
      */
-    private const val CLS_COSTUME_BEAN = "com.sogou.home.costume.bean.CostumeDetailDataBean"
 
     /**
      * T6 商店去推广：postSuccess(pv, String) 是**所有** API JSON 响应的唯一入口
@@ -178,74 +174,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SPLASH_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP PoC（套装穿戴修复）：Z() 构造 skindl.php 下载 URL——该接口服务端已 404
-                    // （curl 实证 2026-10-28：download.sginput.qq.com/skin/skindl.php → 404）。
-                    // 死链时用 cosUrlMap（postSuccess 收集的 skin_id→COS 直链）替换。
-                    className = "com.sogou.theme.b",
-                    methodName = "Z",
-                    paramCount = 1,  // 签名实证：(ThemeItemInfo)String —— b.java:491
-                    returnType = "java.lang.String",
-                    id = ID_Z_URL,
-                    description = "PoC：套装安装 skindl.php 死链(404)替换为 COS 直链",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // TEMP PoC（套装启用修复）：downloadAndInstallTheme 入口改造 ThemeItemInfo——
-                    // 套装 item 服务端不下发 ssf_download_url（只有死链 fileAdd）→ ssfUrl=null →
-                    // R() 判为本地主题 → 不下载直接「皮肤包错误」。此处填 COS 直链 + 清 skinId/md5，
-                    // 让 R0 走「网络下载」分支用 COS 真文件。
-                    className = "com.sogou.home.theme.HomeThemeService",
-                    methodName = "downloadAndInstallTheme",
-                    paramCount = 9,  // 签名实证：(Activity,Z,ThemeItemInfo,I,String,I,String,Z,b94) —— HomeThemeService.java:147
-                    returnType = "void",
-                    id = ID_DAI_FIX,
-                    description = "PoC：套装启用入口注入 COS 直链（补服务端缺失字段）",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // TEMP 调试：安装结果广播接收器 b.X(Intent,boolean)——读 result_code 定位安装失败环节。
-                    className = "com.sogou.theme.b",
-                    methodName = "X",
-                    paramCount = 2,  // 签名实证：(Intent,boolean)V —— b.java X/doReceiver
-                    returnType = "void",
-                    id = ID_DBG_RESULT,
-                    description = "PoC 调试：安装结果广播 result_code 打印",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // 套装安装兼容修复②：phoneTheme.ini 字段 H() 空/超 20000 → cg4 f(21)
-                    // （同 m1 文案组「暂不支持当前设备」）。矫正为 20000 使本机安装器接受。
-                    className = "zf4",
-                    methodName = "H",
-                    paramCount = 0,
-                    returnType = "java.lang.String",
-                    id = ID_INI_H,
-                    description = "PoC：phoneTheme.ini H() 字段白名单矫正",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // 套装安装兼容修复：phoneTheme.ini 标志字段 G() 白名单 {0,1}——
-                    // COS 商店文件该字段超范围 → cg4 f(20) → 「暂不支持当前设备」。
-                    // 矫正为 "1" 使本机安装器接受（cg4.d 实证：仅 0/1 通过）。
-                    className = "zf4",
-                    methodName = "G",
-                    paramCount = 0,
-                    returnType = "java.lang.String",
-                    id = ID_INI_G,
-                    description = "PoC：phoneTheme.ini 标志字段白名单矫正",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // 付费门 PoC①备：全局 payment 字段 0(未购)→1(已购)——观测用
-                    className = CLS_JSON,
-                    methodName = "optInt",
-                    paramCount = 1,
-                    returnType = "int",
-                    id = ID_SKIN_PAYMENT,
-                    description = "PoC备：optInt(payment) 0→1（全局，观测用）",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
                     // T6a：套装列表条目 setAdData 禁用——AMS 信息流广告附到条目上渲染，
                     // 切断数据即无广告位（真机实证：抖音极速版推广混在套装列表）
                     className = CLS_COSTUME_ITEM,
@@ -267,56 +195,25 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP 诊断：u0() 下载发起——打印 this.h（实际下载 URL）
-                    className = CLS_THEME_CTRL,
-                    methodName = "u0",
+                    // 套装安装兼容：phoneTheme.ini 字段 G()/H() 白名单矫正——
+                    // COS 商店文件 G()=2 超 {0,1} 白名单 → cg4 f(20)「暂不支持当前设备」；
+                    // H() 空/超限 → f(21)。真机判据实证（G()=2 矫正为 1）。
+                    className = "zf4",
+                    methodName = "G",
                     paramCount = 0,
-                    returnType = "void",
-                    id = ID_DBG_U0,
-                    description = "PoC 诊断：下载发起 URL",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    returnType = "java.lang.String",
+                    id = ID_INI_G,
+                    description = "套装安装：phoneTheme.ini G() 白名单矫正",
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP 诊断：T(int,String) 下载失败回调——打印进度码与文件路径
-                    className = CLS_THEME_CTRL,
-                    methodName = "T",
-                    paramCount = 2,
-                    returnType = "void",
-                    id = ID_DBG_TFAIL,
-                    description = "PoC 诊断：下载失败回调",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // TEMP PoC：付费状态机 r1（老预览页）。验证完整段删除。
-                    className = CLS_THEME_PREVIEW,
-                    methodName = "r1",
-                    paramCount = 4,  // 签名实证：(D I String Z)I —— ThemePreviewActivity.java:2602（jadx）
-                    returnType = "int",
-                    id = ID_SKIN_R1,
-                    description = "PoC：付费状态机 r1 恒返 1(已购)，验证付费门仅客户端 UI 层",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // TEMP PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
-                    // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
-                    className = CLS_SMART_DETAIL,
-                    methodName = "N1",
-                    paramCount = 1,  // 签名实证：(SmartThemeDetailModel)I —— SmartThemeSkinDetailActivity.java:1185
-                    returnType = "int",
-                    id = ID_SMART_N1,
-                    description = "PoC：智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
-                ),
-                MountEngine.SimpleTask(
-                    // TEMP PoC：套装皮肤付费门 = CostumeDetailDataBean.getPayStatus()（详情页按钮
-                    // 文案/可用性/赠礼逻辑全部由它驱动；sd4.java:17 的 payStatus!="1" 拦截同被满足）。
-                    className = CLS_COSTUME_BEAN,
-                    methodName = "getPayStatus",
-                    paramCount = 0,  // 签名实证：()I —— CostumeDetailDataBean.java:314
-                    returnType = "int",
-                    id = ID_COSTUME_PAYSTATUS,
-                    description = "PoC：套装皮肤 payStatus 恒返 1(已购买，可安装)",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    className = "zf4",
+                    methodName = "H",
+                    paramCount = 0,
+                    returnType = "java.lang.String",
+                    id = ID_INI_H,
+                    description = "PoC：phoneTheme.ini H() 字段白名单矫正",
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     // T6 商店去推广：postSuccess 响应层过滤。**必须用 paramTypes 锚钉 (pv,String) 重载**——
@@ -356,122 +253,6 @@ object ImeHook : TargetHook {
                     }
                     chain.proceedWith(chain.thisObject, args)
                 }
-                ID_SKIN_R1 -> {
-                    // TEMP PoC：r1 是纯状态机（无副作用，jadx 实证方法体只做位判断）→ CONST 短路。
-                    // 1=已购：预览页按钮「立即启用/已购买(￥x)」，走正常下载安装分支（URL 在详情响应里）。
-                    session.judge(module, task, JUDGE_PREFIX, "r1 恒返 1（已购态）")
-                    1
-                }
-                ID_SKIN_PAYMENT -> {
-                    val ret = chain.proceed()
-                    val key = chain.args?.firstOrNull() as? String
-                    if (key == "payment" && ret == 0) {
-                        session.judge(module, task, JUDGE_PREFIX, "optInt(payment) 0→1")
-                        1
-                    } else ret
-                }
-                ID_SMART_N1 -> {
-                    // TEMP PoC：N1 为纯状态判定（jadx 实证：读 model 字段做返回值映射，副作用仅 l3
-                    // 赠礼触发，对付费皮肤路径无意义）→ CONST 短路恒返 3(启用态)。
-                    session.judge(module, task, JUDGE_PREFIX, "N1 恒返 3（智能详情已购/启用态）")
-                    3
-                }
-                ID_COSTUME_PAYSTATUS -> {
-                    // TEMP PoC：CONST 短路（getter 无副作用）。1=已购买：按钮「已购买(￥x)」可用，
-                    // sd4 的 payStatus!=1 拦截同被满足，走套装下载安装路径。
-                    session.judge(module, task, JUDGE_PREFIX, "payStatus 恒返 1（套装已购态）")
-                    1
-                }
-                ID_INI_H -> {
-                    val ret = chain.proceed() as? String
-                    val n = ret?.toLongOrNull()
-                    if (ret != null && ret.isNotBlank() && (n == null || n <= 20000)) ret else {
-                        session.judge(module, task, JUDGE_PREFIX, "H()=$ret 矫正为 20000")
-                        "20000"
-                    }
-                }
-                ID_INI_G -> {
-                    val ret = chain.proceed() as? String
-                    if (ret == "0" || ret == "1") ret else {
-                        session.judge(module, task, JUDGE_PREFIX, "G()=$ret 矫正为 1")
-                        "1"
-                    }
-                }
-                ID_DAI_FIX -> {
-                    // TEMP PoC：args[2]=ThemeItemInfo。补 ssfDownloadUrl（cosUrlMap 或匿名补查），
-                    // 清 skinId（走 R0 下载分支）/md5（跳过本地校验）。查不到直链则原样放行。
-                    try {
-                        val info = chain.args?.getOrNull(2)
-                        val sid = info?.javaClass?.getDeclaredField("skinId")?.get(info) as? String
-                        if (sid.isNullOrBlank()) return@mount chain.proceed()
-                        // 主线程禁网：只查预取表；缺失则放行原逻辑（打判据便于观测）
-                        val cos = cosUrlMap[sid]
-                        if (cos == null) {
-                            session.judge(module, task, JUDGE_PREFIX, "COS 直链缺失（预取未覆盖）：$sid")
-                            return@mount chain.proceed()
-                        }
-                        val cls = info.javaClass
-                        cls.getDeclaredField("ssfDownloadUrl").set(info, cos)
-                        cls.getDeclaredField("skinId").set(info, "")
-                        cls.getDeclaredField("md5").set(info, "")
-                        cls.getDeclaredField("isNetTheme").set(info, true)
-                        session.judge(module, task, JUDGE_PREFIX, "启用入口已注入 COS 直链：$sid")
-                    } catch (_: Throwable) { }
-                    chain.proceed()
-                }
-                ID_DBG_U0 -> {
-                    try {
-                        chain.proceed()
-                        val h = chain.thisObject.javaClass.getDeclaredField("h")
-                        h.isAccessible = true
-                        val u = h.get(chain.thisObject) as? String
-                        module.log(Log.INFO, "SkinPoC", "DOWNLOAD_URL $u")
-                    } catch (_: Throwable) { chain.proceed() }
-                }
-                ID_DBG_TFAIL -> {
-                    try {
-                        val code = chain.args?.getOrNull(0)
-                        val path = chain.args?.getOrNull(1)
-                        module.log(Log.INFO, "SkinPoC", "DL_FAIL code=$code path=$path")
-                    } catch (_: Throwable) { }
-                    chain.proceed()
-                }
-                ID_DBG_RESULT -> {
-                    // TEMP 调试：proceed 后读 result_code/result_msg extras。
-                    try {
-                        val intent = chain.args?.firstOrNull() as? android.content.Intent
-                        chain.proceed()
-                        val code = intent?.getIntExtra("result_code", -999)
-                        val msg = intent?.getStringExtra("result_msg")
-                        module.log(Log.INFO, "SkinPoC", "INSTALL_RESULT code=$code msg=$msg")
-                    } catch (_: Throwable) { chain.proceed() }
-                }
-                ID_Z_URL -> {
-                    // TEMP PoC：proceed 跑原构造，返回值指向 404 死链时换 COS 直链（无网络调用，查表）。
-                    val orig = chain.proceed() as? String
-                        ?: return@mount null
-                    if (orig.contains("skindl.php")) {
-                        val item = chain.args?.firstOrNull()
-                        val sid = try {
-                            item?.javaClass?.getDeclaredField("skinId")?.get(item) as? String
-                        } catch (_: Throwable) { null }
-                        val cos = sid?.let { cosUrlMap[it] }
-                        if (cos != null) {
-                            // md5 清空：套装数据带的是老接口文件的 md5，COS repack 版必不匹配
-                            // → ThemeChecker.a 会删文件报「皮肤包错误」；md5 为空时 App 跳过校验（b.R 实证）。
-                            try {
-                                val fld = item?.javaClass?.getDeclaredField("md5")
-                                fld?.isAccessible = true
-                                fld?.set(item, "")
-                            } catch (_: Throwable) { }
-                            session.judge(module, task, JUDGE_PREFIX, "skindl 死链→COS（md5已清）：$sid")
-                            cos
-                        } else {
-                            session.judge(module, task, JUDGE_PREFIX, "skindl 死链但无映射：$sid")
-                            orig
-                        }
-                    } else orig
-                }
                 ID_AD_SETADDATA -> {
                     // AMS 广告数据不附到条目：吞掉 setAdData（void，不 proceed）
                     session.judge(module, task, JUDGE_PREFIX, "setAdData 已禁用")
@@ -487,6 +268,21 @@ object ImeHook : TargetHook {
                         }
                     } catch (_: Throwable) { }
                     chain.proceed()
+                }
+                ID_INI_H -> {
+                    val ret = chain.proceed() as? String
+                    val n = ret?.toLongOrNull()
+                    if (ret != null && ret.isNotBlank() && (n == null || n <= 20000)) ret else {
+                        session.judge(module, task, JUDGE_PREFIX, "H()=$ret 矫正为 20000")
+                        "20000"
+                    }
+                }
+                ID_INI_G -> {
+                    val ret = chain.proceed() as? String
+                    if (ret == "0" || ret == "1") ret else {
+                        session.judge(module, task, JUDGE_PREFIX, "G()=$ret 矫正为 1")
+                        "1"
+                    }
                 }
                 ID_STORE_AD_FILTER -> {
                     // T6：响应层过滤（规则定稿 2026-10-28，匿名 curl 全量 + 真机抓包互证）：
@@ -642,13 +438,6 @@ object ImeHook : TargetHook {
     private const val ID_A4 = "ime:SettingManager.A4"
     private const val ID_SPLASH_GATE = "ime:px5.b"
     // TEMP(2026-10-28)：披露取证 PoC，验证完删除
-    private const val ID_SKIN_R1 = "ime:ThemePreviewActivity.r1"
-    private const val ID_SKIN_PAYMENT = "ime:JSONObject.optInt(payment)"
-    private const val ID_SMART_N1 = "ime:SmartThemeSkinDetailActivity.N1"
-    private const val ID_COSTUME_PAYSTATUS = "ime:CostumeDetailDataBean.getPayStatus"
-    private const val ID_Z_URL = "ime:theme.b.Z(skindl)"
-    private const val ID_DBG_RESULT = "ime:theme.b.X(result)"
-    private const val ID_DAI_FIX = "ime:HomeThemeService.dai(fix)"
     private const val ID_INI_G = "ime:zf4.G(ini_flag)"
     private const val ID_INI_H = "ime:zf4.H(ini_flag)"
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
@@ -657,10 +446,7 @@ object ImeHook : TargetHook {
 
     private val CLS_COSTUME_ITEM = "com.sogou.home.costume.bean.CostumeSuitDataBean\$CostumeSuitContentItemBean"
     private val CLS_MAINPAGE_AD_CB = "com.sohu.inputmethod.sogou.home.main.viewmodel.MainPageViewModel\$c"
-    private const val ID_DBG_U0 = "ime:theme.b.u0(dbg)"
-    private const val ID_DBG_TFAIL = "ime:theme.b.T(fail_dbg)"
 
-    private const val CLS_THEME_CTRL = "com.sogou.theme.b"
 
 
     /** TEMP PoC：最近一次套装详情 id（suit/items 12003 替换用）。 */

@@ -102,10 +102,6 @@
     <string name="feature_ime_splash_ad_off_title">去开屏广告</string>
     <string name="feature_ime_splash_ad_off_desc">点开输入法图标时不再加载开屏广告，直达主界面；隐私同意状态与广告以外的功能不受影响</string>
 
-    <!-- TEMP(2026-10-28)：付费皮肤越权披露取证 PoC，验证完删除 -->
-    <string name="feature_ime_skin_pay_bypass_title">皮肤付费门验证（PoC）</string>
-    <string name="feature_ime_skin_pay_bypass_desc">临时开关：将皮肤预览页付费状态机视为已购，用于验证付费皮肤仅受客户端校验；取证后关闭并删除</string>
-
     <string name="feature_ime_store_ad_off_title">皮肤商店去推广</string>
     <string name="feature_ime_store_ad_off_desc">过滤皮肤商店列表与详情中伪装成皮肤的推广条目和横幅，只保留真实皮肤与主题</string>
 
