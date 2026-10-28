@@ -213,6 +213,80 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
+                    // 套装安装兼容修复②：phoneTheme.ini 字段 H() 空/超 20000 → cg4 f(21)
+                    // （同 m1 文案组「暂不支持当前设备」）。矫正为 20000 使本机安装器接受。
+                    className = "zf4",
+                    methodName = "H",
+                    paramCount = 0,
+                    returnType = "java.lang.String",
+                    id = ID_INI_H,
+                    description = "PoC：phoneTheme.ini H() 字段白名单矫正",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // 套装安装兼容修复：phoneTheme.ini 标志字段 G() 白名单 {0,1}——
+                    // COS 商店文件该字段超范围 → cg4 f(20) → 「暂不支持当前设备」。
+                    // 矫正为 "1" 使本机安装器接受（cg4.d 实证：仅 0/1 通过）。
+                    className = "zf4",
+                    methodName = "G",
+                    paramCount = 0,
+                    returnType = "java.lang.String",
+                    id = ID_INI_G,
+                    description = "PoC：phoneTheme.ini 标志字段白名单矫正",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // 付费门 PoC①备：全局 payment 字段 0(未购)→1(已购)——观测用
+                    className = CLS_JSON,
+                    methodName = "optInt",
+                    paramCount = 1,
+                    returnType = "int",
+                    id = ID_SKIN_PAYMENT,
+                    description = "PoC备：optInt(payment) 0→1（全局，观测用）",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // T6a：套装列表条目 setAdData 禁用——AMS 信息流广告附到条目上渲染，
+                    // 切断数据即无广告位（真机实证：抖音极速版推广混在套装列表）
+                    className = CLS_COSTUME_ITEM,
+                    methodName = "setAdData",
+                    paramCount = 1,
+                    returnType = "void",
+                    id = ID_AD_SETADDATA,
+                    description = "T6a：套装列表条目 AMS 广告数据禁用",
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
+                ),
+                MountEngine.SimpleTask(
+                    // T6b：商店首页 AMS 信息流回调清空——AdBean 列表置空后页面无广告混排
+                    className = CLS_MAINPAGE_AD_CB,
+                    methodName = "a",
+                    paramCount = 1,
+                    returnType = "void",
+                    id = ID_AD_FEED,
+                    description = "T6b：商店首页 AMS 信息流广告列表清空",
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
+                ),
+                MountEngine.SimpleTask(
+                    // TEMP 诊断：u0() 下载发起——打印 this.h（实际下载 URL）
+                    className = CLS_THEME_CTRL,
+                    methodName = "u0",
+                    paramCount = 0,
+                    returnType = "void",
+                    id = ID_DBG_U0,
+                    description = "PoC 诊断：下载发起 URL",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // TEMP 诊断：T(int,String) 下载失败回调——打印进度码与文件路径
+                    className = CLS_THEME_CTRL,
+                    methodName = "T",
+                    paramCount = 2,
+                    returnType = "void",
+                    id = ID_DBG_TFAIL,
+                    description = "PoC 诊断：下载失败回调",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
                     // TEMP PoC：付费状态机 r1（老预览页）。验证完整段删除。
                     className = CLS_THEME_PREVIEW,
                     methodName = "r1",
@@ -288,6 +362,14 @@ object ImeHook : TargetHook {
                     session.judge(module, task, JUDGE_PREFIX, "r1 恒返 1（已购态）")
                     1
                 }
+                ID_SKIN_PAYMENT -> {
+                    val ret = chain.proceed()
+                    val key = chain.args?.firstOrNull() as? String
+                    if (key == "payment" && ret == 0) {
+                        session.judge(module, task, JUDGE_PREFIX, "optInt(payment) 0→1")
+                        1
+                    } else ret
+                }
                 ID_SMART_N1 -> {
                     // TEMP PoC：N1 为纯状态判定（jadx 实证：读 model 字段做返回值映射，副作用仅 l3
                     // 赠礼触发，对付费皮肤路径无意义）→ CONST 短路恒返 3(启用态)。
@@ -299,6 +381,21 @@ object ImeHook : TargetHook {
                     // sd4 的 payStatus!=1 拦截同被满足，走套装下载安装路径。
                     session.judge(module, task, JUDGE_PREFIX, "payStatus 恒返 1（套装已购态）")
                     1
+                }
+                ID_INI_H -> {
+                    val ret = chain.proceed() as? String
+                    val n = ret?.toLongOrNull()
+                    if (ret != null && ret.isNotBlank() && (n == null || n <= 20000)) ret else {
+                        session.judge(module, task, JUDGE_PREFIX, "H()=$ret 矫正为 20000")
+                        "20000"
+                    }
+                }
+                ID_INI_G -> {
+                    val ret = chain.proceed() as? String
+                    if (ret == "0" || ret == "1") ret else {
+                        session.judge(module, task, JUDGE_PREFIX, "G()=$ret 矫正为 1")
+                        "1"
+                    }
                 }
                 ID_DAI_FIX -> {
                     // TEMP PoC：args[2]=ThemeItemInfo。补 ssfDownloadUrl（cosUrlMap 或匿名补查），
@@ -319,6 +416,23 @@ object ImeHook : TargetHook {
                         cls.getDeclaredField("md5").set(info, "")
                         cls.getDeclaredField("isNetTheme").set(info, true)
                         session.judge(module, task, JUDGE_PREFIX, "启用入口已注入 COS 直链：$sid")
+                    } catch (_: Throwable) { }
+                    chain.proceed()
+                }
+                ID_DBG_U0 -> {
+                    try {
+                        chain.proceed()
+                        val h = chain.thisObject.javaClass.getDeclaredField("h")
+                        h.isAccessible = true
+                        val u = h.get(chain.thisObject) as? String
+                        module.log(Log.INFO, "SkinPoC", "DOWNLOAD_URL $u")
+                    } catch (_: Throwable) { chain.proceed() }
+                }
+                ID_DBG_TFAIL -> {
+                    try {
+                        val code = chain.args?.getOrNull(0)
+                        val path = chain.args?.getOrNull(1)
+                        module.log(Log.INFO, "SkinPoC", "DL_FAIL code=$code path=$path")
                     } catch (_: Throwable) { }
                     chain.proceed()
                 }
@@ -357,6 +471,22 @@ object ImeHook : TargetHook {
                             orig
                         }
                     } else orig
+                }
+                ID_AD_SETADDATA -> {
+                    // AMS 广告数据不附到条目：吞掉 setAdData（void，不 proceed）
+                    session.judge(module, task, JUDGE_PREFIX, "setAdData 已禁用")
+                }
+                ID_AD_FEED -> {
+                    // AMS 信息流回调：List<AdBean> 清空后走原逻辑
+                    try {
+                        val arr = chain.args?.toTypedArray()
+                        if (arr != null && arr.isNotEmpty()) {
+                            arr[0] = java.util.ArrayList<Any>()
+                            session.judge(module, task, JUDGE_PREFIX, "信息流广告列表已清空")
+                            return@mount chain.proceedWith(chain.thisObject, arr)
+                        }
+                    } catch (_: Throwable) { }
+                    chain.proceed()
                 }
                 ID_STORE_AD_FILTER -> {
                     // T6：响应层过滤（规则定稿 2026-10-28，匿名 curl 全量 + 真机抓包互证）：
@@ -513,12 +643,24 @@ object ImeHook : TargetHook {
     private const val ID_SPLASH_GATE = "ime:px5.b"
     // TEMP(2026-10-28)：披露取证 PoC，验证完删除
     private const val ID_SKIN_R1 = "ime:ThemePreviewActivity.r1"
+    private const val ID_SKIN_PAYMENT = "ime:JSONObject.optInt(payment)"
     private const val ID_SMART_N1 = "ime:SmartThemeSkinDetailActivity.N1"
     private const val ID_COSTUME_PAYSTATUS = "ime:CostumeDetailDataBean.getPayStatus"
     private const val ID_Z_URL = "ime:theme.b.Z(skindl)"
     private const val ID_DBG_RESULT = "ime:theme.b.X(result)"
     private const val ID_DAI_FIX = "ime:HomeThemeService.dai(fix)"
+    private const val ID_INI_G = "ime:zf4.G(ini_flag)"
+    private const val ID_INI_H = "ime:zf4.H(ini_flag)"
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
+    private const val ID_AD_SETADDATA = "ime:CostumeItem.setAdData(off)"
+    private const val ID_AD_FEED = "ime:MainPageFeedCb(off)"
+
+    private val CLS_COSTUME_ITEM = "com.sogou.home.costume.bean.CostumeSuitDataBean\$CostumeSuitContentItemBean"
+    private val CLS_MAINPAGE_AD_CB = "com.sohu.inputmethod.sogou.home.main.viewmodel.MainPageViewModel\$c"
+    private const val ID_DBG_U0 = "ime:theme.b.u0(dbg)"
+    private const val ID_DBG_TFAIL = "ime:theme.b.T(fail_dbg)"
+
+    private const val CLS_THEME_CTRL = "com.sogou.theme.b"
 
 
     /** TEMP PoC：最近一次套装详情 id（suit/items 12003 替换用）。 */
