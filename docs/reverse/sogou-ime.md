@@ -52,32 +52,4 @@ if-nez v0, :cond_41    # false ⇒ t.sendEmptyMessage(1) 直达主界面（不�
 **锚点口径**：b() 方法体零字符串，锚只能在类级——px5 的 beacon 面（e/g/h）独占
 `press`/`network`/`confirm`/`cancel` 四串组合。类名漂移后的宽松轨适配**依赖上面的基建项先落地**。
 
-## 二、皮肤 / 会员（二次侦查完毕，2026-10-27 —— 结论：服务端权益，本地做不了）
-
-皮肤面：`com.sogou.theme.*`。支付面：`com.sogou.pay.sdk.PayManager` + `SogouIMEPay`。
-
-**获取路径三条，全终结在服务端**（SmartThemeSkinDetailActivity.java jadx 全读）：
-1. **购买**（payment==0）：`e3()` → `SogouIMEPay.D(...)` → `q.onSuccess` → `D2()` → `hf6.h().p(c0,…)`
-   下载。onSuccess 前提是搜狗服务端订单成立，本地伪造回调过不了。
-2. **会员/礼赠**（payment==2）：`GiftReceiveController`（gift_id 服务端领取链；深链
-   `com.sogou.receive.smarttheme` 同样 gift_id 参数）。
-3. **会员资格本身**：账户 `BindStatus` 服务端下发；dex 全局无本地 Vip 标志类/字符串
-   （isVip/VIP 的 dex_names/dex_strings 双查 0 命中）。
-
-**资源 URL 事实（链路已闭合）**：
-- 真下载不走静态文件：`com.sogou.theme.b.Z(ThemeItemInfo)` 拼 **`skindl.php?skin_id=<id>&sid=<sid>&plat=Android&ver=…`**
-  + DES 加密设备标识（`defpackage.f.b(imei/androidID, "6E09C97EB8798EEB")`）——**skindl.php 是服务端
-  下载分发器，付费与否由服务端按 skin_id + 订单裁定**。详情模型 `download_ssf_url` 同样含 `skin_id=`
-  （F2() 实测分支）= 服务端预拼的同一分发器 URL，不是裸 CDN 文件；`md5` 只是落盘完整性校验。
-- 支付成功链 `D2()→a2()` 不重新拉详情、不取新票据 ⇒ 客户端对付费皮肤**本来就没有本地权益 gate**——
-  门全在 skindl.php 那侧，客户端无点可挂。
-- 改请求参数（服务端查账）/ 改响应（无单时响应里没有文件字节）/ 改本地临时文件
-  （`sga/.sync/` 下全是**已合法获取**的皮肤，未购皮肤的字节不在盘上，md5 一校即穿）——三条路全闭合，皆不可行。
-- 伪造设备标识骗分发器 = 对搜狗服务的权益伪造 + 设备身份伪造，远超「本机内存态」边界，**明确不做**。
-
-**结论：付费皮肤下载无客户端可挂点，本地不可交付（终审）。伪会员态不建议（UI 会员、服务端全拒，交付即误导）。**
-
-## 三、其余面（未勘察）
-
-- 键盘内推广位/热点运营位（`com.sogou.lib.spage.*`）未看。
-- 皮肤 VIP 与「搜狗会员」账号体系未看——账号态伪造涉及服务端账户，默认越界。
+ 

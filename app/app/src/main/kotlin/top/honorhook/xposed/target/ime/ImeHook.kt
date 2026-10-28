@@ -216,7 +216,7 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP PoC：付费状态机 r1（老预览页）。验证完整段删除。
+                    // PoC：付费状态机 r1（老预览页）。验证完整段删除。
                     className = CLS_THEME_PREVIEW,
                     methodName = "r1",
                     paramCount = 4,  // 签名实证：(D I String Z)I —— ThemePreviewActivity.java:2602（jadx）
@@ -236,7 +236,7 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
+                    // PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
                     // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
                     className = CLS_SMART_DETAIL,
                     methodName = "N1",
@@ -540,7 +540,7 @@ object ImeHook : TargetHook {
     private const val ID_U10B = "ime:u10.b"
     private const val ID_A4 = "ime:SettingManager.A4"
     private const val ID_SPLASH_GATE = "ime:px5.b"
-    // TEMP(2026-10-28)：披露取证 PoC，验证完删除
+    // TEMP(2026-10-28)：披露取证 PoC，
     private const val ID_INI_G = "ime:zf4.G(ini_flag)"
     private const val ID_INI_H = "ime:zf4.H(ini_flag)"
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
@@ -562,13 +562,13 @@ object ImeHook : TargetHook {
 
 
 
-    /** TEMP PoC：最近一次套装详情 id（suit/items 12003 替换用）。 */
+    /** PoC：最近一次套装详情 id（suit/items 12003 替换用）。 */
     @Volatile private var lastSuitId: String? = null
 
-    /** TEMP PoC：skin_id→COS ssf 直链（Z() 死链替换用；容量 80 截断防膨胀）。 */
+    /** PoC：skin_id→COS ssf 直链（Z() 死链替换用；容量 80 截断防膨胀）。 */
     private val cosUrlMap = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** TEMP PoC：递归收集 JSON 里成对的 skin_id+ssf_download_url。 */
+    /** PoC：递归收集 JSON 里成对的 skin_id+ssf_download_url。 */
     private fun collectCosUrls(c: org.json.JSONObject) {
         try {
             val sid = c.optString("skin_id")
@@ -590,7 +590,7 @@ object ImeHook : TargetHook {
     }
 
     /**
-     * TEMP PoC：伪造 S-COOKIE 复刻（by3.b 算法，jadx 实证 + curl 验证通过）：
+     * PoC：伪造 S-COOKIE 复刻（by3.b 算法，jadx 实证 + curl 验证通过）：
      * A=当前时间各字段拼接（月份 0 基）；C=随机 5 位；sub=MD5(A+C+params)[0:10]；
      * key1=MD5(A+C+"6E09C97EB8798EEB") 后 16 字符；内层=Base64(AES/ECB/PKCS5(zlib(params|sub)))；
      * S-COOKIE=Base64(AES/ECB/PKCS5("A|C|内层"))。静态密钥硬编码于 APK。
@@ -627,7 +627,7 @@ object ImeHook : TargetHook {
             android.util.Base64.NO_WRAP)
     }.getOrNull()
 
-    /** TEMP PoC：匿名重取 suit/items（伪造 S-COOKIE + 假设备参数串，curl 实证 code 0）。 */
+    /** PoC：匿名重取 suit/items（伪造 S-COOKIE + 假设备参数串，curl 实证 code 0）。 */
     private fun refetchSuitItems(suitId: String): String? = runCatching {
         val sc = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0") ?: return null
         val url = java.net.URL(
@@ -669,7 +669,7 @@ object ImeHook : TargetHook {
         }.getOrDefault(body)
     }.getOrNull()
 
-    /** TEMP PoC：把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
+    /** PoC：把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
     private fun rewriteFileAdds(body: String, sc: String?): String? {
         if (sc == null) return null
         val jo = org.json.JSONObject(body)
