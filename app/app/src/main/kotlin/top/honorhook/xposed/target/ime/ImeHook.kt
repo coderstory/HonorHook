@@ -72,6 +72,26 @@ object ImeHook : TargetHook {
     private const val CLS_SPLASH_GATE = "px5"
 
     /**
+     * TEMP(2026-10-28)：付费皮肤披露 PoC。付费门 = ThemePreviewActivity.r1 状态机
+     * （jadx 实证签名 (D I String Z)I；返回 0=未购「立即购买」1=已购「立即启用」2=免费），
+     * 下载用的 ssf_download_url 本就在详情响应里。r1 为 R8 名 → 类名未混淆可直连。
+     * 验证完整段删除。
+     */
+
+
+    /**
+     * TEMP(2026-10-28)：新版皮肤详情页（用户实际路径，logcat 实证跳转链
+     * SogouIMEHomeActivity → SmartThemeSkinDetailActivity → HonorPayActivity）。
+     * 付费状态机 N1(SmartThemeDetailModel)I：0=购买/7=裂变/9=售罄/8=已获赠(payment==2)/
+     * 3=启用(payment≥1)/1、2=免费。恒返 3 = 「已购买(￥x)」启用态。
+     */
+
+    /**
+     * TEMP(2026-10-28)：套装皮肤详情（CostumeSuitDetailActivity.java:866/460 jadx 实证）：
+     * getPayStatus() 1=已购买(可安装) 2=已获赠 0=待购买；未混淆公共 bean，直连稳定。
+     */
+
+    /**
      * T6 商店去推广：postSuccess(pv, String) 是**所有** API JSON 响应的唯一入口
      * （base 类 onResponse 内调用，子类无法绕过；与 (pv,JSONObject) 重载同签名，
      * 挂载层命中其一即生效——实测 String 重载命中）。
@@ -175,45 +195,27 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // 套装安装兼容：phoneTheme.ini 字段 G()/H() 白名单矫正——
-                    // COS 商店文件 G()=2 超 {0,1} 白名单 → cg4 f(20)「暂不支持当前设备」；
-                    // H() 空/超限 → f(21)。真机判据实证（G()=2 矫正为 1）。
-                    className = "zf4",
-                    methodName = "G",
-                    paramCount = 0,
-                    returnType = "java.lang.String",
-                    id = ID_INI_G,
-                    description = "套装安装：phoneTheme.ini G() 白名单矫正",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
-                ),
-                MountEngine.SimpleTask(
-                    className = "zf4",
-                    methodName = "H",
-                    paramCount = 0,
-                    returnType = "java.lang.String",
-                    id = ID_INI_H,
-                    description = "PoC：phoneTheme.ini H() 字段白名单矫正",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
-                ),
-                MountEngine.SimpleTask(
+                    // TEMP PoC：付费状态机 r1（老预览页）。验证完整段删除。
                     className = CLS_THEME_PREVIEW,
                     methodName = "r1",
                     paramCount = 4,  // 签名实证：(D I String Z)I —— ThemePreviewActivity.java:2602（jadx）
                     returnType = "int",
                     id = ID_SKIN_R1,
                     description = "PoC：付费状态机 r1 恒返 1(已购)，验证付费门仅客户端 UI 层",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
+                    // 付费门 PoC①备：全局 payment 字段 0(未购)→1(已购)——观测用
                     className = CLS_JSON,
                     methodName = "optInt",
                     paramCount = 1,
                     returnType = "int",
                     id = ID_SKIN_PAYMENT,
                     description = "PoC备：optInt(payment) 0→1（全局，观测用）",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
+                    // TEMP PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
                     // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
                     className = CLS_SMART_DETAIL,
                     methodName = "N1",
@@ -221,34 +223,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SMART_N1,
                     description = "PoC：智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
-                ),
-                MountEngine.SimpleTask(
-                    className = CLS_THEME_CTRL,
-                    methodName = "u0",
-                    paramCount = 0,
-                    returnType = "void",
-                    id = ID_DBG_U0,
-                    description = "PoC 诊断：下载发起 URL",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
-                ),
-                MountEngine.SimpleTask(
-                    className = CLS_THEME_CTRL,
-                    methodName = "T",
-                    paramCount = 2,
-                    returnType = "void",
-                    id = ID_DBG_TFAIL,
-                    description = "PoC 诊断：下载失败回调",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
-                ),
-                MountEngine.SimpleTask(
-                    className = CLS_THEME_CTRL,
-                    methodName = "X",
-                    paramCount = 2,  // 签名实证：(Intent,boolean)V —— b.java X/doReceiver
-                    returnType = "void",
-                    id = ID_DBG_RESULT,
-                    description = "PoC 调试：安装结果广播 result_code 打印",
-                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
                     // T6 商店去推广：postSuccess 响应层过滤。**必须用 paramTypes 锚钉 (pv,String) 重载**——
@@ -304,21 +279,6 @@ object ImeHook : TargetHook {
                     } catch (_: Throwable) { }
                     chain.proceed()
                 }
-                ID_INI_H -> {
-                    val ret = chain.proceed() as? String
-                    val n = ret?.toLongOrNull()
-                    if (ret != null && ret.isNotBlank() && (n == null || n <= 20000)) ret else {
-                        session.judge(module, task, JUDGE_PREFIX, "H()=$ret 矫正为 20000")
-                        "20000"
-                    }
-                }
-                ID_INI_G -> {
-                    val ret = chain.proceed() as? String
-                    if (ret == "0" || ret == "1") ret else {
-                        session.judge(module, task, JUDGE_PREFIX, "G()=$ret 矫正为 1")
-                        "1"
-                    }
-                }
                 ID_SKIN_R1 -> {
                     session.judge(module, task, JUDGE_PREFIX, "r1 恒返 1（已购态）")
                     1
@@ -335,105 +295,15 @@ object ImeHook : TargetHook {
                     session.judge(module, task, JUDGE_PREFIX, "N1 恒返 3（智能详情已购/启用态）")
                     3
                 }
-                ID_DBG_U0 -> {
-                    // proceed 只能调一次：先取返回值，诊断读取全包在 runCatching（原 catch 里再 proceed
-                    // 会抛 IllegalStateException，被 PROTECTIVE 吞掉 ⇒ 本点静默空转）。
-                    val ret = chain.proceed()
-                    runCatching {
-                        val h = chain.thisObject.javaClass.getDeclaredField("h")
-                        h.isAccessible = true
-                        val u = h.get(chain.thisObject) as? String
-                        module.log(Log.INFO, "SkinPoC", "DOWNLOAD_URL $u")
-                    }
-                    ret
-                }
-                ID_DBG_TFAIL -> {
-                    try {
-                        val code = chain.args?.getOrNull(0)
-                        val path = chain.args?.getOrNull(1)
-                        module.log(Log.INFO, "SkinPoC", "DL_FAIL code=$code path=$path")
-                    } catch (_: Throwable) { }
-                    chain.proceed()
-                }
-                ID_DBG_RESULT -> {
-                    val intent = chain.args?.firstOrNull() as? android.content.Intent
-                    val ret = chain.proceed()
-                    runCatching {
-                        val code = intent?.getIntExtra("result_code", -999)
-                        val msg = intent?.getStringExtra("result_msg")
-                        module.log(Log.INFO, "SkinPoC", "INSTALL_RESULT code=$code msg=$msg")
-                    }
-                    ret
-                }
                 ID_STORE_AD_FILTER -> {
                     // T6：响应层过滤（规则定稿 2026-10-28，匿名 curl 全量 + 真机抓包互证）：
                     //   ① 清空组：banner_list/bannerList（轮播横幅）、content_list（首页运营推荐）、
                     //      more_recommend/recommend（详情页推荐条）
                     //   ② 通用剔除：任意对象数组内 ad_type≠0 或带 ad_url/ad_title 的条目
                     //      （覆盖 home_store_recommend_item_list 等全部混排位）
-                    //   ③ 附带：收集 skin_id→COS 直链；suit/items 12003 匿名重取；fileAdd 死链换 COS
                     val args = chain.args
-                    var body = args?.getOrNull(1) as? String
+                    val body = args?.getOrNull(1) as? String
                         ?: return@mount chain.proceed()
-                    // 收集 skin_id→COS 直链（Z()/DAI 兜底数据源）
-                    try {
-                        if (body.contains("ssf_download_url") && body.contains("skin_id")) {
-                            collectCosUrls(org.json.JSONObject(body))
-                        }
-                    } catch (_: Throwable) { }
-                    // suit/items 的 fileAdd 死链（srv-ios 需 SCOOKIE）→ 换 COS 直链
-                    if (body.contains("srv-ios") && body.contains("fileAdd")) {
-                        val patched = runCatching {
-                            val sc0 = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0")
-                            rewriteFileAdds(body, sc0)
-                        }.getOrNull()
-                        if (patched != null && patched != body) {
-                            body = patched
-                            val arr0 = args.toTypedArray()
-                            arr0[1] = patched
-                            session.judge(module, task, JUDGE_PREFIX, "fileAdd 已换 COS 直链")
-                            return@mount chain.proceedWith(chain.thisObject, arr0)
-                        }
-                    }
-                    // suit/items 12003（真机参数触发）→ 伪造 S-COOKIE 匿名重取替换
-                    if (body.contains("数据库操作失败") && lastSuitId != null) {
-                        val fixed = refetchSuitItems(lastSuitId!!)
-                        if (fixed != null) {
-                            body = fixed
-                            val arr1 = args.toTypedArray()
-                            arr1[1] = fixed
-                            session.judge(module, task, JUDGE_PREFIX, "suit/items 12003 已匿名重取替换")
-                            return@mount chain.proceedWith(chain.thisObject, arr1)
-                        }
-                    } else {
-                        runCatching {
-                            org.json.JSONObject(body).optJSONObject("data")
-                                ?.takeIf { it.optString("content_title") == "套装内容" }
-                                ?.optString("id")?.takeIf { it.isNotBlank() }
-                                ?.let { id ->
-                                    lastSuitId = id
-                                    // 预取：套装内全部主题的 COS 直链入表（本处在 okhttp 线程，可联网）
-                                    val sc = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0")
-                                    val items = refetchSuitItems(id)
-                                    if (items != null) {
-                                        val arr = org.json.JSONObject(items).getJSONObject("data").getJSONArray("list")
-                                        for (i in 0 until arr.length()) {
-                                            val it2 = arr.optJSONObject(i) ?: continue
-                                            if (it2.optInt("type") != 2000) continue
-                                            val sid = it2.optString("id")
-                                            if (sid.isBlank() || cosUrlMap.containsKey(sid)) continue
-                                            val sc2 = sc ?: continue
-                                            val det = fetchUrl("https://srv.android.shouji.sogou.com/v1/skin/detail?skin_id=$sid&from=detail&req_id=poc&device_type=1&supportvideo=1&supportgyroscope=0&is_full_screen=1", sc2)
-                                            val u = det?.let { o -> org.json.JSONObject(o).optJSONObject("data")?.optString("ssf_download_url") }
-                                                ?.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com")
-                                            if (u != null && u.endsWith(".ssf")) cosUrlMap[sid] = u
-                                        }
-                                        module.log(Log.INFO, "SkinPoC", "预取套装 $id 直链完成，映射表 ${cosUrlMap.size} 条")
-                                    }
-                                }
-                        }
-                    }
-                    // 快路径：无广告/列表标记的响应零成本放行
                     if (!body.contains("banner") && !body.contains("ad_") &&
                         !body.contains("skinlist") && !body.contains("content_list")) {
                         return@mount chain.proceed()
@@ -448,29 +318,28 @@ object ImeHook : TargetHook {
                                 val k = names.next() as String
                                 if (k == "banner_list" || k == "bannerList" ||
                                     k == "content_list" || k == "more_recommend" || k == "recommend") {
-                                    // 清空组：横幅/运营推荐/详情推荐条（真机实证均为付费皮肤推广）
                                     val arr = container.optJSONArray(k)
                                     if (arr != null && arr.length() > 0) {
                                         container.put(k, org.json.JSONArray())
                                         changed[0] = true
                                     }
                                 } else {
-                                    // 通用剔除：任意对象数组内带广告标记的条目
-                                    val arr = container.optJSONArray(k) ?: continue
-                                    var hadObj = false; var removed = false
-                                    val kept = org.json.JSONArray()
-                                    for (i in 0 until arr.length()) {
-                                        val it2 = arr.optJSONObject(i)
-                                        if (it2 == null) { kept.put(arr.opt(i)); continue }
-                                        hadObj = true
-                                        val ad = it2.optInt("ad_type", 0) != 0 ||
-                                            !it2.optString("ad_url").isNullOrBlank() ||
-                                            !it2.optString("ad_title").isNullOrBlank()
-                                        if (!ad) kept.put(it2) else removed = true
-                                    }
-                                    if (hadObj && removed) {
-                                        container.put(k, kept)
-                                        changed[0] = true
+                                    val arr = container.optJSONArray(k)
+                                    if (arr != null) {
+                                        var removed = false
+                                        val kept = org.json.JSONArray()
+                                        for (i in 0 until arr.length()) {
+                                            val it2 = arr.optJSONObject(i)
+                                            if (it2 == null) { kept.put(arr.opt(i)); continue }
+                                            val ad = it2.optInt("ad_type", 0) != 0 ||
+                                                !it2.optString("ad_url").isNullOrBlank() ||
+                                                !it2.optString("ad_title").isNullOrBlank()
+                                            if (!ad) kept.put(it2) else removed = true
+                                        }
+                                        if (removed) {
+                                            container.put(k, kept)
+                                            changed[0] = true
+                                        }
                                     }
                                 }
                                 when (val v = container.opt(k)) {
@@ -483,10 +352,10 @@ object ImeHook : TargetHook {
                         }
                         filtr(jo, 0)
                         if (changed[0]) {
-                            val arr = args.toTypedArray()
-                            arr[1] = jo.toString()
+                            val a = args.toTypedArray()
+                            a[1] = jo.toString()
                             session.judge(module, task, JUDGE_PREFIX, "推广条目已过滤")
-                            chain.proceedWith(chain.thisObject, arr)
+                            chain.proceedWith(chain.thisObject, a)
                         } else chain.proceed()
                     } catch (_: Throwable) {
                         chain.proceed()  // 解析失败：原样放行，宁漏杀不误杀
@@ -518,8 +387,7 @@ object ImeHook : TargetHook {
     private const val ID_U10B = "ime:u10.b"
     private const val ID_A4 = "ime:SettingManager.A4"
     private const val ID_SPLASH_GATE = "ime:px5.b"
-    private const val ID_INI_G = "ime:zf4.G(ini_flag)"
-    private const val ID_INI_H = "ime:zf4.H(ini_flag)"
+    // TEMP(2026-10-28)：披露取证 PoC，验证完删除
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
     private const val CLS_THEME_PREVIEW = "com.sogou.theme.ThemePreviewActivity"
     private const val CLS_JSON = "org.json.JSONObject"
@@ -528,9 +396,6 @@ object ImeHook : TargetHook {
     private const val ID_SKIN_R1 = "ime:ThemePreviewActivity.r1"
     private const val ID_SKIN_PAYMENT = "ime:JSONObject.optInt(payment)"
     private const val ID_SMART_N1 = "ime:SmartThemeSkinDetailActivity.N1"
-    private const val ID_DBG_U0 = "ime:theme.b.u0(dbg)"
-    private const val ID_DBG_TFAIL = "ime:theme.b.T(fail_dbg)"
-    private const val ID_DBG_RESULT = "ime:theme.b.X(result)"
     private const val ID_AD_SETADDATA = "ime:CostumeItem.setAdData(off)"
     private const val ID_AD_FEED = "ime:MainPageFeedCb(off)"
 
@@ -539,114 +404,7 @@ object ImeHook : TargetHook {
 
 
 
-    /** 最近一次套装详情 id（suit/items 12003 替换用）。 */
-    @Volatile private var lastSuitId: String? = null
-
-    /** skin_id→COS ssf 直链（Z() 死链替换用；容量 80 截断防膨胀）。 */
-    private val cosUrlMap = java.util.concurrent.ConcurrentHashMap<String, String>()
-
-    /** 递归收集 JSON 里成对的 skin_id+ssf_download_url。 */
-    private fun collectCosUrls(c: org.json.JSONObject) {
-        try {
-            val sid = c.optString("skin_id")
-            val url = c.optString("ssf_download_url")
-            if (sid.isNotBlank() && url.endsWith(".ssf")) {
-                cosUrlMap[sid] = url.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com")
-            }
-            val it2 = c.keys()
-            while (it2.hasNext()) {
-                when (val v = c.opt(it2.next() as String)) {
-                    is org.json.JSONObject -> collectCosUrls(v)
-                    is org.json.JSONArray -> for (i in 0 until v.length()) {
-                        (v.opt(i) as? org.json.JSONObject)?.let { collectCosUrls(it) }
-                    }
-                }
-            }
-            if (cosUrlMap.size > 80) cosUrlMap.keys.take(cosUrlMap.size - 80).forEach { cosUrlMap.remove(it) }
-        } catch (_: Throwable) { }
-    }
-
-    /**
-     * 伪造 S-COOKIE 复刻（by3.b 算法，jadx 实证 + curl 验证通过）：
-     * A=当前时间各字段拼接（月份 0 基）；C=随机 5 位；sub=MD5(A+C+params)[0:10]；
-     * key1=MD5(A+C+"6E09C97EB8798EEB") 后 16 字符；内层=Base64(AES/ECB/PKCS5(zlib(params|sub)))；
-     * S-COOKIE=Base64(AES/ECB/PKCS5("A|C|内层"))。静态密钥硬编码于 APK。
-     */
-    private fun forgeScookie(params: String): String? = runCatching {
-        val cal = java.util.Calendar.getInstance()
-        val a = "${cal.get(java.util.Calendar.YEAR)}${cal.get(java.util.Calendar.MONTH)}" +
-            "${cal.get(java.util.Calendar.DAY_OF_MONTH)}${cal.get(java.util.Calendar.HOUR_OF_DAY)}" +
-            "${cal.get(java.util.Calendar.MINUTE)}${cal.get(java.util.Calendar.SECOND)}"
-        val c = ((kotlin.math.abs(java.util.Random().nextInt()) % 99999) + 10000).toString()
-        fun md5(x: String): String {
-            val d = java.security.MessageDigest.getInstance("MD5").digest(x.toByteArray(Charsets.UTF_8))
-            return d.joinToString("") { "%02x".format(it) }
-        }
-        fun aes(data: ByteArray, key: String): ByteArray {
-            val ci = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
-            ci.init(javax.crypto.Cipher.ENCRYPT_MODE,
-                javax.crypto.spec.SecretKeySpec(key.toByteArray(Charsets.UTF_8), "AES"))
-            return ci.doFinal(data)
-        }
-        fun zlib(data: ByteArray): ByteArray {
-            val def = java.util.zip.Deflater(); def.setInput(data); def.finish()
-            val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(4096)
-            while (!def.finished()) { val n = def.deflate(buf); out.write(buf, 0, n) }
-            return out.toByteArray()
-        }
-        val sub = md5(a + c + params).substring(0, 10)
-        val k = md5(a + c + "6E09C97EB8798EEB")
-        val inner = android.util.Base64.encodeToString(
-            aes(zlib((params + "|" + sub).toByteArray(Charsets.UTF_8)), k.substring(k.length - 16)),
-            android.util.Base64.NO_WRAP)
-        android.util.Base64.encodeToString(
-            aes((a + "|" + c + "|" + inner).toByteArray(Charsets.UTF_8), "6E09C97EB8798EEB"),
-            android.util.Base64.NO_WRAP)
-    }.getOrNull()
-
-    /** 匿名重取 suit/items（伪造 S-COOKIE + 假设备参数串，curl 实证 code 0）。 */
-    private fun refetchSuitItems(suitId: String): String? = runCatching {
-        val sc = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0") ?: return null
-        val url = java.net.URL(
-            "https://srv.android.shouji.sogou.com/v1/store/suit/items?id=$suitId&supportvideo=1&supportgyroscope=0&is_full_screen=1")
-        val conn = url.openConnection() as javax.net.ssl.HttpsURLConnection
-        conn.connectTimeout = 8000; conn.readTimeout = 8000
-        conn.setRequestProperty("S-COOKIE", sc)
-        conn.setRequestProperty("SOGOU_PLATFORM", "Android")
-        conn.setRequestProperty("User-Agent", "sgandroid_ime/10.32.44")
-        val body = conn.inputStream.bufferedReader().readText()
-        conn.disconnect()
-        if (!body.contains("\"code\":0")) return null
-        // fileAdd 指向 srv-ios ssf_download.php（需 SCOOKIE，App 拿到 JSON 错误体 → 皮肤包错误）。
-        // 逐条目换 COS 直链：v1/skin/detail 匿名可得 ssf_download_url（占位主机换 COS 域）。
-        runCatching {
-            val jo = org.json.JSONObject(body)
-            val list = jo.getJSONObject("data").getJSONArray("list")
-            for (i in 0 until list.length()) {
-                val item = list.optJSONObject(i) ?: continue
-                if (item.optInt("type") != 2000) continue
-                val skinId = item.optString("id")
-                val info = item.optJSONObject("info") ?: continue
-                val det = fetchUrl(
-                    "https://srv.android.shouji.sogou.com/v1/skin/detail?skin_id=$skinId&from=detail&req_id=poc&device_type=1&supportvideo=1&supportgyroscope=0&is_full_screen=1",
-                    sc) ?: continue
-                val url = org.json.JSONObject(det).optJSONObject("data")?.optString("ssf_download_url")
-                if (!url.isNullOrBlank() && url.endsWith(".ssf")) {
-                    val cos = url.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com")
-                    info.put("fileAdd", cos)
-                    // 关键：补齐 ThemePreviewItem 反序列化字段——套装数据缺 ssf_download_url（只有
-                    // 死链 fileAdd）→ ssfUrl=null → R() 判「非网络主题」→ 不下载直接皮肤包错误。
-                    // ssf_download_url=COS 直链；skin_id/md5 置空 → R0 走下载分支、跳过本地校验。
-                    info.put("ssf_download_url", cos)
-                    if (!info.has("skin_id")) info.put("skin_id", "")
-                    if (!info.has("md5")) info.put("md5", "")
-                }
-            }
-            jo.toString()
-        }.getOrDefault(body)
-    }.getOrNull()
-
-    /** 把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
+    /** TEMP PoC：把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
     private fun rewriteFileAdds(body: String, sc: String?): String? {
         if (sc == null) return null
         val jo = org.json.JSONObject(body)
