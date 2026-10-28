@@ -216,6 +216,67 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
+                    // TEMP PoC：付费状态机 r1（老预览页）。验证完整段删除。
+                    className = CLS_THEME_PREVIEW,
+                    methodName = "r1",
+                    paramCount = 4,  // 签名实证：(D I String Z)I —— ThemePreviewActivity.java:2602（jadx）
+                    returnType = "int",
+                    id = ID_SKIN_R1,
+                    description = "PoC：付费状态机 r1 恒返 1(已购)，验证付费门仅客户端 UI 层",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // 付费门 PoC①备：全局 payment 字段 0(未购)→1(已购)——观测用
+                    className = CLS_JSON,
+                    methodName = "optInt",
+                    paramCount = 1,
+                    returnType = "int",
+                    id = ID_SKIN_PAYMENT,
+                    description = "PoC备：optInt(payment) 0→1（全局，观测用）",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // TEMP PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
+                    // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
+                    className = CLS_SMART_DETAIL,
+                    methodName = "N1",
+                    paramCount = 1,  // 签名实证：(SmartThemeDetailModel)I —— SmartThemeSkinDetailActivity.java:1185
+                    returnType = "int",
+                    id = ID_SMART_N1,
+                    description = "PoC：智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // TEMP 诊断：u0() 下载发起——打印 this.h（实际下载 URL）
+                    className = CLS_THEME_CTRL,
+                    methodName = "u0",
+                    paramCount = 0,
+                    returnType = "void",
+                    id = ID_DBG_U0,
+                    description = "PoC 诊断：下载发起 URL",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // TEMP 诊断：T(int,String) 下载失败回调——打印进度码与文件路径
+                    className = CLS_THEME_CTRL,
+                    methodName = "T",
+                    paramCount = 2,
+                    returnType = "void",
+                    id = ID_DBG_TFAIL,
+                    description = "PoC 诊断：下载失败回调",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
+                    // TEMP 调试：安装结果广播接收器 b.X(Intent,boolean)——读 result_code 定位安装失败环节。
+                    className = CLS_THEME_CTRL,
+                    methodName = "X",
+                    paramCount = 2,  // 签名实证：(Intent,boolean)V —— b.java X/doReceiver
+                    returnType = "void",
+                    id = ID_DBG_RESULT,
+                    description = "PoC 调试：安装结果广播 result_code 打印",
+                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                ),
+                MountEngine.SimpleTask(
                     // T6 商店去推广：postSuccess 响应层过滤。**必须用 paramTypes 锚钉 (pv,String) 重载**——
                     // 类内另有 (pv,JSONObject) 同 paramCount 同返回类型重载，无锚时挂载在两者间抽签，
                     // 挂错重载 = 永不触发（onResponse 只调 String 版）。实证：2026-10-28 02:02 进程
@@ -283,6 +344,48 @@ object ImeHook : TargetHook {
                         session.judge(module, task, JUDGE_PREFIX, "G()=$ret 矫正为 1")
                         "1"
                     }
+                }
+                ID_SKIN_R1 -> {
+                    session.judge(module, task, JUDGE_PREFIX, "r1 恒返 1（已购态）")
+                    1
+                }
+                ID_SKIN_PAYMENT -> {
+                    val ret = chain.proceed()
+                    val key = chain.args?.firstOrNull() as? String
+                    if (key == "payment" && ret == 0) {
+                        session.judge(module, task, JUDGE_PREFIX, "optInt(payment) 0→1")
+                        1
+                    } else ret
+                }
+                ID_SMART_N1 -> {
+                    session.judge(module, task, JUDGE_PREFIX, "N1 恒返 3（智能详情已购/启用态）")
+                    3
+                }
+                ID_DBG_U0 -> {
+                    try {
+                        chain.proceed()
+                        val h = chain.thisObject.javaClass.getDeclaredField("h")
+                        h.isAccessible = true
+                        val u = h.get(chain.thisObject) as? String
+                        module.log(Log.INFO, "SkinPoC", "DOWNLOAD_URL $u")
+                    } catch (_: Throwable) { chain.proceed() }
+                }
+                ID_DBG_TFAIL -> {
+                    try {
+                        val code = chain.args?.getOrNull(0)
+                        val path = chain.args?.getOrNull(1)
+                        module.log(Log.INFO, "SkinPoC", "DL_FAIL code=$code path=$path")
+                    } catch (_: Throwable) { }
+                    chain.proceed()
+                }
+                ID_DBG_RESULT -> {
+                    try {
+                        val intent = chain.args?.firstOrNull() as? android.content.Intent
+                        chain.proceed()
+                        val code = intent?.getIntExtra("result_code", -999)
+                        val msg = intent?.getStringExtra("result_msg")
+                        module.log(Log.INFO, "SkinPoC", "INSTALL_RESULT code=$code msg=$msg")
+                    } catch (_: Throwable) { chain.proceed() }
                 }
                 ID_STORE_AD_FILTER -> {
                     // T6：响应层过滤（规则定稿 2026-10-28，匿名 curl 全量 + 真机抓包互证）：
@@ -441,6 +544,16 @@ object ImeHook : TargetHook {
     private const val ID_INI_G = "ime:zf4.G(ini_flag)"
     private const val ID_INI_H = "ime:zf4.H(ini_flag)"
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
+    private const val CLS_THEME_PREVIEW = "com.sogou.theme.ThemePreviewActivity"
+    private const val CLS_JSON = "org.json.JSONObject"
+    private const val CLS_SMART_DETAIL = "com.sogou.theme.SmartThemeSkinDetailActivity"
+    private const val CLS_THEME_CTRL = "com.sogou.theme.b"
+    private const val ID_SKIN_R1 = "ime:ThemePreviewActivity.r1"
+    private const val ID_SKIN_PAYMENT = "ime:JSONObject.optInt(payment)"
+    private const val ID_SMART_N1 = "ime:SmartThemeSkinDetailActivity.N1"
+    private const val ID_DBG_U0 = "ime:theme.b.u0(dbg)"
+    private const val ID_DBG_TFAIL = "ime:theme.b.T(fail_dbg)"
+    private const val ID_DBG_RESULT = "ime:theme.b.X(result)"
     private const val ID_AD_SETADDATA = "ime:CostumeItem.setAdData(off)"
     private const val ID_AD_FEED = "ime:MainPageFeedCb(off)"
 

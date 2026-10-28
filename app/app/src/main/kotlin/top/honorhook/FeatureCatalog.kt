@@ -68,6 +68,9 @@ object FeatureCatalog {
     /** 皮肤商店推广条目过滤（2026-10-28）。 */
     const val KEY_IME_STORE_AD_OFF = "ime.store_ad_off"
 
+    /** TEMP(2026-10-28)：付费皮肤越权验证 PoC（安全披露取证用），验证完整条删除。 */
+    const val KEY_IME_SKIN_PAY_BYPASS = "ime.skin_pay_bypass"
+
     const val KEY_ADS_BLOCK = "ads.block"
     const val KEY_TRACK_BLOCK = "tracking.block"
     const val KEY_OTA_BLOCK = "ota.block"
@@ -220,6 +223,8 @@ object FeatureCatalog {
                 Feature(KEY_IME_CODE_FREE, R.string.feature_ime_code_free_title, R.string.feature_ime_code_free_desc),
                 Feature(KEY_IME_SPLASH_AD_OFF, R.string.feature_ime_splash_ad_off_title, R.string.feature_ime_splash_ad_off_desc),
                 Feature(KEY_IME_STORE_AD_OFF, R.string.feature_ime_store_ad_off_title, R.string.feature_ime_store_ad_off_desc),
+                // TEMP(2026-10-28)：披露取证用 PoC 开关，验证完随 KEY_IME_SKIN_PAY_BYPASS 一并删除
+                Feature(KEY_IME_SKIN_PAY_BYPASS, R.string.feature_ime_skin_pay_bypass_title, R.string.feature_ime_skin_pay_bypass_desc),
             ),
             baselineVersion = "10.32.44.202608251503",  // pm dump 实证 versionName（设备 AAK-AN00 2026-10-12；原 ImeHook 私有常量上提）
         ),
