@@ -12,7 +12,7 @@
 
 - [x] 设置应用详情页「停用」按钮：两场景重写并真机验收（2026-10-13）——用户应用零介入（Q3 恒 setText 卸载），系统应用修管控灰按钮 + HwCust 清字（按 mAppEntry.info.flags 分流，commit 8a8556c）；顺带修 scope set 被未安装包卡断致作用域抹空
 - [x] MFA 去广告复验：installed 1/1，开屏已跳直达主界面，基线 1.0.5 一致（2026-10-13）
-- [ ] 搜狗键盘 v1.2.3 三功能真机验收：T5 去开屏广告（`px5.b` 单点）、T6 皮肤商店去推广（`postSuccess` 响应层过滤）、皮肤付费门 + 套装安装（2026-10-28 部署后 `installed 13/13`——当时 13 点，现 17 点，未经点按验证；观测点 `INSTALL_RESULT`/`DOWNLOAD_URL` 仍在挂）
+- [ ] 搜狗键盘 v1.2.3 三功能真机验收：T5 去开屏广告（`px5.b` 单点）、T6 皮肤商店去推广（`postSuccess` 响应层过滤）、皮肤付费门 + 套装安装（2026-10-28 部署后 `installed 13/13`——当时 13 点，现 17 点，未经点按验证；观测点 `INSTALL_RESULT`/`DOWNLOAD_URL` 仍在挂）。**付费门无独立开关**，随「皮肤商店去推广」生效（1ccba3f）
 
 ## 迭代候选（2026-10-13 推荐，按价值排序）
 
@@ -28,6 +28,7 @@
 - ImeHook `refetchSuitItems` 在 okhttp 响应回调线程内串行发 HTTPS（每皮肤一次、8s 超时）：套装 20 件最坏阻塞 ~160s。属 2026-10-28 已真机跑通的路径，改动需同期真机复验，暂不动。
 - ImeHook `ID_SKIN_PAYMENT` 挂在 `org.json.JSONObject.optInt`（进程级基础设施类，非业务类）：虽有 `key == "payment"` 守卫，失效面覆盖整个进程的 JSON 解析；宿主或框架更换 JSON 实现即静默失效或误伤。
 - ImeHook 判据 M = 17，其中 4 个是纯诊断点（`optInt`/`u0`/`T`/`X`）：`installed 17/17` ≠ 17 个功能生效，功能点为 13。
+- 付费门并入「皮肤商店去推广」后（1ccba3f），3 个诊断点（`DOWNLOAD_URL`/`DL_FAIL`/`INSTALL_RESULT`）随该开关常开：皮肤商店为低频页可接受，若日志嘈杂则单独摘除这三点。
 
 ## 主题商店老 bug（未动）
 
@@ -44,3 +45,4 @@
 - [x] 状态栏 5G 类型标隐藏（SystemUiHook U2，installed 7/7）
 - [x] 搜狗键盘：去开屏广告 + 皮肤商店去推广 + 皮肤付费门（v1.2.3，2026-10-28 发布）
 - [x] 清理 ImeHook / FeatureCatalog / strings 的 PoC·TEMP 注释 36 行 + 修 `ID_DBG_U0`/`ID_DBG_RESULT` 双重 `proceed`（437836b，2026-10-31）
+- [x] 皮肤付费门去 PoC 化：删 `KEY_IME_SKIN_PAY_BYPASS` 常量 / 面板开关 / 两条文案，6 个挂载点改挂「皮肤商店去推广」（1ccba3f，2026-10-31）
