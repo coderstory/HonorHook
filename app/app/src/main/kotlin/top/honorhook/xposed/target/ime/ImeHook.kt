@@ -72,26 +72,6 @@ object ImeHook : TargetHook {
     private const val CLS_SPLASH_GATE = "px5"
 
     /**
-     * TEMP(2026-10-28)：付费皮肤披露 PoC。付费门 = ThemePreviewActivity.r1 状态机
-     * （jadx 实证签名 (D I String Z)I；返回 0=未购「立即购买」1=已购「立即启用」2=免费），
-     * 下载用的 ssf_download_url 本就在详情响应里。r1 为 R8 名 → 类名未混淆可直连。
-     * 验证完整段删除。
-     */
-
-
-    /**
-     * TEMP(2026-10-28)：新版皮肤详情页（用户实际路径，logcat 实证跳转链
-     * SogouIMEHomeActivity → SmartThemeSkinDetailActivity → HonorPayActivity）。
-     * 付费状态机 N1(SmartThemeDetailModel)I：0=购买/7=裂变/9=售罄/8=已获赠(payment==2)/
-     * 3=启用(payment≥1)/1、2=免费。恒返 3 = 「已购买(￥x)」启用态。
-     */
-
-    /**
-     * TEMP(2026-10-28)：套装皮肤详情（CostumeSuitDetailActivity.java:866/460 jadx 实证）：
-     * getPayStatus() 1=已购买(可安装) 2=已获赠 0=待购买；未混淆公共 bean，直连稳定。
-     */
-
-    /**
      * T6 商店去推广：postSuccess(pv, String) 是**所有** API JSON 响应的唯一入口
      * （base 类 onResponse 内调用，子类无法绕过；与 (pv,JSONObject) 重载同签名，
      * 挂载层命中其一即生效——实测 String 重载命中）。
@@ -216,7 +196,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // PoC：付费状态机 r1（老预览页）。验证完整段删除。
                     className = CLS_THEME_PREVIEW,
                     methodName = "r1",
                     paramCount = 4,  // 签名实证：(D I String Z)I —— ThemePreviewActivity.java:2602（jadx）
@@ -226,7 +205,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // 付费门 PoC①备：全局 payment 字段 0(未购)→1(已购)——观测用
                     className = CLS_JSON,
                     methodName = "optInt",
                     paramCount = 1,
@@ -236,7 +214,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
                     // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
                     className = CLS_SMART_DETAIL,
                     methodName = "N1",
@@ -247,7 +224,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP 诊断：u0() 下载发起——打印 this.h（实际下载 URL）
                     className = CLS_THEME_CTRL,
                     methodName = "u0",
                     paramCount = 0,
@@ -257,7 +233,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP 诊断：T(int,String) 下载失败回调——打印进度码与文件路径
                     className = CLS_THEME_CTRL,
                     methodName = "T",
                     paramCount = 2,
@@ -267,7 +242,6 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP 调试：安装结果广播接收器 b.X(Intent,boolean)——读 result_code 定位安装失败环节。
                     className = CLS_THEME_CTRL,
                     methodName = "X",
                     paramCount = 2,  // 签名实证：(Intent,boolean)V —— b.java X/doReceiver
@@ -362,13 +336,16 @@ object ImeHook : TargetHook {
                     3
                 }
                 ID_DBG_U0 -> {
-                    try {
-                        chain.proceed()
+                    // proceed 只能调一次：先取返回值，诊断读取全包在 runCatching（原 catch 里再 proceed
+                    // 会抛 IllegalStateException，被 PROTECTIVE 吞掉 ⇒ 本点静默空转）。
+                    val ret = chain.proceed()
+                    runCatching {
                         val h = chain.thisObject.javaClass.getDeclaredField("h")
                         h.isAccessible = true
                         val u = h.get(chain.thisObject) as? String
                         module.log(Log.INFO, "SkinPoC", "DOWNLOAD_URL $u")
-                    } catch (_: Throwable) { chain.proceed() }
+                    }
+                    ret
                 }
                 ID_DBG_TFAIL -> {
                     try {
@@ -379,13 +356,14 @@ object ImeHook : TargetHook {
                     chain.proceed()
                 }
                 ID_DBG_RESULT -> {
-                    try {
-                        val intent = chain.args?.firstOrNull() as? android.content.Intent
-                        chain.proceed()
+                    val intent = chain.args?.firstOrNull() as? android.content.Intent
+                    val ret = chain.proceed()
+                    runCatching {
                         val code = intent?.getIntExtra("result_code", -999)
                         val msg = intent?.getStringExtra("result_msg")
                         module.log(Log.INFO, "SkinPoC", "INSTALL_RESULT code=$code msg=$msg")
-                    } catch (_: Throwable) { chain.proceed() }
+                    }
+                    ret
                 }
                 ID_STORE_AD_FILTER -> {
                     // T6：响应层过滤（规则定稿 2026-10-28，匿名 curl 全量 + 真机抓包互证）：
@@ -540,7 +518,6 @@ object ImeHook : TargetHook {
     private const val ID_U10B = "ime:u10.b"
     private const val ID_A4 = "ime:SettingManager.A4"
     private const val ID_SPLASH_GATE = "ime:px5.b"
-    // TEMP(2026-10-28)：披露取证 PoC，
     private const val ID_INI_G = "ime:zf4.G(ini_flag)"
     private const val ID_INI_H = "ime:zf4.H(ini_flag)"
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
@@ -562,13 +539,13 @@ object ImeHook : TargetHook {
 
 
 
-    /** PoC：最近一次套装详情 id（suit/items 12003 替换用）。 */
+    /** 最近一次套装详情 id（suit/items 12003 替换用）。 */
     @Volatile private var lastSuitId: String? = null
 
-    /** PoC：skin_id→COS ssf 直链（Z() 死链替换用；容量 80 截断防膨胀）。 */
+    /** skin_id→COS ssf 直链（Z() 死链替换用；容量 80 截断防膨胀）。 */
     private val cosUrlMap = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** PoC：递归收集 JSON 里成对的 skin_id+ssf_download_url。 */
+    /** 递归收集 JSON 里成对的 skin_id+ssf_download_url。 */
     private fun collectCosUrls(c: org.json.JSONObject) {
         try {
             val sid = c.optString("skin_id")
@@ -590,7 +567,7 @@ object ImeHook : TargetHook {
     }
 
     /**
-     * PoC：伪造 S-COOKIE 复刻（by3.b 算法，jadx 实证 + curl 验证通过）：
+     * 伪造 S-COOKIE 复刻（by3.b 算法，jadx 实证 + curl 验证通过）：
      * A=当前时间各字段拼接（月份 0 基）；C=随机 5 位；sub=MD5(A+C+params)[0:10]；
      * key1=MD5(A+C+"6E09C97EB8798EEB") 后 16 字符；内层=Base64(AES/ECB/PKCS5(zlib(params|sub)))；
      * S-COOKIE=Base64(AES/ECB/PKCS5("A|C|内层"))。静态密钥硬编码于 APK。
@@ -627,7 +604,7 @@ object ImeHook : TargetHook {
             android.util.Base64.NO_WRAP)
     }.getOrNull()
 
-    /** PoC：匿名重取 suit/items（伪造 S-COOKIE + 假设备参数串，curl 实证 code 0）。 */
+    /** 匿名重取 suit/items（伪造 S-COOKIE + 假设备参数串，curl 实证 code 0）。 */
     private fun refetchSuitItems(suitId: String): String? = runCatching {
         val sc = forgeScookie("j=10.32&c=100&e=1080_2400&h=440&i=1&o=honor&u=zh-CN&it=0") ?: return null
         val url = java.net.URL(
@@ -669,7 +646,7 @@ object ImeHook : TargetHook {
         }.getOrDefault(body)
     }.getOrNull()
 
-    /** PoC：把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
+    /** 把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
     private fun rewriteFileAdds(body: String, sc: String?): String? {
         if (sc == null) return null
         val jo = org.json.JSONObject(body)
