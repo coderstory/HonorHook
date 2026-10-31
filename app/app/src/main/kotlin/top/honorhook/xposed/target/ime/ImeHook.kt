@@ -202,7 +202,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SKIN_R1,
                     description = "PoC：付费状态机 r1 恒返 1(已购)，验证付费门仅客户端 UI 层",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     className = CLS_JSON,
@@ -211,7 +211,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SKIN_PAYMENT,
                     description = "PoC备：optInt(payment) 0→1（全局，观测用）",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
@@ -221,7 +221,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SMART_N1,
                     description = "PoC：智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     className = CLS_THEME_CTRL,
@@ -230,7 +230,7 @@ object ImeHook : TargetHook {
                     returnType = "void",
                     id = ID_DBG_U0,
                     description = "PoC 诊断：下载发起 URL",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     className = CLS_THEME_CTRL,
@@ -239,7 +239,7 @@ object ImeHook : TargetHook {
                     returnType = "void",
                     id = ID_DBG_TFAIL,
                     description = "PoC 诊断：下载失败回调",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     className = CLS_THEME_CTRL,
@@ -248,7 +248,7 @@ object ImeHook : TargetHook {
                     returnType = "void",
                     id = ID_DBG_RESULT,
                     description = "PoC 调试：安装结果广播 result_code 打印",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     // T6 商店去推广：postSuccess 响应层过滤。**必须用 paramTypes 锚钉 (pv,String) 重载**——
