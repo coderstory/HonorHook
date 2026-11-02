@@ -44,5 +44,3 @@
 - [x] 禁止系统更新后台自动检测/下载/夜间安装/升级提醒（OucHook，installed 11/11；设置内手动检查保留）
 - [x] 状态栏 5G 类型标隐藏（SystemUiHook U2，installed 7/7）
 - [x] 搜狗键盘：去开屏广告 + 皮肤商店去推广 + 皮肤付费门（v1.2.3，2026-10-28 发布）
-- [x] 清理 ImeHook / FeatureCatalog / strings 的 PoC·TEMP 注释 36 行 + 修 `ID_DBG_U0`/`ID_DBG_RESULT` 双重 `proceed`（437836b，2026-10-31）
-- [x] 皮肤付费门去 PoC 化：删 `KEY_IME_SKIN_PAY_BYPASS` 常量 / 面板开关 / 两条文案，6 个挂载点改挂「皮肤商店去推广」（1ccba3f，2026-10-31）

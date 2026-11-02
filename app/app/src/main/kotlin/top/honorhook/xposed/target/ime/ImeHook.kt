@@ -72,26 +72,6 @@ object ImeHook : TargetHook {
     private const val CLS_SPLASH_GATE = "px5"
 
     /**
-     * TEMP(2026-10-28)：付费皮肤披露 PoC。付费门 = ThemePreviewActivity.r1 状态机
-     * （jadx 实证签名 (D I String Z)I；返回 0=未购「立即购买」1=已购「立即启用」2=免费），
-     * 下载用的 ssf_download_url 本就在详情响应里。r1 为 R8 名 → 类名未混淆可直连。
-     * 验证完整段删除。
-     */
-
-
-    /**
-     * TEMP(2026-10-28)：新版皮肤详情页（用户实际路径，logcat 实证跳转链
-     * SogouIMEHomeActivity → SmartThemeSkinDetailActivity → HonorPayActivity）。
-     * 付费状态机 N1(SmartThemeDetailModel)I：0=购买/7=裂变/9=售罄/8=已获赠(payment==2)/
-     * 3=启用(payment≥1)/1、2=免费。恒返 3 = 「已购买(￥x)」启用态。
-     */
-
-    /**
-     * TEMP(2026-10-28)：套装皮肤详情（CostumeSuitDetailActivity.java:866/460 jadx 实证）：
-     * getPayStatus() 1=已购买(可安装) 2=已获赠 0=待购买；未混淆公共 bean，直连稳定。
-     */
-
-    /**
      * T6 商店去推广：postSuccess(pv, String) 是**所有** API JSON 响应的唯一入口
      * （base 类 onResponse 内调用，子类无法绕过；与 (pv,JSONObject) 重载同签名，
      * 挂载层命中其一即生效——实测 String 重载命中）。
@@ -195,34 +175,34 @@ object ImeHook : TargetHook {
                     feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP PoC：付费状态机 r1（老预览页）。验证完整段删除。
+                    // 付费状态机 r1（老预览页）
                     className = CLS_THEME_PREVIEW,
                     methodName = "r1",
                     paramCount = 4,  // 签名实证：(D I String Z)I —— ThemePreviewActivity.java:2602（jadx）
                     returnType = "int",
                     id = ID_SKIN_R1,
-                    description = "PoC：付费状态机 r1 恒返 1(已购)，验证付费门仅客户端 UI 层",
+                    description = "付费状态机 r1 恒返 1(已购)",
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // 付费门 PoC①备：全局 payment 字段 0(未购)→1(已购)——观测用
+                    // 付费门备选：全局 payment 字段 0(未购)→1(已购)——观测用
                     className = CLS_JSON,
                     methodName = "optInt",
                     paramCount = 1,
                     returnType = "int",
                     id = ID_SKIN_PAYMENT,
-                    description = "PoC备：optInt(payment) 0→1（全局，观测用）",
+                    description = "optInt(payment) 0→1（全局，观测用）",
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
-                    // TEMP PoC：新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
+                    // 新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
                     // N1 内含 l3 副作用（payment==2 赠礼控制器），CONST 短路跳过——对启用路径无影响。
                     className = CLS_SMART_DETAIL,
                     methodName = "N1",
                     paramCount = 1,  // 签名实证：(SmartThemeDetailModel)I —— SmartThemeSkinDetailActivity.java:1185
                     returnType = "int",
                     id = ID_SMART_N1,
-                    description = "PoC：智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
+                    description = "智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
                     feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
                 ),
                 MountEngine.SimpleTask(
@@ -387,7 +367,6 @@ object ImeHook : TargetHook {
     private const val ID_U10B = "ime:u10.b"
     private const val ID_A4 = "ime:SettingManager.A4"
     private const val ID_SPLASH_GATE = "ime:px5.b"
-    // TEMP(2026-10-28)：披露取证 PoC，验证完删除
     private const val ID_STORE_AD_FILTER = "ime:okhttp.a.postSuccess(store_ad_off)"
     private const val CLS_THEME_PREVIEW = "com.sogou.theme.ThemePreviewActivity"
     private const val CLS_JSON = "org.json.JSONObject"
@@ -404,7 +383,7 @@ object ImeHook : TargetHook {
 
 
 
-    /** TEMP PoC：把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
+    /** 把响应里所有 srv-ios fileAdd 换成 COS 直链（逐条目查 v1/skin/detail）。 */
     private fun rewriteFileAdds(body: String, sc: String?): String? {
         if (sc == null) return null
         val jo = org.json.JSONObject(body)
@@ -422,7 +401,7 @@ object ImeHook : TargetHook {
                             val sid = m?.groupValues?.get(1)
                             if (sid != null) {
                                 val det = fetchUrl(
-                                    "https://srv.android.shouji.sogou.com/v1/skin/detail?skin_id=$sid&from=detail&req_id=poc&device_type=1&supportvideo=1&supportgyroscope=0&is_full_screen=1", sc)
+                                    "https://srv.android.shouji.sogou.com/v1/skin/detail?skin_id=$sid&from=detail&req_id=app&device_type=1&supportvideo=1&supportgyroscope=0&is_full_screen=1", sc)
                                 val url = det?.let { org.json.JSONObject(it).optJSONObject("data")?.optString("ssf_download_url") }
                                 if (!url.isNullOrBlank() && url.endsWith(".ssf")) {
                                     v.put("fileAdd", url.replace("android.store.ime.local", "skininfo-1258344701.file.myqcloud.com"))
