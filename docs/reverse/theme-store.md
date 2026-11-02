@@ -1057,3 +1057,30 @@ packagePath 含 `.payed` 即强制 `gl5.getDecryptWallpaperFile(serviceId, file)
 
 埋点 SDK（跨 app 通杀面）同步发现：新版天气内置 SDK 删 `HiAnalyticsInstanceEx$Builder`，
 Ex 实例工厂改 `HiAnalyticsManager.getInstanceEx()` 静态方法——HonorTrackingHook 已按类存在性二选一。
+
+## §E.6 付费主题 100%「文件已损坏」定案（2026-11-02，诊断点 + smali 实证）
+
+### 现象
+付费主题/字体走 VIP 通道下载到 100% 即 toast「文件已损坏，请重新下载」（toast_pkg_error，
+0x7f140a20）；点应用同样报错；**退出详情页重进后能正常应用**。
+
+### 机制（两段撕裂，W1 同族）
+1. **下载侧**：VIP 通道（route→3）→ `DownloadInfo.isPayedItem=-100` → 文件落
+   `Android/data/<pkg>/files/Download/Honor/Themes/.payed/<name>.hnt`
+2. **预览侧**：100% 时 `OnlineThemePreviewActivity.updateProgress(ItemInfo)`：
+   `isSuccess() && isFileExists(item.packagePath)` 才继续（自动应用=performClick）；
+   而 `packagePath` 经 A1（isNeedPayItem→false）算成**不带 .payed** 的路径 → isFileExists=false
+   → 直接 toast_pkg_error，**自动应用/解密链根本不进**（无 e26/decrypt 调用，诊断点零命中实证）
+3. 重进详情页 → ItemInfo 重新计算/文件被找到 → `getDecryptFileTheme` 正常 SUCCESS → 应用成功
+
+### 修复（随诊链一并落地）
+- **PATH_MEND**（根治）：`updateProgress` 进门前 packagePath 不存在时按
+  `.payed/`、`.cache/`、父目录变体、`Honor/Themes/.cache/` 探测真实文件写回 ItemInfo
+- **DECRYPT_PREPARE**（次级）：`e26.getDecryptTheme/getDecryptFile` serviceId 空参回填
+  （VIP 路由点从 DownloadInfo 采集）+ 坏缓存产物（非 PK 头）清理
+- 注意：`e26` 两方法是 **static**——proceedWith 的 receiver 用类对象（null 会 NPE 炸宿主，
+  已实证一次）；hook 回调整段 runCatching 兜底
+
+### 诊断设施（已撤点，机制留存）
+- `Toast.show` 文本+调用栈打点 → 锁定 toast 走 HnToast 通道（systemui 代发，NMS 记 pkg=android）
+- 宿主自有 logger（ub2/HwLog）不落 logcat，静态分诊只能靠 smali + 模块侧打点
