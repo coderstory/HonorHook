@@ -446,3 +446,18 @@ z3c.d 类名靠锚串 getShortUrlObservableIfNeed success 所在类 l3c/y 的调
 
 **2026-10-24 10:15 真机复核**：连续 3 篇图文「分享链接解析成功」（图3/图6视频1/图1视频1），
 可下文件数逐篇正确，图片保存主链全通。
+
+## 9.52.1 适配（2026-11-02，MT MCP 串锚/outline 逐点实证）
+
+设备升级 9.52.1，当轮真机判据：`X2 2/3`（x2b 失败）· `X5 3/7`（videoClick / albumSink.h0 / e0 / aigcEditLaunch 失败）
+——9.52.1 无覆盖套 ⇒ 全落 9.50 基线坐标。坐标迁移（覆盖套已落 XhsPoints，本表只留证据）：
+
+| 点 | 9.51 | 9.52.1 | 证据 |
+|---|---|---|---|
+| saveClick | yi9.b | **xq9.b** | ji9.b/yi9.b 在本版均被 R8 重用为普通数据类（outline 实证，同名复用坑再现）；串锚 `onDownloadClick, noteId=` 唯一宿主 xq9.b |
+| x2b | ce8.j | **bm8.j** | 串锚 `disableAiWaterMark is` 唯一宿主；`b(Context,Z)Bitmap` 签名不变 |
+| noteSaveEntry | pb9.o1 | **nj9.o1** | 串锚 `save video failed:`（在其 $a）宿主 nj9.o1；`b` 9 参同构 |
+| aigcEditLaunch | rg4.b | **cq4.b** | 串锚 `tag_video_edit_download_loading` 双宿主（cq4.b capa / ze3.b global_edit 副本）；9.51 rg4.b 亦 capa 系 ⇒ 取 cq4.b |
+| downloaderEntry | g75.h | **pg5.h** | 串锚 `addDownloadTask`；pg5.h static `e(self,…)V` 13 参形状不变（gx0.h 为无关 bridge 服务类） |
+| albumSink videoStore | dz8.t | **d79.s** | 串锚 `saveVideo start copy file.`；static `a(self,String,String,Uri,Z)V` 5 参形状不变 |
+| albumSink h0/e0 | null | null | 仍无新家，videoStore 闸覆盖 |

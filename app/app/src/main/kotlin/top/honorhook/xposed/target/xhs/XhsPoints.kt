@@ -68,6 +68,28 @@ object XhsPoints {
             "albumCopy.e0" to null,
             "albumCopy.videoStore" to "dz8.t",
         ),
+        // 9.52.1（2026-11-02 真机升级判据 installed X2 2/3、X5 3/7；MT MCP 串锚/outline 逐点实证）：
+        // - saveClick：ji9.b/yi9.b 在本版均被 R8 重用为普通数据类（outline 实证）——同名复用坑再现，
+        //   真身认串锚 "onDownloadClick, noteId=" → xq9.b
+        // - videoClick：维持 9.51 起不挂载（noteSaveEntry 上移已覆盖）
+        // - x2b：串锚 disableAiWaterMark → bm8.j，b(Context,Z)Bitmap 签名不变
+        // - noteSaveEntry：串锚 "save video failed:" → nj9.o1，b 9 参 (Z,Activity,z0,NoteFeed,I,Z,ViewGroup,Function1,Function0)V 不变
+        // - aigcEditLaunch：串锚 tag_video_edit_download_loading → cq4.b（capa.video_edit 系，与 9.51 rg4.b 同族；
+        //   ze3.b 为 global_edit 副本不取），invoke(Object)→Object 不变
+        // - downloaderEntry：串锚 addDownloadTask → pg5.h，static e 13 参（首参 receiver）形状不变
+        // - albumCopy.h0/e0：仍无家 → null；videoStore：串锚 "saveVideo start copy file." → d79.s，
+        //   static a(self,String,String,Uri,Z) 5 参 void 形状不变
+        "9.52.1" to mapOf(
+            "saveClick" to "xq9.b",
+            "videoClick" to null,
+            "x2b" to "bm8.j",
+            "noteSaveEntry" to "nj9.o1",
+            "aigcEditLaunch" to "cq4.b",
+            "downloaderEntry" to "pg5.h",
+            "albumCopy.h0" to null,
+            "albumCopy.e0" to null,
+            "albumCopy.videoStore" to "d79.s",
+        ),
     )
 
     /**

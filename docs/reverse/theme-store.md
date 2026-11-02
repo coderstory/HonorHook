@@ -1047,3 +1047,13 @@ packagePath 含 `.payed` 即强制 `gl5.getDecryptWallpaperFile(serviceId, file)
   adb shell content query --uri content://com.hihonor.android.thememanager.ContentProvider/theme --where "title LIKE '%<主题名>%'"
   ```
   （前者无行 = apply 未写库；有行看 spare_two/file_path 是否踩过滤条件。）
+
+## 20.1.67.302 适配（2026-11-02，MT MCP 锚点实证）
+
+设备 OTA 20.1.67.302，真机判据 `installed 48/49`——唯一失效 = F-fallback②（`f71` 类名漂移）。
+串锚 "Start to download vip product" 定位：63.305=f71 → 65.302=g71 → 67.302=**wb1**
+（outline 实证 source=DownloadItemIfVip.java，`downloadItem()V` / `productSendFinish(I,String,String,Pair)` 签名不变）。
+其余 48 点基线表全命中 ⇒ 本版只重排该类。修复 = 新增 `ThemeStoreMap_20_1_67_302` 精确套（f71→wb1）。
+
+埋点 SDK（跨 app 通杀面）同步发现：新版天气内置 SDK 删 `HiAnalyticsInstanceEx$Builder`，
+Ex 实例工厂改 `HiAnalyticsManager.getInstanceEx()` 静态方法——HonorTrackingHook 已按类存在性二选一。

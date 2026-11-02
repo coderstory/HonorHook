@@ -20,6 +20,7 @@ object ThemeStoreHook : TargetHook {
 
     /** 版本选表：精确套优先，默认套（基线点）任何版本兜底。 */
     private val versionTables = listOf(
+        HostVersion.Table(versions = setOf("20.1.67.302")) { THEME_POINTS_20_1_67_302 },
         HostVersion.Table(versions = setOf("20.1.65.302")) { THEME_POINTS_20_1_65_302 },
         HostVersion.Table(versions = emptySet()) { THEME_POINTS_20_1_63_305 },
     )

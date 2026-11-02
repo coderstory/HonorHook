@@ -54,14 +54,31 @@ class HonorTrackingHook(override val packageName: String) : TargetHook {
                 id = "track:HiAnalyticsManager.getInstanceByTag",
                 description = "埋点实例获取收口：含 _default_config_tag 默认实例（v2 静态 API 亦经此）",
             ),
-            MountEngine.SimpleTask(
-                className = "com.hihonor.hianalytics.process.HiAnalyticsInstanceEx${'$'}Builder",
-                methodName = "create",
-                paramCount = 0,
-                returnType = "com.hihonor.hianalytics.process.HiAnalyticsInstanceEx",
-                id = "track:HiAnalyticsInstanceEx.Builder.create",
-                description = "埋点实例Ex工厂收口：autoCollect 自动采集实例（_instance_ex_tag）",
-            ),
+            // Ex 实例工厂按 SDK 版本二选一（2026-11-02 天气判据 installed 2/3 实证）：旧 SDK =
+            // HiAnalyticsInstanceEx$Builder.create()；新版天气内置 SDK 已删该 Builder，改
+            // HiAnalyticsManager.getInstanceEx() 静态方法（dex outline 实证）。类存在性探测选点。
+            if (runCatching {
+                    loader.loadClass("com.hihonor.hianalytics.process.HiAnalyticsInstanceEx${'$'}Builder")
+                }.isSuccess
+            ) {
+                MountEngine.SimpleTask(
+                    className = "com.hihonor.hianalytics.process.HiAnalyticsInstanceEx${'$'}Builder",
+                    methodName = "create",
+                    paramCount = 0,
+                    returnType = "com.hihonor.hianalytics.process.HiAnalyticsInstanceEx",
+                    id = "track:HiAnalyticsInstanceEx.Builder.create",
+                    description = "埋点实例Ex工厂收口：autoCollect 自动采集实例（_instance_ex_tag）",
+                )
+            } else {
+                MountEngine.SimpleTask(
+                    className = "com.hihonor.hianalytics.process.HiAnalyticsManager",
+                    methodName = "getInstanceEx",
+                    paramCount = 0,
+                    returnType = "com.hihonor.hianalytics.process.HiAnalyticsInstanceEx",
+                    id = "track:HiAnalyticsManager.getInstanceEx",
+                    description = "埋点实例Ex工厂收口（新版 SDK）：autoCollect 自动采集实例（_instance_ex_tag）",
+                )
+            },
         )
         session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
     }
