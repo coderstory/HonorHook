@@ -232,8 +232,9 @@ object XhsSavePivot {
         val serviceCls = Class.forName("com.xingin.sharesdk.api.ShareService", true, loader)
         // 服务定位器类名随 R8 漂移：9.50 = i3c.d（u2c/y.java:51 锚）；9.51 = z3c.d
         // （l3c/y smali 实证 sget z3c/d;->Companion 后 e(Class)→ShareService；l3c/y 自带锚串
-        // getShortUrlObservableIfNeed success）。按序试探，新增版本往后追加即可
-        val companion = sequenceOf("z3c.d", "i3c.d").firstNotNullOfOrNull { name ->
+        // getShortUrlObservableIfNeed success）。9.52.1 = zac.d（lac/y smali 实证
+        // sget zac/d;->Companion 后 e(Class)→ShareService，2026-11-02）。按序试探，新增版本往后追加即可
+        val companion = sequenceOf("zac.d", "z3c.d", "i3c.d").firstNotNullOfOrNull { name ->
             runCatching {
                 Class.forName(name, true, loader)
                     .getDeclaredField("Companion")
