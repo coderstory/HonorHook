@@ -81,8 +81,8 @@ internal const val CLS_MAIN_ACTIVITY = "$PKG.HwThemeManagerActivity"
 internal const val CLS_HN_ADS = "com.hihonor.adsdk.base.HnAds"
 internal const val CLS_HN_ADS_OVERSEA = "com.hihonor.adsdk.oversea.base.HnAds"
 
-/** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制； */
-internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE, DOWNLOAD_FALLBACK }
+/** 挂载任务类型：[CONST] 常量短路；[FORCE_ARG] 第 forceArgIndex 参强制；[DIAG_DECRYPT] 解密诊断（after 只读打点，2026-11-02 付费主题首次应用「文件损坏」分诊用）。 */
+internal enum class MountKind { CONST, FORCE_ARG, KEY_OVERRIDE, SLOT_PRUNE, BOTTOM_TAB_PRUNE, BLOCK, FINISH_ACTIVITY, PRE_PROCESS, VIP_STATE_FIX, DOWNLOAD_TYPE_ROUTE, DOWNLOAD_FALLBACK, DIAG_DECRYPT }
 
 /** DownloadInfo 实例获取路径（uriEmptyRoute 条件路由）：[THIS] H1；[GET_DOWNLOAD_INFO] H2b 反射 getDownloadInfo()。 */
 internal enum class UriOwner { THIS, GET_DOWNLOAD_INFO }
@@ -215,6 +215,7 @@ internal fun actionDesc(task: MountTask): String = when (task.kind) {
     MountKind.VIP_STATE_FIX -> "VipState 实例字段改写（after，null 自建）"
     MountKind.DOWNLOAD_TYPE_ROUTE -> "downloadType 按 DownloadInfo 状态分派（空URL→3 / 免费加密→4 / 付费→3，见 theme-store.md §E）"
     MountKind.DOWNLOAD_FALLBACK -> "VIP 通道失败/挂死 → 已购通道兜底（15s 看门狗 + 失败回调双触发，见 ThemeStoreRuntime vip-fallback 段）"
+    MountKind.DIAG_DECRYPT -> "解密诊断：getDecryptFileTheme after 只读打点（随诊可撤）"
 }
 
 /** 反射方法缓存（`类名#方法名` → Method），避免在 getList 这类的取数路径上反复查找。 */

@@ -143,6 +143,34 @@ object ThemeStoreHook : TargetHook {
                     onVipProductSendFinish(chain, module, loader)
                 }
             }
+            // 通用校验诊断（2026-11-02）：after 只读打点——打印全部入参 + 返回值，定位「文件损坏」
+            // 具体校验方（hashCheck = 主题/字体 hash 门；checkFontValid = 字体有效性门）。随诊可撤。
+            MountKind.DIAG_DECRYPT -> {
+                val r = chain.proceed()
+                runCatching {
+                    fun hashOf(a: Any): String = runCatching {
+                        var c: Class<*>? = a.javaClass
+                        while (c != null && c != Any::class.java) {
+                            try {
+                                val f = c.getDeclaredField("hashCodeValue")
+                                f.isAccessible = true
+                                return f.get(a)?.toString() ?: "?"
+                            } catch (_: NoSuchFieldException) { }
+                            c = c.superclass
+                        }
+                        "?"
+                    }.getOrDefault("?")
+                    val args = chain.args?.joinToString(", ") { a ->
+                        when (a) {
+                            null -> "null"
+                            is String, is Number, is Boolean, is java.io.File -> a.toString()
+                            else -> "${a.javaClass.simpleName}(hash=${hashOf(a)})"
+                        }
+                    }
+                    session.judge(module, task, "theme-hook", "校验诊断 result=$r args=[$args]")
+                }
+                r
+            }
             // 参数强制（setter 写点 / 下载类型路由点）
             MountKind.FORCE_ARG -> {
                 if (routeActive(chain, module, task)) {
