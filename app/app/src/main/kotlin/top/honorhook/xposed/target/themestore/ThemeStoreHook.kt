@@ -258,6 +258,41 @@ object ThemeStoreHook : TargetHook {
                     chain.proceedWith(receiver, args)
                 }.getOrElse { chain.proceed() }
             }
+            // 下载完成路径撕裂修复（2026-11-02，updateProgress smali 实证）：付费项下载实际落
+            // `.payed/`（DownloadInfo.isPayedItem=-100 标记侧），而预览页 ItemInfo.packagePath 经
+            // A1（isNeedPayItem→false）算成不带 .payed 的路径 → updateProgress 的 isFileExists 门
+            // 直接 false → toast_pkg_error「文件已损坏」，自动应用链根本不进。修复：进门前若
+            // packagePath 不存在，按变体（同目录/.payed/、.cache/、Honor/Themes/.cache/）探测真实
+            // 文件并写回 packagePath 字段，放行后续链（该链解密应用已实证可 SUCCESS）。
+            MountKind.PATH_MEND -> {
+                // 前置语义：toast 在 updateProgress 内部触发，必须先修 packagePath 再放行
+                runCatching {
+                    val item = runCatching { chain.getArg(0) }.getOrNull() ?: return@runCatching
+                    val field = runCatching {
+                        var cc: Class<*>? = item.javaClass
+                        while (cc != null && cc != Any::class.java) {
+                            try { return@runCatching cc.getDeclaredField("packagePath") } catch (_: NoSuchFieldException) { }
+                            cc = cc.superclass
+                        }
+                        null
+                    }.getOrNull() ?: return@runCatching
+                    field.isAccessible = true
+                    val path = field.get(item) as? String
+                    if (path.isNullOrBlank() || java.io.File(path).exists()) return@runCatching
+                    val f = java.io.File(path)
+                    val candidates = listOf(
+                        java.io.File(f.parentFile, ".payed/" + f.name),
+                        java.io.File(f.parentFile, ".cache/" + f.name),
+                        java.io.File(f.parentFile?.parentFile, ".payed/" + f.name),
+                        java.io.File(f.parentFile?.parentFile, ".cache/" + f.name),
+                        java.io.File("/storage/emulated/0/Honor/Themes/.cache", f.name),
+                    )
+                    val real = candidates.firstOrNull { it.exists() && it.length() > 0 } ?: return@runCatching
+                    field.set(item, real.absolutePath)
+                    session.judge(module, task, "theme-hook", "PATH_MEND packagePath 修正: $path → ${real.absolutePath}")
+                }
+                chain.proceed()
+            }
             // 参数强制（setter 写点 / 下载类型路由点）
             MountKind.FORCE_ARG -> {
                 if (routeActive(chain, module, task)) {
