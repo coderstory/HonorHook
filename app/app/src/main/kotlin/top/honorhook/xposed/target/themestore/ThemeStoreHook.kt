@@ -194,10 +194,13 @@ object ThemeStoreHook : TargetHook {
             // 修复：① serviceId 空参用 lastRouteServiceId 回填；② 已解密产物（getDecryName(origin)）
             // 若存在且非 PK zip 头（历史失败残留）先删，强制重新解密。改参后 proceedWith。
             MountKind.DECRYPT_PREPARE -> {
-                val args = chain.args?.toTypedArray()
-                val svcIdx = if (task.paramCount == 4) 0 else 0   // getDecryptTheme/getDecryptFile 首参均为 serviceId
-                val originIdx = if (task.paramCount == 4) 2 else 1 // origin path 参数位
-                if (args != null) {
+                // 两目标方法均为 static（e26 静态工具）：thisObject 为 null，proceedWith 用类对象作
+                // receiver（反射 invoke 对静态方法忽略 receiver）；整段 try 包裹——hook 回调绝不炸宿主。
+                runCatching {
+                    val args = chain.args?.toTypedArray()
+                    if (args == null) return@runCatching chain.proceed()
+                    val svcIdx = 0                                 // getDecryptTheme/getDecryptFile 首参均为 serviceId
+                    val originIdx = if (task.paramCount == 4) 2 else 1 // origin path 参数位
                     val svc = args.getOrNull(svcIdx) as? String
                     if (svc.isNullOrBlank() || svc == "null") {
                         lastRouteServiceId?.let { filled -> args[svcIdx] = filled }
@@ -211,7 +214,7 @@ object ThemeStoreHook : TargetHook {
                             val out = m.invoke(null, java.io.File(origin)) as? String
                             if (!out.isNullOrBlank()) {
                                 val f = java.io.File(out)
-                                if (f.exists() && f.length() >= 0) {
+                                if (f.exists()) {
                                     val head = f.inputStream().use { ins ->
                                         val b = ByteArray(2); val n = ins.read(b); if (n == 2) String(b, Charsets.US_ASCII) else ""
                                     }
@@ -223,9 +226,11 @@ object ThemeStoreHook : TargetHook {
                             }
                         }
                     }
-                    return@mount chain.proceedWith(chain.thisObject, args)
-                }
-                chain.proceed()
+                    val receiver = chain.thisObject
+                        ?: runCatching { loader.loadClass("e26") }.getOrNull()
+                        ?: return@runCatching chain.proceed()
+                    chain.proceedWith(receiver, args)
+                }.getOrElse { chain.proceed() }
             }
             // 参数强制（setter 写点 / 下载类型路由点）
             MountKind.FORCE_ARG -> {
