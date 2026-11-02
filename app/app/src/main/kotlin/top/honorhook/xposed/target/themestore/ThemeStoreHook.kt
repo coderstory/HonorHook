@@ -18,6 +18,13 @@ object ThemeStoreHook : TargetHook {
 
     override val packageName = "com.hihonor.android.thememanager"
 
+    /** 最近一次 VIP 路由（downloadType→3）看到的 serviceId：e26.getDecryptTheme/getDecryptFile 的
+     *  serviceId 参数在下载完成自动解包路径上为 null（调用方未回填）→ null key 解不出内容 →
+     *  isZipError 删文件报「文件损坏」。路由点 DownloadInfo 是唯一可靠来源（2026-11-02 诊断实证）。 */
+    @Volatile
+    var lastRouteServiceId: String? = null
+        private set
+
     /** 版本选表：精确套优先，默认套（基线点）任何版本兜底。 */
     private val versionTables = listOf(
         HostVersion.Table(versions = setOf("20.1.67.302")) { THEME_POINTS_20_1_67_302 },
@@ -126,6 +133,16 @@ object ThemeStoreHook : TargetHook {
                     if (route == null) {
                         chain.proceed()
                     } else {
+                        if (route == 3) {
+                            // 存下 serviceId 供 DECRYPT_PREPARE 回填（null key 解密必败，见字段注释）
+                            runCatching {
+                                info.javaClass.declaredFields.firstOrNull { it.name == "serviceId" }?.let {
+                                    it.isAccessible = true
+                                    (it.get(info) as? Number)?.let { n -> lastRouteServiceId = n.toString() }
+                                        ?: (it.get(info) as? String)?.takeIf { s -> s.isNotBlank() }?.let { s -> lastRouteServiceId = s }
+                                }
+                            }
+                        }
                         session.judge(module, task, "theme-hook", "downloadType→$route（uriBlank=$uriBlank enc=$encrypted price=$price）")
                         route
                     }
@@ -170,6 +187,45 @@ object ThemeStoreHook : TargetHook {
                     session.judge(module, task, "theme-hook", "校验诊断 result=$r args=[$args]")
                 }
                 r
+            }
+            // 付费解包前置修复（2026-11-02，诊断实证）：下载完成自动解包链 e26.getDecryptTheme /
+            // e26.getDecryptFile 的 serviceId 参数为 null（调用方未回填）→ 内容密钥查不到 → 解密失败
+            // / 密文被 isZipError 误判 → 删文件报「文件损坏」；重进详情页参数齐了才成功。
+            // 修复：① serviceId 空参用 lastRouteServiceId 回填；② 已解密产物（getDecryName(origin)）
+            // 若存在且非 PK zip 头（历史失败残留）先删，强制重新解密。改参后 proceedWith。
+            MountKind.DECRYPT_PREPARE -> {
+                val args = chain.args?.toTypedArray()
+                val svcIdx = if (task.paramCount == 4) 0 else 0   // getDecryptTheme/getDecryptFile 首参均为 serviceId
+                val originIdx = if (task.paramCount == 4) 2 else 1 // origin path 参数位
+                if (args != null) {
+                    val svc = args.getOrNull(svcIdx) as? String
+                    if (svc.isNullOrBlank() || svc == "null") {
+                        lastRouteServiceId?.let { filled -> args[svcIdx] = filled }
+                    }
+                    // 清理坏缓存产物：e26.getDecryName(origin) → 若存在且头两字节非 "PK" 则删除
+                    runCatching {
+                        val origin = args.getOrNull(originIdx) as? String
+                        if (!origin.isNullOrBlank()) {
+                            val m = loader.loadClass("e26").getDeclaredMethod("getDecryName", java.io.File::class.java)
+                            m.isAccessible = true
+                            val out = m.invoke(null, java.io.File(origin)) as? String
+                            if (!out.isNullOrBlank()) {
+                                val f = java.io.File(out)
+                                if (f.exists() && f.length() >= 0) {
+                                    val head = f.inputStream().use { ins ->
+                                        val b = ByteArray(2); val n = ins.read(b); if (n == 2) String(b, Charsets.US_ASCII) else ""
+                                    }
+                                    if (head != "PK") {
+                                        f.delete()
+                                        session.judge(module, task, "theme-hook", "DECRYPT_PREPARE 坏缓存已删: $out")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return@mount chain.proceedWith(chain.thisObject, args)
+                }
+                chain.proceed()
             }
             // 参数强制（setter 写点 / 下载类型路由点）
             MountKind.FORCE_ARG -> {
