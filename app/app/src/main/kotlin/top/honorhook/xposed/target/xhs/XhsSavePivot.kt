@@ -109,9 +109,24 @@ object XhsSavePivot {
                 continue
             }
             // 本节点直接是 NoteFeed？（a59.q：feed 是 lambda 捕获字段，一层即中）
+            // noteId 取法（2026-11-02，9.52.1 实证改版）：不再锚混淆名 u0——9.52.1 上 NoteFeed.u0()
+            // 已被 R8 改成语义无关的 GroupShare（名字复用，旧锚既 miss 又险些错取）。NoteFeed 本身
+            // 未混淆（com.xingin.entities.notedetail.NoteFeed，跨版本稳定）⇒ 类型识别 + 在全部无参
+            // String 方法里过 24hex 门（产物形如 6ad5d4d6000000002a00fa1b）。非 NoteFeed 节点保留
+            // 旧路径（无参 String 且名 u0）以兼容旧现场。
+            val isNoteFeed = runCatching {
+                Class.forName("com.xingin.entities.notedetail.NoteFeed", false, node.javaClass.classLoader).isInstance(node)
+            }.getOrDefault(false) == true
             val noteId = runCatching {
-                val m = node.javaClass.declaredMethods.firstOrNull {
-                    it.name == "u0" && it.parameterCount == 0 && it.returnType == String::class.java
+                val m = if (isNoteFeed) {
+                    node.javaClass.declaredMethods.firstOrNull {
+                        it.parameterCount == 0 && it.returnType == String::class.java &&
+                            runCatching { it.isAccessible = true; (it.invoke(node) as? String)?.matches(HEX24) == true }.getOrDefault(false)
+                    }
+                } else {
+                    node.javaClass.declaredMethods.firstOrNull {
+                        it.name == "u0" && it.parameterCount == 0 && it.returnType == String::class.java
+                    }
                 }
                 m?.isAccessible = true
                 (m?.invoke(node) as? String)?.takeIf { it.matches(HEX24) }
