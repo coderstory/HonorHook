@@ -182,7 +182,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SKIN_R1,
                     description = "付费状态机 r1 恒返 1(已购)",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     // 付费门备选：全局 payment 字段 0(未购)→1(已购)——观测用
@@ -192,7 +192,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SKIN_PAYMENT,
                     description = "optInt(payment) 0→1（全局，观测用）",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     // 新版详情页付费状态机（用户实测路径，ThemePreviewActivity 未被走到）。
@@ -203,7 +203,7 @@ object ImeHook : TargetHook {
                     returnType = "int",
                     id = ID_SMART_N1,
                     description = "智能皮肤详情付费状态机 N1 恒返 3(已购/启用态)",
-                    feature = FeatureCatalog.KEY_IME_SKIN_PAY_BYPASS,
+                    feature = FeatureCatalog.KEY_IME_STORE_AD_OFF,
                 ),
                 MountEngine.SimpleTask(
                     // T6 商店去推广：postSuccess 响应层过滤。**必须用 paramTypes 锚钉 (pv,String) 重载**——

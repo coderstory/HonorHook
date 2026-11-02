@@ -39,7 +39,10 @@ object AppRepository {
                 entry = GovernanceList.lookup(pkg),
             )
         }
-        return result.sortedBy { it.label.lowercase() }
+        // 排序：已冻结（enabledState 2/3）沉底，其余按 label 字典序——冻结区首屏应是「可动手的」
+        return result.sortedWith(
+            compareBy({ it.frozen }, { it.label.lowercase() })
+        )
     }
 
     /** 免 root 单包回读（F1 判据：冻结后 enabledState==3）。 */
