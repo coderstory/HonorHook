@@ -96,6 +96,16 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 
 ## 五、应验判据
 
+### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；2026-11-02 复核）
+
+> **最近一次重采：2026-11-02 21:15–23:45**（模块 1.2.3+dev 多轮覆盖安装；LSPosed 框架日志直读，判据行格式同前）。
+>
+> **当日宿主版本变化**：**theme 20.1.65.302→20.1.67.302**（f71→wb1，精确表已建）、**小红书 9.51.0→9.52.1**（XhsPoints 9.52.1 覆盖套已建）、天气 tracking 旧账 Ex 工厂已修（SDK 删 HiAnalyticsInstanceEx$Builder，按类存在性二选一）。其余（installer 14.0.38.301 / launcher 18.0.0.259 / sysmgr 17.0.0.472 / settings / ouc / mms / systemui / ime / appmarket 16.1.9.302）与 10-27 快照一致或仅版本号微涨（WARN）。
+>
+> **结论：挂载层全绿**——theme 49/49（67.302，诊断点在时装 50/50、53/53 随诊断增减）、ImeHook 17/17（10.32.44）、XhsHook X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.52.1，M 随版本分档：videoClick/h0/e0 三点 9.51 起显式缺席）、AppMarket 7/7、installer 11/11、launcher 5/5、settings 2/2、sysmgr 3/3（472，仅 WARN）、ouc 11/11、mms 2/2、systemui 4/4·U6 3/3·U7 3/3、日历 ads 2/2·ops 1/1·tracking 3/3、天气 ads 2/2·**tracking 3/3（旧账清零）**、云音乐 3/3、HonorAds 其它包 2/2。行为层：付费主题 100% 自动应用（PATH_MEND）、小红书保存全链（noteId/短链 zac.d）用户真机确认通过。
+>
+> **行为层遗留**：sysmgr 版本自检 WARN vs 基线 414（挂载全绿）；快游戏/浏览器仍用户停用无判据行。
+
 ### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；2026-10-27 复核）
 
 > **最近一次重采：2026-10-27 21:11–21:52**（模块 1.2.2 当日判据；adb 通道不在位，改走本机 KernelSU root `su -c dumpsys package <pkg>` 直读版本 + `monkey` 冷启动采判据，判据行仍从 LSPosed 框架日志抓）。
