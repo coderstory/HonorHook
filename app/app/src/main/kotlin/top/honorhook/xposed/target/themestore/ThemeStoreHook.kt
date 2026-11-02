@@ -163,6 +163,32 @@ object ThemeStoreHook : TargetHook {
             // 通用校验诊断（2026-11-02）：after 只读打点——打印全部入参 + 返回值，定位「文件损坏」
             // 具体校验方（hashCheck = 主题/字体 hash 门；checkFontValid = 字体有效性门）。随诊可撤。
             MountKind.DIAG_DECRYPT -> {
+                // Toast 诊断特化：show() after 提取文本 + 调用栈（定位「文件损坏」toast 的真实弹出方）
+                if (task.className == "android.widget.Toast") {
+                    val r = chain.proceed()
+                    runCatching {
+                        val text = chain.thisObject?.let { t ->
+                            runCatching {
+                                var c: Class<*>? = t.javaClass
+                                while (c != null) {
+                                    try {
+                                        val f = c.getDeclaredField("mNextView")
+                                        f.isAccessible = true
+                                        val v = f.get(t) as? android.view.View
+                                        if (v is android.widget.TextView) return@runCatching v.text.toString()
+                                    } catch (_: NoSuchFieldException) { }
+                                    c = c.superclass
+                                }
+                                "?"
+                            }.getOrDefault("?")
+                        }
+                        val stack = Thread.currentThread().stackTrace
+                            .dropWhile { it.className.startsWith("android.") || it.className.startsWith("java.") || it.className.startsWith("top.honorhook") || it.className.contains("LSPosed") || it.className.startsWith("androidx") }
+                            .take(6).joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}" }
+                        session.judge(module, task, "theme-hook", "Toast 诊断 text=[$text] stack=$stack")
+                    }
+                    return@mount r
+                }
                 val r = chain.proceed()
                 runCatching {
                     fun hashOf(a: Any): String = runCatching {
