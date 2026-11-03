@@ -89,11 +89,6 @@ public class WebScanActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // 全屏（2026-11-03 用户需求）：immersive sticky，隐藏状态栏/导航栏
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
         log("onCreate: savedInstanceState=" + (savedInstanceState != null));
         buildUi();
 
@@ -117,7 +112,9 @@ public class WebScanActivity extends Activity {
 
     private void buildUi() {
         float den = getResources().getDisplayMetrics().density;
-        int cardSide = Math.round(getResources().getDisplayMetrics().widthPixels * 0.76f);
+        float den0 = getResources().getDisplayMetrics().density;
+        // 卡片宽度固定 100%（2026-11-03 用户需求）：屏宽 - 两侧 16dp 边距，正方形
+        int cardSide = getResources().getDisplayMetrics().widthPixels - Math.round(16 * den0 * 2);
 
         scanView = new FrameLayout(this);
         scanView.setBackgroundColor(0xFFFFFFFF);
@@ -170,8 +167,9 @@ public class WebScanActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(cardSide, cardSide,
-                Gravity.CENTER);
+                Gravity.CENTER_HORIZONTAL);
         cardLp.bottomMargin = dp(60);
+        cardLp.setMargins(dp(16), 0, dp(16), 0);
         scanView.addView(card, cardLp);
 
         // ---- 底部：状态 + 相册按钮 ----
@@ -438,8 +436,7 @@ public class WebScanActivity extends Activity {
         }
         if (scanView.getVisibility() == View.VISIBLE) {
             // 返回主页面（2026-11-03 用户需求）：回模块主界面，不再说「退出应用」
-            showConfirm("返回主页面", "返回模块主界面？
-已登录状态会保留。", "返回", this::finish, "留在本页");
+            showConfirm("返回主页面", "返回模块主界面？\n已登录状态会保留。", "返回", this::finish, "留在本页");
             return;
         }
         super.onBackPressed();
