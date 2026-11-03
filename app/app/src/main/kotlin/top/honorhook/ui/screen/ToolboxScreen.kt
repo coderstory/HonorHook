@@ -199,7 +199,15 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     HubView.HOME -> {
                         // 运行状态卡已删（2026-11-03 用户指令）：probe/rootOk 仍供各开关/冻结页只读态
                         item {
-                        HubTiles(switchValues, apps, onOpen = { view = it })
+                        HubTiles(
+                            switchValues,
+                            apps,
+                            onOpen = { view = it },
+                            onOpenHubActivity = {
+                                context.startActivity(android.content.Intent(
+                                    context, top.honorhook.ui.webscan.WebScanActivity::class.java))
+                            },
+                        )
                     }
                     }
 
