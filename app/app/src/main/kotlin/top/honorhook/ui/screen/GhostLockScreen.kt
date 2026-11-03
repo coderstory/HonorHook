@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.height
@@ -26,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -61,6 +64,19 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
     var managerPickerOpen by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
 
+    // 状态卡数据：root 探测读 /proc/modules 找 "kernelsu " 前缀行（与载荷判定同源）；
+    // 内核版本走 System.getProperty("os.version")，无需任何特权
+    var rootDetected by remember { mutableStateOf(false) }
+    var kernelVersion by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        kernelVersion = System.getProperty("os.version") ?: "未知"
+        rootDetected = withContext(Dispatchers.IO) {
+            runCatching {
+                java.io.File("/proc/modules").readLines().any { it.startsWith("kernelsu ") }
+            }.getOrDefault(false)
+        }
+    }
+
     fun refreshShizuku() {
         shizukuOk = runner.status() == ShizukuExploitRunner.Status.READY
     }
@@ -74,7 +90,40 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             .padding(top = topInset + 4.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
+        // 顶部状态卡：深绿底样式对齐 GhostlockUI.kt 的 kernel_supported 卡（暗色 0xFF1A3825 / 亮色 0xFFDFFAE4）
+        val dark = isSystemInDarkTheme()
+        val statusBg = if (dark) Color(0xFF1A3825) else Color(0xFFDFFAE4)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(statusBg, RoundedCornerShape(16.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✓", color = Color(0xFF4CD97B), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(
+                    if (rootDetected) "内核漏洞可用 · KernelSU 已挂载" else "内核漏洞可用 · 未检测到 KernelSU",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            Text(
+                "内核 $kernelVersion",
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(
+                "目标漏洞 CVE-2026-98260",
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("Shizuku", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface)
                 Text(
