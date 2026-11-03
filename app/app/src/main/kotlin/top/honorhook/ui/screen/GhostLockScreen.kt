@@ -43,6 +43,7 @@ import kotlinx.coroutines.withContext
 import top.honorhook.tools.ghostlock.data.ManagerScanner
 import top.honorhook.tools.ghostlock.shizuku.ShizukuExploitRunner
 import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -209,6 +210,13 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         }
 
         Button(
+            // 淡绿底 + 深绿字，与顶部状态卡同一绿色系；禁用态灰绿弱化
+            colors = ButtonDefaults.buttonColors(
+                color = Color(0xFFDFFAE4),
+                disabledColor = Color(0xFFE8ECE9),
+                contentColor = Color(0xFF1A4D2E),
+                disabledContentColor = Color(0xFF9AA39E),
+            ),
             onClick = {
                 running = true
                 runOpen = true
@@ -226,7 +234,8 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 }
             },
             enabled = shizukuOk && !running,
-            modifier = Modifier.padding(top = 12.dp).fillMaxWidth().height(48.dp),
+            // 与「选择根管理器」按钮同宽：卡片内按钮比屏幕列多缩进 16dp，这里对齐同一内边距
+            modifier = Modifier.padding(top = 12.dp).padding(horizontal = 16.dp).fillMaxWidth().height(48.dp),
         ) {
             Text(if (running) "执行中…" else "执行提权")
         }
