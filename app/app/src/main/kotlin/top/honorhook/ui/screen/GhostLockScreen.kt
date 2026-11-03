@@ -121,7 +121,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                     color = colorScheme.onSurface,
                 )
                 Text(
-                    "KernelSU $kernelVersion",
+                    kernelVersion,
                     fontSize = 12.sp,
                     color = secondary,
                     modifier = Modifier.padding(top = 3.dp),
