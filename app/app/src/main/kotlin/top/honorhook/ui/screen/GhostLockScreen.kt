@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,7 +40,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.honorhook.tools.ghostlock.data.ManagerScanner
 import top.honorhook.tools.ghostlock.shizuku.ShizukuExploitRunner
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -60,13 +58,10 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
     val runner = remember { ShizukuExploitRunner(context) }
 
     var shizukuOk by remember { mutableStateOf(false) }
-    var managers by remember { mutableStateOf(top.honorhook.ui.toolbox.GhostLockRunner.managers(context)) }
-    var selectedPkg by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
     var runStatus by remember { mutableStateOf("") }
     val logLines = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var runOpen by remember { mutableStateOf(false) }
-    var managerPickerOpen by remember { mutableStateOf(false) }
 
     // 状态卡数据：内核版本走 System.getProperty("os.version")，无需任何特权。
     // 不做 /proc/modules 探测——GKI 上 KernelSU 是 kprobe 型，不注册模块条目，探测恒 false 且误导（2026-11-04 定稿）
@@ -148,67 +143,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         }
         }
 
-        Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.height(6.dp).width(6.dp).background(Color(0xFF4CD97B), RoundedCornerShape(3.dp)))
-                    Text(
-                        "Shizuku",
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 15.sp,
-                        color = colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                Text(
-                    if (shizukuOk) "已授权" else "未就绪（先启动 Shizuku，再点授权）",
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                if (!shizukuOk) {
-                    TextButton(
-                        text = "授权",
-                        onClick = {
-                            runner.requestPermission()
-                            scope.launch {
-                                kotlinx.coroutines.delay(1500)
-                                refreshShizuku()
-                            }
-                        },
-                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                    )
-                }
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.height(6.dp).width(6.dp).background(Color(0xFF4CD97B), RoundedCornerShape(3.dp)))
-                    Text(
-                        "根管理器",
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 15.sp,
-                        color = colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                Text(
-                    "当前：" + (managers.firstOrNull { it.packageName == selectedPkg }?.label
-                        ?: "自发现（默认，优先 KernelSU）"),
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-                TextButton(
-                    text = "选择根管理器",
-                    onClick = { managerPickerOpen = true },
-                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth().height(48.dp),
-                )
-            }
-        }
-
         Button(
             // 淡绿底 + 深绿字，与顶部状态卡同一绿色系；禁用态灰绿弱化
             colors = ButtonDefaults.buttonColors(
@@ -223,7 +157,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 runStatus = "准备执行"
                 scope.launch {
                     val (ok, msg) = withContext(Dispatchers.IO) {
-                        top.honorhook.ui.toolbox.GhostLockRunner.run(context, selectedPkg, onLog = { line -> logLines.add(line) }) { step, status ->
+                        top.honorhook.ui.toolbox.GhostLockRunner.run(context, null /* 自发现：默认优先 KernelSU */, onLog = { line -> logLines.add(line) }) { step, status ->
                             runStatus = "$step · $status"
                         }
                     }
@@ -251,53 +185,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                     WindowInsets.captionBar.asPaddingValues().calculateBottomPadding() + 12.dp
             )
         )
-    }
-
-    // 根管理器选择弹窗：候选 = BUILTIN + 已知分支（ManagerScanner 已滤普通应用），加自发现默认项。
-    // 行样式：圆角 12dp，选中态绿色浅底 + 行尾 ✓；本地 @Composable 复用同一行式
-    if (managerPickerOpen) {
-        WindowDialog(
-            show = true,
-            title = "选择根管理器",
-            summary = "仅列出已知的 KernelSU 系管理器；不选 = 载荷自发现（默认优先 KernelSU）",
-            onDismissRequest = { managerPickerOpen = false },
-        ) {
-            @Composable
-            fun pickerRow(label: String, selected: Boolean, onClick: () -> Unit) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            if (selected) Color(0xFF4CD97B).copy(alpha = 0.14f) else Color(0x14000000),
-                            RoundedCornerShape(12.dp),
-                        )
-                        .clickable(onClick = onClick)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        label,
-                        fontSize = 14.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (selected) {
-                        Text("✓", color = Color(0xFF4CD97B), fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                pickerRow("自发现（默认，优先 KernelSU）", selectedPkg == null) {
-                    selectedPkg = null; managerPickerOpen = false
-                }
-                managers.forEach { c ->
-                    pickerRow(c.label, selectedPkg == c.packageName) {
-                        selectedPkg = c.packageName; managerPickerOpen = false
-                    }
-                }
-            }
-        }
     }
 
     // 运行弹窗（保留）：执行中常驻，完成后出「关闭」
