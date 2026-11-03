@@ -14,7 +14,7 @@ import top.honorhook.tools.ghostlock.data.ManagerScanner
  */
 object GhostLockRunner {
 
-    private const val PAYLOAD_ASSET = "ghostlock/cve98260/cve-2026-98260-android"
+    private const val PAYLOAD_ASSET = "ghostlock/cve98260/cve-2026-98260-uid0"
     private const val SU_ASSET = "ghostlock/cve64560/cve-2026-64560-su"
 
     @Volatile
@@ -42,6 +42,7 @@ object GhostLockRunner {
     suspend fun run(
         context: Context,
         managerPackage: String?,
+        onLog: (String) -> Unit,
         onStatus: ((step: String, status: String) -> Unit)?,
     ): Pair<Boolean, String> {
         val (payload, su) = runCatching { loadPayloads(context) }.getOrElse {
@@ -49,7 +50,7 @@ object GhostLockRunner {
         }
         val code = runnerOf(context).runCve98260(
             payload, su, managerPackage,
-            onLog = { /* 默认零日志 */ },
+            onLog = onLog,
             onStatus = onStatus,
         )
         return when (code) {

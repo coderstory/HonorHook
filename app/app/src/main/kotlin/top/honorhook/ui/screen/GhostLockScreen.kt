@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -53,6 +56,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
     var selectedPkg by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
     var runStatus by remember { mutableStateOf("") }
+    val logLines = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var runOpen by remember { mutableStateOf(false) }
     var managerPickerOpen by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
@@ -121,7 +125,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 runStatus = "准备执行"
                 scope.launch {
                     val (ok, msg) = withContext(Dispatchers.IO) {
-                        top.honorhook.ui.toolbox.GhostLockRunner.run(context, selectedPkg) { step, status ->
+                        top.honorhook.ui.toolbox.GhostLockRunner.run(context, selectedPkg, onLog = { line -> logLines.add(line) }) { step, status ->
                             runStatus = "$step · $status"
                         }
                     }
@@ -191,6 +195,23 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         ) {
             Column {
                 Text(runStatus, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .background(androidx.compose.ui.graphics.Color(0xFF101014)),
+                ) {
+                    items(logLines.size) { i ->
+                        Text(
+                            logLines[i],
+                            fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            color = androidx.compose.ui.graphics.Color(0xFF9BE29B),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
+                        )
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 if (!running) {
                     TextButton(text = "关闭", onClick = { runOpen = false }, modifier = Modifier.fillMaxWidth())
