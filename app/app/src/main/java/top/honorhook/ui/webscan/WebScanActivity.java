@@ -215,17 +215,13 @@ public class WebScanActivity extends Activity {
         menuBtn.setOnClickListener(v -> showWebMenu());
         webWrap.addView(menuBtn, menuLp);
 
+        // 扫码页 = 二级页（顶栏「← 远程开发」，2026-11-03 用户需求）
         FrameLayout root = new FrameLayout(this);
         root.addView(scanView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        root.addView(webWrap, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        // 二级页化（2026-11-03 用户需求）：顶栏「← 远程开发」与工具箱其他二级页一致
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setBackgroundColor(0xFFFFFFFF);
-
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -244,11 +240,17 @@ public class WebScanActivity extends Activity {
         topBar.addView(pageTitle);
         page.addView(topBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
-
         page.addView(root, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        setContentView(page);
+        // 网页 = 全屏顶层（盖住扫码页含顶栏；2026-11-03 用户需求：网页是全屏的）
+        FrameLayout topLayer = new FrameLayout(this);
+        topLayer.addView(page, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        topLayer.addView(webWrap, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        setContentView(topLayer);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
