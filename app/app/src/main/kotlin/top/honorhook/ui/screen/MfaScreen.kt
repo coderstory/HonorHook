@@ -82,9 +82,14 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) runCatching {
             val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
-            val n = text?.let { MfaStore.importJson(context, it) } ?: 0
-            Toast.makeText(context, "导入 $n 个账号", Toast.LENGTH_SHORT).show()
-            if (n > 0) refresh()
+            val r = text?.let { MfaStore.importJson(context, it) } ?: Pair(0, 0)
+            val msg = when {
+                r.second == 0 -> "文件里没有有效账号"
+                r.first == 0 -> "共 ${r.second} 个账号，全部已存在（未重复导入）"
+                else -> "导入 ${r.first} 个新账号（共 ${r.second} 个）"
+            }
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            if (r.first > 0) refresh()
         }.onFailure { Toast.makeText(context, "读取失败: ${it.message}", Toast.LENGTH_SHORT).show() }
     }
 

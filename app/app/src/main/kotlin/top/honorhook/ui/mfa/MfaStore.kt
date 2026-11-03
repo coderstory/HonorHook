@@ -113,12 +113,15 @@ object MfaStore {
         "$name.json"
     }.getOrNull()
 
-    /** 导入（恢复）：吃备份 JSON 文本，uris 去重入库、aliases 并入；返回导入账号数。 */
-    fun importJson(context: Context, text: String): Int = runCatching {
+    /**
+     * 导入（恢复）：吃备份 JSON 文本，uris 去重入库、aliases 并入。
+     * 返回 (新增数, 文件内有效账号数)——新增 0 且有效 >0 = 全部已存在（非错误，2026-11-03 真机反馈歧义）。
+     */
+    fun importJson(context: Context, text: String): Pair<Int, Int> = runCatching {
         val obj = org.json.JSONObject(text)
         val uris = mutableListOf<String>()
-        val arr = obj.optJSONArray("uris") ?: return 0
-        for (i in 0 until arr.length()) uris.add(arr.optString(i))
+        val arr = obj.optJSONArray("uris") ?: return Pair(0, 0)
+        for (i in 0 until arr.length()) arr.optString(i).takeIf { parse(it) != null }?.let { uris.add(it) }
         val added = addAll(context, uris)
         val aliases = obj.optJSONObject("aliases")
         if (aliases != null) {
@@ -127,8 +130,8 @@ object MfaStore {
             for (k in aliases.keys()) mine.putOpt(k, aliases.opt(k))
             prefs.edit().putString(ALIAS, mine.toString()).apply()
         }
-        added
-    }.getOrDefault(0)
+        Pair(added, uris.size)
+    }.getOrDefault(Pair(0, 0))
 
     fun remove(context: Context, uri: String) {
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
