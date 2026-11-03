@@ -400,6 +400,8 @@ object XhsVideoSave {
         // 记录「当前视频笔记」——invoke 的 String 参数语义不可证时（见 XhsBatchSave 挂载处）唯一归属来源
         if (url.contains("/note/videofeed")) queryParam(url, "note_id")?.let { lastVideoNoteId = it }
         harvestNoteShare(body)
+        // 评论图被动采集（2026-11-03 用户需求）：评论区响应顺带抽图链（X5 批量消费，见 XhsCommentHarvest）
+        if (url.contains("comment")) XhsCommentHarvest.harvest(url, body)
         return null
     }
 

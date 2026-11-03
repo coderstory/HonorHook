@@ -609,7 +609,13 @@ object XhsBatchSave {
                         ?.map { it.originalUrl }
                         .orEmpty()
                     val liveFrameUrls = note?.livePhotos.orEmpty().map { it.image.originalUrl }
-                    LinkedHashSet(imageUrls + liveFrameUrls).toList()
+                    // ④ 评论图（2026-11-03 用户需求，被动采集 XhsCommentHarvest）：该笔记打开过评论区的图，
+                    //   并入批量同落 CDN 原始字节（sns-webpic 显示链经 toBare/raw 与笔记图同管线）；没打开过 = 空 = 行为不变
+                    val commentUrls = XhsCommentHarvest.urlsOf(noteId)
+                    if (commentUrls.isNotEmpty()) {
+                        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 评论图并入 ${commentUrls.size} 张 noteId=$noteId")
+                    }
+                    LinkedHashSet(imageUrls + liveFrameUrls + commentUrls).toList()
                 }.getOrNull().orEmpty()
                 if (urls.isEmpty()) {
                     module.log(Log.WARN, MountEngine.TAG,
