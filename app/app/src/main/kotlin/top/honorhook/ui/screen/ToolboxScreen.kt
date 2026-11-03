@@ -167,7 +167,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     ) { innerPadding ->
         if (view == HubView.MFA) {
             // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
-            MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME })
+            MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
         } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,

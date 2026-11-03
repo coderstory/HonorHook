@@ -47,7 +47,7 @@ import java.util.concurrent.Executors
  * 提示条说明对准 otpauth 二维码；连拍命中去重由 [onResult] 一次性收口（命中即返回不循环）。
  */
 @Composable
-fun MfaScanScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, onResult: (List<String>) -> Unit) {
+fun MfaScanScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, onResult: (List<String>) -> Unit, topInset: Dp = 0.dp) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var granted by remember {
@@ -58,7 +58,7 @@ fun MfaScanScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, onResult: (
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     LaunchedEffect(Unit) { if (!granted) permLauncher.launch(Manifest.permission.CAMERA) }
 
-    Column(Modifier.fillMaxSize().padding(bottom = bottomInnerPadding)) {
+    Column(Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInnerPadding)) {
         Card(Modifier.fillMaxWidth().padding(16.dp)) {
             Text("对准 otpauth 二维码（其他验证器导出/网页展示均可）", fontSize = 13.sp, color = colorScheme.onSurfaceVariantSummary)
         }

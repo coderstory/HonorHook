@@ -62,7 +62,8 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  * 录入三通道：相机扫码（[MfaScanScreen]）/ 手动录入（secret 粘贴）/ 批量导入 otpauth 文本（迁移口）。
  */
 @Composable
-fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit) {
+fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 0.dp) {
+    // topInset 必须消费：外层 Scaffold 不自动让位，漏了内容整块画进顶栏底下（2026-11-03 真机空白实证）
     val context = LocalContext.current
     var accounts by remember { mutableStateOf(MfaStore.list(context)) }
     var view by rememberSaveable { mutableStateOf(MfaView.LIST) }
@@ -84,6 +85,7 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit) {
     when (view) {
         MfaView.SCAN -> MfaScanScreen(
             bottomInnerPadding = bottomInnerPadding,
+            topInset = topInset,
             onBack = { view = MfaView.LIST },
             onResult = { uris ->
                 view = MfaView.LIST
@@ -92,7 +94,7 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit) {
                 refresh()
             },
         )
-        MfaView.LIST -> LazyColumn(Modifier.fillMaxSize().padding(bottom = bottomInnerPadding)) {
+        MfaView.LIST -> LazyColumn(Modifier.fillMaxSize().padding(top = topInset, bottom = bottomInnerPadding)) {
             item {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
