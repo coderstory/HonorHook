@@ -119,35 +119,6 @@ public class WebScanActivity extends Activity {
         scanView = new FrameLayout(this);
         scanView.setBackgroundColor(0xFFFFFFFF);
 
-        // ---- 顶部标题 ----
-        LinearLayout titleBar = new LinearLayout(this);
-        titleBar.setOrientation(LinearLayout.VERTICAL);
-        titleBar.setGravity(Gravity.CENTER_HORIZONTAL);
-
-        TextView title = new TextView(this);
-        title.setText("远程开发");
-        title.setTextColor(0xFF17171A);
-        title.setTextSize(22);
-        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        title.setLetterSpacing(-0.01f);
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText("扫一扫 · 打开网页");
-        subtitle.setTextColor(0x8A17171A);
-        subtitle.setTextSize(13);
-        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subLp.topMargin = dp(6);
-        subtitle.setLayoutParams(subLp);
-
-        titleBar.addView(title);
-        titleBar.addView(subtitle);
-        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        titleLp.topMargin = dp(72);
-        scanView.addView(titleBar, titleLp);
-
         // ---- 中央取景卡片（圆角裁剪的相机预览 + 科技感遮罩）----
         FrameLayout card = new FrameLayout(this);
         card.setBackground(roundRect(0xFFF2F3F5, dp(26), 0, 0x1A000000));
@@ -167,7 +138,7 @@ public class WebScanActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(cardSide, cardSide,
-                Gravity.CENTER_HORIZONTAL);
+                Gravity.CENTER);
         cardLp.bottomMargin = dp(60);
         cardLp.setMargins(dp(16), 0, dp(16), 0);
         scanView.addView(card, cardLp);
@@ -250,7 +221,34 @@ public class WebScanActivity extends Activity {
         root.addView(webWrap, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        setContentView(root);
+        // 二级页化（2026-11-03 用户需求）：顶栏「← 远程开发」与工具箱其他二级页一致
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(0xFFFFFFFF);
+
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = new TextView(this);
+        back.setText("←");
+        back.setTextColor(0xFF17171A);
+        back.setTextSize(22);
+        back.setPadding(dp(20), dp(10), dp(20), dp(10));
+        back.setOnClickListener(v -> finish());
+        TextView pageTitle = new TextView(this);
+        pageTitle.setText("远程开发");
+        pageTitle.setTextColor(0xFF17171A);
+        pageTitle.setTextSize(18);
+        pageTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        topBar.addView(back);
+        topBar.addView(pageTitle);
+        page.addView(topBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+
+        page.addView(root, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        setContentView(page);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -367,7 +365,7 @@ public class WebScanActivity extends Activity {
         box.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView head = new TextView(this);
-        head.setText("最近打开（新 → 旧）");
+        head.setText("最近打开（新 → 旧）· 长按复制地址");
         head.setTextColor(0x8A17171A);
         head.setTextSize(12);
         LinearLayout.LayoutParams headLp = new LinearLayout.LayoutParams(
@@ -391,6 +389,14 @@ public class WebScanActivity extends Activity {
             row.setOnClickListener(v -> {
                 if (historyDialog != null) historyDialog.dismiss();
                 openUrl(url);
+            });
+            // 长按复制地址（2026-11-03 用户需求）
+            row.setOnLongClickListener(v -> {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                        getSystemService(Context.CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("url", url));
+                toast("已复制地址");
+                return true;
             });
             box.addView(row, lp);
         }

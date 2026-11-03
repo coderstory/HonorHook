@@ -200,30 +200,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                         // 运行状态卡已删（2026-11-03 用户指令）：probe/rootOk 仍供各开关/冻结页只读态
                         item {
                         HubTiles(switchValues, apps, onOpen = { view = it })
-                        // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白），不走 HubView 二级页；
-                        // 视觉与上方 2×2 磁贴同款（40dp 圆角图标底座 + 同字号），只是独占整行
-                        Card(modifier = Modifier.fillMaxWidth().clickable {
-                            context.startActivity(android.content.Intent(context, top.honorhook.ui.webscan.WebScanActivity::class.java))
-                        }.padding(top = 12.dp)) {
-                            Column(Modifier.padding(16.dp)) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(13.dp)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(Icons.Rounded.Language, contentDescription = null, tint = colorScheme.primary, modifier = Modifier.size(22.dp))
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = "远程开发",
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 15.sp,
-                                    color = colorScheme.onSurface,
-                                )
-                                Text("扫码打开网页 · 全屏浏览器", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
-                            }
-                        }
                     }
                     }
 
@@ -547,6 +523,7 @@ private fun HubTiles(
     values: Map<String, String>,
     apps: List<AppInfo>?,
     onOpen: (HubView) -> Unit,
+    onOpenHubActivity: () -> Unit = {},
 ) {
     val adsOn = ToolSwitchTable.ADS_GROUP.count { values[it.key] == "1" }
     val frozen = (apps ?: emptyList()).count { it.frozen }
@@ -597,6 +574,15 @@ private fun HubTiles(
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.Key, "MFA 验证器", "TOTP 动态码 · 扫码/导入") { onOpen(HubView.MFA) }
             }
+        }
+        // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）；第三行同尺寸磁贴
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.Language, "远程开发", "扫码打开网页 · 全屏浏览器") {
+                    onOpenHubActivity()
+                }
+            }
+            Box(Modifier.weight(1f)) {}
         }
     }
 }
