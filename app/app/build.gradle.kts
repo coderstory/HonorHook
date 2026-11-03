@@ -76,6 +76,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // GhostLock（2026-11-03）：AIDL 三件套（top.honorhook.tools.ghostlock）需要 aidl 编译
+        aidl = true
     }
 
     kotlin {
@@ -149,8 +151,15 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.androidx.core.ktx)
 
+    // ---- GhostLock 集成（2026-11-03）：Shizuku 授权/绑定，坐标照 ghostlock app/build.gradle.kts:187-188 ----
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
+
     // ---- MFA 验证器扫码（2026-11-03）：zxing 解码 + CameraX 取景 ----
     implementation(libs.zxing.core)
+    // GhostLock 临时 root（2026-11-03）：Shizuku 通道
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
     implementation(libs.camera.core)
     implementation(libs.camera.camera2)
     implementation(libs.camera.lifecycle)

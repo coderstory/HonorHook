@@ -20,6 +20,7 @@
 
     <!-- MFA 验证器扫码（2026-11-03）：CameraX 取景 + zxing 解码 otpauth 二维码。 -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。
@@ -79,6 +80,13 @@
             </intent-filter>
         </activity>
 
+            <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
 </manifest>

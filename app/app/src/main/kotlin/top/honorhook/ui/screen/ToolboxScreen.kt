@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -169,6 +170,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         if (view == HubView.MFA) {
             // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
             MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
+        } else if (view == HubView.GHOSTLOCK) {
+            // GhostLock 临时提权（2026-11-03）：极简整页，接住返回键回工作台
+            GhostLockScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
         } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,
@@ -257,6 +261,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 HubView.FREEZE -> {}
                 // MFA 页走独立整页分支（见 when 外层）
                 HubView.MFA -> {}
+                // GhostLock 页走独立整页分支（见 when 外层）
+                HubView.GHOSTLOCK -> {}
             }
 
             item {
@@ -390,6 +396,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), MFA("MFA 验证器"),
+    GHOSTLOCK("GhostLock"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -590,7 +597,9 @@ private fun HubTiles(
                     onOpenHubActivity()
                 }
             }
-            Box(Modifier.weight(1f)) {}
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.Security, "GhostLock", "临时提权 · CVE-2026-98260") { onOpen(HubView.GHOSTLOCK) }
+            }
         }
     }
 }
