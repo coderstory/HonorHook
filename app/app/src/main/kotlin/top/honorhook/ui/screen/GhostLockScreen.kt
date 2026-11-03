@@ -54,6 +54,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
     var running by remember { mutableStateOf(false) }
     var runStatus by remember { mutableStateOf("") }
     var runOpen by remember { mutableStateOf(false) }
+    var managerPickerOpen by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
 
     fun refreshShizuku() {
@@ -78,18 +79,19 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-                TextButton(
-                    text = if (shizukuOk) "已授权" else "授权",
-                    enabled = !shizukuOk,
-                    onClick = {
-                        runner.requestPermission()
-                        scope.launch {
-                            kotlinx.coroutines.delay(1500)
-                            refreshShizuku()
-                        }
-                    },
-                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                )
+                if (!shizukuOk) {
+                    TextButton(
+                        text = "授权",
+                        onClick = {
+                            runner.requestPermission()
+                            scope.launch {
+                                kotlinx.coroutines.delay(1500)
+                                refreshShizuku()
+                            }
+                        },
+                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                    )
+                }
             }
         }
 
@@ -97,31 +99,17 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text("根管理器", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface)
                 Text(
-                    if (managers.isEmpty()) "未检测到候选（默认：载荷自发现，优先 KernelSU）" else "检测到候选，默认自发现优先 KernelSU",
+                    "当前：" + (managers.firstOrNull { it.packageName == selectedPkg }?.label
+                        ?: "自发现（默认，优先 KernelSU）"),
                     fontSize = 12.sp,
                     color = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(top = 6.dp),
                 )
-                managers.forEach { c ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            (if (selectedPkg == c.packageName) "● " else "○ ") + c.label,
-                            fontSize = 13.sp,
-                            color = colorScheme.onSurface,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                }
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        (if (selectedPkg == null) "● " else "○ ") + "自发现（默认）",
-                        fontSize = 13.sp,
-                        color = colorScheme.onSurface,
-                    )
-                }
+                TextButton(
+                    text = "选择根管理器",
+                    onClick = { managerPickerOpen = true },
+                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                )
             }
         }
 
@@ -166,6 +154,31 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                     WindowInsets.captionBar.asPaddingValues().calculateBottomPadding() + 12.dp
             )
         )
+    }
+
+    // 根管理器选择弹窗：候选 = BUILTIN + 已知分支（ManagerScanner 已滤普通应用），加自发现默认项
+    if (managerPickerOpen) {
+        WindowDialog(
+            show = true,
+            title = "选择根管理器",
+            summary = "仅列出已知的 KernelSU 系管理器；不选 = 载荷自发现（默认优先 KernelSU）",
+            onDismissRequest = { managerPickerOpen = false },
+        ) {
+            Column {
+                TextButton(
+                    text = "自发现（默认，优先 KernelSU）" + if (selectedPkg == null) " ✓" else "",
+                    onClick = { selectedPkg = null; managerPickerOpen = false },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                managers.forEach { c ->
+                    TextButton(
+                        text = c.label + (if (selectedPkg == c.packageName) " ✓" else ""),
+                        onClick = { selectedPkg = c.packageName; managerPickerOpen = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
     }
 
     // 运行弹窗（保留）：执行中常驻，完成后出「关闭」
