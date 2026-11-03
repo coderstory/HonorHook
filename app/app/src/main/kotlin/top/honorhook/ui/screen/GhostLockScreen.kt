@@ -237,8 +237,9 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             enabled = shizukuOk && !running,
             // 与「选择根管理器」按钮同宽：卡片内按钮比屏幕列多缩进 16dp，这里对齐同一内边距；
             // 深绿描边收束淡绿底（画在 border 层，不改变按钮自身形状与点击区域）
+            // 与上方卡片拉开间距（scroll 列无法 weight 压底，用固定边距）
             modifier = Modifier
-                .padding(top = 12.dp)
+                .padding(top = 32.dp)
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .height(48.dp)
