@@ -67,7 +67,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
     val logLines = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var runOpen by remember { mutableStateOf(false) }
     var managerPickerOpen by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<String?>(null) }
 
     // 状态卡数据：内核版本走 System.getProperty("os.version")，无需任何特权。
     // 不做 /proc/modules 探测——GKI 上 KernelSU 是 kprobe 型，不注册模块条目，探测恒 false 且误导（2026-11-04 定稿）
@@ -221,7 +220,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             onClick = {
                 running = true
                 runOpen = true
-                result = null
                 runStatus = "准备执行"
                 scope.launch {
                     val (ok, msg) = withContext(Dispatchers.IO) {
@@ -229,7 +227,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                             runStatus = "$step · $status"
                         }
                     }
-                    result = msg
                     running = false
                     runStatus = if (ok) "完成" else "失败"
                 }
@@ -245,9 +242,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 .border(1.5.dp, Color(0xFF2E7D4F), RoundedCornerShape(12.dp)),
         ) {
             Text(if (running) "执行中…" else "执行提权")
-        }
-        result?.let {
-            Text(it, fontSize = 13.sp, color = colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp))
         }
 
         Spacer(
