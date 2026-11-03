@@ -54,6 +54,7 @@ object ManagerScanner {
         val label: String,
         val hasKsud: Boolean,
         val builtin: Boolean,
+        val fuzzyFork: Boolean = false,
     )
 
     /** Manager package plus the ksud binary it ships. */
@@ -78,9 +79,14 @@ object ManagerScanner {
                     label = ai.loadLabel(pm).toString(),
                     hasKsud = nativeKsud || builtin || fuzzyFork,
                     builtin = builtin,
+                    fuzzyFork = fuzzyFork,
                 )
             }
-            .filter { it.hasKsud }
+            // 2026-11-04 收紧：不再以 native 目录的随机名大 .so 作为入选条件——
+            // 京东/什么值得买/企业微信等大厂 app 恰好带 lib+10小写字母.so ≥1MB 的混淆库，
+            // 全被误判为 KSU 候选。包名匹配（内置表+分支关键词）已覆盖真实 KSU 系；
+            // 改包名的伪装分支交由 resolveKsud 的执行期兜底处理，不进选择弹窗。
+            .filter { it.builtin || it.fuzzyFork }
             .sortedWith(sortComparator())
             .toList()
 
