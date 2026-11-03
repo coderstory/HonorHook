@@ -73,6 +73,21 @@ object MfaAuthHook : TargetHook {
             override val description = "vault 解密明文截获（迁移诊断，只读日志）"
         }
         session.attemptMount(listOf(probeTask), module, loader) { t -> mountVaultProbe(session, t, module, loader) }
+
+        // SecretKeySpec 构造器挂不上（引擎只解析方法）→ 挂 Mac.init(Key)：TOTP 算码必经，
+        // args[0] 是 SecretKey，getEncoded() 公开接口取密钥原文
+        val keyTask = object : MountEngine.Task {
+            override val className = "javax.crypto.Mac"
+            override val methodName = "init"
+            override val paramCount = 1
+            override val returnType = "void"
+            override val id = "mfa:key.probe"
+            override val description = "TOTP 密钥直取（迁移诊断，只读日志）"
+        }
+        session.attemptMount(listOf(keyTask), module, loader) { t -> mountKeyProbe(session, t, module, loader) }
+
+        // ---- 探针 2（TOTP 密钥直取）：SQLCipher 路不通后改挂 javax.crypto.spec.SecretKeySpec 构造——
+        // TOTP 每次算码必经 Mac(SecretKeySpec(secret))，密钥原文在构造参数里，一个不漏。
     }
 
     private fun mountVaultProbe(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
@@ -85,8 +100,16 @@ object MfaAuthHook : TargetHook {
                     // 判据日志（挂载日志不受 debug 门控）；去重防解锁流程内重复 doFinal 刷屏
                     if (lastDumped == null || !lastDumped.contentEquals(out)) {
                         lastDumped = out
+                        // LSPosed 单行日志有截断上限（真机实证 19KB b64 被腰斩）→ 分块打，
+                        // root 侧按 chunk 序号拼接还原
                         val b64 = android.util.Base64.encodeToString(out, android.util.Base64.NO_WRAP)
-                        module.log(android.util.Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX vault-plaintext len=${out.size} gzip=$isGzip b64=$b64")
+                        val chunk = 2400
+                        val n = (b64.length + chunk - 1) / chunk
+                        for (i in 0 until n) {
+                            module.log(android.util.Log.INFO, MountEngine.TAG,
+                                "$JUDGE_PREFIX vault-chunk $i/$n len=${out.size} gzip=$isGzip: " +
+                                    b64.substring(i * chunk, minOf((i + 1) * chunk, b64.length)))
+                        }
                     }
                 }
             }
@@ -95,6 +118,39 @@ object MfaAuthHook : TargetHook {
 
     /** 探针去重记忆（进程级；同明文只打一次）。 */
     private var lastDumped: ByteArray? = null
+
+    private fun mountKeyProbe(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            runCatching {
+                val sk = chain.args?.getOrNull(0) as? java.security.Key ?: return@mount null
+                val key = sk.encoded ?: return@mount null
+                val algo = sk.algorithm ?: ""
+                // TOTP 密钥形态：Hmac 算法 + 10~64 字节；逐出（seen 去重防每 30s 刷屏）
+                if (algo.startsWith("Hmac", true) && key.size in 10..64 && seenKeys.add(key.contentHashCode())) {
+                    val b32 = key.joinToString("") {
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".let { a -> "" }
+                    }
+                    // Base32 编码（RFC4648 无填充）
+                    val sb = StringBuilder()
+                    var bits = 0; var value = 0
+                    for (b in key) {
+                        value = (value shl 8) or (b.toInt() and 0xFF)
+                        bits += 8
+                        while (bits >= 5) {
+                            sb.append("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[(value shr (bits - 5)) and 31])
+                            bits -= 5
+                        }
+                    }
+                    module.log(android.util.Log.INFO, MountEngine.TAG,
+                        "$JUDGE_PREFIX totp-key algo=$algo len=${key.size} b32=$sb b64=" +
+                            android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP))
+                }
+            }
+            null   // 构造器：无返回值
+        }
+
+    /** 已上报密钥指纹（进程级去重）。 */
+    private val seenKeys = HashSet<Int>()
 
     private fun mountSplash(session: MountSession, task: MountEngine.Task, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         session.mount(task, module, loader) { chain ->

@@ -29,8 +29,10 @@ object Totp {
     }
 
     fun codeAt(secret: ByteArray, algo: String, digits: Int, period: Int, counter: Long): String {
-        val mac = Mac.getInstance("Hmac$" + algo.uppercase())   // "HmacSHA1/256/512"
-        mac.init(SecretKeySpec(secret, "Hmac$" + algo.uppercase()))
+        // 标准名：SHA1 → HmacSHA1 / SHA256 → HmacSHA256 / SHA512 → HmacSHA512
+        val name = "Hmac" + algo.uppercase().removePrefix("HMAC")
+        val mac = Mac.getInstance(name)
+        mac.init(SecretKeySpec(secret, name))
         val msg = ByteArray(8)
         var c = counter
         for (i in 7 downTo 0) { msg[i] = (c and 0xFF).toByte(); c = c shr 8 }
@@ -46,11 +48,12 @@ object Totp {
 
     private val TEN_POW = longArrayOf(0, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000)
 
-    /** 当前时间片对应验证码。 */
-    fun now(acc: MfaAccount, millis: Long = System.currentTimeMillis()): String {
-        val counter = millis / 1000L / acc.period
-        return codeAt(acc.secret, acc.algorithm, acc.digits, acc.period, counter)
-    }
+    /** 当前时间片对应验证码（任何失败回 "000000"，绝不炸 UI——2026-11-03 真机 Hmac$SHA1 闪退实证）。 */
+    fun now(acc: MfaAccount, millis: Long = System.currentTimeMillis()): String =
+        runCatching {
+            val counter = millis / 1000L / acc.period
+            codeAt(acc.secret, acc.algorithm, acc.digits, acc.period, counter)
+        }.getOrDefault("000000")
 
     /** 当前时间片剩余秒数（进度环/倒计时用）。 */
     fun remainingSeconds(acc: MfaAccount, millis: Long = System.currentTimeMillis()): Int =

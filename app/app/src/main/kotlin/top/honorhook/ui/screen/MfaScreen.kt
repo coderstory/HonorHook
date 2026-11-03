@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material3.Icon
@@ -70,6 +71,7 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
     var showManual by remember { mutableStateOf(false) }
     var showImport by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<MfaAccount?>(null) }
+    var renaming by remember { mutableStateOf<MfaAccount?>(null) }
     // 全局 1s 心跳：所有卡共用一次 now() 取样，避免每卡独立 ticker
     var tick by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -125,11 +127,12 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
                 }
             }
             items(accounts, key = { it.uri }) { acc ->
-                AccountCard(acc, tick, onClick = {
+                AccountCard(acc, tick, MfaStore.aliasOf(context, acc.uri), onClick = {
                     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("otp", Totp.now(acc, tick)))
                     Toast.makeText(context, "已复制 ${Totp.now(acc, tick)}", Toast.LENGTH_SHORT).show()
-                }, onDelete = { deleting = acc })
+                }, onDelete = { deleting = acc },
+                    onRename = { renaming = acc })
             }
             item { Spacer(Modifier.height(16.dp)) }
         }
@@ -203,21 +206,43 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
                 }
         }
     }
+
+    // —— 改别名对话框（2026-11-03 用户需求）——
+    if (renaming != null) {
+        val acc = renaming!!
+        var name by remember(acc.uri) { mutableStateOf(MfaStore.aliasOf(context, acc.uri) ?: acc.issuer) }
+        WindowDialog(
+            show = true,
+            title = "改别名",
+            summary = null,
+            onDismissRequest = { renaming = null },
+        ) {
+            Column {
+                InputField(query = name, onQueryChange = { name = it }, onSearch = {}, expanded = false, onExpandedChange = {}, label = "显示名", modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                TextButton(text = "保存", onClick = {
+                    MfaStore.setAlias(context, acc.uri, name)
+                    renaming = null
+                    refresh()
+                }, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
 }
 
 private enum class MfaView { LIST, SCAN }
 
 /** 账号卡（爱码仕首页同款信息密度）：issuer/label + 大字验证码 + 剩余秒环；点按复制，尾钮删除。 */
 @Composable
-private fun AccountCard(acc: MfaAccount, tick: Long, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun AccountCard(acc: MfaAccount, tick: Long, alias: String?, onClick: () -> Unit, onDelete: () -> Unit, onRename: () -> Unit) {
     val code = Totp.now(acc, tick)
     val remain = Totp.remainingSeconds(acc, tick)
     val frac = remain.toFloat() / acc.period
     Card(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).clickable { onClick() }) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(acc.issuer, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Text(acc.label, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                Text(alias ?: acc.issuer, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(acc.label.ifEmpty { acc.issuer }, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
             }
             // 剩余秒进度环
             Box(contentAlignment = Alignment.Center, modifier = Modifier.size(40.dp)) {
@@ -238,6 +263,9 @@ private fun AccountCard(acc: MfaAccount, tick: Long, onClick: () -> Unit, onDele
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
             )
+            IconButton(onClick = onRename) {
+                Icon(Icons.Rounded.Edit, null, tint = colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
+            }
             IconButton(onClick = onDelete) {
                 Icon(Icons.Rounded.Delete, null, tint = colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
             }

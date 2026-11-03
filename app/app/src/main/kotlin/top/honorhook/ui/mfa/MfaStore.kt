@@ -28,6 +28,7 @@ object MfaStore {
 
     private const val PREF = "mfa_accounts"
     private const val KEY = "uris"
+    private const val ALIAS = "aliases"
 
     /** otpauth://totp/Issuer:label?secret=..&issuer=..&algorithm=..&digits=..&period=.. 解析。 */
     fun parse(uri: String): MfaAccount? = runCatching {
@@ -71,10 +72,31 @@ object MfaStore {
         return added
     }
 
+    // ---- 别名（2026-11-03 用户需求：改别名）：单独 key 存 JSONObject(uri→alias)，显示优先别名 ----
+    fun aliasOf(context: Context, uri: String): String? = runCatching {
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            .getString(ALIAS, null)?.let { org.json.JSONObject(it).optString(uri, "").ifEmpty { null } }
+    }.getOrNull()
+
+    fun setAlias(context: Context, uri: String, alias: String) {
+        runCatching {
+            val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            val obj = org.json.JSONObject(prefs.getString(ALIAS, "{}") ?: "{}")
+            if (alias.isBlank()) obj.remove(uri) else obj.put(uri, alias)
+            prefs.edit().putString(ALIAS, obj.toString()).apply()
+        }
+    }
+
     fun remove(context: Context, uri: String) {
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val arr = JSONArray(prefs.getString(KEY, "[]") ?: "[]")
         val keep = (0 until arr.length()).map { arr.optString(it) }.filter { it != uri }
         prefs.edit().putString(KEY, JSONArray(keep).toString()).apply()
+        runCatching {   // 连带清别名
+            val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            val obj = org.json.JSONObject(prefs.getString(ALIAS, "{}") ?: "{}")
+            obj.remove(uri)
+            prefs.edit().putString(ALIAS, obj.toString()).apply()
+        }
     }
 }
