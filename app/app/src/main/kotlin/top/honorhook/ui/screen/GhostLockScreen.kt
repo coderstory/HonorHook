@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -143,27 +146,59 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         }
         }
 
+        // Shizuku 卡：安全图标徽标 + 标题/副标题 + 右侧状态胶囊（绿=已授权 / 灰=未就绪）；未授权时下方出授权按钮
         Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.height(6.dp).width(6.dp).background(Color(0xFF4CD97B), RoundedCornerShape(3.dp)))
-                    Text(
-                        "Shizuku",
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 15.sp,
-                        color = colorScheme.onSurface,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
+                    Box(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .width(36.dp)
+                            .background(colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Rounded.Security,
+                            contentDescription = null,
+                            tint = colorScheme.primary,
+                            modifier = Modifier.height(20.dp).width(20.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Shizuku",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 15.sp,
+                            color = colorScheme.onSurface,
+                        )
+                        Text(
+                            if (shizukuOk) "已连接 · shell uid 投放通道" else "未就绪 · 先启动 Shizuku 应用",
+                            fontSize = 12.sp,
+                            color = colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    // 状态胶囊：绿=已授权 / 灰=未就绪
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (shizukuOk) Color(0xFF4CD97B).copy(alpha = 0.14f) else Color(0x14000000),
+                                RoundedCornerShape(999.dp),
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            if (shizukuOk) "已授权" else "未就绪",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (shizukuOk) Color(0xFF2E7D4F) else colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
                 }
-                Text(
-                    if (shizukuOk) "已授权" else "未就绪（先启动 Shizuku，再点授权）",
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
                 if (!shizukuOk) {
                     TextButton(
-                        text = "授权",
+                        text = "授权 Shizuku",
                         onClick = {
                             runner.requestPermission()
                             scope.launch {
@@ -171,7 +206,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                                 refreshShizuku()
                             }
                         },
-                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                        modifier = Modifier.padding(top = 12.dp).fillMaxWidth().height(44.dp),
                     )
                 }
             }
