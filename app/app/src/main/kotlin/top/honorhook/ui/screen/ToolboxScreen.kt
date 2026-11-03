@@ -598,6 +598,8 @@ private fun HubTiles(
                 }
             }
             Box(Modifier.weight(1f)) {
+                // GhostLock（2026-11-03）：第三行右格；payload 不打进 APK，
+                // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
                 Tile(Icons.Rounded.Security, "GhostLock", "临时提权 · CVE-2026-98260") { onOpen(HubView.GHOSTLOCK) }
             }
         }

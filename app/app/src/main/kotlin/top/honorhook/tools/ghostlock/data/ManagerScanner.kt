@@ -5,7 +5,10 @@ import android.content.pm.PackageManager
 import java.io.File
 import java.util.zip.ZipFile
 
-/** Finds root-manager candidates and orders them for ksud resolution. */
+/**
+ * 移植自 GhostLock data/ManagerScanner.kt（上游 218 行全保留，仅改包名）：
+ * 找根管理器候选并按优先级排 ksud 解析序。默认路径 = chosen=null（BUILTIN 优先）。
+ */
 object ManagerScanner {
     const val PREF_KEY = "manager_package"
 

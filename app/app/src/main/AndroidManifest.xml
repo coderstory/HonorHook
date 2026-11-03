@@ -80,13 +80,21 @@
             </intent-filter>
         </activity>
 
-            <provider
+        <!-- GhostLock（2026-11-03）：Shizuku API 授权通道 provider（照 ghostlock AndroidManifest.xml:26-31）-->
+        <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
             android:multiprocess="false"
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- GhostLock UserService：由 Shizuku server 以 shell uid 拉起（类名经 UserServiceArgs
+             ComponentName 绑定，不可混淆；proguard 有具名 keep） -->
+        <service
+            android:name="top.honorhook.tools.ghostlock.shizuku.GhostlockUserService"
+            android:exported="false"
+            tools:ignore="Instantiatable" />
     </application>
 
 </manifest>

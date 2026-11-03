@@ -11,7 +11,7 @@ import top.honorhook.ui.scope.RootShell
  *
  * 载荷与执行序列移植自 GhostLock 源码
  * （web/cev/dada-cve-AN00/app，shizuku/GhostlockUserService.kt
- * #runCve98260Blocking 与 #runCve64560Blocking）：
+ * #runCve98260Blocking）：
  * - 载荷 = assets/cve98260/cve-2026-98260-uid0（提权本体）+
  *   assets/cve64560/cve-2026-64560-su（临时 su，98260 链路里投放但非必需）
  * - 投放点 = /data/local/tmp/ghostlock-app/cve98260 与 /cve64560（源码同款目录）
@@ -32,7 +32,7 @@ object GhostLockTool {
     /** 目标机内核（aak.md：6.6.118-android15-8-gf17133276a57-abogki518694926-4k）。 */
     private const val EXPECTED_KERNEL_PREFIX = "6.6.118"
 
-    // 源码工作目录常量（GhostlockUserService 同款，勿改：fake 链路对路径无依赖但保持一致便于人工核对）
+    // 源码工作目录常量（GhostlockUserService 同款，勿改：保持与上游人工核对一致）
     private const val WORK_ROOT = "/data/local/tmp/ghostlock-app"
     private const val WORK_DIR_98260 = "$WORK_ROOT/cve98260"
     private const val WORK_DIR_64560 = "$WORK_ROOT/cve64560"
@@ -72,9 +72,8 @@ object GhostLockTool {
     data class ExtractResult(val ok: Boolean, val payloadFile: File?, val suFile: File?, val error: String?)
 
     /**
-     * 从 base.apk 内解出两个 payload 到 filesDir/ghostlock/（只写本应用私有目录），
-     * 再用 su chmod 补执行位（filesDir 上 Java 的 setExecutable 对 app uid 无意义，
-     * 后续由 root cp 到 /data/local/tmp 后统一 chmod 700——见 [installPayloads]）。
+     * 从 base.apk 内解出两个 payload 到 filesDir/ghostlock/（只写本应用私有目录）。
+     * 执行位由后续 root cp 到 /data/local/tmp 后统一 chmod 700 补齐（见 [runEscalation]）。
      */
     fun extractPayloads(context: Context): ExtractResult = runCatching {
         val carrier = carrier(context)
@@ -142,13 +141,13 @@ object GhostLockTool {
     fun runEscalation(context: Context): RunResult = runCatching {
         val extract = extractPayloads(context)
         if (!extract.ok || extract.payloadFile == null) {
-            return RunResult(false, "载荷提取失败：${extract.error ?: CARRIER_REQUIREMENT}")
+            return@runCatching RunResult(false, "载荷提取失败：${extract.error ?: CARRIER_REQUIREMENT}")
         }
         val payload = extract.payloadFile
-        val su = extract.suFile ?: return RunResult(false, "载荷提取失败：缺临时 su 载荷")
+        val su = extract.suFile ?: return@runCatching RunResult(false, "载荷提取失败：缺临时 su 载荷")
 
         // ① 投放：root 把 filesDir 里的载荷 cp 到源码同款目录并补执行位
-        // （VALUE_PATTERN 白名单不覆盖路径类命令，这里目录均为本文件常量、文件名固定，无用户输入）
+        // （目录/文件名均为本文件常量，无用户输入，无注入面）
         val stage = RootShell.exec(
             "mkdir -p $WORK_DIR_98260 $WORK_DIR_64560" +
                 " && cp ${payload.absolutePath} $WORK_DIR_98260/$PAYLOAD_98260_NAME" +
@@ -157,12 +156,12 @@ object GhostLockTool {
             timeoutSeconds = 30,
         )
         if (stage !is RootShell.Result.Ok) {
-            return RunResult(false, "载荷投放失败（su）")
+            return@runCatching RunResult(false, "载荷投放失败（su）")
         }
 
         // ② 前置检查：kernelsu 已在线（本机常态）则无需再跑
         if (kernelsuLive()) {
-            return RunResult(true, "KernelSU 已在线（本机已是 root），无需提权")
+            return@runCatching RunResult(true, "KernelSU 已在线（本机已是 root），无需提权")
         }
 
         // ③ 后台拉起 fake 链路：nohup + & 使 su 立即返回；输出落文件不落管道
@@ -172,21 +171,23 @@ object GhostLockTool {
             timeoutSeconds = 10,
         )
         if (launch !is RootShell.Result.Ok) {
-            return RunResult(false, "提权进程启动失败（su）")
+            return@runCatching RunResult(false, "提权进程启动失败（su）")
         }
 
         // ④ 轮询成功判据（源码 isKernelSuLive：/proc/modules 有 kernelsu 行）
         val deadline = System.currentTimeMillis() + RUN_TIMEOUT_MS
         while (System.currentTimeMillis() < deadline) {
             if (kernelsuLive()) {
-                return RunResult(true, "ROOT_SUCCESS backend=cve_2026_98260+kernelsu")
+                return@runCatching RunResult(true, "ROOT_SUCCESS backend=cve_2026_98260+kernelsu")
             }
             Thread.sleep(POLL_INTERVAL_MS)
         }
         RunResult(false, "CVE-2026-98260: KernelSU 未上线（设备未重启；进程按源码语义保留）")
     }.getOrElse { RunResult(false, "提权流程异常：${it.message ?: "unknown"}") }
 
-    private fun kernelsuLive(): Boolean = when (val r = RootShell.exec("grep -q '^kernelsu ' /proc/modules && echo live")) {
+    private fun kernelsuLive(): Boolean = when (
+        val r = RootShell.exec("grep -q '^kernelsu ' /proc/modules && echo live")
+    ) {
         is RootShell.Result.Ok -> r.stdout.contains("live")
         else -> false
     }
