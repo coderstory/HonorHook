@@ -31,7 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
-import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -58,6 +58,7 @@ import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.StatusChip
 import top.honorhook.ui.scope.RootShell
 import top.honorhook.ui.scope.SafeCommands
+import top.honorhook.ui.screen.MfaScreen
 import top.honorhook.ui.toolbox.AppInfo
 import top.honorhook.ui.toolbox.AppRepository
 import top.honorhook.ui.toolbox.GovernanceList
@@ -164,7 +165,10 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             .add(WindowInsets.displayCutout)
             .only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
-        if (view == HubView.FREEZE) {
+        if (view == HubView.MFA) {
+            // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
+            MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME })
+        } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,
                 topInset = innerPadding.calculateTopPadding(),
@@ -192,8 +196,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             when (view) {
                     // —— 工作台首页：状态摘要 + 磁贴（最近执行预览已删——与执行记录磁贴同数据源，同屏双份冗余） ——
                     HubView.HOME -> {
-                        item { SummaryCard(probe, rootOk, ota) }
-                        item { HubTiles(switchValues, apps, context, queue, onOpen = { view = it }) }
+                        // 运行状态卡已删（2026-11-03 用户指令）：probe/rootOk 仍供各开关/冻结页只读态
+                        item { HubTiles(switchValues, apps, onOpen = { view = it }) }
                     }
 
                 // —— 净化页：一键动作 ——
@@ -240,11 +244,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
 
                 // 冻结页走 FreezePane 独立布局（固定搜索 + 滚动列表，见上）
                 HubView.FREEZE -> {}
-
-                // —— 记录页：执行历史与快照（顶栏即页面标题，卡内不再重复标题） ——
-                HubView.LOG -> {
-                    item { HistoryCard(context, queue, asPage = true) }
-                }
+                // MFA 页走独立整页分支（见 when 外层）
+                HubView.MFA -> {}
             }
 
             item {
@@ -377,7 +378,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
-    HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), LOG("执行记录"),
+    HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), MFA("MFA 验证器"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -511,22 +512,18 @@ private fun FreezePane(
 }
 
 /**
- * 工作台 2×2 功能磁贴（v1.3.2）：副标题实时计数——营销键开数 / 冻结数 / 开关项数 / 记录数。
- * 快照与队列读取沿用 HistoryCard 既有口径（filesDir/toolbox/snapshots/ 与 ToolQueue）。
+ * 工作台 2×2 功能磁贴（v1.3.2；2026-11-03 执行记录磁贴删、MFA 验证器磁贴加）：
+ * 副标题实时计数——营销键开数 / 冻结数 / 开关项数。
  */
 @Composable
 private fun HubTiles(
     values: Map<String, String>,
     apps: List<AppInfo>?,
-    context: Context,
-    queue: ToolQueue,
     onOpen: (HubView) -> Unit,
 ) {
     val adsOn = ToolSwitchTable.ADS_GROUP.count { values[it.key] == "1" }
     val frozen = (apps ?: emptyList()).count { it.frozen }
     val switchCount = ToolSwitchTable.ENTRIES.count { it.group == null }
-    val snaps = SnapshotStore.all(context).size
-    val logCount = queue.items().size
 
     @Composable
     fun Tile(
@@ -571,85 +568,12 @@ private fun HubTiles(
                 Tile(Icons.Rounded.ToggleOn, "系统开关", "$switchCount 项可调") { onOpen(HubView.SWITCH) }
             }
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.History, "执行记录", "$snaps 份快照 · $logCount 条") { onOpen(HubView.LOG) }
+                Tile(Icons.Rounded.Key, "MFA 验证器", "TOTP 动态码 · 扫码/导入") { onOpen(HubView.MFA) }
             }
         }
     }
 }
 
-/**
- * 状态摘要卡（v1.3.4）：三枚状态 chip + root 临时态一行说明。
- * 挂载判据整线已删（2026-10-25 用户拍板：工程诊断数据不上用户界面）。
- */
-@Composable
-private fun SummaryCard(
-    probe: RootShell.ProbeResult?,
-    rootOk: Boolean,
-    ota: OtaSentinel.Report?,
-) {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text = "运行状态",
-                fontWeight = FontWeight.Medium,
-                fontSize = 15.sp,
-                color = colorScheme.onSurface,
-            )
-            val fw = FrameworkState.active
-            Row(
-                modifier = Modifier.padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusChip(
-                    if (probe == null) "root 检测中" else if (probe.available) "root 可用" else "root 不可用",
-                    ok = probe?.available == true,
-                )
-                StatusChip(
-                    when {
-                        fw == null -> "LSPosed 检测中"
-                        fw -> "LSPosed 已激活"
-                        else -> "LSPosed 未激活"
-                    },
-                    ok = fw == true,
-                )
-                StatusChip(
-                    when {
-                        ota == null -> "更新防护检查中"
-                        ota.shouldWarn -> "更新防护异常"
-                        else -> "更新防护正常"
-                    },
-                    ok = ota != null && !ota.shouldWarn,
-                )
-            }
-            Text(
-                text = "root 为临时授权，手机重启后失效",
-                fontSize = 11.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            if (!rootOk && probe != null) {
-                Text(
-                    text = "⚠ root 不可用（${probe.failure}）：开关和冻结暂时用不了；已保存的记录和备份不受影响。",
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            if (ota != null && ota.shouldWarn) {
-                Text(
-                    text = "⚠ 更新防护：" + listOfNotNull(
-                        ota.violatedSix.takeIf { it.isNotEmpty() }?.let { "有 ${it.size} 项防护开关被系统改回（${it.joinToString()}）" },
-                        ota.sentinelChanged.takeIf { it.isNotEmpty() }?.let { "检测到系统更新推送活动（${it.joinToString()}）" },
-                    ).joinToString("；"),
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun AdsGroupCard(
@@ -901,59 +825,3 @@ private fun ConfirmDialog(
     }
 }
 
-/** 执行记录卡；LOG 页模式（asPage=true）不渲染折叠头——顶栏已是页面标题（2026-10-25 去重）。 */
-@Composable
-private fun HistoryCard(context: Context, queue: ToolQueue, asPage: Boolean = false) {
-    var open by rememberSaveable { mutableStateOf(asPage) }
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            if (!asPage) Row(
-                modifier = Modifier.fillMaxWidth().clickable { open = !open },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = "执行记录与快照",
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 15.sp,
-                        color = colorScheme.onSurface,
-                    )
-                    val pending = queue.pending().size
-                    Text(
-                        text = if (pending > 0) "待执行 $pending 项（点开查看）" else "点开查看队列与快照",
-                        fontSize = 12.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                    )
-                }
-            }
-            if (open) {
-                queue.items().takeLast(8).reversed().forEach { item ->
-                    val state = when (item.state) {
-                        ToolQueue.Core.State.PENDING -> "待执行"
-                        ToolQueue.Core.State.DONE -> "✓"
-                        ToolQueue.Core.State.FAILED -> "× ${item.error}"
-                    }
-                    Text(
-                        text = "$state ${describeAction(item.action)}",
-                        fontSize = 11.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                val snaps = SnapshotStore.all(context).take(3)
-                if (snaps.isNotEmpty()) {
-                    Text(
-                        text = "备份快照：",
-                        fontSize = 12.sp,
-                        color = colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                    snaps.forEach { s ->
-                        Text("· ${s.name}（${s.length() / 1024}KB）", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
-                    }
-                }
-            }
-        }
-    }
-}

@@ -18,6 +18,9 @@
          只是声明权，安装前还有「允许安装未知应用」的用户授权页，见 ApkInstaller.install）。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- MFA 验证器扫码（2026-11-03）：CameraX 取景 + zxing 解码 otpauth 二维码。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。
 
