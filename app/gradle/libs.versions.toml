@@ -21,8 +21,16 @@ junit = "4.13.2"
 # 1.9.0 = 现状解析值（此前经 compose 依赖树隐式可见），显式声明后版本不漂。
 kotlinxCoroutines = "1.9.0"
 hiddenApiBypass = "4.3"
+# MFA 扫码（2026-11-03）：zxing 纯 Java 解码核心 + CameraX 相机栈
+zxing = "3.5.3"
+camerax = "1.4.2"
 
 [libraries]
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
+camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }
+camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
+camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 hiddenapibypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version.ref = "hiddenApiBypass" }
 libxposed-api = { group = "io.github.libxposed", name = "api", version.ref = "libxposed" }
