@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -234,8 +235,14 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 }
             },
             enabled = shizukuOk && !running,
-            // 与「选择根管理器」按钮同宽：卡片内按钮比屏幕列多缩进 16dp，这里对齐同一内边距
-            modifier = Modifier.padding(top = 12.dp).padding(horizontal = 16.dp).fillMaxWidth().height(48.dp),
+            // 与「选择根管理器」按钮同宽：卡片内按钮比屏幕列多缩进 16dp，这里对齐同一内边距；
+            // 深绿描边收束淡绿底（画在 border 层，不改变按钮自身形状与点击区域）
+            modifier = Modifier
+                .padding(top = 12.dp)
+                .padding(horizontal = 16.dp)
+                .fillMaxWidth()
+                .height(48.dp)
+                .border(1.5.dp, Color(0xFF2E7D4F), RoundedCornerShape(12.dp)),
         ) {
             Text(if (running) "执行中…" else "执行提权")
         }
