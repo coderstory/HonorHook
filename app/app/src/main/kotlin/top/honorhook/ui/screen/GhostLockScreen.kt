@@ -143,6 +143,40 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         }
         }
 
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.height(6.dp).width(6.dp).background(Color(0xFF4CD97B), RoundedCornerShape(3.dp)))
+                    Text(
+                        "Shizuku",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp,
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Text(
+                    if (shizukuOk) "已授权" else "未就绪（先启动 Shizuku，再点授权）",
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                if (!shizukuOk) {
+                    TextButton(
+                        text = "授权",
+                        onClick = {
+                            runner.requestPermission()
+                            scope.launch {
+                                kotlinx.coroutines.delay(1500)
+                                refreshShizuku()
+                            }
+                        },
+                        modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                    )
+                }
+            }
+        }
+
         Button(
             // 淡绿底 + 深绿字，与顶部状态卡同一绿色系；禁用态灰绿弱化
             colors = ButtonDefaults.buttonColors(
