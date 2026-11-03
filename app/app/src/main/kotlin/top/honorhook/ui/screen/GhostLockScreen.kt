@@ -100,49 +100,51 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 .background(statusBg, RoundedCornerShape(20.dp))
                 .padding(horizontal = 18.dp, vertical = 16.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 徽标：40dp 圆，绿色 18% 透明底，✓ 居中；与标题同行垂直居中，不留上下空隙
-                Box(
-                    modifier = Modifier
-                        .height(40.dp)
-                        .width(40.dp)
-                        .background(accent.copy(alpha = 0.18f), RoundedCornerShape(20.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("✓", color = accent, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
-                Spacer(Modifier.width(12.dp))
+        // 徽标与右侧全部内容（标题/内核/标签）垂直居中：圆圈=合并单元格式占满整卡高度的中轴
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    .width(40.dp)
+                    .background(accent.copy(alpha = 0.18f), RoundedCornerShape(20.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✓", color = accent, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column {
                 Text(
                     "临时提权 · 内核漏洞可用",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 16.sp,
                     color = colorScheme.onSurface,
                 )
-            }
-            Text(
-                "KernelSU $kernelVersion",
-                fontSize = 12.sp,
-                color = secondary,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 胶囊标签：半透明白底，弱化次级信息
-                Box(
-                    modifier = Modifier
-                        .background(chipBg, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                ) {
-                    Text("CVE-2026-98260", fontSize = 11.sp, color = secondary, fontWeight = FontWeight.Medium)
+                Text(
+                    "KernelSU $kernelVersion",
+                    fontSize = 12.sp,
+                    color = secondary,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // 胶囊标签：半透明白底，弱化次级信息
+                    Box(
+                        modifier = Modifier
+                            .background(chipBg, RoundedCornerShape(999.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text("CVE-2026-98260", fontSize = 11.sp, color = secondary, fontWeight = FontWeight.Medium)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(chipBg, RoundedCornerShape(999.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text("Shizuku 投放 · 零日志", fontSize = 11.sp, color = secondary, fontWeight = FontWeight.Medium)
+                    }
                 }
-                Box(
-                    modifier = Modifier
-                        .background(chipBg, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                ) {
-                    Text("Shizuku 投放 · 零日志", fontSize = 11.sp, color = secondary, fontWeight = FontWeight.Medium)
-                }
             }
+        }
         }
 
         Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
