@@ -9,7 +9,10 @@ import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -64,17 +67,11 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
     var managerPickerOpen by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
 
-    // 状态卡数据：root 探测读 /proc/modules 找 "kernelsu " 前缀行（与载荷判定同源）；
-    // 内核版本走 System.getProperty("os.version")，无需任何特权
-    var rootDetected by remember { mutableStateOf(false) }
+    // 状态卡数据：内核版本走 System.getProperty("os.version")，无需任何特权。
+    // 不做 /proc/modules 探测——GKI 上 KernelSU 是 kprobe 型，不注册模块条目，探测恒 false 且误导（2026-11-04 定稿）
     var kernelVersion by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         kernelVersion = System.getProperty("os.version") ?: "未知"
-        rootDetected = withContext(Dispatchers.IO) {
-            runCatching {
-                java.io.File("/proc/modules").readLines().any { it.startsWith("kernelsu ") }
-            }.getOrDefault(false)
-        }
     }
 
     fun refreshShizuku() {
@@ -90,42 +87,78 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             .padding(top = topInset + 4.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        // 顶部状态卡：深绿底样式对齐 GhostlockUI.kt 的 kernel_supported 卡（暗色 0xFF1A3825 / 亮色 0xFFDFFAE4）
+        // 顶部状态卡：深绿底样式对齐 GhostlockUI.kt 的 kernel_supported 卡（暗色 0xFF1A3825 / 亮色 0xFFDFFAE4）。
+        // 布局：圆形徽标 + 标题/内核副标题 + CVE 胶囊标签行
         val dark = isSystemInDarkTheme()
         val statusBg = if (dark) Color(0xFF1A3825) else Color(0xFFDFFAE4)
+        val accent = Color(0xFF4CD97B)
+        val secondary = colorScheme.onSurfaceVariantSummary
+        val chipBg = if (dark) Color(0x2EFFFFFF) else Color(0x8CFFFFFF)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(statusBg, RoundedCornerShape(16.dp))
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .background(statusBg, RoundedCornerShape(20.dp))
+                .padding(horizontal = 18.dp, vertical = 16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("✓", color = Color(0xFF4CD97B), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text(
-                    if (rootDetected) "内核漏洞可用 · KernelSU 已挂载" else "内核漏洞可用 · 未检测到 KernelSU",
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 15.sp,
-                    color = colorScheme.onSurface,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
+                // 徽标：40dp 圆，绿色 18% 透明底，✓ 居中
+                Box(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .width(40.dp)
+                        .background(accent.copy(alpha = 0.18f), RoundedCornerShape(20.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("✓", color = accent, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "临时提权 · 内核漏洞可用",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                        color = colorScheme.onSurface,
+                    )
+                    Text(
+                        "KernelSU $kernelVersion",
+                        fontSize = 12.sp,
+                        color = secondary,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
             }
-            Text(
-                "内核 $kernelVersion",
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "目标漏洞 CVE-2026-98260",
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 2.dp),
-            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 胶囊标签：半透明白底，弱化次级信息
+                Box(
+                    modifier = Modifier
+                        .background(chipBg, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text("CVE-2026-98260", fontSize = 11.sp, color = secondary, fontWeight = FontWeight.Medium)
+                }
+                Box(
+                    modifier = Modifier
+                        .background(chipBg, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text("Shizuku 投放 · 零日志", fontSize = 11.sp, color = secondary, fontWeight = FontWeight.Medium)
+                }
+            }
         }
 
         Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text("Shizuku", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.height(6.dp).width(6.dp).background(Color(0xFF4CD97B), RoundedCornerShape(3.dp)))
+                    Text(
+                        "Shizuku",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp,
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
                 Text(
                     if (shizukuOk) "已授权" else "未就绪（先启动 Shizuku，再点授权）",
                     fontSize = 12.sp,
@@ -150,7 +183,16 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
 
         Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text("根管理器", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.height(6.dp).width(6.dp).background(Color(0xFF4CD97B), RoundedCornerShape(3.dp)))
+                    Text(
+                        "根管理器",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 15.sp,
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
                 Text(
                     "当前：" + (managers.firstOrNull { it.packageName == selectedPkg }?.label
                         ?: "自发现（默认，优先 KernelSU）"),
@@ -209,7 +251,8 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         )
     }
 
-    // 根管理器选择弹窗：候选 = BUILTIN + 已知分支（ManagerScanner 已滤普通应用），加自发现默认项
+    // 根管理器选择弹窗：候选 = BUILTIN + 已知分支（ManagerScanner 已滤普通应用），加自发现默认项。
+    // 行样式：圆角 12dp，选中态绿色浅底 + 行尾 ✓；本地 @Composable 复用同一行式
     if (managerPickerOpen) {
         WindowDialog(
             show = true,
@@ -217,18 +260,39 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             summary = "仅列出已知的 KernelSU 系管理器；不选 = 载荷自发现（默认优先 KernelSU）",
             onDismissRequest = { managerPickerOpen = false },
         ) {
-            Column {
-                TextButton(
-                    text = "自发现（默认，优先 KernelSU）" + if (selectedPkg == null) " ✓" else "",
-                    onClick = { selectedPkg = null; managerPickerOpen = false },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                managers.forEach { c ->
-                    TextButton(
-                        text = c.label + (if (selectedPkg == c.packageName) " ✓" else ""),
-                        onClick = { selectedPkg = c.packageName; managerPickerOpen = false },
-                        modifier = Modifier.fillMaxWidth(),
+            @Composable
+            fun pickerRow(label: String, selected: Boolean, onClick: () -> Unit) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (selected) Color(0xFF4CD97B).copy(alpha = 0.14f) else Color(0x14000000),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable(onClick = onClick)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        label,
+                        fontSize = 14.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (selected) {
+                        Text("✓", color = Color(0xFF4CD97B), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                pickerRow("自发现（默认，优先 KernelSU）", selectedPkg == null) {
+                    selectedPkg = null; managerPickerOpen = false
+                }
+                managers.forEach { c ->
+                    pickerRow(c.label, selectedPkg == c.packageName) {
+                        selectedPkg = c.packageName; managerPickerOpen = false
+                    }
                 }
             }
         }
