@@ -101,7 +101,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 .padding(horizontal = 18.dp, vertical = 16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 徽标：40dp 圆，绿色 18% 透明底，✓ 居中
+                // 徽标：40dp 圆，绿色 18% 透明底，✓ 居中；与标题同行垂直居中，不留上下空隙
                 Box(
                     modifier = Modifier
                         .height(40.dp)
@@ -112,21 +112,19 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                     Text("✓", color = accent, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
                 Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(
-                        "临时提权 · 内核漏洞可用",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp,
-                        color = colorScheme.onSurface,
-                    )
-                    Text(
-                        "KernelSU $kernelVersion",
-                        fontSize = 12.sp,
-                        color = secondary,
-                        modifier = Modifier.padding(top = 3.dp),
-                    )
-                }
+                Text(
+                    "临时提权 · 内核漏洞可用",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    color = colorScheme.onSurface,
+                )
             }
+            Text(
+                "KernelSU $kernelVersion",
+                fontSize = 12.sp,
+                color = secondary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // 胶囊标签：半透明白底，弱化次级信息
