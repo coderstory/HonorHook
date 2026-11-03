@@ -396,7 +396,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), MFA("MFA 验证器"),
-    GHOSTLOCK("GhostLock"),
+    GHOSTLOCK("临时Root"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -600,7 +600,7 @@ private fun HubTiles(
             Box(Modifier.weight(1f)) {
                 // GhostLock（2026-11-03）：第三行右格；payload 不打进 APK，
                 // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
-                Tile(Icons.Rounded.Security, "GhostLock", "临时提权 · CVE-2026-98260") { onOpen(HubView.GHOSTLOCK) }
+                Tile(Icons.Rounded.Key, "临时Root", "无 root 提权 · Shizuku") { onOpen(HubView.GHOSTLOCK) }
             }
         }
     }

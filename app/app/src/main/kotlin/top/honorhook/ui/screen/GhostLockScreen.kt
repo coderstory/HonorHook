@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -30,146 +31,133 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.honorhook.ui.scope.RootShell
-import top.honorhook.ui.toolbox.GhostLockTool
+import top.honorhook.tools.ghostlock.data.ManagerScanner
+import top.honorhook.tools.ghostlock.shizuku.ShizukuExploitRunner
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
-/**
- * GhostLock 二级页（2026-11-03）：极简三件套——状态卡 + 主按钮 + 检查 root 次按钮。
- * 全部默认值（CVE-2026-98260 fake 链路、manager 自发现、零日志）：
- * 不移植 CPU 核心组 / 安全模式 / AdvancedUI / profile 编辑（用户拍板，勿扩大）。
- * 提权按钮留待用户自测（本机已 root，AI 验收只跑「检查 root 状态」）。
- */
+/** 临时 Root 二级页（2026-11-03 定稿）：Shizuku 授权 / 根管理器选择 / 执行+运行弹窗。
+ *  无 root 场景（Shizuku shell uid 投放执行）；全默认参数；默认零日志（onLog 丢弃）。 */
 @Composable
 fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topInset: Dp = 0.dp) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val runner = remember { ShizukuExploitRunner(context) }
 
-    var carrier by remember { mutableStateOf<GhostLockTool.CarrierInfo?>(null) }
-    var extract by remember { mutableStateOf<GhostLockTool.ExtractResult?>(null) }
-    var root by remember { mutableStateOf<GhostLockTool.RootStatus?>(null) }
+    var shizukuOk by remember { mutableStateOf(false) }
+    var managers by remember { mutableStateOf(top.honorhook.ui.toolbox.GhostLockRunner.managers(context)) }
+    var selectedPkg by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
-    var checking by remember { mutableStateOf(false) }
-    var lastRun by remember { mutableStateOf<String?>(null) }
+    var runStatus by remember { mutableStateOf("") }
+    var runOpen by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
 
-    // 进页先做只读检查：载体 + 载荷提取 + root 状态（任何一步异常吞掉显示失败文案）
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            carrier = GhostLockTool.carrier(context)
-            extract = if (carrier?.installed == true && carrier?.versionOk == true) {
-                GhostLockTool.extractPayloads(context)
-            } else {
-                null
-            }
-            root = GhostLockTool.checkRoot()
-            RootShell.reset()
-        }
+    fun refreshShizuku() {
+        shizukuOk = runner.status() == ShizukuExploitRunner.Status.READY
     }
+    LaunchedEffect(Unit) { refreshShizuku() }
+    LaunchedEffect(Unit) { runner.setStatusListener { refreshShizuku() } }
 
     Column(
         modifier = Modifier
             .fillMaxHeight()
             .padding(horizontal = 12.dp)
-            // topInset 必须消费：外层 Scaffold 不自动让位（MfaScreen 真机空白实证）
             .padding(top = topInset + 4.dp)
             .verticalScroll(rememberScrollState()),
     ) {
-        // —— 状态卡 ——
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text("Shizuku", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface)
                 Text(
-                    text = "运行状态",
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 15.sp,
-                    color = colorScheme.onSurface,
+                    if (shizukuOk) "已授权" else "未就绪（先启动 Shizuku，再点授权）",
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
-                StatusLine(
-                    "载荷载体",
-                    when {
-                        carrier == null -> "检查中…"
-                        carrier?.installed != true -> "未安装 · ${GhostLockTool.CARRIER_REQUIREMENT}"
-                        carrier?.versionOk != true ->
-                            "版本不符（${carrier?.versionName ?: "?"}）· ${GhostLockTool.CARRIER_REQUIREMENT}"
-                        else -> "GhostLock v${carrier?.versionName} 已安装"
+                TextButton(
+                    text = if (shizukuOk) "已授权" else "授权",
+                    enabled = !shizukuOk,
+                    onClick = {
+                        runner.requestPermission()
+                        scope.launch {
+                            kotlinx.coroutines.delay(1500)
+                            refreshShizuku()
+                        }
                     },
+                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
                 )
-                StatusLine(
-                    "载荷提取",
-                    when {
-                        extract == null && carrier?.versionOk != true -> "未提取（等载体就绪）"
-                        extract == null -> "未提取"
-                        extract?.ok == true -> "已提取（payload + 临时 su）"
-                        else -> "提取失败：${extract?.error ?: "未知"}"
-                    },
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text("根管理器", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface)
+                Text(
+                    if (managers.isEmpty()) "未检测到候选（默认：载荷自发现，优先 KernelSU）" else "检测到候选，默认自发现优先 KernelSU",
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
-                StatusLine(
-                    "Root",
-                    when {
-                        root == null -> "检测中…"
-                        root?.suAvailable != true -> "su 不可用（需 KSU 授权）"
-                        root?.kernelsuLive == true -> "KernelSU 已在线 · 已是 root"
-                        else -> "su 可用 · kernelsu 模块未加载"
-                    },
-                )
-                root?.kernelRelease?.let {
-                    StatusLine("内核", it)
+                managers.forEach { c ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            (if (selectedPkg == c.packageName) "● " else "○ ") + c.label,
+                            fontSize = 13.sp,
+                            color = colorScheme.onSurface,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (if (selectedPkg == null) "● " else "○ ") + "自发现（默认）",
+                        fontSize = 13.sp,
+                        color = colorScheme.onSurface,
+                    )
                 }
             }
         }
 
-        // —— 主按钮：完整提权流程（默认参数，见 GhostLockTool）——
-        val ready = extract?.ok == true && root?.suAvailable == true && !running
         Button(
             onClick = {
                 running = true
+                runOpen = true
+                result = null
+                runStatus = "准备执行"
                 scope.launch {
-                    lastRun = withContext(Dispatchers.IO) { GhostLockTool.runEscalation(context).message }
+                    val (ok, msg) = withContext(Dispatchers.IO) {
+                        top.honorhook.ui.toolbox.GhostLockRunner.run(context, selectedPkg) { step, status ->
+                            runStatus = "$step · $status"
+                        }
+                    }
+                    result = msg
                     running = false
+                    runStatus = if (ok) "完成" else "失败"
                 }
             },
-            enabled = ready,
+            enabled = shizukuOk && !running,
             modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
         ) {
-            Text(if (running) "提权流程运行中…" else "运行提权流程（CVE-2026-98260 · 默认参数）")
+            Text(if (running) "执行中…" else "执行提权")
         }
-        if (extract == null || extract?.ok != true || root?.suAvailable != true) {
+        if (!shizukuOk) {
             Text(
-                text = GhostLockTool.CARRIER_REQUIREMENT + "；且需 KernelSU 授权本应用的 su",
+                "需要先授权 Shizuku（本功能面向无 root 设备）",
                 fontSize = 11.sp,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
-        lastRun?.let {
-            Text(
-                text = it,
-                fontSize = 13.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+        result?.let {
+            Text(it, fontSize = 13.sp, color = colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp))
         }
-
-        // —— 次按钮：检查 root 状态（AI 验收走这条）——
-        TextButton(
-            text = if (checking) "检查中…" else "检查 root 状态",
-            enabled = !checking && !running,
-            onClick = {
-                checking = true
-                scope.launch {
-                    root = withContext(Dispatchers.IO) {
-                        val status = GhostLockTool.checkRoot()
-                        RootShell.reset()
-                        status
-                    }
-                    checking = false
-                }
-            },
-            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-        )
 
         Spacer(
             Modifier.height(
@@ -179,17 +167,22 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             )
         )
     }
-}
 
-@Composable
-private fun StatusLine(label: String, value: String) {
-    Row(modifier = Modifier.padding(top = 6.dp)) {
-        Text(
-            text = label,
-            fontSize = 12.sp,
-            color = colorScheme.onSurfaceVariantSummary,
-            modifier = Modifier.width(72.dp),
-        )
-        Text(text = value, fontSize = 12.sp, color = colorScheme.onSurface)
+    // 运行弹窗（保留）：执行中常驻，完成后出「关闭」
+    if (runOpen) {
+        WindowDialog(
+            show = true,
+            title = "提权运行中",
+            summary = "载荷经 Shizuku 投放执行，请勿离开本页",
+            onDismissRequest = { if (!running) runOpen = false },
+        ) {
+            Column {
+                Text(runStatus, fontSize = 14.sp)
+                Spacer(Modifier.height(12.dp))
+                if (!running) {
+                    TextButton(text = "关闭", onClick = { runOpen = false }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
     }
 }
