@@ -83,9 +83,15 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         modifier = Modifier
             .fillMaxHeight()
             .padding(horizontal = 12.dp)
-            .padding(top = topInset + 4.dp)
-            .verticalScroll(rememberScrollState()),
+            .padding(top = topInset + 4.dp),
     ) {
+        // 滚动区：两张卡片；执行按钮固定在页面底部（滚动区之外）
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        ) {
         // 顶部状态卡：深绿底样式对齐 GhostlockUI.kt 的 kernel_supported 卡（暗色 0xFF1A3825 / 亮色 0xFFDFFAE4）。
         // 布局：圆形徽标 + 标题/内核副标题 + CVE 胶囊标签行
         val dark = isSystemInDarkTheme()
@@ -212,6 +218,8 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             }
         }
 
+        }
+
         Button(
             // 淡绿底 + 深绿字，与顶部状态卡同一绿色系；禁用态灰绿弱化
             colors = ButtonDefaults.buttonColors(
@@ -237,9 +245,9 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             enabled = shizukuOk && !running,
             // 与「选择根管理器」按钮同宽：卡片内按钮比屏幕列多缩进 16dp，这里对齐同一内边距；
             // 深绿描边收束淡绿底（画在 border 层，不改变按钮自身形状与点击区域）
-            // 与上方卡片拉开间距（scroll 列无法 weight 压底，用固定边距）
+            // 固定在页面底部：滚动区之外的尾部
             modifier = Modifier
-                .padding(top = 32.dp)
+                .padding(top = 16.dp)
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .height(48.dp)
@@ -252,7 +260,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
             Modifier.height(
                 bottomInnerPadding +
                     WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
-                    WindowInsets.captionBar.asPaddingValues().calculateBottomPadding() + 12.dp
+                    WindowInsets.captionBar.asPaddingValues().calculateBottomPadding() + 12.dp + 8.dp
             )
         )
     }
