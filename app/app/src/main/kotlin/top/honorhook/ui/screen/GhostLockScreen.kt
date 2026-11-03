@@ -246,14 +246,6 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
         ) {
             Text(if (running) "执行中…" else "执行提权")
         }
-        if (!shizukuOk) {
-            Text(
-                "需要先授权 Shizuku（本功能面向无 root 设备）",
-                fontSize = 11.sp,
-                color = colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        }
         result?.let {
             Text(it, fontSize = 13.sp, color = colorScheme.onSurface, modifier = Modifier.padding(top = 8.dp))
         }
