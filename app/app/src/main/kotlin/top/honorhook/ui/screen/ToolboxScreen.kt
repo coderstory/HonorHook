@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -551,7 +552,7 @@ private fun HubTiles(
         sub: String,
         onClick: () -> Unit,
     ) {
-        Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Card(modifier = Modifier.fillMaxWidth().fillMaxHeight().clickable(onClick = onClick)) {
             Column(Modifier.padding(16.dp)) {
                 Box(
                     modifier = Modifier
@@ -574,7 +575,7 @@ private fun HubTiles(
     }
 
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.Campaign, "营销推荐", "11 个系统开关 · 当前开 $adsOn") { onOpen(HubView.PURIFY) }
             }
@@ -582,7 +583,7 @@ private fun HubTiles(
                 Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档") { onOpen(HubView.FREEZE) }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.ToggleOn, "系统开关", "$switchCount 项可调") { onOpen(HubView.SWITCH) }
             }
@@ -591,7 +592,7 @@ private fun HubTiles(
             }
         }
         // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）；第三行同尺寸磁贴
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.Language, "远程开发", "扫码打开网页 · 全屏浏览器") {
                     onOpenHubActivity()
