@@ -1104,7 +1104,9 @@ object XhsVideoSave {
                     dialog.dismiss()
                     hdActive = true
                     videoCancelRequested = false   // 2026-10-19 取消旗标每轮重置（上轮不泄漏）
-                    showProgressDialog()
+                    // 后台静默下载（2026-11-03 用户需求，xhs.silent_download）：开 = 不弹进度卡，
+                    // 下载照跑（hdActive/dismissProgress 均幂等，弹卡重试链不会启动）；取消入口随之消失。
+                    if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) showProgressDialog()
                     Thread({
                         runCatching { pickBestAndDownload(app, noteId, streams, t0, module) }
                             .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下失败 noteId=$noteId: ${it.message}") }

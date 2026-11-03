@@ -16,6 +16,7 @@ import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.core.MountSession
+import top.honorhook.xposed.data.RemoteConfig
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -1046,6 +1047,7 @@ object XhsBatchSave {
     /**
      * 外挂直下：后台线程逐张 HttpURLConnection + MediaStore 落「Pictures/小红书」。
      * 2026-10-19 进度+取消（用户需求）：开头重置取消旗标并弹进度卡（[showImageProgressDialog]，主线程）；
+     * 2026-11-03 后台静默（xhs.silent_download）：开关开时进度卡不弹（downloadAll 内判点），其余不变。
      * 每张开始前查 [imageCancelRequested]（true 则停，剩余张不动、已下载完成的不处理），取消落在本张
      * 写入期间 = 本张作废（onClick 即删 + 收尾补删半成品）；结束（完成/取消/异常）finally 必收卡
      * （幂等）后弹既有完成卡（取消时文案带「已取消」）。
@@ -1055,7 +1057,11 @@ object XhsBatchSave {
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下开始 ${urls.size} 张")
         mainHandler.post {
             runCatching {
-                showImageProgressDialog(activity, urls.size, module)
+                // 后台静默下载（2026-11-03 用户需求，xhs.silent_download）：开 = 不弹批量进度卡，
+                // Toast 轻提示保留作后台线索；取消旗标无人置位（恒 false）→ 循环自然跑完，完成卡照弹。
+                if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+                    showImageProgressDialog(activity, urls.size, module)
+                }
                 android.widget.Toast.makeText(activity, "开始下载 ${urls.size} 张…", android.widget.Toast.LENGTH_SHORT).show()
             }
         }

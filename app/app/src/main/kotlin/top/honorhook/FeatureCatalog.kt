@@ -58,6 +58,9 @@ object FeatureCatalog {
     const val KEY_XHS_SAVE_UNLOCK = "xhs.save_unlock"
     const val KEY_XHS_TAKEOVER_SAVE = "xhs.takeover_save"
 
+    /** 小红书图片/视频下载后台静默（2026-11-03 用户需求）：开 = 不弹进度卡（视频 HD 卡/图片批量卡），完成提示卡保留。 */
+    const val KEY_XHS_SILENT_DOWNLOAD = "xhs.silent_download"
+
     const val KEY_WALLPAPER_TRANSCODE_QUALITY = "wallpaper.transcode_quality"
     const val KEY_WALLPAPER_TIMELINE_UNLIMITED = "wallpaper.timeline_unlimited"
     const val KEY_WALLPAPER_LOOP = "wallpaper.loop"
@@ -267,6 +270,7 @@ object FeatureCatalog {
             listOf(
                 Feature(KEY_XHS_SAVE_UNLOCK, R.string.feature_xhs_save_unlock_title, R.string.feature_xhs_save_unlock_desc),
                 Feature(KEY_XHS_TAKEOVER_SAVE, R.string.feature_xhs_takeover_save_title, R.string.feature_xhs_takeover_save_desc),
+                Feature(KEY_XHS_SILENT_DOWNLOAD, R.string.feature_xhs_silent_download_title, R.string.feature_xhs_silent_download_desc),
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
             extraVersions = setOf("9.49.1", "9.51.0"),  // 9.51.0 = 2026-10-23 真机升级版（XhsPoints 9.51 套；albumCopy 落盘闸未定位诚实跳过）
