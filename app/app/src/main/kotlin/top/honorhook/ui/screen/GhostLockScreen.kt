@@ -112,7 +112,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 TextButton(
                     text = "选择根管理器",
                     onClick = { managerPickerOpen = true },
-                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth().height(48.dp),
                 )
             }
         }
@@ -135,7 +135,7 @@ fun GhostLockScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit = {}, topI
                 }
             },
             enabled = shizukuOk && !running,
-            modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+            modifier = Modifier.padding(top = 12.dp).fillMaxWidth().height(48.dp),
         ) {
             Text(if (running) "执行中…" else "执行提权")
         }
