@@ -87,6 +87,49 @@ object MfaStore {
         }
     }
 
+    /**
+     * 备份（2026-11-03 用户需求）：uris + aliases 打包 JSON 写公共下载目录（MediaStore.Downloads，
+     * API 29+ 免存储权限）。返回显示文件名；失败 null（UI toast 报错）。
+     */
+    fun backup(context: Context): String? = runCatching {
+        val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+        val uris = JSONArray(prefs.getString(KEY, "[]") ?: "[]")
+        val aliases = org.json.JSONObject(prefs.getString(ALIAS, "{}") ?: "{}")
+        val payload = org.json.JSONObject()
+            .put("app", "honorhook-mfa")
+            .put("uris", uris)
+            .put("aliases", aliases)
+        val name = "mfa_backup_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss",
+            java.util.Locale.US).format(java.util.Date())
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "$name.json")
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+            put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                android.os.Environment.DIRECTORY_DOWNLOADS)
+        }
+        val uri = context.contentResolver.insert(
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
+        context.contentResolver.openOutputStream(uri)?.use { it.write(payload.toString().toByteArray()) }
+        "$name.json"
+    }.getOrNull()
+
+    /** 导入（恢复）：吃备份 JSON 文本，uris 去重入库、aliases 并入；返回导入账号数。 */
+    fun importJson(context: Context, text: String): Int = runCatching {
+        val obj = org.json.JSONObject(text)
+        val uris = mutableListOf<String>()
+        val arr = obj.optJSONArray("uris") ?: return 0
+        for (i in 0 until arr.length()) uris.add(arr.optString(i))
+        val added = addAll(context, uris)
+        val aliases = obj.optJSONObject("aliases")
+        if (aliases != null) {
+            val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+            val mine = org.json.JSONObject(prefs.getString(ALIAS, "{}") ?: "{}")
+            for (k in aliases.keys()) mine.putOpt(k, aliases.opt(k))
+            prefs.edit().putString(ALIAS, mine.toString()).apply()
+        }
+        added
+    }.getOrDefault(0)
+
     fun remove(context: Context, uri: String) {
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val arr = JSONArray(prefs.getString(KEY, "[]") ?: "[]")

@@ -23,6 +23,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material3.Icon
@@ -37,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -72,6 +76,18 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
     var showImport by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<MfaAccount?>(null) }
     var renaming by remember { mutableStateOf<MfaAccount?>(null) }
+    fun refresh() { accounts = MfaStore.list(context) }
+
+    // 导入文件选择器（2026-11-03 备份/导入）：系统 SAF 选 JSON
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) runCatching {
+            val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+            val n = text?.let { MfaStore.importJson(context, it) } ?: 0
+            Toast.makeText(context, "导入 $n 个账号", Toast.LENGTH_SHORT).show()
+            if (n > 0) refresh()
+        }.onFailure { Toast.makeText(context, "读取失败: ${it.message}", Toast.LENGTH_SHORT).show() }
+    }
+
     // 全局 1s 心跳：所有卡共用一次 now() 取样，避免每卡独立 ticker
     var tick by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -81,8 +97,6 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
         }
     }
     BackHandler(enabled = view != MfaView.LIST) { view = MfaView.LIST }
-
-    fun refresh() { accounts = MfaStore.list(context) }
 
     when (view) {
         MfaView.SCAN -> MfaScanScreen(
@@ -102,6 +116,19 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.End,
                 ) {
+                    IconButton(onClick = {
+                        val name = MfaStore.backup(context)
+                        Toast.makeText(context,
+                            if (name != null) "已备份到 Download/$name" else "备份失败",
+                            Toast.LENGTH_LONG).show()
+                    }) {
+                        Icon(Icons.Rounded.Backup, null, tint = colorScheme.onSurface)
+                    }
+                    IconButton(onClick = {
+                        importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+                    }) {
+                        Icon(Icons.Rounded.FolderOpen, null, tint = colorScheme.onSurface)
+                    }
                     IconButton(onClick = { showImport = true }) {
                         Icon(Icons.Rounded.ContentPaste, null, tint = colorScheme.onSurface)
                     }
