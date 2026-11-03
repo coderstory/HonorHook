@@ -64,6 +64,11 @@
 
         <!-- 宿主设置界面：三 Tab（首页/功能/设置），Miuix Compose 实现 -->
         <activity
+            android:name=".ui.webscan.WebScanActivity"
+            android:exported="false"
+            android:label="远程开发"
+            android:launchMode="singleTask" />
+        <activity
             android:name=".ui.MainActivity"
             android:exported="true"
             android:label="Re:荣耀"

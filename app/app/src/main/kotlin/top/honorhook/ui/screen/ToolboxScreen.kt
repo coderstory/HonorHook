@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -197,7 +198,20 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     // —— 工作台首页：状态摘要 + 磁贴（最近执行预览已删——与执行记录磁贴同数据源，同屏双份冗余） ——
                     HubView.HOME -> {
                         // 运行状态卡已删（2026-11-03 用户指令）：probe/rootOk 仍供各开关/冻结页只读态
-                        item { HubTiles(switchValues, apps, onOpen = { view = it }) }
+                        item {
+                        HubTiles(switchValues, apps, onOpen = { view = it })
+                        // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白），不走 HubView 二级页
+                        Card(modifier = Modifier.fillMaxWidth().clickable {
+                            context.startActivity(android.content.Intent(context, top.honorhook.ui.webscan.WebScanActivity::class.java))
+                        }.padding(top = 12.dp)) {
+                            Column(Modifier.padding(16.dp)) {
+                                Icon(Icons.Rounded.Language, null, tint = colorScheme.primary, modifier = Modifier.size(22.dp))
+                                Text("远程开发", fontWeight = FontWeight.Medium, fontSize = 15.sp, color = colorScheme.onSurface,
+                                    modifier = Modifier.padding(top = 10.dp))
+                                Text("扫码打开网页 · 全屏浏览器", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                            }
+                        }
+                    }
                     }
 
                 // —— 净化页：一键动作 ——
