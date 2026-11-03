@@ -122,7 +122,7 @@
     <string name="feature_xhs_takeover_save_title">接管下载</string>
     <string name="feature_xhs_takeover_save_desc">保存时由模块接手：图片下原图（实况图只下静态那张），视频自动换到原片（作者关掉下载时会先弹卡片问你），顺手去水印，带进度和取消按钮</string>
     <string name="feature_xhs_silent_download_title">后台静默下载</string>
-    <string name="feature_xhs_silent_download_desc">下载过程不弹进度卡，后台静默完成；下载完成后的提示卡保留，进度卡里的取消按钮随之不可用</string>
+    <string name="feature_xhs_silent_download_desc">保存后不再弹任何确认/进度弹窗，直接后台下载，Toast 提示开始与完成（含张数/体积）；取消按钮随之不可用</string>
 
     <string name="target_name_wallpapereditor">壁纸视频增强</string>
     <string name="target_name_livewallpaper">壁纸视频循环播放</string>

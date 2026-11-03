@@ -1036,9 +1036,42 @@ object XhsVideoSave {
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX HD询问 noteId=$noteId 候选 ${streams.size} 个")
         // 确定性让位：X4 卡后弹 ⇒ 主动关掉 X5 的「已保存本视频」反馈卡，不依赖时序（2026-10-15）
         XhsBatchSave.dismissVideoFeedbackCard()
+        // 静默直下（2026-11-03 用户需求，xhs.silent_download）：跳过询问卡直接开下，Toast 提示开始
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+            startHdDownload(noteId, streams, app, t0, module)
+            return
+        }
         // lastAsk 幂等对 (lastAskAtMs/lastAskNoteId) 不在此写——showAskDialog 内 dialog.show()
         // 成功后才写（审计 L4，见该处注释）
         showAskDialog(noteId, streams, app, t0, module)
+    }
+
+    /**
+     * HD 直下发起（2026-11-03 自询问卡 onClick 抽出，静默/询问两路共用）：
+     * 旗标重置 + 开始提示（静默 = Toast「正在下载视频…」，询问 = 进度卡）+ 下载线程。
+     * 静默路无重试（不弹卡即无 Activity 重试链）⇒ lastAsk 幂等对入口直写安全（审计 L4：无「弹成才写」语义）。
+     */
+    private fun startHdDownload(noteId: String, streams: List<VideoCandidate>, app: android.content.Context, t0: Long, module: XposedModule) {
+        lastAskAtMs = System.currentTimeMillis()
+        lastAskNoteId = noteId
+        hdActive = true
+        videoCancelRequested = false   // 2026-10-19 取消旗标每轮重置（上轮不泄漏）
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+            // 静默：不弹进度卡（hdActive 门控的 300ms 弹卡重试链不会启动），Toast 轻提示作后台线索
+            mainHandler.post {
+                runCatching {
+                    android.widget.Toast.makeText(app, "正在下载视频…", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            showProgressDialog()
+        }
+        Thread({
+            runCatching { pickBestAndDownload(app, noteId, streams, t0, module) }
+                .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下失败 noteId=$noteId: ${it.message}") }
+            hdActive = false
+            dismissProgress()
+        }, "HonorHook-xhs-video-hd").start()
     }
 
     /**
@@ -1102,17 +1135,7 @@ object XhsVideoSave {
                 })
                 row.addView(pillBtn("下载原版", filled = true) {
                     dialog.dismiss()
-                    hdActive = true
-                    videoCancelRequested = false   // 2026-10-19 取消旗标每轮重置（上轮不泄漏）
-                    // 后台静默下载（2026-11-03 用户需求，xhs.silent_download）：开 = 不弹进度卡，
-                    // 下载照跑（hdActive/dismissProgress 均幂等，弹卡重试链不会启动）；取消入口随之消失。
-                    if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) showProgressDialog()
-                    Thread({
-                        runCatching { pickBestAndDownload(app, noteId, streams, t0, module) }
-                            .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下失败 noteId=$noteId: ${it.message}") }
-                        hdActive = false
-                        dismissProgress()
-                    }, "HonorHook-xhs-video-hd").start()
+                    startHdDownload(noteId, streams, app, t0, module)
                 }.apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 })
@@ -1401,7 +1424,16 @@ object XhsVideoSave {
         // 把 dismissProgress 一起拖后 5~6 秒 = 进度卡与完成卡并存。
         hdActive = false      // 先落标记：中止 showProgressDialog 的重试链，防收卡后又被建回来
         dismissProgress()     // 幂等：兜住 total<=0（无进度更新）与失败回滚两条路径
-        showDownloadedDialog(written, name)
+        // 静默（2026-11-03，xhs.silent_download）：完成态 Toast（体积），不弹完成卡
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+            mainHandler.post {
+                runCatching {
+                    android.widget.Toast.makeText(ctx, "视频下载完毕 · ${formatSize(written)}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        } else {
+            showDownloadedDialog(written, name)
+        }
         deleteLowQuality(ctx, t0, finalUri, written, module)
         // 客户端低码文件可能晚于我们落盘：5s 后兜底再删一轮——专用延时线程，不再 sleep 阻塞收尾
         runCatching {

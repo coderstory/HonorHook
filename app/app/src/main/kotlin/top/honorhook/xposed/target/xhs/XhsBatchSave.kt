@@ -623,6 +623,9 @@ object XhsBatchSave {
                 }
                 if (urls.size == 1) {
                     showOnTrackedActivity(module, "单图静默直下") { downloadAll(it, urls, module) }
+                } else if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+                    // 静默（2026-11-03 用户需求）：多图也跳过「全部下载」询问卡，直接批量开下
+                    showOnTrackedActivity(module, "静默批量直下") { downloadAll(it, urls, module) }
                 } else {
                     showOnTrackedActivity(module, "追加询问") { maybeShowBatchDialog(it, urls, module) }
                 }
@@ -1103,7 +1106,15 @@ object XhsBatchSave {
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下被用户取消 ok=$ok/${urls.size}（半成品已删）")
             }
             // 完成态提示（替换旧 Toast「已保存 N/N」，用户定案 2026-10-14）；走追踪 Activity（修 BadToken）
-            showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled) }
+            // 静默（2026-11-03，xhs.silent_download）：完成态 Toast（张数+总体积），不弹完成卡
+            if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+                val what = if (canceled) "已取消 $ok/${urls.size} · ${fmtSize(bytes)}" else "下载完毕 $ok/${urls.size} · ${fmtSize(bytes)}"
+                showOnTrackedActivity(module, "完成 Toast") { act ->
+                    android.widget.Toast.makeText(act, what, android.widget.Toast.LENGTH_LONG).show()
+                }
+            } else {
+                showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled) }
+            }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}")
         }, "HonorHook-xhs-batch").start()
     }
