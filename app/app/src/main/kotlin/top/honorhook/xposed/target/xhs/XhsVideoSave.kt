@@ -989,7 +989,20 @@ object XhsVideoSave {
                 )
             }
         } ?: emptyList()
-        offerHdDownload(noteId, t0, streams, module)
+        // 混合笔记图片收集（2026-11-04 用户报障「视频+图片只检测到视频」根因修）：视频链此前只消费
+        // note.videos，同笔记 images/livePhotos 被丢弃 ⇒ 图片全丢。口径与图片分支同源（XhsBatchSave
+        // mountClick ①②④）：images 去 cover/评论图取 originalUrl + livePhotos 只展开静帧原图 +
+        // 评论图并入（XhsCommentHarvest 被动采集，没打开过评论区 = 空 = 行为不变）。空集 = 纯视频
+        // 笔记，透传空表零行为变化。
+        val imageUrls = LinkedHashSet(
+            (note?.images.orEmpty().filterNot { it.cover || it.commentId != null }.map { it.originalUrl }) +
+                note?.livePhotos.orEmpty().map { it.image.originalUrl } +
+                XhsCommentHarvest.urlsOf(noteId)
+        ).toList()
+        if (imageUrls.isNotEmpty()) {
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 混合笔记图片并入 ${imageUrls.size} 张 noteId=$noteId")
+        }
+        offerHdDownload(noteId, t0, streams, imageUrls, module)
     }
 
     /**
@@ -1010,7 +1023,7 @@ object XhsVideoSave {
      * [ASK_DEDUPE_MS] 窗口内后到轨 INFO 一行跳过。窗口 = 卡展示期量级，只防同单双轨叠加：
      * 不同笔记不受影响，连续重存同笔记 10s 外照常弹（与删 5min dedupe 的拍板语义不冲突）。
      */
-    private fun offerHdDownload(noteId: String, t0: Long, streams: List<VideoCandidate>, module: XposedModule) {
+    private fun offerHdDownload(noteId: String, t0: Long, streams: List<VideoCandidate>, imageUrls: List<String> = emptyList(), module: XposedModule) {
         // 候选集（2026-10-15 基准切换）：全部逐 URL 候选，选档在 pickBestAndDownload
         // （逐语义移植 XHS_Downloader_Android NoteOutput.kt:47-56——响应 download_url 不参与选档）
         if (streams.isEmpty()) {
@@ -1040,12 +1053,12 @@ object XhsVideoSave {
         XhsBatchSave.dismissVideoFeedbackCard()
         // 静默直下（2026-11-03 用户需求，xhs.silent_download）：跳过询问卡直接开下，Toast 提示开始
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
-            startHdDownload(noteId, streams, app, t0, module)
+            startHdDownload(noteId, streams, imageUrls, app, t0, module)
             return
         }
         // lastAsk 幂等对 (lastAskAtMs/lastAskNoteId) 不在此写——showAskDialog 内 dialog.show()
         // 成功后才写（审计 L4，见该处注释）
-        showAskDialog(noteId, streams, app, t0, module)
+        showAskDialog(noteId, streams, imageUrls, app, t0, module)
     }
 
     /**
@@ -1053,7 +1066,7 @@ object XhsVideoSave {
      * 旗标重置 + 开始提示（静默 = Toast「正在下载视频…」，询问 = 进度卡）+ 下载线程。
      * 静默路无重试（不弹卡即无 Activity 重试链）⇒ lastAsk 幂等对入口直写安全（审计 L4：无「弹成才写」语义）。
      */
-    private fun startHdDownload(noteId: String, streams: List<VideoCandidate>, app: android.content.Context, t0: Long, module: XposedModule) {
+    private fun startHdDownload(noteId: String, streams: List<VideoCandidate>, imageUrls: List<String>, app: android.content.Context, t0: Long, module: XposedModule) {
         lastAskAtMs = System.currentTimeMillis()
         lastAskNoteId = noteId
         hdActive = true
@@ -1062,7 +1075,8 @@ object XhsVideoSave {
             // 静默：不弹进度卡（hdActive 门控的 300ms 弹卡重试链不会启动），Toast 轻提示作后台线索
             mainHandler.post {
                 runCatching {
-                    android.widget.Toast.makeText(app, "正在下载视频…", android.widget.Toast.LENGTH_SHORT).show()
+                    val what = if (imageUrls.isNotEmpty()) "正在下载原片（视频+${imageUrls.size} 张图片）…" else "正在下载视频…"
+                    android.widget.Toast.makeText(app, what, android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
         } else {
@@ -1071,6 +1085,12 @@ object XhsVideoSave {
         Thread({
             runCatching { pickBestAndDownload(app, noteId, streams, t0, module) }
                 .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下失败 noteId=$noteId: ${it.message}") }
+            // 混合笔记图片（2026-11-04 一键全下）：视频落盘后交图片管线（downloadAll 自带进度/取消/
+            // 完成卡，与视频管线互不阻塞——视频失败图片照下）。复用 XhsBatchSave 追踪 Activity 链。
+            if (imageUrls.isNotEmpty()) {
+                runCatching { XhsBatchSave.downloadImagesForVideoNote(imageUrls, module) }
+                    .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 混合图片直下发起失败 noteId=$noteId: ${it.message}") }
+            }
             hdActive = false
             dismissProgress()
         }, "HonorHook-xhs-video-hd").start()
@@ -1080,11 +1100,11 @@ object XhsVideoSave {
      * 询问卡：问是否下载原版（2026-10-19「拦截默认」拍板改文案——拦截模式下宿主未存任何文件，
      * 旧「客户端已保存低画质版」前缀语义不再成立；按钮 下载原版/取消 保留，取消 = 什么都不存）。
      */
-    private fun showAskDialog(noteId: String, streams: List<VideoCandidate>, app: android.content.Context, t0: Long, module: XposedModule, attempt: Int = 0) {
+    private fun showAskDialog(noteId: String, streams: List<VideoCandidate>, imageUrls: List<String>, app: android.content.Context, t0: Long, module: XposedModule, attempt: Int = 0) {
         mainHandler.post {
             val activity = trackedActivity
             if (activity == null) {
-                if (attempt < 16) mainHandler.postDelayed({ showAskDialog(noteId, streams, app, t0, module, attempt + 1) }, 300)
+                if (attempt < 16) mainHandler.postDelayed({ showAskDialog(noteId, streams, imageUrls, app, t0, module, attempt + 1) }, 300)
                 return@post
             }
             runCatching {
@@ -1106,7 +1126,8 @@ object XhsVideoSave {
                     }
                 }
                 card.addView(android.widget.TextView(activity).apply {
-                    text = "下载高清原版视频"
+                    // 混合笔记（2026-11-04 一键全下）：图片并入时标题带张数，语义从「视频」升为「原片」
+                    text = if (imageUrls.isNotEmpty()) "下载原片（视频 + ${imageUrls.size} 张图片）" else "下载高清原版视频"
                     textSize = 17f; setTextColor(titleColor); paint.isFakeBoldText = true
                 })
                 card.addView(android.widget.TextView(activity).apply {
@@ -1135,9 +1156,9 @@ object XhsVideoSave {
                 row.addView(pillBtn("取消", filled = false) { dialog.dismiss() }.apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = d(10) }
                 })
-                row.addView(pillBtn("下载原版", filled = true) {
+                row.addView(pillBtn(if (imageUrls.isEmpty()) "下载原版" else "全部下载", filled = true) {
                     dialog.dismiss()
-                    startHdDownload(noteId, streams, app, t0, module)
+                    startHdDownload(noteId, streams, imageUrls, app, t0, module)
                 }.apply {
                     layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 })

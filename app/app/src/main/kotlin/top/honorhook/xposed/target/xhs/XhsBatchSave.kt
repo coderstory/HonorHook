@@ -1054,6 +1054,16 @@ object XhsBatchSave {
     }
 
     /**
+     * 混合笔记图片直下入口（2026-11-04 一键全下，视频链 XhsVideoSave.startHdDownload 调用）：
+     * 视频落盘后把同笔记图片直链交回本类既有 downloadAll 管线（进度/取消/落盘/完成卡零改动）。
+     * 走追踪 Activity 重试链（showOnTrackedActivity）；空表直接跳过。
+     */
+    internal fun downloadImagesForVideoNote(urls: List<String>, module: XposedModule) {
+        if (urls.isEmpty()) return
+        showOnTrackedActivity(module, "混合笔记图片直下") { downloadAll(it, urls, module) }
+    }
+
+    /**
      * 外挂直下：后台线程逐张 HttpURLConnection + MediaStore 落「Pictures/小红书」。
      * 2026-10-19 进度+取消（用户需求）：开头重置取消旗标并弹进度卡（[showImageProgressDialog]，主线程）；
      * 2026-11-03 后台静默（xhs.silent_download）：开关开时进度卡不弹（downloadAll 内判点），其余不变。

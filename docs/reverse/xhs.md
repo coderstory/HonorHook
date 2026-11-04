@@ -461,3 +461,19 @@ z3c.d 类名靠锚串 getShortUrlObservableIfNeed success 所在类 l3c/y 的调
 | downloaderEntry | g75.h | **pg5.h** | 串锚 `addDownloadTask`；pg5.h static `e(self,…)V` 13 参形状不变（gx0.h 为无关 bridge 服务类） |
 | albumSink videoStore | dz8.t | **d79.s** | 串锚 `saveVideo start copy file.`；static `a(self,String,String,Uri,Z)V` 5 参形状不变 |
 | albumSink h0/e0 | null | null | 仍无新家，videoStore 闸覆盖 |
+
+## 混合笔记（视频+图片）一键全下（2026-11-04 用户报障修）
+
+**报障**：文章同时含视频和图片时，保存只检测到视频，图片全丢。
+
+**根因**：混合笔记的保存点击走视频链（a59.q / ab9.r1#b → XhsVideoSave.offerHdDownloadFromNote），
+该入口只消费 `note.videos`；同笔记 `note.images` / `note.livePhotos` 解析出来后被直接丢弃。
+图片链（XhsBatchSave.mountClick，ji9/xq9.b）挂在图片笔记的长按保存入口，视频笔记到不了，
+且其注释明确「videos 维持不消费（视频流归 X4 HD 询问分支）」——两条链互不补位。
+
+**修法（一键全下）**：offerHdDownloadFromNote 按图片分支同口径收集图片直链
+（images 去 cover/评论图取 originalUrl + livePhotos 静帧原图 + XhsCommentHarvest 评论图并入，
+LinkedHashSet 去重保序），透传 offerHdDownload → 询问卡文案升为「下载原片（视频 + N 张图片）」
+（按钮「全部下载」）/ 静默路 Toast 同步；startHdDownload 在视频落盘后调
+XhsBatchSave.downloadImagesForVideoNote（internal 新入口，复用 downloadAll 管线零改动）。
+视频失败不影响图片继续下（两段互不阻塞）。纯视频笔记 imageUrls 空 = 行为不变。
