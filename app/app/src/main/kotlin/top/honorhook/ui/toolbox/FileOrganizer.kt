@@ -382,8 +382,23 @@ object FileOrganizer {
                 when (op.type) {
                     OpType.DELETE -> {
                         if (op.note == "rmdir") {
-                            if (src.listFiles()?.isEmpty() == true && src.delete()) { op.status = OpStatus.DONE; deleted++ }
-                            else { op.status = OpStatus.FAILED; op.note = "目录非空或删除失败"; failed++ }
+                            // FUSE 目录列表缓存滞后：同轮移动刚清空的目录，listFiles 可能仍返回旧条目。
+                            // 重试 3 次带间隔，等缓存失效；期间若有新文件进来则保持失败（不误删）
+                            var removed = false
+                            var lastErr = "目录非空或删除失败"
+                            repeat(3) { attempt ->
+                                if (removed) return@repeat
+                                val kids = src.listFiles()
+                                if (kids == null) { lastErr = "无法读取目录"; return@repeat }
+                                if (kids.isNotEmpty()) {
+                                    // 缓存滞后的条目再逐个确认：真实存在的才算非空
+                                    val real = kids.filter { it.exists() }
+                                    if (real.isNotEmpty()) { lastErr = "目录非空（含 ${real.size} 项）"; return@repeat }
+                                }
+                                if (src.delete()) { removed = true } else { lastErr = "delete 失败"; Thread.sleep(80L * (attempt + 1)) }
+                            }
+                            if (removed) { op.status = OpStatus.DONE; deleted++ }
+                            else { op.status = OpStatus.FAILED; op.note = lastErr; failed++ }
                         } else {
                             if (src.delete()) { op.status = OpStatus.DONE; deleted++; freed += op.size }
                             else { op.status = OpStatus.FAILED; op.note = "删除失败"; failed++ }
