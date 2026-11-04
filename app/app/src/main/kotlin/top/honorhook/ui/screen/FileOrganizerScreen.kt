@@ -288,6 +288,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                                 HeroCta("删除其余文件", primary = true, danger = true) { confirmDedupDelete = true },
                                 HeroCta("全部保留最新") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 2) } },
                                 HeroCta("全部保留最旧") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 3) } },
+                                HeroCta("全部保留最短路径") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 1) } },
                             ),
                         )
                         else -> HeroUi(
@@ -423,17 +424,21 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                             }
                             if (ui.ctas.isNotEmpty()) {
                                 Spacer(Modifier.height(14.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    ui.ctas.forEachIndexed { i, cta ->
-                                        if (cta.primary) {
-                                            val cc = if (cta.danger) Color(0xFFBA1A1A) else colorScheme.primary
-                                            Button(onClick = cta.onClick, enabled = cta.enabled, modifier = Modifier.weight(1.4f),
-                                                colors = ButtonDefaults.buttonColors(color = cc, contentColor = Color.White)) {
-                                                Text(cta.label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                            }
-                                        } else {
+                                val primaries = ui.ctas.filter { it.primary }
+                                val secondaries = ui.ctas.filter { !it.primary }
+                                primaries.forEach { cta ->
+                                    val cc = if (cta.danger) Color(0xFFBA1A1A) else colorScheme.primary
+                                    Button(onClick = cta.onClick, enabled = cta.enabled, modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(color = cc, contentColor = Color.White)) {
+                                        Text(cta.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                                if (secondaries.isNotEmpty()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        secondaries.forEach { cta ->
                                             Card(
-                                                modifier = Modifier.weight(1f).clickable(onClick = cta.onClick),
+                                                modifier = Modifier.weight(1f).clickable(enabled = cta.enabled, onClick = cta.onClick),
                                                 colors = CardDefaults.defaultColors(color = colorScheme.primary.copy(alpha = 0.12f)),
                                             ) {
                                                 Text(cta.label, fontSize = 12.sp, color = colorScheme.primary,
