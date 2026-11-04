@@ -1147,12 +1147,27 @@ private fun RuleEditorPane(
         WindowDialog(
             show = true,
             title = "删除此规则",
-            summary = "移除「$name」？只删规则配置，不删除任何文件。",
+            summary = null,
             onDismissRequest = { confirmDelete = false },
         ) {
-            TextButton(text = "删除", modifier = Modifier.fillMaxWidth(),
-                onClick = { confirmDelete = false; onDelete?.invoke() })
-            TextButton(text = "取消", modifier = Modifier.fillMaxWidth(), onClick = { confirmDelete = false })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("⚠", fontSize = 18.sp, color = Color(0xFFBA1A1A))
+                Spacer(Modifier.size(8.dp))
+                Text("删除此规则", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("移除「$name」？只删除规则配置，不删除任何文件。", fontSize = 13.sp,
+                color = colorScheme.onSurfaceVariantSummary)
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = { confirmDelete = false }, modifier = Modifier.weight(1f)) {
+                    Text("取消", fontSize = 13.sp)
+                }
+                Button(onClick = { confirmDelete = false; onDelete?.invoke() }, modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(color = Color(0xFFBA1A1A), contentColor = Color.White)) {
+                    Text("删除", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
