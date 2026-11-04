@@ -926,13 +926,13 @@ private fun RuleEditorPane(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
-            // tree uri 形如 primary:Pictures/CoolMarket → 转相对路径
+            // SAF tree uri 解码后是相对存储根的路径（如 "Pictures/CoolMarket"），
+            // 旧实现错误地要求绝对路径前缀 → 永不回填（选目录选了个寂寞的根因）
             val seg = uri.lastPathSegment.orEmpty()
             val dec = java.net.URLDecoder.decode(seg.substringAfter(':'), "UTF-8")
-            val root = "/storage/emulated/0"
-            if (dec.startsWith(root)) {
+            if (dec.isNotBlank()) {
                 testResult = null
-                scope = java.io.File(dec).relativeTo(java.io.File(root)).path
+                scope = dec.trim().trimStart('/').trimEnd('/')
             }
         }
     }
