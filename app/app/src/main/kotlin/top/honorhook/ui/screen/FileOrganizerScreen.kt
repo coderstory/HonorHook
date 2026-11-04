@@ -1122,7 +1122,7 @@ private fun RuleEditorPane(
         // 底部操作栏：固定可见（返回由外层顶栏/手势承担）
         Row(
             Modifier.fillMaxWidth()
-                .padding(vertical = 8.dp)
+                .padding(vertical = 5.dp)
                 .navigationBarsPadding()
                 .padding(bottom = bottomInnerPadding),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1132,7 +1132,7 @@ private fun RuleEditorPane(
                 Text("删除此规则", fontSize = 13.sp,
                     color = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
                     modifier = Modifier.clickable { confirmDelete = true }
-                        .padding(horizontal = 4.dp, vertical = 12.dp))
+                        .padding(horizontal = 4.dp, vertical = 9.dp))
             }
             Spacer(Modifier.weight(1f))
             Button(onClick = { onCancel() }) { Text("取消", fontSize = 13.sp) }
