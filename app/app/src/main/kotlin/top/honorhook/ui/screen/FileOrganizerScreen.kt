@@ -737,13 +737,6 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                 Text("预览仅列前 80 项，其余 ${(plan?.ops?.size ?: 0) - 80} 项按同规则直接执行",
                     fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
             }
-            if (delN > 0) {
-                Spacer(Modifier.height(10.dp))
-                Card(Modifier.fillMaxWidth(), colors = CardDefaults.defaultColors(color = Color(0xFFFFDAD6))) {
-                    Text("删除操作永久生效，无法恢复", fontSize = 12.sp, color = Color(0xFFBA1A1A),
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                }
-            }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { confirmRun = false }, modifier = Modifier.weight(1f)) {
@@ -774,11 +767,6 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
             }
             Spacer(Modifier.height(10.dp))
             Text("将直接删除 $delCount 个重复文件（每组保留 1 个）。", fontSize = 13.sp, color = colorScheme.onSurfaceVariantSummary)
-            Spacer(Modifier.height(10.dp))
-            Card(Modifier.fillMaxWidth(), colors = CardDefaults.defaultColors(color = Color(0xFFFFDAD6))) {
-                Text("删除操作永久生效，无法恢复", fontSize = 12.sp, color = Color(0xFFBA1A1A),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-            }
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { confirmDedupDelete = false }, modifier = Modifier.weight(1f)) {
@@ -1080,15 +1068,7 @@ private fun RuleEditorPane(
                                     }
                             }
                         }
-                        if (isDelete) {
-                            Spacer(Modifier.height(10.dp))
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.defaultColors(color = Color(0xFFFFDAD6))) {
-                                Text("此规则会永久删除匹配的文件，无法恢复。建议先「演练」确认命中范围。",
-                                    fontSize = 12.sp,
-                                    color = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
-                                    modifier = Modifier.padding(12.dp))
-                            }
-                        }
+
                     }
                 }
             }
