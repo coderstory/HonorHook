@@ -413,9 +413,14 @@ object FileOrganizer {
                         }
                     }
                     OpType.MOVE -> {
-                        File(op.dst).parentFile?.mkdirs()
-                        if (move(src, File(op.dst))) { op.status = OpStatus.DONE; moved++; touched += op.dst }
-                        else { op.status = OpStatus.FAILED; op.note = "移动失败"; failed++ }
+                        if (!src.exists()) {
+                            // MediaStore 幽灵条目：源已不存在（上轮已处理）——不算失败
+                            op.status = OpStatus.DONE; op.note = "幽灵条目：源文件已不存在（跳过）"; moved++
+                        } else {
+                            File(op.dst).parentFile?.mkdirs()
+                            if (move(src, File(op.dst))) { op.status = OpStatus.DONE; moved++; touched += op.dst }
+                            else { op.status = OpStatus.FAILED; op.note = "移动失败"; failed++ }
+                        }
                     }
                 }
                 onProgress?.invoke(idx + 1, ops.size)   // 逐文件进度（UI hero 实时显示）
