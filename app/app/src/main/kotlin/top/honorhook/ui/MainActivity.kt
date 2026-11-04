@@ -71,6 +71,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // 远程开发页曾打开且未被用户关闭 → 桌面冷启/回到主任务后自动拉回该页（恢复会话）
+        if (getSharedPreferences("webscan", MODE_PRIVATE).getBoolean("open", false)) {
+            startActivity(android.content.Intent(this, top.honorhook.ui.webscan.WebScanActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
         // 框架状态是异步问出来的：兜底计时，1.5s 还没绑上服务才判「未激活」，
         // 免得冷启动先闪一个错误的「未激活」再跳成「工作中」
         FrameworkState.armResolveTimeout()

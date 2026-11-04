@@ -73,7 +73,8 @@
             android:name=".ui.webscan.WebScanActivity"
             android:exported="false"
             android:label="远程开发"
-            android:launchMode="singleTask" />
+            android:launchMode="singleTask"
+            android:taskAffinity="top.honorhook.webscan" />
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

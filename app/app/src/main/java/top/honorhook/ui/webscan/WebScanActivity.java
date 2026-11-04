@@ -89,6 +89,7 @@ public class WebScanActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getSharedPreferences("webscan", MODE_PRIVATE).edit().putBoolean("open", true).apply();
         log("onCreate: savedInstanceState=" + (savedInstanceState != null));
         buildUi();
 
@@ -953,6 +954,10 @@ public class WebScanActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        // 仅用户主动关闭（isFinishing）时清标记；系统回收不清，桌面冷启主界面后可自动拉回本页
+        if (isFinishing()) {
+            getSharedPreferences("webscan", MODE_PRIVATE).edit().putBoolean("open", false).apply();
+        }
         stopCamera();
         if (cameraThread != null) cameraThread.quitSafely();
         if (webView != null) webView.destroy();

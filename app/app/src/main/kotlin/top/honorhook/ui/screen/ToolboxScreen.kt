@@ -216,7 +216,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             onOpen = { view = it },
                             onOpenHubActivity = {
                                 context.startActivity(android.content.Intent(
-                                    context, top.honorhook.ui.webscan.WebScanActivity::class.java))
+                                    context, top.honorhook.ui.webscan.WebScanActivity::class.java)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                             },
                         )
                     }

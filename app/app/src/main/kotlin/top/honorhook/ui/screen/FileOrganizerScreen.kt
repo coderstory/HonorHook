@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -205,6 +207,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
         RuleEditorPane(
             draft = draft,
             topInset = topInset,
+            bottomInnerPadding = bottomInnerPadding,
             onCancel = { ruleEditor = null },
             onSave = { saved ->
                 rules = if (draft.id.isEmpty()) rules + saved
@@ -685,16 +688,54 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
 
     // ═══ 对话框 ═══
     if (confirmRun) {
+        val ops = plan?.ops ?: emptyList()
+        val exec = ops - ops.filter { it.opId in pendingExcluded }.toSet()
+        val mvN = exec.count { it.type == FileOrganizer.OpType.MOVE }
+        val delN = exec.count { it.type == FileOrganizer.OpType.DELETE }
         WindowDialog(
             show = true,
             title = "确认执行",
-            summary = "将真实执行 ${(plan?.ops?.size ?: 0) - pendingExcluded.size} 项" +
-                (if ((plan?.ops?.size ?: 0) > 80) "（预览仅列前 80 项，其余 ${(plan?.ops?.size ?: 0) - 80} 项按同规则直接执行）" else "") +
-                "。删除为直接删除、不可恢复；移动可撤销。",
+            summary = null,
             onDismissRequest = { confirmRun = false },
         ) {
-            TextButton(text = "执行", modifier = Modifier.fillMaxWidth(), onClick = { confirmRun = false; doApply() })
-            TextButton(text = "取消", modifier = Modifier.fillMaxWidth(), onClick = { confirmRun = false })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("⚠", fontSize = 18.sp, color = Color(0xFFBA1A1A))
+                Spacer(Modifier.size(8.dp))
+                Text("确认执行", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("将真实执行 ${exec.size} 项：", fontSize = 13.sp, color = colorScheme.onSurfaceVariantSummary)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("$mvN 移动（可撤销）", fontSize = 13.sp, color = colorScheme.primary)
+                Text("$delN 删除（不可恢复）", fontSize = 13.sp, color = Color(0xFFBA1A1A),
+                    fontWeight = if (delN > 0) FontWeight.SemiBold else FontWeight.Normal)
+            }
+            if ((plan?.ops?.size ?: 0) > 80) {
+                Spacer(Modifier.height(6.dp))
+                Text("预览仅列前 80 项，其余 ${(plan?.ops?.size ?: 0) - 80} 项按同规则直接执行",
+                    fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+            }
+            if (delN > 0) {
+                Spacer(Modifier.height(10.dp))
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.defaultColors(color = Color(0xFFFFDAD6))) {
+                    Text("删除操作永久生效，无法恢复", fontSize = 12.sp, color = Color(0xFFBA1A1A),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = { confirmRun = false }, modifier = Modifier.weight(1f)) {
+                    Text("取消", fontSize = 13.sp)
+                }
+                Button(onClick = { confirmRun = false; doApply() }, enabled = exec.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        color = if (delN > 0) Color(0xFFBA1A1A) else colorScheme.primary,
+                        contentColor = Color.White)) {
+                    Text(if (delN > 0) "执行（含删除）" else "执行", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
     if (confirmDedupDelete) {
@@ -702,11 +743,31 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
         WindowDialog(
             show = true,
             title = "删除重复文件",
-            summary = "将直接删除 $delCount 个重复文件（每组保留 1 个）。删除不可恢复。",
+            summary = null,
             onDismissRequest = { confirmDedupDelete = false },
         ) {
-            TextButton(text = "删除", modifier = Modifier.fillMaxWidth(), onClick = { confirmDedupDelete = false; dedupApply() })
-            TextButton(text = "取消", modifier = Modifier.fillMaxWidth(), onClick = { confirmDedupDelete = false })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("⚠", fontSize = 18.sp, color = Color(0xFFBA1A1A))
+                Spacer(Modifier.size(8.dp))
+                Text("删除重复文件", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("将直接删除 $delCount 个重复文件（每组保留 1 个）。", fontSize = 13.sp, color = colorScheme.onSurfaceVariantSummary)
+            Spacer(Modifier.height(10.dp))
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.defaultColors(color = Color(0xFFFFDAD6))) {
+                Text("删除操作永久生效，无法恢复", fontSize = 12.sp, color = Color(0xFFBA1A1A),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+            }
+            Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = { confirmDedupDelete = false }, modifier = Modifier.weight(1f)) {
+                    Text("取消", fontSize = 13.sp)
+                }
+                Button(onClick = { confirmDedupDelete = false; dedupApply() }, modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(color = Color(0xFFBA1A1A), contentColor = Color.White)) {
+                    Text("删除", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -839,6 +900,7 @@ private fun ruleSummary(r: Rule): String {
 private fun RuleEditorPane(
     draft: Rule,
     topInset: androidx.compose.ui.unit.Dp,
+    bottomInnerPadding: androidx.compose.ui.unit.Dp,
     onCancel: () -> Unit,
     onSave: (Rule) -> Unit,
     onDelete: (() -> Unit)?,
@@ -854,6 +916,20 @@ private fun RuleEditorPane(
     var confirmDelete by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Pair<Int, List<String>>?>(null) }
     var testing by remember { mutableStateOf(false) }
+    val dirPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // tree uri 形如 primary:Pictures/CoolMarket → 转相对路径
+            val seg = uri.lastPathSegment.orEmpty()
+            val dec = java.net.URLDecoder.decode(seg.substringAfter(':'), "UTF-8")
+            val root = "/storage/emulated/0"
+            if (dec.startsWith(root)) {
+                testResult = null
+                scope = java.io.File(dec).relativeTo(java.io.File(root)).path
+            }
+        }
+    }
     val paneScope = rememberCoroutineScope()
     val dark = isInDarkTheme()
 
@@ -877,25 +953,14 @@ private fun RuleEditorPane(
         version = draft.version + 1,
     )
 
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(top = topInset + 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("‹", fontSize = 22.sp, color = colorScheme.primary,
-                modifier = Modifier.clickable(onClick = onCancel)
-                    .padding(horizontal = 18.dp, vertical = 13.dp))  // ≥48dp 命中区
-            Column(Modifier.weight(1f)) {
-                Text(if (draft.id.isEmpty()) "新建规则" else "编辑规则",
-                    fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colorScheme.onSurface)
-                Text(if (draft.builtin) "内置规则" else "自定义规则",
-                    fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
-            }
-            Button(onClick = { onSave(buildRule()) }, enabled = formOk,
-                colors = ButtonDefaults.buttonColors(color = colorScheme.primary, contentColor = Color.White)) {
-                Text("保存", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
-
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        // 标题/返回由外层顶栏承担；保存固定在底部操作栏，滚动全程可见
+        LazyColumn(
+            Modifier.weight(1f)
+                .padding(top = 8.dp)
+                .imePadding(),
+            contentPadding = PaddingValues(bottom = 12.dp),
+        ) {
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
@@ -913,9 +978,15 @@ private fun RuleEditorPane(
                             }
                         }
                         Spacer(Modifier.height(12.dp))
-                        FieldLabel("作用域目录（相对根目录，只处理该目录顶层的散文件）")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FieldLabel("作用域目录（顶层散文件）")
+                            Spacer(Modifier.weight(1f))
+                            Text("选择目录", fontSize = 12.sp, color = colorScheme.primary,
+                                modifier = Modifier.clickable { dirPickerLauncher.launch(null) }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp))
+                        }
                         InputField(query = scope, onQueryChange = { scope = it; testResult = null },
-                            onSearch = { }, expanded = false, onExpandedChange = { }, label = "如：Pictures/CoolMarket",
+                            onSearch = { }, expanded = false, onExpandedChange = { }, label = "点「选择目录」或手输相对路径",
                             modifier = Modifier.fillMaxWidth())
                     }
                 }
@@ -927,15 +998,19 @@ private fun RuleEditorPane(
                         Text("匹配条件（都可选）", fontSize = 12.sp, fontWeight = FontWeight.Medium,
                             color = colorScheme.onSurfaceVariantSummary)
                         Spacer(Modifier.height(10.dp))
-                        FieldLabel("文件名正则")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FieldLabel("文件名正则")
+                            if (regex.isNotEmpty()) {
+                                Spacer(Modifier.weight(1f))
+                                Text(if (regexOk) "✓ 正则合法" else "✗ 正则非法（保存已禁用）",
+                                    fontSize = 11.sp,
+                                    color = if (regexOk) colorScheme.primary else if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
+                                    modifier = Modifier.padding(end = 4.dp))
+                            }
+                        }
                         InputField(query = regex, onQueryChange = { regex = it; testResult = null },
                             onSearch = { }, expanded = false, onExpandedChange = { }, label = "^IMG_ · 留空=全部匹配",
                             modifier = Modifier.fillMaxWidth())
-                        if (regex.isNotEmpty() && !regexOk) {
-                            Text("✗ 正则语法错误，保存已被禁止", fontSize = 11.sp,
-                                color = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
-                                modifier = Modifier.padding(start = 4.dp, top = 2.dp))
-                        }
                         Spacer(Modifier.height(12.dp))
                         FieldLabel("扩展名白名单")
                         InputField(query = ext, onQueryChange = { ext = it; testResult = null },
@@ -1042,16 +1117,27 @@ private fun RuleEditorPane(
                 }
             }
 
+        }
+        // 底部操作栏：固定可见（返回由外层顶栏/手势承担）
+        Row(
+            Modifier.fillMaxWidth()
+                .padding(vertical = 8.dp)
+                .navigationBarsPadding()
+                .padding(bottom = bottomInnerPadding),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (onDelete != null) {
-                item {
-                    Card(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                        Text("删除此规则（不删除任何文件）", fontSize = 13.sp,
-                            color = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
-                            modifier = Modifier.fillMaxWidth()
-                                .clickable { confirmDelete = true }
-                                .padding(horizontal = 12.dp, vertical = 12.dp))
-                    }
-                }
+                Text("删除此规则", fontSize = 13.sp,
+                    color = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
+                    modifier = Modifier.clickable { confirmDelete = true }
+                        .padding(horizontal = 4.dp, vertical = 12.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            Button(onClick = { onCancel() }) { Text("取消", fontSize = 13.sp) }
+            Button(onClick = { onSave(buildRule()) }, enabled = formOk,
+                colors = ButtonDefaults.buttonColors(color = colorScheme.primary, contentColor = Color.White)) {
+                Text("保存", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
