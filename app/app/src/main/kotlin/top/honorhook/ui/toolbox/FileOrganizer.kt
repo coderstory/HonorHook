@@ -386,7 +386,7 @@ object FileOrganizer {
                             // 重试 3 次带间隔，等缓存失效；期间若有新文件进来则保持失败（不误删）
                             var removed = false
                             var lastErr = "目录非空或删除失败"
-                            repeat(3) { attempt ->
+                            repeat(5) { attempt ->
                                 if (removed) return@repeat
                                 val kids = src.listFiles()
                                 if (kids == null) { lastErr = "无法读取目录"; return@repeat }
@@ -395,13 +395,21 @@ object FileOrganizer {
                                     val real = kids.filter { it.exists() }
                                     if (real.isNotEmpty()) { lastErr = "目录非空（含 ${real.size} 项）"; return@repeat }
                                 }
-                                if (src.delete()) { removed = true } else { lastErr = "delete 失败"; Thread.sleep(80L * (attempt + 1)) }
+                                if (src.delete()) { removed = true } else { lastErr = "delete 失败"; Thread.sleep(150L * (attempt + 1)) }
                             }
                             if (removed) { op.status = OpStatus.DONE; deleted++ }
                             else { op.status = OpStatus.FAILED; op.note = lastErr; failed++ }
                         } else {
-                            if (src.delete()) { op.status = OpStatus.DONE; deleted++; freed += op.size }
-                            else { op.status = OpStatus.FAILED; op.note = "删除失败"; failed++ }
+                            if (!src.exists()) {
+                                // MediaStore 幽灵条目：索引还在、文件早没了——不算失败
+                                op.status = OpStatus.DONE; op.note = "幽灵条目：文件已不存在（跳过）"
+                            } else {
+                                if (src.delete()) {
+                                    op.status = OpStatus.DONE; deleted++; freed += op.size
+                                    touched += op.src   // 扫描源路径，MediaStore 清掉已删条目
+                                }
+                                else { op.status = OpStatus.FAILED; op.note = "删除失败（文件被占用或权限不足）"; failed++ }
+                            }
                         }
                     }
                     OpType.MOVE -> {
