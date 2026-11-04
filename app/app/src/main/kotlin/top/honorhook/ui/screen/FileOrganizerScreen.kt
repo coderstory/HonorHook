@@ -966,7 +966,7 @@ private fun RuleEditorPane(
         // 标题/返回由外层顶栏承担；保存固定在底部操作栏，滚动全程可见
         LazyColumn(
             Modifier.weight(1f)
-                .padding(top = 8.dp)
+                .padding(top = topInset + 8.dp)   // 外层顶栏让位（删顶栏时误删的）
                 .imePadding(),
             contentPadding = PaddingValues(bottom = 12.dp),
         ) {
