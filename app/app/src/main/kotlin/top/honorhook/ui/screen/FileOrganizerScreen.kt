@@ -613,7 +613,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                                 Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     IconBadge(actionIcon(rule), rule.action == ActionType.DELETE)
                                     Spacer(Modifier.size(10.dp))
-                                    Column(Modifier.weight(1f).clickable(enabled = !rule.builtin) { ruleEditor = rule }) {
+                                    Column(Modifier.weight(1f).clickable { ruleEditor = rule }) {
                                         Text(rule.name + if (!rule.builtin) " ·自定义" else "",
                                             fontSize = 14.sp, color = colorScheme.onSurface)
                                         Text(ruleSummary(rule), fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
@@ -868,12 +868,13 @@ private fun QuickChip(label: String, onClick: () -> Unit) {
 
 /** 动作选择大卡片 */
 @Composable
-private fun ActionCard(title: String, desc: String, selected: Boolean, danger: Boolean = false, onClick: () -> Unit) {
+private fun ActionCard(title: String, desc: String, selected: Boolean, danger: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val accent = if (danger) Color(0xFFBA1A1A) else colorScheme.primary
     Card(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         colors = CardDefaults.defaultColors(color = if (selected) accent.copy(alpha = 0.10f) else colorScheme.surface),
-        onClick = onClick, showIndication = false,
+        showIndication = false,
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (selected) "●" else "○", fontSize = 14.sp, color = accent)
@@ -925,6 +926,7 @@ private fun RuleEditorPane(
     var conflict by remember { mutableStateOf(draft.conflict.name) }
     var enabled by remember { mutableStateOf(draft.enabled) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val readOnly = draft.builtin   // 内置规则：详情只读，不可保存/删除
     var testResult by remember { mutableStateOf<Pair<Int, List<String>>?>(null) }
     var testing by remember { mutableStateOf(false) }
     val dirPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -978,14 +980,14 @@ private fun RuleEditorPane(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 FieldLabel("规则名")
-                                InputField(query = name, onQueryChange = { name = it },
+                                InputField(query = name, onQueryChange = { if (!readOnly) name = it },
                                     onSearch = { }, expanded = false, onExpandedChange = { }, label = "如：壁纸批量归档",
                                     modifier = Modifier.fillMaxWidth())
                             }
                             Spacer(Modifier.size(12.dp))
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("启用", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
-                                Switch(checked = enabled, onCheckedChange = { enabled = it })
+                                Text(if (readOnly) "启用（内置只读）" else "启用", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                                Switch(checked = enabled, onCheckedChange = { if (!readOnly) enabled = it })
                             }
                         }
                         Spacer(Modifier.height(12.dp))
@@ -996,7 +998,7 @@ private fun RuleEditorPane(
                                 modifier = Modifier.clickable { dirPickerLauncher.launch(null) }
                                     .padding(horizontal = 8.dp, vertical = 6.dp))
                         }
-                        InputField(query = scope, onQueryChange = { scope = it; testResult = null },
+                        InputField(query = scope, onQueryChange = { if (!readOnly) scope = it; testResult = null },
                             onSearch = { }, expanded = false, onExpandedChange = { }, label = "点「选择目录」或手输相对路径",
                             modifier = Modifier.fillMaxWidth())
                     }
@@ -1019,12 +1021,12 @@ private fun RuleEditorPane(
                                     modifier = Modifier.padding(end = 4.dp))
                             }
                         }
-                        InputField(query = regex, onQueryChange = { regex = it; testResult = null },
+                        InputField(query = regex, onQueryChange = { if (!readOnly) regex = it; testResult = null },
                             onSearch = { }, expanded = false, onExpandedChange = { }, label = "^IMG_ · 留空=全部匹配",
                             modifier = Modifier.fillMaxWidth())
                         Spacer(Modifier.height(12.dp))
                         FieldLabel("扩展名白名单")
-                        InputField(query = ext, onQueryChange = { ext = it; testResult = null },
+                        InputField(query = ext, onQueryChange = { if (!readOnly) ext = it; testResult = null },
                             onSearch = { }, expanded = false, onExpandedChange = { }, label = "jpg,png · 留空=不限",
                             modifier = Modifier.fillMaxWidth())
                     }
@@ -1038,19 +1040,19 @@ private fun RuleEditorPane(
                             color = colorScheme.onSurfaceVariantSummary)
                         Spacer(Modifier.height(8.dp))
                         ActionCard("归档", "移动到按月子目录，如 Camera/202611",
-                            selected = action == "ARCHIVE",
+                            selected = action == "ARCHIVE", enabled = !readOnly,
                             onClick = { action = "ARCHIVE"; testResult = null
                                 if (target.isEmpty()) target = scope.trim() + "/{YYYYMM}" })
                         ActionCard("合并", "移动到一个固定目录，与现有文件共存",
-                            selected = action == "MERGE",
+                            selected = action == "MERGE", enabled = !readOnly,
                             onClick = { action = "MERGE"; testResult = null })
                         ActionCard("删除", "直接删除，不可恢复", danger = true,
-                            selected = action == "DELETE",
+                            selected = action == "DELETE", enabled = !readOnly,
                             onClick = { action = "DELETE"; testResult = null; target = "" })
                         if (action == "ARCHIVE" || action == "MERGE") {
                             Spacer(Modifier.height(10.dp))
                             FieldLabel(if (action == "ARCHIVE") "目标目录模板（{YYYYMM} 会替换成月份）" else "合并目标目录")
-                            InputField(query = target, onQueryChange = { target = it; testResult = null },
+                            InputField(query = target, onQueryChange = { if (!readOnly) target = it; testResult = null },
                                 onSearch = { }, expanded = false, onExpandedChange = { }, label = "如：DCIM/Camera/{YYYYMM}",
                                 modifier = Modifier.fillMaxWidth())
                         }
@@ -1137,10 +1139,14 @@ private fun RuleEditorPane(
                         .padding(horizontal = 4.dp, vertical = 9.dp))
             }
             Spacer(Modifier.weight(1f))
-            Button(onClick = { onCancel() }) { Text("取消", fontSize = 13.sp) }
-            Button(onClick = { onSave(buildRule()) }, enabled = formOk,
-                colors = ButtonDefaults.buttonColors(color = colorScheme.primary, contentColor = Color.White)) {
-                Text("保存", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Button(onClick = { onCancel() }) {
+                Text(if (readOnly) "关闭" else "取消", fontSize = 13.sp)
+            }
+            if (!readOnly) {
+                Button(onClick = { onSave(buildRule()) }, enabled = formOk,
+                    colors = ButtonDefaults.buttonColors(color = colorScheme.primary, contentColor = Color.White)) {
+                    Text("保存", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
