@@ -386,9 +386,10 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     else -> HeroUi(
                         light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
                         icon = Icons.Rounded.FolderCopy,
-                        headline = "${visibleRules.count { it.enabled }} 条规则已启用",
+                        headline = "规则整理就绪",
                         sub = "照片按月归档 · 垃圾清理 · 同类归拢",
                         stats = listOf(
+                            visibleRules.count { it.enabled }.toLong() to "已启用规则",
                             visibleRules.size.toLong() to "规则总数",
                         ),
                         ctas = listOf(
