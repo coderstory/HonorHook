@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.CallMerge
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.CallMerge
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material.icons.rounded.Image
@@ -637,13 +638,6 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
     if (showFailedDialog && result != null) {
         val failedOps = result!!.ops.filter { it.status == FileOrganizer.OpStatus.FAILED }
         val okN = result!!.moved
-        val reasonColor: (String) -> Color = { note ->
-            when {
-                note.contains("取消") -> if (dark) Color(0xFFB0B7C0) else Color(0xFF6B7280)
-                note.contains("crash") || note.contains("中断") -> Color(0xFFB8860B)
-                else -> if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A)
-            }
-        }
         WindowDialog(
             show = true,
             title = "整理结果 · ${failedOps.size} 项失败",
@@ -653,26 +647,47 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
             Column(
                 Modifier.fillMaxWidth().height(320.dp).verticalScroll(rememberScrollState())
             ) {
-                failedOps.forEach { op ->
-                    Card(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
-                        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                            Text(
-                                (if (op.type == FileOrganizer.OpType.DELETE) "🗑 删除  " else "→ 移动  ") +
-                                    op.src.removePrefix("/storage/emulated/0/"),
-                                fontSize = 12.sp, maxLines = 2,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                color = colorScheme.onSurface,
+                // 失败行：与规则库/汇总卡同构——36dp 徽章 + 路径 14sp + 原因 11sp（设计稿定稿版）
+                failedOps.forEachIndexed { i, op ->
+                    val isDel = op.type == FileOrganizer.OpType.DELETE
+                    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(36.dp)
+                                .background(
+                                    (if (isDel) Color(0xFFBA1A1A) else colorScheme.primary).copy(alpha = 0.12f),
+                                    RoundedCornerShape(11.dp),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                if (isDel) Icons.Rounded.DeleteOutline else Icons.Rounded.CallMerge,
+                                null, Modifier.size(20.dp),
+                                tint = if (isDel) Color(0xFFBA1A1A) else colorScheme.primary,
                             )
-                            Spacer(Modifier.height(3.dp))
+                        }
+                        Spacer(Modifier.size(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                op.src.removePrefix("/storage/emulated/0/") +
+                                    (if (!isDel) "  →  " + op.dst.removePrefix("/storage/emulated/0/") else ""),
+                                fontSize = 14.sp, color = colorScheme.onSurface,
+                                modifier = Modifier.padding(bottom = 2.dp),
+                            )
+                            val bad = !op.note.contains("取消") && !op.note.contains("缓存")
                             Text(
                                 op.note.ifEmpty { "未知原因" },
-                                fontSize = 11.sp, color = reasonColor(op.note),
-                                modifier = Modifier
-                                    .background(reasonColor(op.note).copy(alpha = 0.10f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                fontSize = 11.sp,
+                                color = when {
+                                    bad -> if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A)
+                                    else -> Color(0xFFB8860B)
+                                },
                             )
                         }
                     }
+                    if (i < failedOps.size - 1) Box(
+                        Modifier.fillMaxWidth().height(0.5.dp)
+                            .background(colorScheme.onSurfaceVariantSummary.copy(alpha = 0.15f))
+                    ) { Box(Modifier) }
                 }
             }
             Spacer(Modifier.height(8.dp))
