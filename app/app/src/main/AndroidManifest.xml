@@ -22,6 +22,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <!-- 文件整理（2026-11-04，工具箱 FILES 页）：跨应用媒体移动 + 全盘空目录清理
+         在 MediaStore-only 模型下做不到（审计 D-M7 架构级结论），唯一路线 = 全文件访问，
+         用户在系统设置里手动授权（rules v2 §0）。声明之外还需运行时引导，见 FileOrganizerScreen。 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。
 

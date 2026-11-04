@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Security
@@ -174,6 +175,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         } else if (view == HubView.GHOSTLOCK) {
             // GhostLock 临时提权（2026-11-03）：极简整页，接住返回键回工作台
             GhostLockScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
+        } else if (view == HubView.FILES) {
+            // 文件整理（2026-11-04）：规则引擎 + 页面见 ui/toolbox/FileOrganizer.kt（规格 project/file-organizer-rules.md v2）
+            FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding, topInset = innerPadding.calculateTopPadding())
         } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,
@@ -200,6 +204,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             contentPadding = innerPadding,
         ) {
             when (view) {
+                    // FILES 整页在外层 if 分支接住（FileOrganizerScreen 自带滚动），此处仅保 when 穷尽
+                    HubView.FILES -> {}
                     // —— 工作台首页：状态摘要 + 磁贴（最近执行预览已删——与执行记录磁贴同数据源，同屏双份冗余） ——
                     HubView.HOME -> {
                         // 运行状态卡已删（2026-11-03 用户指令）：probe/rootOk 仍供各开关/冻结页只读态
@@ -397,7 +403,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), MFA("MFA 验证器"),
-    GHOSTLOCK("临时Root"),
+    GHOSTLOCK("临时Root"), FILES("文件整理"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -603,6 +609,14 @@ private fun HubTiles(
                 // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
                 Tile(Icons.Rounded.Key, "临时Root", "无 root 提权 · Shizuku") { onOpen(HubView.GHOSTLOCK) }
             }
+        }
+        // 文件整理（2026-11-04）：第四行左格；规格 project/file-organizer-rules.md v2
+        // 右格必须留占位 Box——单格 weight(1f) 会独占整行变成大卡（用户实测指出）
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) {
+                Tile(Icons.Rounded.FolderOpen, "文件整理", "照片按月归档 · 垃圾清理") { onOpen(HubView.FILES) }
+            }
+            Box(Modifier.weight(1f)) {}
         }
     }
 }
