@@ -1,27 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  monochrome 层（Android 13+ 主题图标单色层）：只保留 "Re:" 字标，
-  颜色由系统按主题着色。与 foreground 层用同一套描边路径，保证字形一致。
--->
+<!-- monochrome（主题图标）：荣耀喵剪影（头+耳+冠），系统按壁纸染色 -->
 <vector android:height="108.0dp" android:width="108.0dp" android:viewportWidth="108.0" android:viewportHeight="108.0"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- R：竖笔 + 上半圆角环 + 斜腿 -->
-    <path
-        android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53"
-        android:strokeColor="#ffffff"
-        android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="#00000000" />
-    <path
-        android:pathData="M46,53 L62,72"
-        android:strokeColor="#ffffff"
-        android:strokeWidth="8"
-        android:strokeLineCap="round"
-        android:fillColor="#00000000" />
-    <!-- 冒号 -->
-    <path android:fillColor="#ffffff"
-        android:pathData="M78,49 A4.5,4.5 0 1 1 69,49 A4.5,4.5 0 1 1 78,49 Z" />
-    <path android:fillColor="#ffffff"
-        android:pathData="M78,70 A4.5,4.5 0 1 1 69,70 A4.5,4.5 0 1 1 78,70 Z" />
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M28.5,37 L24,15.5 L44.5,26 Z M79.5,37 L84,15.5 L63.5,26 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M54,31 a29,29 0 1 0 0.001,0 Z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M36.5,20.5 L36.5,10.8 L44.5,17.5 L54,7.8 L63.5,17.5 L71.5,10.8 L71.5,20.5 Z M37,20 L71,20 A2,2 0 0 1 73,22 L73,24.5 A2,2 0 0 1 71,26.5 L37,26.5 A2,2 0 0 1 35,24.5 L35,22 A2,2 0 0 1 37,20 Z" />
 </vector>
