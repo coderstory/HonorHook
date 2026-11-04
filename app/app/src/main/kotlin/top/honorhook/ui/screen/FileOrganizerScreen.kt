@@ -211,8 +211,10 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
             bottomInnerPadding = bottomInnerPadding,
             onCancel = { ruleEditor = null },
             onSave = { saved ->
-                rules = if (draft.id.isEmpty()) rules + saved
-                        else rules.map { if (it.id == draft.id) saved else it }
+                // 新建草稿 id 为空：保存时必须生成真实 id，否则该规则永远无法编辑/删除
+                val finalSaved = if (saved.id.isEmpty()) saved.copy(id = "c${System.currentTimeMillis()}") else saved
+                rules = if (draft.id.isEmpty()) rules + finalSaved
+                        else rules.map { if (it.id == draft.id) finalSaved else it }
                 scope.launch { withContext(Dispatchers.IO) { FileOrganizer.saveRules(context, rules) } }
                 ruleEditor = null
                 log(if (draft.id.isEmpty()) "已新建规则「${saved.name}」" else "已更新规则「${saved.name}」")

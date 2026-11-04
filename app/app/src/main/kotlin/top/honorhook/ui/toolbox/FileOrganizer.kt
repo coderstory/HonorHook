@@ -611,8 +611,10 @@ object FileOrganizer {
                         version = o.optInt("version", 1),
                     )
                 } else {
+                    // 历史版本新建保存的规则 id 为空 → 迁移生成，否则永远无法编辑/删除
+                    val realId = if (id.isBlank()) "c${System.currentTimeMillis()}_${o.optString("name")}" else id
                     Rule(
-                        id = id, name = o.getString("name"),
+                        id = realId, name = o.getString("name"),
                         enabled = o.optBoolean("enabled", true), builtin = false,
                         scopeDirs = o.getJSONArray("scope").let { a -> (0 until a.length()).map { a.getString(it) } },
                         recursive = o.optBoolean("recursive"), topOnly = o.optBoolean("topOnly", true),
