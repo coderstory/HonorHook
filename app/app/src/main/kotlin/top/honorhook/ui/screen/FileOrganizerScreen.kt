@@ -87,14 +87,14 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
     var rules by remember { mutableStateOf<List<Rule>>(emptyList()) }
     var plan by remember { mutableStateOf<Plan?>(null) }
     var result by remember { mutableStateOf<RunResult?>(null) }
-    var logLines by remember { mutableStateOf<List<String>>(emptyList()) }
-    var phase by remember { mutableStateOf("idle") } // idle | scanning | preview | analyze | running | done
+    var logLines by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(listOf<String>()) }
+    var phase by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("idle") } // idle | scanning | preview | analyze | running | done
     var pendingExcluded by remember { mutableStateOf<Set<String>>(emptySet()) }
     var analyzeSummary by remember { mutableStateOf<List<Triple<String, Int, Long>>>(emptyList()) }
     var confirmRun by remember { mutableStateOf(false) }
     var runProgress by remember { mutableStateOf(0 to 0) }  // 已处理 to 总数（running 态实时刷新）
 
-    var mode by remember { mutableStateOf("organize") } // organize | dedup
+    var mode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("organize") } // organize | dedup
     var dedupGroups by remember { mutableStateOf<List<FileDedup.Group>>(emptyList()) }
     var dedupScanning by remember { mutableStateOf(false) }
     var dedupProgress by remember { mutableStateOf("" to 0) }
@@ -143,10 +143,10 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                             Triple(rid, ops.size, ops.sumOf { it.size })   // key=ruleId（重名规则不撞）
                         }.sortedByDescending { it.third }
                         phase = "analyze"
-                        log("分析完成：${p.ops.size} 项可处理，涉及 ${byRule.size} 条规则（耗时 ${(System.currentTimeMillis() - t0) / 100}f / 10 秒）".replace("f / 10 秒", "秒").replace(".0 秒", "秒"))
+                        log("分析完成：${p.ops.size} 项可处理，涉及 ${byRule.size} 条规则（耗时 ${"%.1f".format((System.currentTimeMillis() - t0) / 1000.0)} 秒）")
                     } else {
                         phase = "preview"
-                        log("扫描完成（耗时 ${(System.currentTimeMillis() - t0) / 1000.0} 秒）：${p.ops.size} 项计划" + (if (p.stale.isNotEmpty()) "，${p.stale.size} 条告警" else ""))
+                        log("扫描完成（耗时 ${"%.1f".format((System.currentTimeMillis() - t0) / 1000.0)} 秒）：${p.ops.size} 项计划" + (if (p.stale.isNotEmpty()) "，${p.stale.size} 条告警" else ""))
                     }
                 }
                 .onFailure { phase = "idle"; log("✗ 扫描失败：${it.message}") }
@@ -182,7 +182,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     dedupGroups = groups
                     dedupKeep = groups.associateWith { FileDedup.suggest(it, 2) }
                     dedupScanning = false
-                    log("查重完成：${groups.size} 组重复（哈希耗时 ${(System.currentTimeMillis() - t0) / 1000.0} 秒）")
+                    log("查重完成：${groups.size} 组重复（哈希耗时 ${"%.1f".format((System.currentTimeMillis() - t0) / 1000.0)} 秒）")
                 }
                 .onFailure { dedupScanning = false; log("✗ 查重失败：${it.message}") }
         }
