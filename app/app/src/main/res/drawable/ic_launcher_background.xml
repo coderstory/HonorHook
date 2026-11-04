@@ -1,9 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  launcher 背景层：纯白（自适应图标的外层底，彩色内容都在前景层）。
-  原先从 Rain LSPosed 复制来的纯白底保持不变，但前景已换成本模块自绘的 "Re:" 字标。
+  launcher 背景层 v2（质感提升）：渐变从前景圆角方移到这里全幅铺满——
+  原版背景纯白、渐变缩在前景圆角方里，圆形/异形 mask 下四周露白边（廉价感主因）。
+  三段对角渐变（比原版略深衬托白字）+ 左上白径向光晕 + 右下紫径向光晕。
 -->
 <vector android:height="108.0dp" android:width="108.0dp" android:viewportWidth="108.0" android:viewportHeight="108.0"
-  xmlns:android="http://schemas.android.com/apk/res/android">
-    <path android:fillColor="#ffffff" android:pathData="M0,0h108v108h-108z" />
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0" android:startY="0" android:endX="108" android:endY="108"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00CDC4" />
+                <item android:offset="0.45" android:color="#FF2F76FF" />
+                <item android:offset="1.0" android:color="#FF8C46FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="16" android:centerY="12" android:radius="54dp"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#33FFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="92" android:centerY="95" android:radius="48dp"
+                android:type="radial">
+                <item android:offset="0.0" android:color="#38BE78FF" />
+                <item android:offset="1.0" android:color="#00BE78FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
 </vector>
