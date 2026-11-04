@@ -1127,7 +1127,7 @@ private fun RuleEditorPane(
         Row(
             Modifier.fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(bottom = 56.dp),   // 让过悬浮胶囊底栏（72dp 偏大，收紧 16dp）
+                .padding(bottom = 80.dp),   // 用户定稿值
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
