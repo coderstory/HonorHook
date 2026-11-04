@@ -18,12 +18,21 @@
     <path android:pathData="M4,58 L104,20 L104,29 L4,67 Z" android:fillColor="#26FFFFFF" />
     <path android:pathData="M4,72 L104,34 L104,37 L4,75 Z" android:fillColor="#14FFFFFF" />
 
+    <!-- 液态玻璃：中央玻璃面板（半透填充 + 边框 + 顶部边缘高光） -->
+    <path android:pathData="M26,30 L82,30 A10,10 0 0 1 92,40 L92,74 A10,10 0 0 1 82,84 L26,84 A10,10 0 0 1 16,74 L16,40 A10,10 0 0 1 26,30 Z" android:fillColor="#12FFFFFF" />
+    <path android:pathData="M26,30 L82,30 A10,10 0 0 1 92,40 L92,74 A10,10 0 0 1 82,84 L26,84 A10,10 0 0 1 16,74 L16,40 A10,10 0 0 1 26,30 Z" android:strokeColor="#2BFFFFFF" android:strokeWidth="1" android:fillColor="#00000000" />
+    <path android:pathData="M30,31.5 L78,31.5" android:strokeColor="#66FFFFFF" android:strokeWidth="1.2" android:strokeLineCap="round" android:fillColor="#00000000" />
+
     <!-- 字标微投影（offset 0.8,1.2，紫黑 40% 透明度） -->
     <path android:pathData="M37.8,73.2 L37.8,39.2" android:strokeColor="#661E1464" android:strokeWidth="8" android:strokeLineCap="round" android:fillColor="#00000000" />
     <path android:pathData="M37.8,39.2 L49.3,39.2 A7.5,7.5 0 0 1 49.3,54.2 L37.8,54.2" android:strokeColor="#661E1464" android:strokeWidth="8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
     <path android:pathData="M47.3,54.2 L63.3,73.2" android:strokeColor="#661E1464" android:strokeWidth="8" android:strokeLineCap="round" android:fillColor="#00000000" />
     <path android:pathData="M78.8,50.2 A4.5,4.5 0 1 1 69.8,50.2 A4.5,4.5 0 1 1 78.8,50.2 Z" android:fillColor="#661E1464" />
     <path android:pathData="M78.8,71.2 A4.5,4.5 0 1 1 69.8,71.2 A4.5,4.5 0 1 1 78.8,71.2 Z" android:fillColor="#661E1464" />
+
+    <!-- 字标光晕：宽描边冰蓝低透明（玻璃背光） -->
+    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#40E0F6FF" android:strokeWidth="11" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
+    <path android:pathData="M46,53 L62,72" android:strokeColor="#40E0F6FF" android:strokeWidth="11" android:strokeLineCap="round" android:fillColor="#00000000" />
 
     <!-- R 字标：白主描边 -->
     <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#FFFFFFFF" android:strokeWidth="8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
@@ -34,6 +43,6 @@
     <!-- 冰蓝内芯（55% 宽度，覆盖在白描边上做渐变白效果） -->
     <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#E0F6FF" android:strokeWidth="4.4" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
     <path android:pathData="M46,53 L62,72" android:strokeColor="#E0F6FF" android:strokeWidth="4.4" android:strokeLineCap="round" android:fillColor="#00000000" />
-    <path android:pathData="M78,49 A2.2,2.2 0 1 1 69,49 A2.2,2.2 0 1 1 78,49 Z" android:fillColor="#E0F6FF" />
-    <path android:pathData="M78,70 A2.2,2.2 0 1 1 69,70 A2.2,2.2 0 1 1 78,70 Z" android:fillColor="#E0F6FF" />
+    <path android:pathData="M78,49 A3.4,3.4 0 1 1 69,49 A3.4,3.4 0 1 1 78,49 Z" android:strokeColor="#4DFFFFFF" android:strokeWidth="0.8" android:fillColor="#E0F6FF" />
+    <path android:pathData="M78,70 A3.4,3.4 0 1 1 69,70 A3.4,3.4 0 1 1 78,70 Z" android:strokeColor="#4DFFFFFF" android:strokeWidth="0.8" android:fillColor="#E0F6FF" />
 </vector>
