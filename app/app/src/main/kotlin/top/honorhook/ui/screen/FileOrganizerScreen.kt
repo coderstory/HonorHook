@@ -1126,7 +1126,7 @@ private fun RuleEditorPane(
             Modifier.fillMaxWidth()
                 .padding(vertical = 5.dp)
                 .navigationBarsPadding()
-                .padding(bottom = bottomInnerPadding),
+                .padding(bottom = 2.dp),   // 只留手势条让位；bottomInnerPadding（含悬浮底栏高度）留白过大，去掉
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
