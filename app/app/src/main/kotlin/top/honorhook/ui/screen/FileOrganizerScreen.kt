@@ -1126,9 +1126,8 @@ private fun RuleEditorPane(
         // 底部操作栏：固定可见（返回由外层顶栏/手势承担）
         Row(
             Modifier.fillMaxWidth()
-                .padding(vertical = 5.dp)
                 .navigationBarsPadding()
-                .padding(bottom = 2.dp),   // 只留手势条让位；bottomInnerPadding（含悬浮底栏高度）留白过大，去掉
+                .padding(bottom = bottomInnerPadding + 2.dp),   // 必须让过悬浮 tab 栏（回归修复）
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
