@@ -1128,7 +1128,7 @@ private fun RuleEditorPane(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (onDelete != null) {
+            if (onDelete != null && draft.id.isNotEmpty()) {   // 新建流程无删除入口
                 Text("删除此规则", fontSize = 13.sp,
                     color = if (dark) Color(0xFFFFB4AB) else Color(0xFFBA1A1A),
                     modifier = Modifier.clickable { confirmDelete = true }
