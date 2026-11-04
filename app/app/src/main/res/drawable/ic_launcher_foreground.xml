@@ -1,48 +1,90 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Re:荣耀 字标前景 v2（质感提升，原字形不动）：
-  ① 字标整体微移 (-1.5,-1.5)——原组合视觉中心偏右下，现与画布中心对齐；
-  ② 字标底层加 #661E1464 微投影（offset 0.8,1.2）——白字在渐变上有厚度；
-  ③ 白描边内芯加冰蓝窄芯（#E0F6FF，宽度 55%）——模拟渐变白，不再死白；
-  ④ 玻璃斜带改两条（15% 主带 + 8% 窄副带），更接近系统图标的光泽语言。
-  渐变底已在 background 层全幅（前景透明）。
+  Re:荣耀 字标前景 v3「液态玻璃」：
+  玻璃质感三要素——① 材质渐变（描边色沿对角从纯白降到冰蓝半透，光从左上来）；
+  ② 端点光珠（玻璃管两端的高光球，双层圆模拟）；③ 边缘 rim 光（玻璃板只露边缘弧光不露盒子）。
+  色场背景在 background 层。全部 linear 渐变（radial 启动器解码失败，实锤约束）。
 -->
 <vector
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 玻璃斜带：主带 + 窄副带 -->
-    <path android:pathData="M4,58 L104,20 L104,29 L4,67 Z" android:fillColor="#26FFFFFF" />
+    <!-- 玻璃板 rim 光：只画左上/右下两段角弧，光从左上入射 -->
+    <path android:pathData="M24,44 A20,20 0 0 1 44,24" android:strokeColor="#5CFFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path android:pathData="M84,60 A20,20 0 0 1 64,80" android:strokeColor="#2BFFFFFF" android:strokeWidth="1.2" android:strokeLineCap="round" android:fillColor="#00000000" />
+
+    <!-- 玻璃斜带：主带（中亮缘淡三段渐变=软边光带） -->
+    <path android:pathData="M4,58 L104,20 L104,29 L4,67 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="4" android:startY="62.5" android:endX="104" android:endY="24.5" android:type="linear">
+                <item android:offset="0.0" android:color="#00FFFFFF" />
+                <item android:offset="0.5" android:color="#2EFFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
     <path android:pathData="M4,72 L104,34 L104,37 L4,75 Z" android:fillColor="#14FFFFFF" />
 
-    <!-- 液态玻璃：中央玻璃面板（半透填充 + 边框 + 顶部边缘高光） -->
-    <path android:pathData="M26,30 L82,30 A10,10 0 0 1 92,40 L92,74 A10,10 0 0 1 82,84 L26,84 A10,10 0 0 1 16,74 L16,40 A10,10 0 0 1 26,30 Z" android:fillColor="#12FFFFFF" />
-    <path android:pathData="M26,30 L82,30 A10,10 0 0 1 92,40 L92,74 A10,10 0 0 1 82,84 L26,84 A10,10 0 0 1 16,74 L16,40 A10,10 0 0 1 26,30 Z" android:strokeColor="#2BFFFFFF" android:strokeWidth="1" android:fillColor="#00000000" />
-    <path android:pathData="M30,31.5 L78,31.5" android:strokeColor="#66FFFFFF" android:strokeWidth="1.2" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <!-- 字标光晕（玻璃背光，宽描边低透明） -->
+    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#33D9F2FF" android:strokeWidth="11.5" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
+    <path android:pathData="M46,53 L62,72" android:strokeColor="#33D9F2FF" android:strokeWidth="11.5" android:strokeLineCap="round" android:fillColor="#00000000" />
 
-    <!-- 字标微投影（offset 0.8,1.2，紫黑 40% 透明度） -->
+    <!-- 字标微投影（offset 0.8,1.2 紫黑 40%） -->
     <path android:pathData="M37.8,73.2 L37.8,39.2" android:strokeColor="#661E1464" android:strokeWidth="8" android:strokeLineCap="round" android:fillColor="#00000000" />
     <path android:pathData="M37.8,39.2 L49.3,39.2 A7.5,7.5 0 0 1 49.3,54.2 L37.8,54.2" android:strokeColor="#661E1464" android:strokeWidth="8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
     <path android:pathData="M47.3,54.2 L63.3,73.2" android:strokeColor="#661E1464" android:strokeWidth="8" android:strokeLineCap="round" android:fillColor="#00000000" />
     <path android:pathData="M78.8,50.2 A4.5,4.5 0 1 1 69.8,50.2 A4.5,4.5 0 1 1 78.8,50.2 Z" android:fillColor="#661E1464" />
     <path android:pathData="M78.8,71.2 A4.5,4.5 0 1 1 69.8,71.2 A4.5,4.5 0 1 1 78.8,71.2 Z" android:fillColor="#661E1464" />
 
-    <!-- 字标光晕：宽描边冰蓝低透明（玻璃背光） -->
-    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#40E0F6FF" android:strokeWidth="11" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
-    <path android:pathData="M46,53 L62,72" android:strokeColor="#40E0F6FF" android:strokeWidth="11" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <!-- R 玻璃主描边：对角渐变（左上纯白 → 右下冰蓝半透），材质感核心 -->
+    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" android:strokeWidth="8">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:startX="37" android:startY="38" android:endX="62" android:endY="72" android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="0.6" android:color="#FFEAF8FF" />
+                <item android:offset="1.0" android:color="#FFB9E4FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M46,53 L62,72" android:strokeLineCap="round" android:fillColor="#00000000" android:strokeWidth="8">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:startX="46" android:startY="53" android:endX="62" android:endY="72" android:type="linear">
+                <item android:offset="0.0" android:color="#FFEAF8FF" />
+                <item android:offset="1.0" android:color="#FFB9E4FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
 
-    <!-- R 字标：白主描边 -->
-    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#FFFFFFFF" android:strokeWidth="8" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
-    <path android:pathData="M46,53 L62,72" android:strokeColor="#FFFFFFFF" android:strokeWidth="8" android:strokeLineCap="round" android:fillColor="#00000000" />
-    <path android:pathData="M78,49 A4.5,4.5 0 1 1 69,49 A4.5,4.5 0 1 1 78,49 Z" android:fillColor="#FFFFFFFF" />
-    <path android:pathData="M78,70 A4.5,4.5 0 1 1 69,70 A4.5,4.5 0 1 1 78,70 Z" android:fillColor="#FFFFFFFF" />
+    <!-- R 内芯亮核 -->
+    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#FFFFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
 
-    <!-- 冰蓝内芯（55% 宽度，覆盖在白描边上做渐变白效果） -->
-    <path android:pathData="M37,72 L37,38 L48.5,38 A7.5,7.5 0 0 1 48.5,53 L37,53" android:strokeColor="#E0F6FF" android:strokeWidth="4.4" android:strokeLineCap="round" android:strokeLineJoin="round" android:fillColor="#00000000" />
-    <path android:pathData="M46,53 L62,72" android:strokeColor="#E0F6FF" android:strokeWidth="4.4" android:strokeLineCap="round" android:fillColor="#00000000" />
-    <path android:pathData="M78,49 A3.4,3.4 0 1 1 69,49 A3.4,3.4 0 1 1 78,49 Z" android:strokeColor="#4DFFFFFF" android:strokeWidth="0.8" android:fillColor="#E0F6FF" />
-    <path android:pathData="M78,70 A3.4,3.4 0 1 1 69,70 A3.4,3.4 0 1 1 78,70 Z" android:strokeColor="#4DFFFFFF" android:strokeWidth="0.8" android:fillColor="#E0F6FF" />
+    <!-- 玻璃光珠：竖笔顶端 + 斜腿末端（双层：外晕+实心核） -->
+    <path android:pathData="M37,36.6 m-4.2,0 a4.2,4.2 0 1 0 8.4,0 a4.2,4.2 0 1 0 -8.4,0 Z" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M37,36.6 m-2,0 a2,2 0 1 0 4,0 a2,2 0 1 0 -4,0 Z" android:fillColor="#FFFFFFFF" />
+    <path android:pathData="M62.6,71 m-4.2,0 a4.2,4.2 0 1 0 8.4,0 a4.2,4.2 0 1 0 -8.4,0 Z" android:fillColor="#33DFF4FF" />
+    <path android:pathData="M62.6,71 m-1.8,0 a1.8,1.8 0 1 0 3.6,0 a1.8,1.8 0 1 0 -3.6,0 Z" android:fillColor="#FFF2FBFF" />
+
+    <!-- 冒号玻璃点：渐变点 + 边缘 rim + 左上微高光 -->
+    <path android:pathData="M78,49 A4.5,4.5 0 1 1 69,49 A4.5,4.5 0 1 1 78,49 Z" android:strokeWidth="8">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="69" android:startY="44.5" android:endX="78" android:endY="53.5" android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="1.0" android:color="#FFAFE0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M78,70 A4.5,4.5 0 1 1 69,70 A4.5,4.5 0 1 1 78,70 Z" android:strokeWidth="8">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="69" android:startY="65.5" android:endX="78" android:endY="74.5" android:type="linear">
+                <item android:offset="0.0" android:color="#FFF2FBFF" />
+                <item android:offset="1.0" android:color="#FF9ED8FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M70.8,46.9 m-1.2,0 a1.2,1.2 0 1 0 2.4,0 a1.2,1.2 0 1 0 -2.4,0 Z" android:fillColor="#FFFFFFFF" />
+    <path android:pathData="M70.8,67.9 m-1.2,0 a1.2,1.2 0 1 0 2.4,0 a1.2,1.2 0 1 0 -2.4,0 Z" android:fillColor="#FFFFFFFF" />
 </vector>

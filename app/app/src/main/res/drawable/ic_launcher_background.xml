@@ -1,42 +1,65 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  launcher 背景层 v2.1：渐变全幅铺满（修 mask 露白边）。
-  注意：只用 linear 渐变——radial 在 MagicOS 启动器/MT 的矢量加载器上会让图标解码失败
-  （2026-11-04 实锤：radial 版桌面/MT 图标全部变默认机器人）。光晕改用旋转矩形 + linear 渐变。
+  launcher 背景层 v3「液态玻璃色场」：模拟失焦玻璃后的色彩场。
+  结构 = 深色基底 + 四团彩色散景（旋转椭圆、三段 linear 渐隐模拟高斯斑）。
+  约束：只用 linear（radial 在 MagicOS 启动器解码失败，2026-11-04 实锤）；
+  椭圆用标准双半圆 idiom（直径弧，无小半径/短弦风险）。
 -->
 <vector android:height="108.0dp" android:width="108.0dp" android:viewportWidth="108.0" android:viewportHeight="108.0"
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt">
+
+    <!-- 基底：对角青→蓝→紫 -->
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="0" android:startY="0" android:endX="108" android:endY="108"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#FF00CDC4" />
-                <item android:offset="0.45" android:color="#FF2F76FF" />
-                <item android:offset="1.0" android:color="#FF8C46FF" />
+            <gradient android:startX="0" android:startY="0" android:endX="108" android:endY="108" android:type="linear">
+                <item android:offset="0.0" android:color="#FF00C2B9" />
+                <item android:offset="0.45" android:color="#FF2C6FFF" />
+                <item android:offset="1.0" android:color="#FF8A41FF" />
             </gradient>
         </aapt:attr>
     </path>
-    <!-- 左上白光晕：旋转矩形沿对角方向渐隐 -->
-    <path android:pathData="M-30,-26 L52,4 L30,44 L-52,14 Z">
+
+    <!-- 散景 1：薄荷青斑（左上） -->
+    <path android:pathData="M26,20 m-30,0 a30,22 0 1 0 60,0 a30,22 0 1 0 -60,0 Z" android:rotation="-18" android:pivotX="26" android:pivotY="20">
         <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="11" android:startY="-11" android:endX="41" android:endY="24"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#40FFFFFF" />
-                <item android:offset="1.0" android:color="#00FFFFFF" />
+            <gradient android:startX="-4" android:startY="20" android:endX="56" android:endY="20" android:type="linear">
+                <item android:offset="0.0" android:color="#0087F5E4" />
+                <item android:offset="0.5" android:color="#FF8FF5E4" />
+                <item android:offset="1.0" android:color="#0087F5E4" />
             </gradient>
         </aapt:attr>
     </path>
-    <!-- 右下紫光晕 -->
-    <path android:pathData="M138,134 L56,104 L78,64 L160,94 Z">
+
+    <!-- 散景 2：宝蓝斑（右中） -->
+    <path android:pathData="M86,52 m-32,0 a32,24 0 1 0 64,0 a32,24 0 1 0 -64,0 Z" android:rotation="15" android:pivotX="86" android:pivotY="52">
         <aapt:attr name="android:fillColor">
-            <gradient
-                android:startX="97" android:startY="119" android:endX="67" android:endY="84"
-                android:type="linear">
-                <item android:offset="0.0" android:color="#40BE78FF" />
-                <item android:offset="1.0" android:color="#00BE78FF" />
+            <gradient android:startX="54" android:startY="52" android:endX="118" android:endY="52" android:type="linear">
+                <item android:offset="0.0" android:color="#005E9CFF" />
+                <item android:offset="0.5" android:color="#FF5E9CFF" />
+                <item android:offset="1.0" android:color="#005E9CFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 散景 3：紫罗兰斑（底部） -->
+    <path android:pathData="M44,96 m-36,0 a36,26 0 1 0 72,0 a36,26 0 1 0 -72,0 Z" android:rotation="-10" android:pivotX="44" android:pivotY="96">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="8" android:startY="96" android:endX="80" android:endY="96" android:type="linear">
+                <item android:offset="0.0" android:color="#00B38CFF" />
+                <item android:offset="0.5" android:color="#FFB38CFF" />
+                <item android:offset="1.0" android:color="#00B38CFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 散景 4：樱粉斑（右上小） -->
+    <path android:pathData="M92,14 m-18,0 a18,13 0 1 0 36,0 a18,13 0 1 0 -36,0 Z" android:rotation="20" android:pivotX="92" android:pivotY="14">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startX="74" android:startY="14" android:endX="110" android:endY="14" android:type="linear">
+                <item android:offset="0.0" android:color="#00FFA6C8" />
+                <item android:offset="0.5" android:color="#FFFFA6C8" />
+                <item android:offset="1.0" android:color="#00FFA6C8" />
             </gradient>
         </aapt:attr>
     </path>
