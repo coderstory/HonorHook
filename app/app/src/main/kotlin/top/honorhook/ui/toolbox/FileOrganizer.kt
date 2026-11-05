@@ -226,7 +226,9 @@ object FileOrganizer {
 
         for (rule in enabled) {
             if (rule.id == "g3") continue
-            if (rule.action == ActionType.MERGE && !File(ROOT, rule.mergeDir).exists()) continue
+            // 源目录不存在才跳过（无活可干）；目标目录由 execute 自动创建——R8 即此类，不能据目标缺失跳过
+            if (rule.action == ActionType.MERGE && rule.scopeDirs.firstOrNull() != null &&
+                !File(ROOT, rule.scopeDirs[0]).exists()) continue
             val reg = rule.nameRegex?.let { runCatching { Regex(it) }.getOrNull() }
             if (rule.nameRegex != null && reg == null) { stale.add("[${rule.name}] 正则非法: ${rule.nameRegex}"); continue }
             val ageLimit = if (rule.action == ActionType.DELETE) DELETE_AGE_MS else MOVE_AGE_MS
