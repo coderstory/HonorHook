@@ -234,7 +234,9 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
     // 必须按 rules 变化才重算，不能放组合函数里每次重组都跑
     val visibleRules = remember(rules) {
         rules.filter {
-            it.action != ActionType.MERGE || java.io.File("/storage/emulated/0/${it.mergeDir}").exists()
+            // 合并规则：源目录存在才显示（源没了=没活可干；目标目录由执行时自动创建，不能据此隐藏）
+            it.action != ActionType.MERGE ||
+                it.scopeDirs.firstOrNull()?.let { s -> java.io.File("/storage/emulated/0/$s").exists() } != false
         }
     }
 
