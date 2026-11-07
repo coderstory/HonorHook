@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -99,6 +100,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
     var dedupScanning by remember { mutableStateOf(false) }
     var dedupProgress by remember { mutableStateOf("" to 0) }
     var dedupKeep by remember { mutableStateOf<Map<FileDedup.Group, Int>>(emptyMap()) }
+    var previewTarget by remember { mutableStateOf<Pair<FileDedup.Group, Int>?>(null) }  // 查重文件预览弹窗目标（组, 保留索引候选）
     var dedupDone by remember { mutableStateOf<String?>(null) }
     var confirmDedupDelete by remember { mutableStateOf(false) }
     var showFailedDialog by remember { mutableStateOf(false) }
@@ -226,6 +228,10 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     ruleEditor = null
                 }
             },
+            onToggleEnabled = { on ->
+                rules = rules.map { if (it.id == draft.id) it.copy(enabled = on) else it }
+                scope.launch { withContext(Dispatchers.IO) { FileOrganizer.saveRules(context, rules) } }
+            },
         )
         return
     }
@@ -290,10 +296,10 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                             headline = "${dedupGroups.size} 组重复",
                             sub = "每组选一个保留，其余直接删除（不可恢复）",
                             ctas = listOf(
-                                HeroCta("删除其余文件", primary = true, danger = true) { confirmDedupDelete = true },
-                                HeroCta("全部保留最新") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 2) } },
-                                HeroCta("全部保留最旧") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 3) } },
-                                HeroCta("全部保留最短路径") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 1) } },
+                                HeroCta("删除", primary = true, danger = true) { confirmDedupDelete = true },
+                                HeroCta("留最新") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 2) } },
+                                HeroCta("留最旧") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 3) } },
+                                HeroCta("留最短") { dedupKeep = dedupGroups.associateWith { FileDedup.suggest(it, 1) } },
                             ),
                         )
                         else -> HeroUi(
@@ -430,19 +436,17 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                             }
                             if (ui.ctas.isNotEmpty()) {
                                 Spacer(Modifier.height(14.dp))
-                                val primaries = ui.ctas.filter { it.primary }
-                                val secondaries = ui.ctas.filter { !it.primary }
-                                primaries.forEach { cta ->
-                                    val cc = if (cta.danger) Color(0xFFBA1A1A) else colorScheme.primary
-                                    Button(onClick = cta.onClick, enabled = cta.enabled, modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(color = cc, contentColor = Color.White)) {
-                                        Text(cta.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                }
-                                if (secondaries.isNotEmpty()) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        secondaries.forEach { cta ->
+                                // 单行左右排列：primary 实底按钮 + secondary 浅底片，等分同一 Row
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ui.ctas.forEach { cta ->
+                                        if (cta.primary) {
+                                            val cc = if (cta.danger) Color(0xFFBA1A1A) else colorScheme.primary
+                                            Button(onClick = cta.onClick, enabled = cta.enabled, modifier = Modifier.weight(1f),
+                                                colors = ButtonDefaults.buttonColors(color = cc, contentColor = Color.White)) {
+                                                Text(cta.label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1, textAlign = TextAlign.Center)
+                                            }
+                                        } else {
                                             Card(
                                                 modifier = Modifier.weight(1f).clickable(enabled = cta.enabled, onClick = cta.onClick),
                                                 colors = CardDefaults.defaultColors(color = colorScheme.primary.copy(alpha = 0.12f)),
@@ -507,7 +511,20 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text((if (excluded) "☐" else "☑"), fontSize = 15.sp,
                                 color = if (excluded) colorScheme.onSurfaceVariantSummary else colorScheme.primary)
-                            Spacer(Modifier.size(10.dp))
+                            Spacer(Modifier.size(8.dp))
+                            // 文件/目录标识：真实文件系统优先；不存在的路径是 MediaStore 幽灵行（执行时自动跳过）
+                            val f = java.io.File(op.src)
+                            val (typeLabel, typeColor) = when {
+                                f.isDirectory -> "目录" to Color(0xFFB8860B)
+                                f.exists() -> "文件" to colorScheme.primary
+                                else -> "已不存在" to colorScheme.onSurfaceVariantSummary
+                            }
+                            Text(typeLabel, fontSize = 10.sp,
+                                color = typeColor,
+                                modifier = Modifier
+                                    .background(typeColor.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp))
+                            Spacer(Modifier.size(8.dp))
                             Text(
                                 (if (op.type == FileOrganizer.OpType.DELETE) "删除 " else "移动 ") +
                                     op.src.removePrefix("/storage/emulated/0/") +
@@ -527,7 +544,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
 
             // ═══ 查重分组 ═══
             if (mode == "dedup" && dedupGroups.isNotEmpty()) {
-                item { SectionHeader("重复文件组 · 点文件行可改保留项") }
+                item { SectionHeader("重复文件组 · 点文件行预览 · 组内 chips 改保留项") }
                 items(dedupGroups, key = { it.entries.first().path }) { group ->
                     val keep = dedupKeep[group] ?: 0
                     val ext = group.entries.first().file.extension.uppercase()
@@ -550,7 +567,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                                     else -> "保留·手动  "
                                 }
                                 Row(
-                                    Modifier.fillMaxWidth().clickable { dedupKeep = dedupKeep + (group to i) }
+                                    Modifier.fillMaxWidth().clickable { previewTarget = group to i }
                                         .padding(vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
@@ -591,7 +608,8 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
             }
 
             // ═══ 规则库 ═══
-            if (mode == "organize") {
+            // 规则库只在空闲态展示（2026-11-05 用户指令：扫描结果页隐藏规则列表）
+            if (mode == "organize" && phase == "idle") {
                 item {
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("规则库 · ${visibleRules.count { it.enabled }}/${visibleRules.size} 条启用",
@@ -783,6 +801,54 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
             }
         }
     }
+
+    // ═══ 查重文件预览弹窗（点文件行弹出；图片解码显示，非图片显示元信息）═══
+    if (previewTarget != null) {
+        val (pGroup, pIdx) = previewTarget!!
+        val entry = pGroup.entries[pIdx]
+        val isKeep = (dedupKeep[pGroup] ?: FileDedup.suggest(pGroup, 3)) == pIdx
+        WindowDialog(
+            show = true,
+            title = "文件预览",
+            summary = null,
+            onDismissRequest = { previewTarget = null },
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                // 图片缩略图（IO 线程解码，限 1024px 防大图 OOM）
+                var bmp by remember(entry.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                LaunchedEffect(entry.path) {
+                    bmp = withContext(Dispatchers.IO) { decodePreview(entry.file, 1024) }
+                }
+                val shown = bmp
+                if (shown != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = shown.asImageBitmap(),
+                        contentDescription = entry.path,
+                        modifier = Modifier.fillMaxWidth().height(220.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                Text(entry.path.removePrefix("/storage/emulated/0/"), fontSize = 12.sp,
+                    color = colorScheme.onSurface, modifier = Modifier.padding(bottom = 4.dp))
+                Text("${fmtMb(entry.size)} · ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(entry.mtime))}",
+                    fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { previewTarget = null }, modifier = Modifier.weight(1f)) {
+                        Text("关闭", fontSize = 13.sp)
+                    }
+                    Button(
+                        onClick = { dedupKeep = dedupKeep + (pGroup to pIdx); previewTarget = null },
+                        enabled = !isKeep,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(color = colorScheme.primary, contentColor = Color.White),
+                    ) {
+                        Text(if (isKeep) "已是保留项" else "设为保留项", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ═══ Hero 状态数据模型：每个状态显式声明 ═══
@@ -868,6 +934,29 @@ private fun QuickChip(label: String, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 8.dp))
 }
 
+/** 查重预览：解码图片缩略图 / 视频关键帧（其余类型或解码失败返回 null，UI 落到元信息展示）。最长边 ≤ maxDim */
+private fun decodePreview(f: java.io.File, maxDim: Int): android.graphics.Bitmap? = runCatching {
+    val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    android.graphics.BitmapFactory.decodeFile(f.absolutePath, bounds)
+    if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= maxDim || bounds.outHeight / (sample * 2) >= maxDim) sample *= 2
+        return android.graphics.BitmapFactory.decodeFile(f.absolutePath,
+            android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+    // 非图片：按视频取关键帧（MediaMetadataRetriever 不吃扩展名，直接试数据源；不支持会抛异常被 runCatching 吞掉）
+    val mmr = android.media.MediaMetadataRetriever()
+    try {
+        mmr.setDataSource(f.absolutePath)
+        val frame = mmr.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+        val scale = maxOf(frame.width, frame.height) / maxDim.toFloat()
+        if (scale > 1f) {
+            android.graphics.Bitmap.createScaledBitmap(
+                frame, (frame.width / scale).toInt().coerceAtLeast(1), (frame.height / scale).toInt().coerceAtLeast(1), true)
+        } else frame
+    } finally { mmr.release() }
+}.getOrNull()
+
 /** 动作选择大卡片 */
 @Composable
 private fun ActionCard(title: String, desc: String, selected: Boolean, danger: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
@@ -918,6 +1007,7 @@ private fun RuleEditorPane(
     onCancel: () -> Unit,
     onSave: (Rule) -> Unit,
     onDelete: (() -> Unit)?,
+    onToggleEnabled: (Boolean) -> Unit = {},   // 内置规则编辑器里直接切换启用态（即时持久化）
 ) {
     var name by remember { mutableStateOf(draft.name) }
     var scope by remember { mutableStateOf(draft.scopeDirs.joinToString("/")) }
@@ -927,6 +1017,9 @@ private fun RuleEditorPane(
     var target by remember { mutableStateOf(if (draft.action == ActionType.ARCHIVE) draft.dirPattern else draft.mergeDir) }
     var conflict by remember { mutableStateOf(draft.conflict.name) }
     var enabled by remember { mutableStateOf(draft.enabled) }
+    // 处理子目录（2026-11-06 用户指令）：不勾选只处理目标目录顶层散文件（跳过文件夹），
+    // 勾选后递归进子目录。引擎映射 recursive=true + topOnly=false
+    var includeSub by remember { mutableStateOf(draft.recursive) }
     var confirmDelete by remember { mutableStateOf(false) }
     val readOnly = draft.builtin   // 内置规则：详情只读，不可保存/删除
     var testResult by remember { mutableStateOf<Pair<Int, List<String>>?>(null) }
@@ -965,6 +1058,8 @@ private fun RuleEditorPane(
         dirPattern = if (action == "ARCHIVE") target.trim() else "",
         mergeDir = if (action == "MERGE") target.trim() else "",
         conflict = FileOrganizer.ConflictPolicy.valueOf(conflict),
+        recursive = includeSub,
+        topOnly = !includeSub,
         version = draft.version + 1,
     )
 
@@ -988,8 +1083,12 @@ private fun RuleEditorPane(
                             }
                             Spacer(Modifier.size(12.dp))
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(if (readOnly) "启用（内置只读）" else "启用", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
-                                Switch(checked = enabled, onCheckedChange = { if (!readOnly) enabled = it })
+                                Text(if (readOnly) "启用（内置不可改，可禁用）" else "启用", fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                                // 内置规则：字段只读但开关可用（2026-11-05 用户指令）；readOnly 下切换即时落盘
+                                Switch(checked = enabled, onCheckedChange = {
+                                    enabled = it
+                                    if (readOnly) onToggleEnabled(it)
+                                })
                             }
                         }
                         Spacer(Modifier.height(12.dp))
@@ -1003,6 +1102,17 @@ private fun RuleEditorPane(
                         InputField(query = scope, onQueryChange = { if (!readOnly) scope = it; testResult = null },
                             onSearch = { }, expanded = false, onExpandedChange = { }, label = "点「选择目录」或手输相对路径",
                             modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                FieldLabel("处理子目录")
+                                Text("勾选后递归处理目标目录里的子文件夹；不勾选只处理顶层散文件",
+                                    fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                            }
+                            Switch(checked = includeSub, onCheckedChange = {
+                                if (!readOnly) { includeSub = it; testResult = null }
+                            })
+                        }
                     }
                 }
             }

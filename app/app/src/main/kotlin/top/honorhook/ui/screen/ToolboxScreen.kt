@@ -158,7 +158,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            // FILES 页无顶栏（2026-11-05 用户指令：标题文本删除，容器也不占位）；状态栏避让走 contentWindowInsets.Top
+            if (view != HubView.FILES) TopAppBar(
                 title = if (view == HubView.HOME) "工具箱" else view.title,
                 navigationIcon = { if (view != HubView.HOME) MiuixBackButton { view = HubView.HOME } },
                 scrollBehavior = scrollBehavior,
@@ -167,7 +168,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         popupHost = { },
         contentWindowInsets = WindowInsets.systemBars
             .add(WindowInsets.displayCutout)
-            .only(WindowInsetsSides.Horizontal),
+            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
     ) { innerPadding ->
         if (view == HubView.MFA) {
             // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
@@ -177,7 +178,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             GhostLockScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
         } else if (view == HubView.FILES) {
             // 文件整理（2026-11-04）：规则引擎 + 页面见 ui/toolbox/FileOrganizer.kt（规格 project/file-organizer-rules.md v2）
-            FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding, topInset = innerPadding.calculateTopPadding())
+            // FILES 页无顶栏：Miuix Scaffold 不渲染 TopAppBar 时 innerPadding 仍按顶栏高度预留 → 改用纯状态栏高度
+            FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding,
+                topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding())
         } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,

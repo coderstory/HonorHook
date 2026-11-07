@@ -90,6 +90,9 @@ object FileOrganizer {
     val EXCLUDES = listOf(
         "Android/", "backup/", "backups/", "Honor/", "Sounds/CallRecord/", "project/",
         ".Trash/", "Documents/dshdata/", ".fileMOShare/", "Download/123云盘/",
+        // 荣耀相册回收站（2026-11-05）：内部同一文件双副本（bins/*.hnbk + bins/0/*.hndgp），
+        // 参与查重会互相重复删不完；清理应走相册 App 的「清空回收站」
+        "Pictures/.Gallery2/",
     )
 
     // ---------- 内置规则（rules v2 §1/§2，共 11 条） ----------
@@ -245,7 +248,10 @@ object FileOrganizer {
                 if (protectedTargets.contains(path) || seenSrc.contains(path)) continue
                 // MediaStore Files 表在部分 ROM 会把【目录】也索引成 size=0 的行（用户实测：
                 // G2 计划删除 Pictures/DCIM/Download 等顶层目录）→ 一律先判目录并跳过
-                if (java.io.File(path).isDirectory) continue
+                val f = java.io.File(path)
+                if (f.isDirectory) continue
+                // MediaStore 残留行（已删除文件/目录的幽灵索引）→ 扫描期直接过滤，不进计划
+                if (!f.exists()) continue
                 val ext = path.substringAfterLast('.', "").lowercase()
                 if (reg != null && !reg.containsMatchIn(path.substringAfterLast('/'))) continue
                 if (rule.extWhitelist != null && ext !in rule.extWhitelist) continue
@@ -578,9 +584,9 @@ object FileOrganizer {
         val samples = mutableListOf<String>()
         for (scope in rule.scopeDirs) {
             val dir = File(ROOT, scope)
-            val files = dir.listFiles() ?: continue
+            // recursive（UI「处理子目录」开关）勾选时递归进子目录，与 scan 的放行口径一致
+            val files = if (rule.recursive) dir.walkTopDown().filter { it.isFile }.toList() else dir.listFiles()?.filter { !it.isDirectory } ?: continue
             for (f in files) {
-                if (f.isDirectory) continue
                 val ext = f.extension.lowercase()
                 if (reg != null && !reg.containsMatchIn(f.name)) continue
                 if (rule.extWhitelist != null && ext !in rule.extWhitelist) continue
