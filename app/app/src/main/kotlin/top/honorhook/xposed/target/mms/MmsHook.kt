@@ -223,6 +223,22 @@ object MmsHook : TargetHook {
     )
 
     /**
+     * T3 主轨（插件 10.0.44.309 起）：`c(String msgId, String json, String smsNumber, TedCard, long)`
+     * ——旧 `b(4参)` 在此版本改名并多了一个 `long`（smali 实证：`iput-wide p5->u:J` 落时间戳）。
+     * 函数体逐字保留同一语义：`json.length()==0 && (card==null || code!=0EFF76FF)` → `setVisibility(8)`
+     * 直接 return，因此置空第 2 参照旧整块动作区消失。按「先老签名、再新签名」双轨解析，
+     * 老插件版本继续走 [simpleActionTask]，不因宿主插件升级反向丢功能。
+     */
+    private val simpleActionTaskV2 = MountEngine.SimpleTask(
+        className = CLS_SIMPLE_ACTION_LAYOUT,
+        methodName = "c",
+        paramCount = 5,
+        returnType = "void",
+        id = ID_SIMPLE_ACTION_V2,
+        description = "T3 主轨（10.0.44.309+）：卡片动作区数据源清空（json 参数置空 → 引擎自带 setVisibility(GONE) 路径）",
+    )
+
+    /**
      * T3 卡片按钮/应用推广卡补杀——数据源选型（jadx 实证，见 [CLS_SIMPLE_ACTION_LAYOUT] 注释）：
      * - 改参数 > 改返回值 > View 层 GONE：把 `b` 的第 2 参 json 置空串，引擎自己的空数据路径接管
      *   （`str2.length()==0 && (tedCard==null || code!=验证码)` → `setVisibility(8)` 整块动作区隐藏，
@@ -247,17 +263,22 @@ object MmsHook : TargetHook {
                     cardKillTried.set(false)   // 失败不置位：下次会话页重试
                     return
                 }
-            val method = MethodResolver.resolveMethod(
-                pluginCl, CLS_SIMPLE_ACTION_LAYOUT, "b",
-                paramCount = simpleActionTask.paramCount, returnType = simpleActionTask.returnType,
-            ) ?: run {
-                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨未解析（$CLS_SIMPLE_ACTION_LAYOUT#b(4参)，插件版本差异？），卡片按钮原样显示")
+            // 双轨：老插件 10.0.42.x 的 b(4参) → 新插件 10.0.44.309+ 的 c(5参，多一个 long)。
+            // 不能只留新签名：用户群里插件版本跟着系统 OTA 走，老机器仍跑旧插件。
+            val matched = listOf(simpleActionTask, simpleActionTaskV2).firstNotNullOfOrNull { t ->
+                MethodResolver.resolveMethod(
+                    pluginCl, t.className, t.methodName,
+                    paramCount = t.paramCount, returnType = t.returnType,
+                )?.let { m -> m to t }
+            } ?: run {
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨未解析（$CLS_SIMPLE_ACTION_LAYOUT#b(4参)/#c(5参) 均无，插件版本差异？），卡片按钮原样显示")
                 cardKillTried.set(false)   // 失败不置位：下次会话页重试
                 return
             }
+            val (method, task) = matched
             module.hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .setId(ID_SIMPLE_ACTION)
+                .setId(task.id)
                 .intercept { chain ->
                     val args = chain.args?.toTypedArray()
                         ?: return@intercept chain.proceed()  // 取不到参数骨架：原样放行，宁漏杀不误杀
@@ -267,10 +288,10 @@ object MmsHook : TargetHook {
                     // （menus:[] 数组值，optString → "[]" 非空 → 不触发空 menus 提前 return），
                     // c() 从 tedCard.subTitle 本地合成复制按钮——引擎原生路径，实测见验证记录。
                     args[1] = ""
-                    session.judge(module, simpleActionTask, JUDGE_PREFIX, "json 已置空（card=${args.getOrNull(3)?.javaClass?.simpleName ?: "null"}）")
+                    session.judge(module, task, JUDGE_PREFIX, "json 已置空（card=${args.getOrNull(3)?.javaClass?.simpleName ?: "null"}）")
                     chain.proceedWith(chain.thisObject, args)
                 }
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.b → 全卡 json 置空")
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主轨已挂载: $CLS_SIMPLE_ACTION_LAYOUT.${task.methodName}(${task.paramCount}参) → 全卡 json 置空")
         }.onFailure { t ->
             cardKillTried.set(false)   // 失败不置位：下次会话页重试
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 主轨挂载异常（卡片按钮原样显示，不 crash）: ${t.message}", t)
@@ -368,6 +389,9 @@ object MmsHook : TargetHook {
 
     /** T3 主轨任务 id（插件侧 SimpleActionLayout.b）。 */
     private const val ID_SIMPLE_ACTION = "mms:SimpleActionLayout.b"
+
+    /** T3 主轨任务 id（插件 10.0.44.309+：SimpleActionLayout.c）。 */
+    private const val ID_SIMPLE_ACTION_V2 = "mms:SimpleActionLayout.c"
 
     /** T4 主轨任务 id（插件侧 AppDownloadButton 构造）。 */
     private const val ID_AIM_APP_BUTTON = "mms:AppDownloadButton.<init>"
