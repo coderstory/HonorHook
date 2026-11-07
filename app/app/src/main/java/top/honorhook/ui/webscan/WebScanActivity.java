@@ -204,12 +204,17 @@ public class WebScanActivity extends Activity {
         webWrap.addView(webColumn, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // 悬浮球样式（2026-11-08 用户要求）：黑底 + 外圈荧光绿。
+        // 单层 setStroke 只能画一圈实线，没有「发光」感，所以叠两层：
+        // 外层 6dp 半透明绿环当辉光，内层黑实心 + 2dp 亮绿描边。
         android.widget.TextView menuBtn = new android.widget.TextView(this);
         menuBtn.setText("☰");
-        menuBtn.setTextColor(0xCC17171A);
+        menuBtn.setTextColor(0xFF39FF88);
         menuBtn.setTextSize(18);
+        menuBtn.setTypeface(Typeface.DEFAULT_BOLD);
         menuBtn.setGravity(Gravity.CENTER);
-        menuBtn.setBackground(roundRect(0x8AFFFFFF, dp(22), dp(1), 0x1A000000));
+        menuBtn.setBackground(fabBackground());
+        menuBtn.setElevation(dp(8));
         FrameLayout.LayoutParams menuLp = new FrameLayout.LayoutParams(dp(44), dp(44));
         menuBtn.setLayoutParams(menuLp);
         setupDraggableFab(menuBtn, menuLp);
@@ -1135,6 +1140,16 @@ public class WebScanActivity extends Activity {
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    /** 悬浮球背景：外层荧光绿辉光环 + 内层黑实心（层级理由见创建处注释） */
+    private android.graphics.drawable.Drawable fabBackground() {
+        android.graphics.drawable.GradientDrawable glow =
+                roundRect(0x0039FF88, dp(22), dp(6), 0x5539FF88);
+        android.graphics.drawable.GradientDrawable core =
+                roundRect(0xF217171A, dp(22), dp(2), 0xCC39FF88);
+        return new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{glow, core});
     }
 
     private android.graphics.drawable.GradientDrawable roundRect(
