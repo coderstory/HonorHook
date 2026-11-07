@@ -315,15 +315,47 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             summary = "选中后自动勾选名单内的应用，列表显示不变；「可选冻结」的部分应用有功能代价",
             onDismissRequest = { freezeMenuOpen = false },
         ) {
-            BulkOption.entries.forEach { opt ->
-                TextButton(
-                    text = opt.label,
-                    modifier = Modifier.fillMaxWidth(),
+            // 每项一张卡片：label 主行 + 说明副行 + 右侧本次会勾中的数量（实时算，不用再点才知道）
+            BulkOption.entries.forEachIndexed { i, opt ->
+                val count = when (opt) {
+                    BulkOption.NONE -> 0
+                    else -> {
+                        val selectable = (apps ?: emptyList()).filter { it.selectable }
+                        when (opt) {
+                            BulkOption.PRESET ->
+                                selectable.count { it.pkg in GovernanceList.PURE_PRESET }
+                            BulkOption.TIER_B -> selectable.count { it.entry?.tier == GovernanceList.Tier.B }
+                            BulkOption.TIER_C -> selectable.count { it.entry?.tier == GovernanceList.Tier.C }
+                            BulkOption.ALL -> selectable.size
+                            BulkOption.NONE -> 0
+                        }
+                    }
+                }
+                Card(
                     onClick = {
                         applyBulk(opt)
                         freezeMenuOpen = false
                     },
-                )
+                    showIndication = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (i == 0) 0.dp else 8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(opt.label, fontSize = 15.sp, color = colorScheme.onSurface)
+                            Text(opt.desc, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                        }
+                        Text(
+                            text = if (opt == BulkOption.NONE) "" else "$count 项",
+                            fontSize = 13.sp,
+                            color = colorScheme.primary,
+                        )
+                    }
+                }
             }
         }
     }
@@ -414,8 +446,12 @@ private enum class HubView(val title: String) {
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
-private enum class BulkOption(val label: String) {
-    PRESET("纯净模式精选"), TIER_B("可选冻结（有功能代价）"), TIER_C("建议冻结"), ALL("全部勾选"), NONE("清空勾选"),
+private enum class BulkOption(val label: String, val desc: String) {
+    PRESET("纯净模式精选", "名单内的系统营销 / 推送类应用"),
+    TIER_B("可选冻结（有功能代价）", "有副作用，冻结后会二次确认"),
+    TIER_C("建议冻结", "低风险，可放心冻结"),
+    ALL("全部勾选", "所有可冻结应用"),
+    NONE("清空勾选", "取消已勾选的全部应用"),
 }
 
 /**
