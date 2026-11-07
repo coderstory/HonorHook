@@ -93,3 +93,29 @@ done
 - **`java` 不在 PATH 上**（JDK 是搬迁装的，没有往 `$PREFIX/bin` 放 java）⇒ 命令行工具会报 `exec: java: not found`（如 `apksigner verify`）。跑法：`JAVA_HOME=$PREFIX/lib/jvm/java-21-openjdk PATH=$JAVA_HOME/bin:$PATH bash tools/android-sdk/build-tools/36.0.0/apksigner verify <apk>`。Gradle 不受影响（认 JAVA_HOME）
 - 本机**没有** `app/app/signing.properties`、也没有 `tools/signing/` ⇒ `build-release` 按设计回落 debug keystore（`apksigner --print-certs` 显示 `CN=Android Debug`）。要出正式包需补 keystore 或走 CI `-Phh*`
 - 判据：装完即写 INSTALL_NOTE.json（jadx 同款），并更新本文件
+
+## on-device 设备操作子命令（2026-11-07 新增）
+
+本机既是开发机又是目标机。`dev.sh` 里原来只认 adb 的子命令改**双后端**：
+`have_adb()`（ADB 是真实可执行文件才算）/ `dev_sh()`（host: adb shell / on-device: 本地 bash）/
+`dev_root()`（host: adb shell su 0 / on-device: 本地 su -c）。
+
+```bash
+bash tools/dev.sh install-local                  # 缺省装 debug APK（on-device 静默安装）
+bash tools/dev.sh install-local <apk 路径>
+bash tools/dev.sh stop-app com.hihonor.mms       # kill -9（am force-stop 被壳侧策略拒）
+bash tools/dev.sh modlog-grep MmsHook 20         # 本地 su grep，不再要求 adb
+bash tools/dev.sh modlog-f HonorHook
+bash tools/dev.sh restart-scope [pkg...]         # 缺省 = scope.list 全部
+```
+
+坑（都实测过）：
+
+- **root 读不到 `/storage`**：`cmd package install /storage/.../x.apk` 直接报
+  `Error: Can't open file`，必须先 `su -c 'cp <apk> /data/local/tmp/'` 再装。`install-local` 已封装。
+- `lspctl` 只认 ADB root shell（报 `developer commands are only allowed from an ADB root shell`）
+  ⇒ `enable-module` / `enable-cli` 在 on-device 形态不可用，属已知边界。
+- 覆盖安装（`cmd package install -r`）**不丢 LSPosed 启用态**：实测
+  `modules_state.enabled=1`、scope 20 条不变，装完无需 enable-module。
+- 设备侧查 LSPosed 启用态：把 `/data/adb/lspd/config/modules_config.db` 拷到 `/data/local/tmp`
+  用 `python3 -c "import sqlite3;..."` 读（本机无 `sqlite3` 可执行文件）。

@@ -67,6 +67,26 @@ stamp() { date +%Y%m%d-%H%M%S; }
 
 require() { [ -x "$1" ] || [ -f "$1" ] || die "缺少文件: $1（工具链未就位？）"; }
 
+# ---- 设备执行后端（2026-11-07 on-device 会话沉淀）----
+# 同一批子命令要吃两种形态：
+#   host      —— dev-env 解析出真实 adb 可执行文件
+#   on-device —— 本机就是目标机（DSH/Termux），没有 adb 二进制，但有 su
+# 判据只认「ADB 是真实可执行文件」：dev-env-linux 在无 adb 机器上回落字面量 "adb"，
+# 那是占位不是工具——直接 require 会在不相干的地方炸。
+have_adb() { [ -n "${ADB:-}" ] && [ -x "${ADB:-}" ]; }
+
+# 设备侧普通命令（host: adb shell / on-device: 本地 bash）
+dev_sh() {
+  if have_adb; then "$ADB" shell "$1"; else bash -c "$1"; fi
+}
+
+# 设备侧 root 命令（host: adb shell su 0 / on-device: 本地 su -c）
+# 注意：lspctl 只认 ADB root shell（本机 su 直跑报 "developer commands are only allowed
+# from an ADB root shell"）⇒ enable-cli / enable-module 无法在 on-device 形态工作，属已知边界。
+dev_root() {
+  if have_adb; then "$ADB" shell "su 0 sh -c \"$1\""; else su -c "$1"; fi
+}
+
 # ---- 安装确认弹窗代点（install / install-root 共用；T-1，2026-10-14）----
 # 场景：荣耀 ROM 对 `adb install` 与 root `pm install` 都弹确认（纯净模式 / USB 安装管控），
 # 两段式（先「继续 / 仍要安装」，再「继续安装 / 确定」）；实测按钮文本出现过：
@@ -290,6 +310,8 @@ HonorHook 开发工具
   install          安装 debug APK 到已连接设备（-r 覆盖；自动点 ROM 安装确认弹窗）
   install-release  安装 release APK
   install-apk <apk...>    安装任意 APK 文件（-r 覆盖保数据，自动点 ROM 安装弹窗）
+  install-local [apk]     本机静默覆盖安装（on-device：中转 /data/local/tmp；缺省装 debug APK）
+  stop-app <pkg...>       强杀进程（on-device 走 su kill -9；host 走 su 0 kill -9）
   enable-module    重装后重新启用 LSPosed 模块（lspctl CLI 通道，含作用域进程强停）
   deploy-release   一键全流程：build-release + install-release + enable-module
   connect <ip[:port]> 无线 adb 连接（省端口默认 5555）
@@ -639,19 +661,56 @@ EOF
     "$ADB" shell rm -f /data/local/tmp/honorhook-install.apk >/dev/null 2>&1
     ;;
 
+  install-local)
+    # on-device 静默覆盖安装（2026-11-07 实证）：/storage 上的 APK root 也打不开（uid 0 无 sdcardfs
+    # 通路），必须先中转 /data/local/tmp 再 `cmd package install`。host 形态等价 adb install -r。
+    # 不点安装弹窗、不依赖 MT；装完 LSPosed 侧启用态不掉（install -r 语义）。
+    apk="${2:-$ROOT/app/app/build/outputs/apk/debug/app-debug.apk}"
+    [ -f "$apk" ] || die "APK 不存在: $apk（先 build / build-release）"
+    if have_adb; then
+      "$ADB" install -r "$apk" | tr -d '\r'
+      exit 0
+    fi
+    info "on-device 静默安装: $(basename "$apk") ($(du -h "$apk" | cut -f1))"
+    dev_root "cp '$apk' /data/local/tmp/honorhook-install.apk && chmod 644 /data/local/tmp/honorhook-install.apk" \
+      || die "中转 /data/local/tmp 失败（su 不可用？）"
+    dev_root "cmd package install -r -d /data/local/tmp/honorhook-install.apk" | tr -d '\r'
+    ;;
+
+  stop-app)
+    # 强杀宿主进程：改完 hook 要新进程才注入。**用 kill -9 而非 am force-stop**——本机壳侧
+    # 策略拒 am force-stop（真实屏管控），root kill 不受影响；host 形态走 adb shell su 0。
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh stop-app <包名...>"
+    shift
+    for p in "$@"; do
+      [[ "$p" =~ ^[A-Za-z0-9_.]+$ ]] || die "包名非法: $p"
+      pids=$(dev_root "pidof $p" 2>/dev/null | tr -d '\r' || true)
+      if [ -z "$pids" ]; then
+        info "$p 未在运行"
+        continue
+      fi
+      for pid in $pids; do dev_root "kill -9 $pid" >/dev/null 2>&1 || true; done
+      info "$p (pid $(echo $pids | tr '\n' ' ')) 已 kill -9"
+    done
+    ;;
+
   # 重启作用域进程：root kill（TERM，干净，无 crash 记录不计 LSPosed 安全模式频次）——
   # 与模块 App「强制重启作用域应用」同机制。用法：restart-scope [pkg...]（缺省 = scope.list 全部）。
   # 进程被 kill 后由系统自动拉起（persistent）。禁用 am crash（用户 2026-10-12 永久禁令）。
   restart-scope)
-    require "$ADB"
-    pkgs="${*:-$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | tr '\n' ' ')}"
+    # 参数缺省 = scope.list 全部（dispatch 无 shift，故取 ${*:2} 而非 ${*}）
+    if [ $# -gt 1 ]; then
+      pkgs="${*:2}"
+    else
+      pkgs="$(tr -d '\r' < "$ROOT/app/app/src/main/resources/META-INF/xposed/scope.list" | tr '\n' ' ')"
+    fi
     for p in $pkgs; do
       # pidof 无匹配时设备侧 exit 1 → 管道非零：|| true 防 pipefail 杀脚本
-      pids=$("$ADB" shell "su 0 pidof $p" 2>/dev/null | tr -d '\r' | tr ' ' '\n' || true)
+      pids=$(dev_root "pidof $p" 2>/dev/null | tr -d '\r' | tr ' ' '\n' || true)
       if [ -n "$pids" ]; then
         # pidof 可能返回多个 pid（多进程宿主）——全部杀，只杀首个杀不干净
         for pid in $pids; do
-          "$ADB" shell "su 0 kill $pid" >/dev/null 2>&1 || true
+          dev_root "kill $pid" >/dev/null 2>&1 || true
         done
         info "$p (pid $(echo "$pids" | tr '\n' ' ')) 已 TERM，等系统拉起"
       else
@@ -665,8 +724,12 @@ EOF
     TAG="${2:-HonorHook}"   # $1 = 子命令名（dispatch 无 shift），tag 落在 $2
     # tag 进 su -c 双引号内层 grep：先校验字符集，杜绝引号/分号注入碎 shell（d3）
     [[ "$TAG" =~ ^[A-Za-z0-9_.:-]+$ ]] || die "tag 仅限字母/数字/._:-（防注入碎 shell）"
-    require "$ADB"
-    "$ADB" shell "su 0 grep -h $TAG /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30" 2>&1 | tr -d '\r'
+    # on-device 形态（本机即目标机、无 adb 二进制）：同一路径直接本地 su grep，逻辑等价
+    if have_adb; then
+      "$ADB" shell "su 0 grep -h $TAG /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30" 2>&1 | tr -d '\r'
+    else
+      dev_root "grep -h $TAG /data/adb/lspd/log/modules_*.log 2>/dev/null | tail -30" 2>&1 | tr -d '\r'
+    fi
     ;;
 
   # LSPosed 官方 CLI 启用/查询模块（enable-module = 本命令 + 作用域进程强停）。
@@ -865,30 +928,30 @@ EOF
     esac
     N="${3:-40}"
     [[ "$N" =~ ^[0-9]+$ ]] || die "行数须为正整数: $N"
-    require "$ADB"
-    F="$("$ADB" shell "su 0 ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
+    # dev_root 双形态：host（adb shell su 0）/ on-device（本地 su -c）
+    F="$(dev_root "ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
     [ -n "$F" ] || die "未取到 lspd 模块日志文件（设备未连 / su 不可用）"
     info "最新日志文件: $F"
-    "$ADB" shell "su 0 grep -h -- '$PAT' \"$F\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$N" || true
+    dev_root "grep -h -- '$PAT' '$F' 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$N" || true
     ;;
 
   xhs-judge)
     # 小红书保存链路判据三件套一次性收集（2026-10-19 真机排查沉淀）；任一段失败不中断
-    require "$ADB"
-    F="$("$ADB" shell "su 0 ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
+    # 双形态：日志走 dev_root，媒体/目录走 dev_sh（root 读不到 /sdcard，2026-11-07 实证）
+    F="$(dev_root "ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
     echo "== 模块判据（XhsHook 最近 80 行）=="
     if [ -n "$F" ]; then
-      "$ADB" shell "su 0 grep -h XhsHook \"$F\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -80 || true
+      dev_root "grep -h XhsHook '$F' 2>/dev/null" 2>&1 | tr -d '\r' | tail -80 || true
     else
       warn "未取到 lspd 模块日志（设备未连 / su 不可用）"
     fi
     echo "== MediaStore 近 5 分钟新增（images + video）=="
     # \$(( \$(date +%s) )) 故意留给设备端展开：本机与设备时钟可能不同步（adb shell 内层 $() 须转义）
-    "$ADB" shell "content query --uri content://media/external/images/media --projection _display_name:_data:date_added --where \"date_added > \$(( \$(date +%s) - 300 ))\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -15 || true
-    "$ADB" shell "content query --uri content://media/external/video/media --projection _display_name:_data:date_added --where \"date_added > \$(( \$(date +%s) - 300 ))\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -15 || true
+    dev_sh "content query --uri content://media/external/images/media --projection _display_name:_data:date_added --where \"date_added > \$(( \$(date +%s) - 300 ))\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -15 || true
+    dev_sh "content query --uri content://media/external/video/media --projection _display_name:_data:date_added --where \"date_added > \$(( \$(date +%s) - 300 ))\" 2>/dev/null" 2>&1 | tr -d '\r' | tail -15 || true
     echo "== 落盘目录清单（小红书 Pictures/Movies + DCIM 近 10min）=="
-    "$ADB" shell "ls -t /sdcard/Pictures/小红书/ /sdcard/Movies/小红书/ 2>/dev/null | head -12" 2>&1 | tr -d '\r' || true
-    "$ADB" shell "find /sdcard/DCIM -name '*xhs*' -mmin -10 2>/dev/null" 2>&1 | tr -d '\r' || true
+    dev_sh "ls -t /sdcard/Pictures/小红书/ /sdcard/Movies/小红书/ 2>/dev/null | head -12" 2>&1 | tr -d '\r' || true
+    dev_sh "find /sdcard/DCIM -name '*xhs*' -mmin -10 2>/dev/null" 2>&1 | tr -d '\r' || true
     info "判据键：HD询问/接管/回落/HD直下完成/已删低画质"
     ;;
 
