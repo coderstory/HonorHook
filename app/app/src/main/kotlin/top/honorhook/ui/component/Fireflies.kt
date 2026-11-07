@@ -11,6 +11,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameNanos
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -29,7 +30,7 @@ import kotlin.random.Random
  *
  * 只放在首页（HomeScreen）的内容层后面：其它页是列表 / 设置页，密集文字上飘光点会干扰阅读。
  */
-private const val COUNT = 22
+private const val COUNT = 16
 
 /** 单只萤火虫的固定参数（位置、路径、节奏），只在首次进首页时随机一次 */
 private class Firefly(
@@ -42,6 +43,8 @@ private class Firefly(
     val phase: Float,
     val blinkSpeed: Float,
     val sizePx: Float,
+    /** 每秒往上飘的归一化距离（屏高比例）；到顶回到底部，像真的往上飞 */
+    val rise: Float,
 )
 
 @Composable
@@ -54,13 +57,16 @@ fun Fireflies(modifier: Modifier = Modifier) {
             Firefly(
                 baseX = rnd.nextFloat(),
                 baseY = rnd.nextFloat(),
-                driftX = 0.03f + rnd.nextFloat() * 0.06f,
-                driftY = 0.02f + rnd.nextFloat() * 0.05f,
-                speedX = 0.05f + rnd.nextFloat() * 0.10f,
-                speedY = 0.04f + rnd.nextFloat() * 0.09f,
+                driftX = 0.03f + rnd.nextFloat() * 0.05f,
+                driftY = 0.02f + rnd.nextFloat() * 0.04f,
+                // 首版 speed 只有 0.05~0.15 rad/s（周期 40~120s），再乘 0.03~0.09 的位移幅度，
+                // 实际速度 1~2px/s —— 肉眼就是「不动」。这里提到 0.35~0.9（周期 7~18s）。
+                speedX = 0.35f + rnd.nextFloat() * 0.55f,
+                speedY = 0.30f + rnd.nextFloat() * 0.45f,
                 phase = rnd.nextFloat() * 6.283f,
                 blinkSpeed = 0.25f + rnd.nextFloat() * 0.55f,
-                sizePx = 1.1f + rnd.nextFloat() * 1.4f,
+                sizePx = 1.0f + rnd.nextFloat() * 1.1f,
+                rise = 0.008f + rnd.nextFloat() * 0.016f,
             )
         }
     }
@@ -88,9 +94,11 @@ fun Fireflies(modifier: Modifier = Modifier) {
         val h = size.height
 
         flies.forEach { f ->
-            // 双正弦叠加 = 自然的绕圈漫游，避免直线漂移那种「子弹」感
+            // 横向：正弦左右游走；纵向：正弦上下摆 + 持续上升（到顶回绕）
+            // 只有正弦没有净位移的话，虫子会在一个小范围里「原地晃」，看不出在飞。
             val x = (f.baseX + f.driftX * sin(t * f.speedX + f.phase)) * w
-            val y = (f.baseY + f.driftY * sin(t * f.speedY + f.phase * 1.7f)) * h
+            val yNorm = (f.baseY - f.rise * t + f.driftY * sin(t * f.speedY + f.phase * 1.7f))
+            val y = ((yNorm % 1f) + 1f) % 1f * h
 
             // 明灭：sin 取三次方让「亮起来」短促、「暗下去」长，才像萤火虫；
             // 再乘一个很慢的整体呼吸，避免所有虫子同一节奏。
@@ -98,14 +106,17 @@ fun Fireflies(modifier: Modifier = Modifier) {
             val wave = (sin(t * f.blinkSpeed * 6.283f + f.phase) + 1f) * 0.5f
             val pulse = 0.18f + 0.82f * (wave * wave * wave)
             val breathe = 0.82f + 0.18f * sin(t * 0.35f + f.phase * 0.3f)
-            val a = pulse * breathe * strength
+            // 回绕时在顶 / 底边缘淡出淡入，否则虫子飞出屏幕又「啪」地出现在另一头
+            val edge = minOf(1f, (yNorm / 0.08f).coerceIn(0f, 1f), ((1f - yNorm) / 0.06f).coerceIn(0f, 1f))
+            val a = pulse * breathe * strength * edge
 
-            val r = (1.9f + 2.1f * pulse) * f.sizePx.dp.toPx() * 1.35f
+            val r = (1.5f + 1.7f * pulse) * f.sizePx.dp.toPx() * 1.2f
 
-            // 三层同心圆凑出「光点 + 光晕」：比径向渐变省一次 Brush 分配，视觉上分不出来
-            drawCircle(color = aura.copy(alpha = a * 0.10f), radius = r * 5.0f, center = Offset(x, y))
-            drawCircle(color = core.copy(alpha = a * 0.20f), radius = r * 2.4f, center = Offset(x, y))
-            drawCircle(color = core.copy(alpha = a * 0.92f), radius = r, center = Offset(x, y))
+            // 三层同心圆凑出「光点 + 光晕」：比径向渐变省一次 Brush 分配，视觉上分不出来。
+            // 光晕收窄（5.0/2.4 → 3.6/1.8）：太大在低透明度下就是一团「闪烁的圆」，不像虫子。
+            drawCircle(color = aura.copy(alpha = a * 0.10f), radius = r * 3.6f, center = Offset(x, y))
+            drawCircle(color = core.copy(alpha = a * 0.22f), radius = r * 1.8f, center = Offset(x, y))
+            drawCircle(color = core.copy(alpha = a.coerceAtMost(1f)), radius = r, center = Offset(x, y))
         }
     }
 }
