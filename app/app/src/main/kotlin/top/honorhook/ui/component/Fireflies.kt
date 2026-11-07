@@ -30,7 +30,7 @@ import kotlin.random.Random
  *
  * 只放在首页（HomeScreen）的内容层后面：其它页是列表 / 设置页，密集文字上飘光点会干扰阅读。
  */
-private const val COUNT = 16
+private const val COUNT = 34
 
 /** 单只萤火虫的固定参数（位置、路径、节奏），只在首次进首页时随机一次 */
 private class Firefly(
@@ -59,14 +59,14 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 baseY = rnd.nextFloat(),
                 driftX = 0.03f + rnd.nextFloat() * 0.05f,
                 driftY = 0.02f + rnd.nextFloat() * 0.04f,
-                // 首版 speed 只有 0.05~0.15 rad/s（周期 40~120s），再乘 0.03~0.09 的位移幅度，
-                // 实际速度 1~2px/s —— 肉眼就是「不动」。这里提到 0.35~0.9（周期 7~18s）。
-                speedX = 0.35f + rnd.nextFloat() * 0.55f,
-                speedY = 0.30f + rnd.nextFloat() * 0.45f,
+                // 首版 0.05~0.15 rad/s 慢到 1~2px/s（肉眼「不动」），第二版 0.35~0.9 又偏快。
+                // 现在取中段：0.18~0.42（周期 15~35s），每秒约 6~14px，看得出在飘但不抢视线。
+                speedX = 0.18f + rnd.nextFloat() * 0.24f,
+                speedY = 0.16f + rnd.nextFloat() * 0.22f,
                 phase = rnd.nextFloat() * 6.283f,
-                blinkSpeed = 0.25f + rnd.nextFloat() * 0.55f,
+                blinkSpeed = 0.12f + rnd.nextFloat() * 0.26f,
                 sizePx = 1.0f + rnd.nextFloat() * 1.1f,
-                rise = 0.008f + rnd.nextFloat() * 0.016f,
+                rise = 0.004f + rnd.nextFloat() * 0.007f,
             )
         }
     }
@@ -105,7 +105,7 @@ fun Fireflies(modifier: Modifier = Modifier) {
             // 0.18 的底噪是必须的——纯三次方大多数时间接近 0，画面上等于没有（首版就栽在这）。
             val wave = (sin(t * f.blinkSpeed * 6.283f + f.phase) + 1f) * 0.5f
             val pulse = 0.18f + 0.82f * (wave * wave * wave)
-            val breathe = 0.82f + 0.18f * sin(t * 0.35f + f.phase * 0.3f)
+            val breathe = 0.82f + 0.18f * sin(t * 0.18f + f.phase * 0.3f)
             // 回绕时在顶 / 底边缘淡出淡入，否则虫子飞出屏幕又「啪」地出现在另一头
             val edge = minOf(1f, (yNorm / 0.08f).coerceIn(0f, 1f), ((1f - yNorm) / 0.06f).coerceIn(0f, 1f))
             val a = pulse * breathe * strength * edge
