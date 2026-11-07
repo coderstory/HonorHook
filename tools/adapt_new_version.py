@@ -443,6 +443,10 @@ def run_jadx(apk: Path, out_dir: Path, threads: int):
         cmd = ['cmd', '/c', str(JADX_BIN), '--no-res', '--no-debug-info']
     else:
         cmd = [str(JADX_BIN), '--no-res', '--no-debug-info']
+        # /storage 挂载 noexec（DSH 设备实测 2026-11-06）：脚本本体无执行位/无 exec 权限，
+        # os.access(X_OK) 为假时经 bash 调起（tools/jadx/bin/jadx 是纯 bash 启动器）
+        if not os.access(JADX_BIN, os.X_OK):
+            cmd = ['bash', str(JADX_BIN), '--no-res', '--no-debug-info']
     if threads:
         cmd += ['-j', str(threads)]
     cmd += ['-d', str(out_dir), str(apk)]

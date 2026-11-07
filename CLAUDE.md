@@ -37,6 +37,17 @@
 
 ## 工具清单（tools/，详情 `tools/README.md`）
 
+**设备侧已装工具台账 = `tools/ONDEVICE_TOOLCHAIN.md`（2026-11-06 实测盘点）——缺工具先查它，禁止重新下载已装件**（jadx 1.5.1 便携版在 `tools/jadx/`，noexec 环境须经 bash 调用；GitHub release 直连不稳，大文件走 Maven Central/codeload）。
+
+**DSH 会话（本机直装）安装 APK 的唯一可用路（2026-11-06 用户拍板）：`am start` VIEW intent 交 MT 管理器装，不走模拟点击**。`pm install` 在 Shizuku 特权通道被危险检查拦（权限写面黑名单）；SDK platform-tools 的 adb 是 x86-64 二进制，本机（arm64 Termux 环境）跑不了。命令：
+
+```
+am start -a android.intent.action.VIEW \
+  -d "file:///<apk 绝对路径>" -t "application/vnd.android.package-archive"
+```
+
+MT 弹安装面板，用户手点确认；装后 LSPosed 会停用模块 → `dev.sh enable-module`（桌面）或用户手动重启用 + force-stop 宿主。判据：`dumpsys package io.github.coderstory.honorhook | grep lastUpdateTime`。
+
 自写脚本：`dev.sh`（构建/安装/日志/UI 自动化/反编译统一入口）、`adapt_new_version.py`
 （宿主新版本适配校验：从 hook 源码+数据表提取挂载点，现 140 点，对反编译产物核对类/方法存活；口径见 docs/hook-inventory-audit.md §一）、
 `rain-decrypt.py`（Rain 参考模块字符串解密，逆向期）。

@@ -50,13 +50,28 @@ class Apk:
         MT_URL = __import__('os').environ.get('MT_MCP_URL', 'http://127.0.0.1:8787/mcp')
         import os
         import time
-        apk_path = os.path.abspath(apk_path)  # MT 按它自己的 Home 解析相对路径 → 必须绝对化
+        apk_path = apk_path.strip()
+        # 2026-11-07 MT MCP 新文件策略（0.2.0 实测）：任意 /storage 绝对路径被
+        # FILE_ACCESS_DENIED 拒，只收三类目标 —— mt://installed-app/<包名>（装好的 app 当前
+        # base APK）、mt://workspace/<id>、Home 相对路径。装好 app 一律优先走 installed-app。
+        if apk_path.startswith("mt://"):
+            target = apk_path
+        elif os.path.isfile(apk_path):
+            target = None                      # 本地文件先试原路径，被拒再回落 installed-app
+        else:
+            target = "mt://installed-app/%s" % apk_path   # 裸包名 = installed-app 目标
         r = None
         for attempt in range(3):  # PATH_NOT_FOUND 偶发瞬时（MT 忙），退避重试
             r = _post("tools/call", {"name": "mt_apk_workspace_open",
-                                     "arguments": {"path": apk_path, "temporary": False}})
+                                     "arguments": {"path": target or apk_path, "temporary": False}})
             if r.get("ok"):
                 break
+            err = (r.get("error") or {})
+            # 文件策略拒绝（如 /storage 绝对路径）→ 从文件名/包名转 installed-app 目标重试
+            if err.get("code") == "FILE_ACCESS_DENIED" and target is None:
+                pkg = os.path.basename(apk_path).rsplit(".", 1)[0]
+                target = "mt://installed-app/%s" % pkg
+                continue
             time.sleep(1.5 * (attempt + 1))
         if not r or not r.get("ok"):
             raise SystemExit(f"workspace_open 失败: {(r or {}).get('error')}")
@@ -118,8 +133,9 @@ class Apk:
         return sorted({h["locator"] for h in hits})
 
     def list_classes(self, java_prefix, limit=100):
-        out = self._call("mt_apk_list",
-                         {"view": "dex_classes", "prefix": java_prefix, "limit": limit})
+        # 2026-11-07 MT MCP 0.2.0 改名：mt_apk_list(view=…) → mt_apk_dex_list_classes
+        out = self._call("mt_apk_dex_list_classes",
+                         {"prefix": java_prefix, "limit": limit})
         return [(i["javaName"], i["methodCount"]) for i in out.get("items", [])]
 
 
