@@ -243,11 +243,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             request(actions, "营销推荐：全部关闭")
                         }
                     }
-                    item {
-                        PrivateDnsCard(rootOk, switchValues, running) { actions ->
-                            request(actions, "私有 DNS")
-                        }
-                    }
                 }
 
                 // —— 开关页：功能描述行 ——
@@ -717,56 +712,6 @@ private fun AdsGroupCard(
             ) {
                 Text("全部关闭")
             }
-        }
-    }
-}
-
-@Composable
-private fun PrivateDnsCard(
-    enabled: Boolean,
-    values: Map<String, String>,
-    running: Boolean,
-    onRequest: (List<ToolAction>) -> Unit,
-) {
-    val mode = values["private_dns_mode"].orEmpty()
-    val on = mode == "hostname"
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "私有 DNS 去遥测",
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 15.sp,
-                    color = colorScheme.onSurface,
-                )
-                Text(
-                    text = "dns.adguard-dns.com · 需网络放行 DoT（853 端口），系统提示「无法访问」时请关闭此开关；当前：${if (mode.isBlank()) "未设置" else mode}",
-                    fontSize = 12.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                )
-            }
-            SafeSwitch(
-                checked = on,
-                enabled = enabled && !running,
-                onCheckedChange = { turnOn ->
-                    onRequest(
-                        if (turnOn) {
-                            listOf(
-                                ToolAction.Switch(SafeCommands.Table.GLOBAL, "private_dns_mode", "hostname"),
-                                ToolAction.Switch(SafeCommands.Table.GLOBAL, "private_dns_specifier", "dns.adguard-dns.com"),
-                            )
-                        } else {
-                            listOf(
-                                ToolAction.Switch(SafeCommands.Table.GLOBAL, "private_dns_mode", "off"),
-                                ToolAction.Switch(SafeCommands.Table.GLOBAL, "private_dns_specifier", ""),
-                            )
-                        },
-                    )
-                },
-            )
         }
     }
 }

@@ -72,11 +72,7 @@ object ToolSwitchTable {
         Entry("ads_search_letter", "桌面下拉搜索热词", "", SafeCommands.Table.SECURE, "search.recommend.letter.switch", "1", "0", Risk.LOW, "05 号", cloudRewrite = true, group = "ads"),
         Entry("ads_cloud_maintenance", "云维护提醒", "", SafeCommands.Table.SECURE, "cloud_maintenance", "1", "0", Risk.LOW, "05 号", cloudRewrite = true, group = "ads"),
         Entry("ads_location_report", "位置上报", "", SafeCommands.Table.SECURE, "location_report_switch", "1", "0", Risk.LOW, "05 号；与 state_of_ads_switch 双表同键", cloudRewrite = true, group = "ads"),
-        // —— 私有 DNS 成对事务（07 号 hosts 块的持久层替代）——
-        Entry("private_dns", "私有 DNS 去遥测", "AdGuard DNS；两键成对", SafeCommands.Table.GLOBAL, "private_dns_mode", "hostname", "off", Risk.MID, "off 时 specifier 置空成对回滚；07 号", group = "privateDns"),
-        Entry("private_dns_spec", "私有 DNS 主机名", "dns.adguard-dns.com", SafeCommands.Table.GLOBAL, "private_dns_specifier", "dns.adguard-dns.com", "", Risk.MID, "与 private_dns_mode 成对执行", group = "privateDns"),
     )
 
     val ADS_GROUP: List<Entry> = ENTRIES.filter { it.group == "ads" }
-    val PRIVATE_DNS_GROUP: List<Entry> = ENTRIES.filter { it.group == "privateDns" }
 }

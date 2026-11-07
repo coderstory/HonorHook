@@ -138,7 +138,7 @@ object SafeCommands {
     fun settingsPut(table: Table, key: String, value: String): String? {
         if (!KEY_PATTERN.matches(key)) return null
         if (!VALUE_PATTERN.matches(value)) return null
-        // 空值必须带引号，否则 sh 吃掉尾参变成缺参命令（private_dns_specifier 回滚走空值）
+        // 空值必须带引号，否则 sh 吃掉尾参变成缺参命令（部分 settings 键的 off 回滚就是空值）
         val v = if (value.isEmpty()) "''" else value
         return "settings put ${table.token} $key $v"
     }
