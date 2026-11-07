@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 深色模式下的宿主 UI 主题：只覆盖 windowBackground / 系统启动画面底色。
-         统一用 splash_bg（近黑），冷启动不再闪白，也和自绘 splash 无缝衔接。 -->
+         统一用 splash_bg（近黑，与 Compose DarkPalette 的 bgTop 同色），冷启动不再闪白，也和自绘 splash 无缝衔接。 -->
     <style name="Theme.HonorHook" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/splash_bg</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>

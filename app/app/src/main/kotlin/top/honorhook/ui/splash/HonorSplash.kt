@@ -51,6 +51,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import top.honorhook.BuildConfig
+import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.Text
 
 /**
@@ -62,15 +63,45 @@ import top.yukonga.miuix.kmp.basic.Text
  * - **入场**：整体 0.6→1.0 弹簧放大 + 淡入，文字延迟 180ms 再上浮淡入；
  * - **退场**：停留 [HOLD_MS]（2.4s，2026-11-08 用户要求拉长）后 420ms 淡出，再回调 [onFinish]，由调用方移除覆盖层。
  *
- * 配色沿用「远程开发」悬浮球的语言：近黑底 + 荧光绿描边，与工具箱视觉统一。
+ * 配色跟随主题：浅色 = 白→浅灰绿底 + 墨绿描边；深色 = 近黑底 + 荧光绿描边（与「远程开发」悬浮球同一套语言）。
  * 动画全部走 Compose 的 infiniteTransition / Animatable，不建 Timer、不碰主线程阻塞。
  */
 private const val HOLD_MS = 2400L
 private const val FADE_MS = 420
 
-private val Neon = Color(0xFF39FF88)
-private val BgTop = Color(0xFF0D100E)
-private val BgBottom = Color(0xFF070808)
+/** 两套配色只在「线条 / 文字 / 身体」上分叉，布局与动画完全共用，改动画不会两边跑偏 */
+private data class SplashPalette(
+    val accent: Color,
+    val bgTop: Color,
+    val bgBottom: Color,
+    val bodyTop: Color,
+    val bodyBottom: Color,
+    val title: Color,
+    val subtitle: Color,
+    val shadowAlpha: Float,
+)
+
+private val DarkPalette = SplashPalette(
+    accent = Color(0xFF39FF88),
+    bgTop = Color(0xFF0D100E),
+    bgBottom = Color(0xFF070808),
+    bodyTop = Color(0xFF24282A),
+    bodyBottom = Color(0xFF0F1112),
+    title = Color(0xFFEAF6EF),
+    subtitle = Color(0xFF9FB4A7),
+    shadowAlpha = 0.30f,
+)
+
+private val LightPalette = SplashPalette(
+    accent = Color(0xFF12B76A),
+    bgTop = Color(0xFFFFFFFF),
+    bgBottom = Color(0xFFF0F5F1),
+    bodyTop = Color(0xFFFFFFFF),
+    bodyBottom = Color(0xFFE9F0EB),
+    title = Color(0xFF101613),
+    subtitle = Color(0xFF5F6F64),
+    shadowAlpha = 0.16f,
+)
 
 @Composable
 fun HonorSplash(onFinish: () -> Unit) {
@@ -88,19 +119,24 @@ fun HonorSplash(onFinish: () -> Unit) {
         label = "splashFade",
     )
 
-    // splash 永远是深底，浅色主题下系统栏原本是深色图标 → 看不清。
-    // 期间强制浅色图标，退出时还原成进入前的值（Theme.kt 只在 darkTheme 变化时才重设，不会自己纠正）。
+    // 跟随 App 颜色模式：浅色主题给白底墨绿描边，深色主题保留近黑 + 荧光绿。
+    // 系统启动画面那一段由 values(-night)/colors.xml 的 splash_bg 决定，两边配色必须同步改。
+    val dark = isInDarkTheme()
+    val p = if (dark) DarkPalette else LightPalette
+
+    // 系统栏图标跟着 splash 底色走（浅底要深色图标、深底要浅色图标）。
+    // Theme.kt 的 LaunchedEffect 只在 darkTheme 变化时才重设，splash 退出时不会自己纠正，故这里保存 / 还原。
     val context = LocalContext.current
-    DisposableEffect(Unit) {
+    DisposableEffect(dark) {
         val window = (context as? Activity)?.window
         val controller = window?.let { WindowInsetsControllerCompat(it, it.decorView) }
         val prevStatus = controller?.isAppearanceLightStatusBars
         val prevNav = controller?.isAppearanceLightNavigationBars
-        controller?.isAppearanceLightStatusBars = false
-        controller?.isAppearanceLightNavigationBars = false
+        controller?.isAppearanceLightStatusBars = !dark
+        controller?.isAppearanceLightNavigationBars = !dark
         onDispose {
-            controller?.isAppearanceLightStatusBars = prevStatus ?: false
-            controller?.isAppearanceLightNavigationBars = prevNav ?: false
+            controller?.isAppearanceLightStatusBars = prevStatus ?: !dark
+            controller?.isAppearanceLightNavigationBars = prevNav ?: !dark
         }
     }
 
@@ -119,11 +155,12 @@ fun HonorSplash(onFinish: () -> Unit) {
             .graphicsLayer { alpha = overlayAlpha }
             // 吞掉点击：splash 期间不让用户点到下面的首页/底栏
             .pointerInput(Unit) { detectTapGestures { } }
-            .background(Brush.verticalGradient(listOf(BgTop, BgBottom))),
+            .background(Brush.verticalGradient(listOf(p.bgTop, p.bgBottom))),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Mascot(
+                palette = p,
                 modifier = Modifier
                     .size(190.dp)
                     .graphicsLayer {
@@ -138,7 +175,7 @@ fun HonorSplash(onFinish: () -> Unit) {
                 text = "Re:荣耀",
                 fontSize = 27.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFFEAF6EF),
+                color = p.title,
                 modifier = Modifier.graphicsLayer {
                     alpha = textIn
                     translationY = (1f - textIn) * 14f
@@ -148,18 +185,19 @@ fun HonorSplash(onFinish: () -> Unit) {
             Text(
                 text = "荣耀功能增强模块 · v${BuildConfig.VERSION_NAME}",
                 fontSize = 12.sp,
-                color = Color(0xFF9FB4A7).copy(alpha = 0.85f * textIn),
+                color = p.subtitle.copy(alpha = 0.85f * textIn),
                 modifier = Modifier.graphicsLayer { translationY = (1f - textIn) * 10f },
             )
             Spacer(Modifier.height(28.dp))
-            LoadingDots(alpha = textIn)
+            LoadingDots(alpha = textIn, color = p.accent)
         }
     }
 }
 
 /** 待机动画参数：一个 infiniteTransition 里跑四条曲线，相位错开才有「活物」感 */
 @Composable
-private fun Mascot(modifier: Modifier) {
+private fun Mascot(palette: SplashPalette, modifier: Modifier) {
+    val accent = palette.accent
     val loop = rememberInfiniteTransition(label = "mascot")
 
     // 上下浮动 0..1（正弦往复，2.2s 一个来回）
@@ -227,7 +265,7 @@ private fun Mascot(modifier: Modifier) {
 
         // 1) 地面阴影（不随浮动走，越浮动越淡越小）
         drawOval(
-            color = Color.Black.copy(alpha = 0.30f - 0.10f * bob),
+            color = Color.Black.copy(alpha = palette.shadowAlpha - 0.10f * bob),
             topLeft = Offset(cx - bodyW * 0.42f, h * 0.845f),
             size = Size(bodyW * 0.84f, h * 0.05f),
         )
@@ -235,7 +273,7 @@ private fun Mascot(modifier: Modifier) {
         // 2) 身后光晕
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Neon.copy(alpha = glow * 0.55f), Color.Transparent),
+                colors = listOf(accent.copy(alpha = glow * 0.55f), Color.Transparent),
                 center = Offset(cx, cy),
                 radius = w * 0.46f,
             ),
@@ -251,7 +289,7 @@ private fun Mascot(modifier: Modifier) {
             val px = cx + (orbitR * Math.cos(rad)).toFloat()
             val py = cy + (orbitR * Math.sin(rad)).toFloat() * 0.55f
             drawCircle(
-                color = Neon.copy(alpha = 0.18f + 0.22f * ((i + 1) % 3) / 2f),
+                color = accent.copy(alpha = 0.18f + 0.22f * ((i + 1) % 3) / 2f),
                 radius = (2.2f + i * 0.7f).dp.toPx(),
                 center = Offset(px, py),
             )
@@ -262,24 +300,24 @@ private fun Mascot(modifier: Modifier) {
         val tipX = cx + sway * 8.dp.toPx()
         val tipY = top - h * 0.10f - 4.dp.toPx() * bob
         drawLine(
-            color = Neon.copy(alpha = 0.85f),
+            color = accent.copy(alpha = 0.85f),
             start = antennaBase,
             end = Offset(tipX, tipY),
             strokeWidth = 2.5.dp.toPx(),
             cap = StrokeCap.Round,
         )
-        drawCircle(color = Neon, radius = 5.5.dp.toPx(), center = Offset(tipX, tipY))
+        drawCircle(color = accent, radius = 5.5.dp.toPx(), center = Offset(tipX, tipY))
         drawCircle(
-            color = Neon.copy(alpha = 0.25f),
+            color = accent.copy(alpha = 0.25f),
             radius = 12.dp.toPx() * (0.8f + 0.35f * bob),
             center = Offset(tipX, tipY),
         )
 
-        // 5) 身体：近黑圆角块 + 荧光绿描边；整体绕底部微倾
+        // 5) 身体：圆角块（深色近黑 / 浅色白）+ 主色描边；整体绕底部微倾
         rotate(degrees = sway * 2.2f, pivot = Offset(cx, cy + bodyH * 0.55f)) {
             drawRoundRect(
                 brush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF24282A), Color(0xFF0F1112)),
+                    colors = listOf(palette.bodyTop, palette.bodyBottom),
                     startY = top,
                     endY = top + bodyH,
                 ),
@@ -288,7 +326,7 @@ private fun Mascot(modifier: Modifier) {
                 cornerRadius = corner,
             )
             drawRoundRect(
-                color = Neon.copy(alpha = 0.85f),
+                color = accent.copy(alpha = 0.85f),
                 topLeft = Offset(left, top),
                 size = Size(bodyW, bodyH),
                 cornerRadius = corner,
@@ -301,7 +339,7 @@ private fun Mascot(modifier: Modifier) {
             val eyeY = cy - bodyH * 0.02f
             listOf(-0.20f, 0.20f).forEach { dx ->
                 drawRoundRect(
-                    color = Neon,
+                    color = accent,
                     topLeft = Offset(cx + bodyW * dx - eyeW / 2f, eyeY - eyeH / 2f),
                     size = Size(eyeW, eyeH),
                     cornerRadius = CornerRadius(eyeW / 2f),
@@ -311,7 +349,7 @@ private fun Mascot(modifier: Modifier) {
             // 7) 腮红
             listOf(-0.30f, 0.30f).forEach { dx ->
                 drawCircle(
-                    color = Neon.copy(alpha = 0.13f),
+                    color = accent.copy(alpha = 0.13f),
                     radius = bodyW * 0.075f,
                     center = Offset(cx + bodyW * dx, eyeY + bodyH * 0.22f),
                 )
@@ -321,7 +359,7 @@ private fun Mascot(modifier: Modifier) {
             val mouthW = bodyW * 0.26f
             val mouthY = eyeY + bodyH * 0.20f + 1.dp.toPx() * bob
             drawArc(
-                color = Neon.copy(alpha = 0.8f),
+                color = accent.copy(alpha = 0.8f),
                 startAngle = 15f,
                 sweepAngle = 150f,
                 useCenter = false,
@@ -335,7 +373,7 @@ private fun Mascot(modifier: Modifier) {
 
 /** 底部三点脉冲（相位错开 160ms），替代无限旋转的菊花，和上面柔和的待机动画更搭 */
 @Composable
-private fun LoadingDots(alpha: Float) {
+private fun LoadingDots(alpha: Float, color: Color) {
     val loop = rememberInfiniteTransition(label = "dots")
     val phase by loop.animateFloat(
         initialValue = 0f,
@@ -354,7 +392,7 @@ private fun LoadingDots(alpha: Float) {
             Box(
                 modifier = Modifier
                     .size(5.dp + 1.5.dp * k)
-                    .background(Neon.copy(alpha = 0.25f + 0.6f * k), CircleShape),
+                    .background(color.copy(alpha = 0.25f + 0.6f * k), CircleShape),
             )
         }
     }
