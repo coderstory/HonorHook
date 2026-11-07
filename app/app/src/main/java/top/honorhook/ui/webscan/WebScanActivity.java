@@ -294,11 +294,16 @@ public class WebScanActivity extends Activity {
             @Override
             public void onPageStarted(android.webkit.WebView view, String url, android.graphics.Bitmap favicon) {
                 log("onPageStarted: " + url);
+                // 重定向链里中间地址也记：最终页可能永远走不到 onPageFinished（站点自跳转/被拦截）
+                rememberUrl(url);
             }
 
             @Override
             public void onPageFinished(android.webkit.WebView view, String url) {
                 log("onPageFinished: " + url);
+                // 「最后访问的地址（含 query）」在这里落盘：扫码打开后站点会二次跳转，
+                // 旧实现只在 openUrl 存扫码原址，重开就回到没有会话参数的入口页。
+                rememberUrl(url);
             }
 
         });
@@ -313,15 +318,15 @@ public class WebScanActivity extends Activity {
 
     private static final String KEY_HISTORY = "history";
 
-    /** URL 归一（2026-11-03 用户需求）：判同去掉 query 参数，仅保留 scheme://host/path */
+    /**
+     * URL 归一：判同用「scheme://host/path?query」，只丢 fragment（#锚点）。
+     * 2026-11-03 首版把 query 也丢了，导致 ?sid=.../ ?id=1 与 ?id=2 被当成同一条被去重掉；
+     * 2026-11-08 用户要求历史必须按参数区分。手工截断而不用 URI 重组——
+     * URI 构造器会重新转义已编码的 path，反而不稳。
+     */
     private static String normUrl(String u) {
-        try {
-            java.net.URI uri = new java.net.URI(u);
-            return new java.net.URI(uri.getScheme(), uri.getHost(), uri.getPath(), null).toString();
-        } catch (Exception e) {
-            int q = u.indexOf('?');
-            return q < 0 ? u : u.substring(0, q);
-        }
+        int h = u.indexOf('#');
+        return h < 0 ? u : u.substring(0, h);
     }
 
     /** 记录打开历史：按去参 URL 判重置顶，最多 10 条 */
@@ -419,13 +424,26 @@ public class WebScanActivity extends Activity {
     private void openUrl(String url) {
         log("openUrl: " + url);
         recordHistory(url);
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_URL, url).apply();
+        rememberUrl(url);
         scanView.setVisibility(View.GONE);
         webWrap.setVisibility(View.VISIBLE);
         webView.setVisibility(View.VISIBLE);
         stopCamera();
         webView.loadUrl(url);
+    }
+
+    /**
+     * 记住「最后访问」的地址（连同 query 参数）。
+     * 触发点：页面开始/结束加载 + 退到后台（SPA 用 pushState 改地址不会触发 page 回调）。
+     * 只认 http(s)：about:blank、intent:// 之类不落盘，避免下次打开变白页。
+     */
+    private void rememberUrl(String url) {
+        if (url == null || url.isEmpty()) return;
+        if (!(url.startsWith("http://") || url.startsWith("https://"))) return;
+        String prev = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, null);
+        if (url.equals(prev)) return;
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
+        log("rememberUrl: " + url);
     }
 
     /** 返回键：网页后退 → 确认回扫码页；扫码页 → 确认退出 */
@@ -970,6 +988,8 @@ public class WebScanActivity extends Activity {
         // Cookie 立即落盘，保证状态恢复
         android.webkit.CookieManager.getInstance().flush();
         if (webWrap.getVisibility() == View.VISIBLE) {
+            // 离开前台时把当前地址（含 query）定格：前端路由页面不再有 page 回调
+            try { rememberUrl(webView.getUrl()); } catch (Exception ignore) { }
             // 后台冻结网页：停渲染 + 全局暂停 JS 定时器/动画
             webView.onPause();
             webView.pauseTimers();
