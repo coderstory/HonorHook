@@ -16,13 +16,15 @@
 | SystemUI | `com.android.systemui` | 17.0.0.1 | 目标类有 2 个 1 参 void 重载（直连轨须按参数类型消歧）；重载消歧坑；U4 通知身份锚点（dumpsys 渠道打码 → group/id/探针） | [`systemui.md`](systemui.md) |
 | 系统更新 | `com.hihonor.ouc` + `com.hihonor.android.upgradeguide` | 18.0.3.230 / 16.0.0.005 | 主代码 R8 深混淆，但 **manifest 组件名未混淆**（锚点全选组件 framework 回调，零 DexKit）；手动检查路径与自动链分离须保留 | [`ouc.md`](ouc.md) |
 | 成人高考题库 | `com.exam8.chengrenGK` | 5.9.0.0-release | **未混淆**（bean 稳定）；但**服务端按订单态下发正文** ⇒ 能力边界见下 | [`exam8.md`](exam8.md) |
-| 荣耀短信+智能信息 | `com.hihonor.mms` + `com.hihonor.intelligentmessage` | 19.0.9.306 / 10.0.41.308 | 引擎以插件载入 mms 进程；`ted.sms` 半可读、广告管线在 `defpackage`；mms 侧桥接 `com.smartsms.proxy.hw.*` **未混淆** | [`sms-ads.md`](sms-ads.md) |
+| 荣耀短信+智能信息 | `com.hihonor.mms` + `com.hihonor.intelligentmessage` | 19.0.9.306 / 10.0.41.308（现行 19.0.10.310 / 10.0.44.309：T3 挂 `c(5参)`） | 引擎以插件载入 mms 进程；`ted.sms` 半可读、广告管线在 `defpackage`；mms 侧桥接 `com.smartsms.proxy.hw.*` **未混淆** | [`sms-ads.md`](sms-ads.md) |
 | 京东 | `com.jingdong.app.mall` | 16.1.0 | 半可读：业务类名大量保留（SplashFragment/JDHomeManager），方法名 R8 单字母；开屏自研（无第三方广告 SDK） | [`jd.md`](jd.md) |
 | MFA身份验证器 | `com.aimazhishi.mfa.authenticator` | 1.0.5 (5) | **360 加固**（StubApp/libjiagu）：业务代码静态不可读，hook 走 manifest 类名 + classloader 捕获；广告 = 穿山甲开屏 | [`mfa-authenticator.md`](mfa-authenticator.md) |
 | 系统管家服务 | `com.hihonor.systemmanager` | 17.0.0.414 | 116MB 巨包；杀毒模块类名可读（`com.hihonor.antivirus.*` 未混淆）；自带 `msc.config.hide_virus` 总开关 | [`sysmgr.md`](sysmgr.md) |
 | 壁纸编辑器（独立桌面视频路线已放弃留档；现行 W16 转码/W18 去限）+ LivePaper 引擎（W17 循环/W19 隐藏暂停） | `com.hihonor.wallpapereditor` + `com.hihonor.livewallpaper.paradise` | 153.0.0.423 / 11.0.0.252 | editor 类名/方法名/字段名都是**源码原名**（非 R8 产物，但无 keep）；**陷阱：jadx 把短字段名改写成 `f<hash><字母>`，运行时是字母本身 ⇒ 以 smali 为准**；mcs 转码库未混淆。paradise 引擎 n4.* 变体（z 手机/w Pad/c0 折叠）混淆，锚点串全类共享 ⇒ DexKit 全挂；受体 l3.l（VisionControllerImpl，pluginsdk 接口）稳定 | [`wallpaper-editor.md`](wallpaper-editor.md) |
 | 小红书 | `com.xingin.xhs` | 9.50.0 | 深混淆但**载荷字段名明文**（gson/kotlinx 双模型并行）；保存业务三入口三路（§九图谱）；**锚点登记表** [`xhs-anchors.md`](xhs-anchors.md) + 流程 skill `xhs-recon` | [`xhs.md`](xhs.md) |
 
+> **逐次版本适配的实证记录**：[`findings-2026-11-07-version-adapt.md`](findings-2026-11-07-version-adapt.md)（theme 20.1.67.303 四个混淆类改名、xhs 9.53.3 六点坐标、短信插件 b(4参)→c(5参)、小红书定位器 dcc.d；含「工具三缺陷」与待真机判据清单）。每轮适配都落一份 `findings-<日期>-<主题>.md`，别只写进会话。
+>
 > 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` §八 未解决项与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。
 >
 > **归档目录 [`archive/`](archive/)**：已关线/已放弃目标的逆向记录留档（`mihealth-face.md` 2026-10-14 关线、`mailmaster.md` 2026-10-13 放弃）——只作历史证据，不在目标总表内。
