@@ -456,8 +456,10 @@ public class WebScanActivity extends Activity {
             if (webView.canGoBack()) {
                 webView.goBack();
             } else {
-                showConfirm("返回扫码", "退出当前网页，返回扫码页？\n已登录状态会保留。",
-                        "返回扫码", this::backToScanner, "留在本页");
+                // 三选一（2026-11-08 用户需求）：多一个「返回主页」，不用先回扫码页再退
+                showConfirm3("返回扫码", "退出当前网页，返回扫码页？\n已登录状态会保留。",
+                        new String[]{"返回扫码", "返回主页", "留在本页"},
+                        new Runnable[]{this::backToScanner, this::finish, null}, 0);
             }
             return;
         }
@@ -685,6 +687,85 @@ public class WebScanActivity extends Activity {
             d.dismiss();
             openUrl(raw);
         });
+    }
+
+    /**
+     * 三选一确认弹窗（2026-11-08 用户需求）：「返回扫码」确认里要能直接回模块主页。
+     * 按钮等宽平分一行；primaryIdx 指定的那个用实底深色（主操作），其余描边次操作。
+     * null 动作 = 仅关闭弹窗（「留在本页」）。
+     */
+    private void showConfirm3(String title, String message,
+                              String[] texts, Runnable[] actions, int primaryIdx) {
+        float den = getResources().getDisplayMetrics().density;
+        int pad = (int) (22 * den);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad, pad, (int) (16 * den));
+
+        TextView tv = new TextView(this);
+        tv.setText(title);
+        tv.setTextColor(0xFF17171A);
+        tv.setTextSize(17);
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(tv);
+
+        TextView msg = new TextView(this);
+        msg.setText(message);
+        msg.setTextColor(0x8A17171A);
+        msg.setTextSize(14);
+        msg.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        msgLp.topMargin = dp(10);
+        box.addView(msg, msgLp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(22);
+        row.setLayoutParams(rowLp);
+
+        final android.app.AlertDialog[] holder = new android.app.AlertDialog[1];
+        for (int i = 0; i < texts.length; i++) {
+            final int idx = i;
+            android.widget.Button b = new android.widget.Button(this);
+            b.setText(texts[i]);
+            b.setTextSize(13);
+            b.setAllCaps(false);
+            b.setStateListAnimator(null);
+            b.setPadding(dp(6), 0, dp(6), 0);
+            if (i == primaryIdx) {
+                b.setTextColor(0xFFFFFFFF);
+                b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                gd.setColor(0xFF17171A);
+                gd.setCornerRadius(dp(20));
+                b.setBackground(gd);
+            } else {
+                b.setTextColor(0xFF17171A);
+                b.setBackground(roundRect(0x00000000, dp(20), dp(1), 0x1A000000));
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+            if (i > 0) lp.leftMargin = dp(8);
+            b.setOnClickListener(v -> {
+                if (holder[0] != null) holder[0].dismiss();
+                if (actions[idx] != null) actions[idx].run();
+            });
+            row.addView(b, lp);
+        }
+        box.addView(row);
+
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this).create();
+        holder[0] = d;
+        d.setView(box);
+        d.show();
+        if (d.getWindow() != null) {
+            d.getWindow().setBackgroundDrawable(roundRect(0xFFFFFFFF, dp(22), dp(1), 0x1A000000));
+            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     /** 统一样式确认弹窗：深色圆角卡片 + 渐变主按钮 + 描边次按钮 */
