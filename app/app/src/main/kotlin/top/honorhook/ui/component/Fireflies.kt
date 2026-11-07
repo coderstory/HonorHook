@@ -118,8 +118,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 speedY = 0.06f + rnd.nextFloat() * 0.09f,
                 phase = rnd.nextFloat() * 6.283f,
                 blinkSpeed = 0.05f + rnd.nextFloat() * 0.10f,
-                // 光团：基准 2~8dp（原来 0.8~3.3），叠上明灭的涨缩后直径能到 20dp 上下
-                sizePx = 2.0f + rnd.nextFloat() * 6.0f,
+                // 光团：基准 4~16dp，叠上明灭涨缩后大只直径能到 30dp 上下（用户反馈 2~8 还是太小）
+                sizePx = 4.0f + rnd.nextFloat() * 12.0f,
                 // 放慢：每秒 0.15%~0.4% 屏高（约 4~10px/s），飘得更闲散
                 rise = 0.0015f + rnd.nextFloat() * 0.0025f,
                 colorIndex = rnd.nextInt(6),
@@ -180,7 +180,7 @@ fun Fireflies(modifier: Modifier = Modifier) {
             drawCircle(color = core.copy(alpha = a * 0.18f), radius = r * 0.72f, center = c)
             drawCircle(color = core.copy(alpha = a * 0.30f), radius = r * 0.42f, center = c)
             // 内核：一个小而亮的实心点，让光团有「灯芯」，否则整团是一块糊的
-            drawCircle(color = core.copy(alpha = (a * 1.5f).coerceAtMost(0.95f)), radius = r * 0.16f, center = c)
+            drawCircle(color = core.copy(alpha = (a * 1.4f).coerceAtMost(0.95f)), radius = r * 0.26f, center = c)
         }
     }
 }
