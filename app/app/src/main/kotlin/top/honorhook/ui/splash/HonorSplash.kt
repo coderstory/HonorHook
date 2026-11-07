@@ -60,12 +60,12 @@ import top.yukonga.miuix.kmp.basic.Text
  * - **待机循环**：身体上下浮动（bob）、左右轻摆（sway）、眼睛定时眨（blink）、
  *   天线球与光晕随之呼吸、四个光点绕体缓慢公转；
  * - **入场**：整体 0.6→1.0 弹簧放大 + 淡入，文字延迟 180ms 再上浮淡入；
- * - **退场**：停留 [HOLD_MS] 后 420ms 淡出，再回调 [onFinish]，由调用方移除覆盖层。
+ * - **退场**：停留 [HOLD_MS]（2.4s，2026-11-08 用户要求拉长）后 420ms 淡出，再回调 [onFinish]，由调用方移除覆盖层。
  *
  * 配色沿用「远程开发」悬浮球的语言：近黑底 + 荧光绿描边，与工具箱视觉统一。
  * 动画全部走 Compose 的 infiniteTransition / Animatable，不建 Timer、不碰主线程阻塞。
  */
-private const val HOLD_MS = 1200L
+private const val HOLD_MS = 2400L
 private const val FADE_MS = 420
 
 private val Neon = Color(0xFF39FF88)
