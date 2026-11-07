@@ -552,6 +552,8 @@ public class WebScanActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(10), dp(6), dp(10), dp(6));
 
+        box.addView(menuItem("输入网址", () -> { dismissWebMenu(); showUrlInput(); }),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
         box.addView(menuItem("刷新页面", () -> { dismissWebMenu(); webView.reload(); }),
                 new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
         box.addView(menuItem("返回主页面", () -> { dismissWebMenu(); finish(); }),
@@ -588,6 +590,101 @@ public class WebScanActivity extends Activity {
         b.setPadding(dp(14), 0, dp(14), 0);
         b.setOnClickListener(v -> action.run());
         return b;
+    }
+
+    /**
+     * 「输入网址」弹窗（2026-11-08 用户需求）：一个输入框 + 一个跳转按钮。
+     * 跳转走 openUrl()，因此同时进「最近打开的地址」（recordHistory）并成为下次恢复地址。
+     * 只补 https:// 前缀，不猜站点；非 http(s) 一律拒绝，避免 loadUrl 出白页。
+     */
+    private void showUrlInput() {
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this).create();
+        float den = getResources().getDisplayMetrics().density;
+        int pad = (int) (20 * den);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad, pad, (int) (16 * den));
+
+        TextView title = new TextView(this);
+        title.setText("输入网址");
+        title.setTextColor(0xFF17171A);
+        title.setTextSize(17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("https://example.com/path?x=1");
+        input.setSingleLine(true);
+        input.setTextSize(14);
+        input.setTextColor(0xFF17171A);
+        input.setHintTextColor(0x6617171A);
+        input.setBackground(roundRect(0xFFF2F3F5, dp(12), 0, 0));
+        input.setPadding(dp(14), 0, dp(14), 0);
+        String cur = webView != null ? webView.getUrl() : null;
+        if (cur != null && (cur.startsWith("http://") || cur.startsWith("https://"))) {
+            input.setText(cur);
+            input.setSelection(0, input.getText().length());
+        }
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        inputLp.topMargin = dp(12);
+        box.addView(input, inputLp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.END);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(16);
+        row.setLayoutParams(rowLp);
+
+        android.widget.Button cancel = new android.widget.Button(this);
+        cancel.setText("取消");
+        cancel.setTextColor(0xFF17171A);
+        cancel.setTextSize(14);
+        cancel.setAllCaps(false);
+        cancel.setStateListAnimator(null);
+        cancel.setBackground(roundRect(0x00000000, dp(22), dp(1), 0x1A000000));
+        cancel.setPadding(dp(20), 0, dp(20), 0);
+        row.addView(cancel, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40)));
+
+        android.widget.Button go = new android.widget.Button(this);
+        go.setText("跳转");
+        go.setTextColor(0xFFFFFFFF);
+        go.setTextSize(14);
+        go.setAllCaps(false);
+        go.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        go.setStateListAnimator(null);
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setColor(0xFF17171A);
+        gd.setCornerRadius(dp(22));
+        go.setBackground(gd);
+        go.setPadding(dp(26), 0, dp(26), 0);
+        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
+        goLp.leftMargin = dp(10);
+        row.addView(go, goLp);
+        box.addView(row);
+
+        d.setView(box);
+        d.show();
+        if (d.getWindow() != null) {
+            d.getWindow().setBackgroundDrawable(roundRect(0xFFFFFFFF, dp(22), dp(1), 0x1A000000));
+            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        }
+        cancel.setOnClickListener(v -> d.dismiss());
+        go.setOnClickListener(v -> {
+            String raw = input.getText().toString().trim();
+            if (raw.isEmpty()) { toast("请输入网址"); return; }
+            if (!raw.startsWith("http://") && !raw.startsWith("https://")) raw = "https://" + raw;
+            if (!(raw.startsWith("http://") || raw.startsWith("https://"))) { toast("网址格式不对"); return; }
+            d.dismiss();
+            openUrl(raw);
+        });
     }
 
     /** 统一样式确认弹窗：深色圆角卡片 + 渐变主按钮 + 描边次按钮 */
