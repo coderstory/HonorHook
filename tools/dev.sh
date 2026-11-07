@@ -136,6 +136,145 @@ tap_install_confirm() {
   return 0
 }
 
+# ---- on-device 工具链自愈（2026-11-07）----
+# 重建「必须可执行、且只存在于 $PREFIX」的两件：JDK 21 与 aapt2。
+# 为什么不能放进 tools/（本项目其余工具都在那）：/storage 挂 noexec **且禁止建软链**——
+#   ln -s 直接 Permission denied，二进制复制进去 chmod 755 也照样 Permission denied（aapt2 实测）；
+#   AGP 又必须 exec 这个二进制（它不读 PATH，只认 android.aapt2FromMavenOverride）。
+# 为什么用 deb 解包而不是 pkg/apt install：源里 deb 是 com.termux 前缀，dpkg 前端必然失败
+#   （报 "expected programs not found in PATH"，误导性）。搬迁可行的前提见各二进制 RUNPATH。
+# 判据是「真跑起来」而不是「文件在不在」：java -version / jlink --version / aapt2 version 三者都要出结果。
+# 实录与依赖细节：tools/ONDEVICE_TOOLCHAIN.md §2026-11-07 两节。
+bootstrap_env() {
+  local mode="${1:-}"
+  case "$mode" in --check|--force|"") ;; *) die "env-bootstrap 参数只认 --check / --force" ;; esac
+  [ -n "${PREFIX:-}" ] || die "env-bootstrap 仅用于 on-device Termux/DSH（\$PREFIX 未设置）；桌面机请用系统包管理器"
+  case "$PREFIX" in */com.termux|*/com.dsharnessmobile.shell|*/com.termux/*|*/com.dsharnessmobile.shell/*) ;; *) die "env-bootstrap 仅用于 Termux 系前缀，当前 ${PREFIX}" ;; esac
+
+  local jdk="$PREFIX/lib/jvm/java-21-openjdk"
+  local work="$PREFIX/tmp/honorhook-bootstrap"
+  local override="$GRADLE_USER_HOME/gradle.properties"
+  local want_aapt2="$PREFIX/bin/aapt2"
+  local rc=0
+  mkdir -p "$work"
+
+  # apt-cache 在本机不可用（缺 com.termux 的 apt.conf.d），apt-get download 仍可用
+  _deb() {   # $1 包名 → 确保 $work/<pkg>_*.deb 存在（已下过就复用）
+    ls "$work"/"$1"_*.deb >/dev/null 2>&1 && return 0
+    ( cd "$work" && apt-get download "$1" ) >/dev/null 2>&1 || return 1
+    ls "$work"/"$1"_*.deb >/dev/null 2>&1
+  }
+  _x() {     # $1 包名 → 解包到 $work/x/<pkg>，回显包内 usr/ 根（写死的 com.termux 前缀就在这里剥掉）
+    local d="$work/x/$1" u="$work/x/$1/data/data/com.termux/files/usr" f
+    if [ ! -d "$u" ]; then
+      f=$(ls "$work"/"$1"_*.deb 2>/dev/null | head -1)
+      [ -n "$f" ] || return 1
+      mkdir -p "$d"
+      dpkg-deb -x "$f" "$d" >/dev/null 2>&1 || return 1
+    fi
+    [ -d "$u" ] || return 1
+    printf '%s\n' "$u"
+  }
+
+  # ---- 1. JDK 21 ----
+  [ "$mode" = --force ] && rm -rf "$jdk"
+  if [ -x "$jdk/bin/jlink" ] && "$jdk/bin/java" -version >/dev/null 2>&1; then
+    info "JDK OK: $("$jdk/bin/java" -version 2>&1 | grep -v '^Picked up' | head -1)"
+  elif [ "$mode" = --check ]; then
+    warn "JDK 缺失/不可用: $jdk"; rc=1
+  else
+    info "重建 JDK 21（deb 解包搬迁，下载约 106MB）"
+    _deb openjdk-21 || die "下载 openjdk-21 失败（检查网络 / 镜像）"
+    local u p du
+    u=$(_x openjdk-21) || die "解包 openjdk-21 失败"
+    mkdir -p "$PREFIX/lib/jvm"
+    rm -rf "$jdk"
+    cp -a "$u/lib/jvm/java-21-openjdk" "$PREFIX/lib/jvm/" || die "复制 JDK 目录失败"
+    # libjvm.so 的运行时依赖：缺 libandroid-shmem.so 时 java 直接 "dl failure ... libjvm.so"
+    for p in libandroid-shmem libandroid-sysv-semaphore libandroid-spawn; do
+      if _deb "$p"; then
+        du=$(_x "$p") && find "$du/lib" -name '*.so*' -exec cp -f {} "$PREFIX/lib/" \;
+      else
+        warn "下载 $p 失败（JDK 可能起不来）"
+      fi
+    done
+    if [ -x "$jdk/bin/jlink" ] && "$jdk/bin/java" -version >/dev/null 2>&1; then
+      info "JDK OK: $("$jdk/bin/java" -version 2>&1 | grep -v '^Picked up' | head -1)"
+    else
+      die "JDK 重建后仍不可用（对照 tools/ONDEVICE_TOOLCHAIN.md §JDK 重建实录）"
+    fi
+  fi
+
+  # ---- 2. aapt2 ----
+  [ "$mode" = --force ] && rm -f "$want_aapt2"
+  if [ -x "$want_aapt2" ] && "$want_aapt2" version >/dev/null 2>&1; then
+    info "aapt2 OK: $("$want_aapt2" version 2>&1 | head -1)"
+  elif [ "$mode" = --check ]; then
+    warn "aapt2 缺失/不可执行: $want_aapt2（build-tools 里那份是 x86-64，用不了）"; rc=1
+  else
+    info "重建 aapt2（Termux aapt2 包 + fmt/libpng/libprotobuf/abseil-cpp）"
+    local p u f b n=0
+    for p in aapt2 fmt libpng libprotobuf abseil-cpp; do
+      _deb "$p" || die "下载 $p 失败（检查网络 / 镜像）"
+    done
+    u=$(_x aapt2) || die "解包 aapt2 失败"
+    install -m 755 "$u/bin/aapt2" "$want_aapt2" || die "安装 aapt2 到 $want_aapt2 失败"
+    # 依赖 .so 只补 $PREFIX/lib 里没有的（别覆盖既有 libc++/libz 等同名库）
+    for p in fmt libpng libprotobuf abseil-cpp; do
+      u=$(_x "$p") || continue
+      for f in "$u"/lib/lib*.so "$u"/lib/lib*.so.*; do
+        [ -e "$f" ] || continue
+        b=$(basename "$f")
+        if [ ! -e "$PREFIX/lib/$b" ]; then
+          cp -f "$f" "$PREFIX/lib/$b" && n=$((n + 1))
+        fi
+      done
+    done
+    info "补齐 aapt2 依赖 .so: ${n} 个"
+    if [ -x "$want_aapt2" ] && "$want_aapt2" version >/dev/null 2>&1; then
+      info "aapt2 OK: $("$want_aapt2" version 2>&1 | head -1)"
+    else
+      die "aapt2 重建后仍不可用：用 readelf -d $want_aapt2 | grep NEEDED 逐个查缺哪些 .so（别信 ldd）"
+    fi
+  fi
+
+  # ---- 3. AGP 只认 android.aapt2FromMavenOverride（不读 PATH）⇒ 装好还得让它知道 ----
+  # 该文件在 tools/gradle-home/（gitignored）：属本机状态，不入库
+  if grep -q '^android\.aapt2FromMavenOverride=' "$override" 2>/dev/null; then
+    local cur
+    cur=$(grep '^android\.aapt2FromMavenOverride=' "$override" | tail -1 | cut -d= -f2-)
+    if [ "$cur" != "$want_aapt2" ]; then
+      sed -i.hh "s|^android\.aapt2FromMavenOverride=.*|android.aapt2FromMavenOverride=$want_aapt2|" "$override" \
+        && rm -f "$override.hh"
+      info "gradle.properties: aapt2 覆盖路径 → $want_aapt2"
+    fi
+  elif [ "$mode" != --check ]; then
+    mkdir -p "$(dirname "$override")"
+    {
+      printf '\n# on-device：AGP 自带 aapt2 是 glibc/x86-64，bionic 上跑不了 → 指向 $PREFIX 里的 Termux aapt2\n'
+      printf '# 维护入口：bash tools/dev.sh env-bootstrap（2026-11-07）\n'
+      printf 'android.aapt2FromMavenOverride=%s\n' "$want_aapt2"
+    } >>"$override"
+    info "gradle.properties: 写入 aapt2 覆盖路径 → $want_aapt2"
+  fi
+
+  # ---- 4. python3：只体检不重建 ----
+  # 它是 DSH/Termux 前缀自带件，sys.prefix 编译期写死 com.termux 路径，deb 搬迁会半残（拿不到 stdlib）
+  if command -v python3 >/dev/null 2>&1; then
+    info "python3 OK: $(python3 -V 2>&1) @ $(command -v python3)"
+  else
+    warn "python3 缺失：属 DSH/Termux 前缀自带件，deb 搬迁修不了（sys.prefix 写死）→ 需重装 DSH/Termux"
+    rc=1
+  fi
+
+  if [ "$mode" = --check ]; then
+    [ "$rc" -eq 0 ] && info "体检通过：JDK 21 / aapt2 / python3 齐备" || warn "体检发现问题（见上）"
+  else
+    info "完成；接着跑 bash tools/dev.sh env 看解析结果（或直接 bash tools/dev.sh build）"
+  fi
+  return "$rc"
+}
+
 case "${1:-help}" in
 
   help|"")
@@ -195,6 +334,7 @@ HonorHook 开发工具
   verify           一键：编译 → 安装 → 启动 → 抓判据日志
   clean            清理 Gradle 构建产物
   env              打印工具链解析结果（java/adb/apktool/jadx/aapt2/python 都在哪，先跑这个）
+  env-bootstrap [--check|--force]  重建 on-device 前缀里的 JDK21 + aapt2（环境重置后跑；--check 只体检）
   decompile <apk> [名称]   apktool 反编译 → system-files/<名称>-apktool（smali + 明文 manifest + res）
   jadx <apk> [名称]        jadx 反编译（--show-bad-code）→ system-files/<名称>-jadx
   aapt2 <参数...>          aapt2 透传（自动选 build-tools 里最高版本）
@@ -208,6 +348,7 @@ EOF
 
   build)
     # 不 require jlink：debug 编译不需要，缺 jlink 的 JDK 也应能编 debug（release 才要）
+    [ -x "$JAVA_HOME/bin/java" ] || die "JDK 不可用（${JAVA_HOME}）：先跑 bash tools/dev.sh env-bootstrap"
     require "$GRADLEW"
     info "编译 debug APK（JAVA_HOME=${JAVA_HOME}）"
     (cd "$ROOT/app" && bash "$GRADLEW" :app:assembleDebug --console=plain)
@@ -355,12 +496,14 @@ EOF
     ;;
 
   build-release)
+    [ -x "$JAVA_HOME/bin/jlink" ] || die "JDK 21（含 jlink）不可用（${JAVA_HOME}）：先跑 bash tools/dev.sh env-bootstrap"
     require "$GRADLEW"; require "$JAVA_HOME/bin/jlink"
     (cd "$ROOT/app" && bash "$GRADLEW" :app:assembleRelease --console=plain)
     ls -lh "$APK_RELEASE"
     ;;
 
   test)
+    [ -x "$JAVA_HOME/bin/java" ] || die "JDK 不可用（${JAVA_HOME}）：先跑 bash tools/dev.sh env-bootstrap"
     require "$GRADLEW"
     info "运行 JVM 单元测试（:app:testDebugUnitTest）"
     (cd "$ROOT/app" && bash "$GRADLEW" :app:testDebugUnitTest --console=plain)
@@ -811,6 +954,11 @@ EOF
     for t in apktool jadx aapt2 apksigner zipalign dexdump java adb; do
       printf '  %-12s %s\n' "$t" "$(command -v "$t" 2>/dev/null || echo MISSING)"
     done
+    ;;
+
+  env-bootstrap|bootstrap)
+    # 环境重置后一条命令复原 JDK/aapt2（为什么必须留在 $PREFIX 而不能进 tools/：见函数头注释）
+    bootstrap_env "${2:-}"
     ;;
 
   decompile)

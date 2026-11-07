@@ -33,6 +33,7 @@ metadata:
 | 反编译目标 app | `decompile <apk> [名]`（smali+明文 manifest+res）· `jadx <apk> [名]`（伪代码）· `aapt2 <参数>` · `apkinfo <apk>` |
 | 校验作用域配错没 | `scopes` vs `targets`（不一致 ⇒ 框架静默不回调该包） |
 | 体积 / dex 构成 | `size` · `dexstat` |
+| 环境被重置（JDK/aapt2 MISSING、构建起不来） | `env-bootstrap --check`（只体检）→ `env-bootstrap`（重建 JDK21 + aapt2 到可执行前缀 `$PREFIX`）。**这两件不能挪进 `tools/`**：`/storage` 挂 noexec 且禁止建软链，二进制复制过去 `chmod 755` 也照样 `Permission denied` |
 
 ## 判据与日志坑
 
