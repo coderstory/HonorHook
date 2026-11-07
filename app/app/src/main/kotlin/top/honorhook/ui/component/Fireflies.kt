@@ -107,8 +107,11 @@ fun Fireflies(modifier: Modifier = Modifier) {
     // 之前按主题关掉（浅色默认不画），结果用户升级后直接「没效果」——默认能看见比讲究更重要，
     // 真正的开关放设置里（firefly_enabled）。
     if (!AppSettings.fireflyEnabled) return
+    // 亮底/暗底两套尺寸：白底上 1.4dp 的小点是彻底看不见的（加光不可见，只能减光），
+    // 必须放大到 3~7dp、提高不透明度，才勉强能读出「有东西在飘」。
+    val light = !dark
     // 一次算好：不同屏幕比例下按归一化坐标分布，再乘实际尺寸
-    val flies = remember(COUNT) {
+    val flies = remember(COUNT, light) {
         val rnd = Random(20261108)
         List(COUNT) {
             val soft = rnd.nextFloat() < 0.30f
@@ -126,7 +129,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 blinkSpeed = 0.05f + rnd.nextFloat() * 0.10f,
                 // 两级尺寸（照参考图）：三成是 6~14dp 的虚焦散景，七成是 1.4~3.6dp 的清晰亮点。
                 // 全都一样大反而假——真实镜头里远近光斑尺寸差一个数量级。
-                sizePx = if (soft) 6.0f + rnd.nextFloat() * 8.0f else 1.4f + rnd.nextFloat() * 2.2f,
+                sizePx = if (soft) 8.0f + rnd.nextFloat() * 10.0f
+                else if (light) 3.0f + rnd.nextFloat() * 4.0f
+                else 1.4f + rnd.nextFloat() * 2.2f,
                 // 放慢：每秒 0.15%~0.4% 屏高（约 4~10px/s），飘得更闲散
                 rise = 0.0015f + rnd.nextFloat() * 0.0025f,
                 colorIndex = rnd.nextInt(6),
@@ -147,12 +152,21 @@ fun Fireflies(modifier: Modifier = Modifier) {
         }
     }
 
+    var logged = remember { false }
     val tint = FireflyTint.of(AppSettings.fireflyTint)
     val colors = FireflyTint.colors(dark, tint)
     // 亮底上更要收：白底没有「发光」的物理依据，浓度一高就像屏幕脏了
-    val strength = if (dark) 1f else 0.5f
+    val strength = if (dark) 1f else 0.8f
 
     Canvas(modifier = modifier.fillMaxSize()) {
+        if (!logged) {
+            logged = true
+            android.util.Log.i(
+                "HonorFireflies",
+                "first draw: dark=$dark enabled=${AppSettings.fireflyEnabled} tint=${AppSettings.fireflyTint} " +
+                    "count=${flies.size} size=${size.width}x${size.height}",
+            )
+        }
         val t = time.floatValue
         val w = size.width
         val h = size.height
