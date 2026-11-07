@@ -26,6 +26,22 @@
 | 短链生成（分享链接单链） | `u2c.y`（ShareService 实现内） | `"getShortUrlObservableIfNeed success"`（u2c/y.java:70）；服务定位反射 `i3c.d` → `ShareService.getShortUrl` | 未记（运行时反射定位，类名经 `i3c.d` 服务表取） | 9.50 |
 | 保存下载总入口（v3 主断点） | `b75.h#e`（static void 13 参 Kotlin 顶层函数，h.java:227；CommercialHorizonBridge_VideoDownloader） | DexHint 串锚 `"addDownloadTask 强制下载"`（h.java:288）；链路 `e→k→j→m(CommonVideoDownload)→XYDownloader→l.onFinished→n(save_to_album)`（静态审计 2026-10-19 全程核实）。**Java 调用点为 0**（跨平台桥 JS 侧分发）——重定位只能靠 DexKit 串锚。拦截判据：url 精确匹配 savePending 登记 + xhscdn.com 域 | classes2（b75/h.java:227） | 9.50 |
 
+## 版本坐标快照（覆盖套，见 `XhsPoints.kt`）
+
+| 点 | 9.50.0（基线） | 9.51.0 | 9.52.1 | **9.53.3**（2026-11-07 实装） |
+|---|---|---|---|---|
+| saveClick | ji9.b | yi9.b | xq9.b | **gr9.b** |
+| x2b | nd8.j | ce8.j | bm8.j | **jm8.j** |
+| noteSaveEntry | ab9.r1 | pb9.o1 | nj9.o1 | **vj9.q1** |
+| aigcEditLaunch | — | rg4.b | cq4.b | **gq4.b** |
+| downloaderEntry | b75.h | g75.h | pg5.h | **tg5.h** |
+| albumCopy.videoStore | xec.w 系 | dz8.t | d79.s | **l79.s** |
+| videoClick / h0 / e0 | — / xec.w / xec.w | null | null | **null**（仍无家） |
+
+9.53.3 实测手法：全程走 MT MCP（`tools/mtmcp.py strings <pkg> <锚>` → 唯一宿主类），
+再用 outline 核对方法名 + 参数数；`noteSaveEntry` 的锚串落在内部类 `vj9.q1$a`，真身取外层 `vj9.q1#b`（9 参）。
+同名类被 R8 重用是常态（9.51 的 b75.h 就是同名 SuspendLambda）⇒ 一律以串锚唯一宿主为准，不得按类名存在性判存活。
+
 ## 已知非挂载但关键的宿主结构（业务图谱见 xhs.md §九）
 
 | 结构 | 锚 | 用途 |

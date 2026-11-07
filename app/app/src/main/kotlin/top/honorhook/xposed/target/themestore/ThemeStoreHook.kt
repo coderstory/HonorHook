@@ -25,8 +25,13 @@ object ThemeStoreHook : TargetHook {
     var lastRouteServiceId: String? = null
         private set
 
+    /** 当前版本 ThemeCheckTool 的混淆类名（DECRYPT_PREPARE 行取；null = 版本表未带该行，调用方回落 gl5）。 */
+    @Volatile
+    internal var decryptToolClass: String? = null
+
     /** 版本选表：精确套优先，默认套（基线点）任何版本兜底。 */
     private val versionTables = listOf(
+        HostVersion.Table(versions = setOf("20.1.67.303")) { THEME_POINTS_20_1_67_303 },
         HostVersion.Table(versions = setOf("20.1.67.302")) { THEME_POINTS_20_1_67_302 },
         HostVersion.Table(versions = setOf("20.1.65.302")) { THEME_POINTS_20_1_65_302 },
         HostVersion.Table(versions = emptySet()) { THEME_POINTS_20_1_63_305 },
@@ -57,6 +62,11 @@ object ThemeStoreHook : TargetHook {
             val session = MountEngine.open("ThemeStoreHook", packageName, apkPath, pick.matchedVersion ?: baseline, RemoteConfig)
             val pending = pick.tasks
                 .map { it.toMountTask() }
+            // 解密工具类（源名 ThemeCheckTool）的混淆名随版本绑定：W2 付费壁纸解密要直接调它的
+            // getDecryptWallpaperFile。历史版本该方法在独立工具类 gl5；2026-11-07 的 20.1.67.303 实证
+            // gl5 已变成不相关的 Rx 类、方法整体迁进 ThemeCheckTool 本体 b26 ⇒ 只对本表显式指定，
+            // 其余版本保持旧的 gl5（不能拿 DECRYPT_PREPARE 行的类名顶替：老表的 e26 只挂 getDecryptTheme）。
+            decryptToolClass = if (pick.matchedVersion == "20.1.67.303") THEME_DECRYPT_TOOL_67_303 else null
 
             session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
         }
@@ -70,11 +80,15 @@ object ThemeStoreHook : TargetHook {
         }
     }
 
-    /** PRE_PROCESS 按 task.id 的处理函数表（评审 #12：if/else 魔法串分派表化——新表行忘登记从静默跑错变 WARN 可见）。 */
-    private val preProcessHandlers: Map<String, (XposedInterface.Chain, XposedModule, ClassLoader) -> Unit> = mapOf(
-        "theme:WallpaperPreview.fixPackagePath" to { chain, module, _ -> fixWallpaperPackagePath(chain, module) },
-        "theme:WallpaperPreview.decryptPaidWp" to { chain, module, loader -> decryptPaidWallpaper(chain, module, loader) },
-        "adsource:CreateTabs.pruneStateFlow" to { chain, module, _ -> pruneTabStateFlowBeforeCreateTabs(chain, module) },
+    /** PRE_PROCESS 按 task.id 的处理函数表（评审 #12：if/else 魔法串分派表化——新表行忘登记从静默跑错变 WARN 可见）。
+     *  第 4 参传 task：处理函数里要复用的宿主类名（W2 的 bz2）是**混淆名、随版本绑定**，
+     *  只能从当前命中的表行 task.className 取，不得在函数里写死（2026-11-07 20.1.67.303 实证）。 */
+    private val preProcessHandlers: Map<String, (XposedInterface.Chain, XposedModule, ClassLoader, MountTask) -> Unit> = mapOf(
+        "theme:WallpaperPreview.fixPackagePath" to { chain, module, _, _ -> fixWallpaperPackagePath(chain, module) },
+        "theme:WallpaperPreview.decryptPaidWp" to { chain, module, loader, task ->
+            decryptPaidWallpaper(chain, module, loader, task.className)
+        },
+        "adsource:CreateTabs.pruneStateFlow" to { chain, module, _, _ -> pruneTabStateFlowBeforeCreateTabs(chain, module) },
     )
 
     /**
@@ -235,7 +249,7 @@ object ThemeStoreHook : TargetHook {
                     runCatching {
                         val origin = args.getOrNull(originIdx) as? String
                         if (!origin.isNullOrBlank()) {
-                            val m = loader.loadClass("e26").getDeclaredMethod("getDecryName", java.io.File::class.java)
+                            val m = loader.loadClass(task.className).getDeclaredMethod("getDecryName", java.io.File::class.java)
                             m.isAccessible = true
                             val out = m.invoke(null, java.io.File(origin)) as? String
                             if (!out.isNullOrBlank()) {
@@ -253,7 +267,7 @@ object ThemeStoreHook : TargetHook {
                         }
                     }
                     val receiver = chain.thisObject
-                        ?: runCatching { loader.loadClass("e26") }.getOrNull()
+                        ?: runCatching { loader.loadClass(task.className) }.getOrNull()
                         ?: return@runCatching chain.proceed()
                     chain.proceedWith(receiver, args)
                 }.getOrElse { chain.proceed() }
@@ -357,7 +371,7 @@ object ThemeStoreHook : TargetHook {
             // 前置数据修正（proceed 前修 this/共享数据，再原样放行）：按任务 id 查表分派（未注册 = 新表行错路，WARN 可见）
             MountKind.PRE_PROCESS -> {
                 if (routeActive(chain, module, task)) {
-                    preProcessHandlers[task.id]?.invoke(chain, module, loader)
+                    preProcessHandlers[task.id]?.invoke(chain, module, loader, task)
                         ?: module.log(
                             Log.WARN, MountEngine.TAG,
                             "PRE_PROCESS 处理函数未注册（放行原逻辑）: ${task.id} — 新表行需在 preProcessHandlers 登记",

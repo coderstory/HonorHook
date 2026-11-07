@@ -90,6 +90,28 @@ object XhsPoints {
             "albumCopy.e0" to null,
             "albumCopy.videoStore" to "d79.s",
         ),
+        // 9.53.3（2026-11-07 设备实装；MT MCP 串锚 + outline 逐点实证，签名与参数数全部未变）：
+        // 全部 6 个在位点都换了包（R8 重排，iO 前缀整体 +1~+4 位）：xp9→gr9、bm8→jm8、nj9→vj9、
+        // cq4→gq4、pg5→tg5、d79→l79。坑同 9.52.1：同名类被 R8 重用，一律以串锚唯一宿主为准。
+        // - saveClick：串锚 "onDownloadClick, noteId=" → gr9.b，invoke(Object)→Object 不变
+        // - x2b：串锚 disableAiWaterMark + andr_image_save_white_bg_optimized → jm8.j，b(Context,Z)Bitmap 不变
+        // - noteSaveEntry：串锚 "save video failed:" 落在内部类 vj9.q1$a，真身是外层 vj9.q1#b，
+        //   9 参 (Z,Activity,z0,NoteFeed,I,Z,ViewGroup,Function1,Function0)V 不变
+        // - aigcEditLaunch：串锚 tag_video_edit_download_loading → gq4.b（cf3.b 是 global_edit 副本不取）
+        // - downloaderEntry：串锚 addDownloadTask → tg5.h，static e 13 参形状不变
+        // - albumCopy.videoStore：串锚 "saveVideo start copy file." → l79.s，static a 5 参 void 不变
+        // - videoClick / albumCopy.h0 / albumCopy.e0：仍无家 → null（原因同 9.51/9.52，勿回落基线）
+        "9.53.3" to mapOf(
+            "saveClick" to "gr9.b",
+            "videoClick" to null,
+            "x2b" to "jm8.j",
+            "noteSaveEntry" to "vj9.q1",
+            "aigcEditLaunch" to "gq4.b",
+            "downloaderEntry" to "tg5.h",
+            "albumCopy.h0" to null,
+            "albumCopy.e0" to null,
+            "albumCopy.videoStore" to "l79.s",
+        ),
     )
 
     /**

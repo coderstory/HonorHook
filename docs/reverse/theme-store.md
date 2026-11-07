@@ -1058,6 +1058,24 @@ packagePath 含 `.payed` 即强制 `gl5.getDecryptWallpaperFile(serviceId, file)
 埋点 SDK（跨 app 通杀面）同步发现：新版天气内置 SDK 删 `HiAnalyticsInstanceEx$Builder`，
 Ex 实例工厂改 `HiAnalyticsManager.getInstanceEx()` 静态方法——HonorTrackingHook 已按类存在性二选一。
 
+## 20.1.67.303 适配（2026-11-07，MT MCP 锚点实证）
+
+设备 2026-11-06 OTA 到 **20.1.67.303**。这是又一次构建，四个混淆类同时改名（67.302 只改了 f71）：
+
+| 源名 | 67.302 | **67.303** | 锚 |
+|---|---|---|---|
+| SharepreferenceUtils（云控读点） | u15 | **xh5** | "themename" + 双 getBoolean 重载 |
+| LiveWallpaperHelper | ez2 | **b83** | `createApplyWallPaper(WallPaperInfo)V` / `getDecryWallpaperPath(String)` |
+| DownloadItemIfVip | wb1 | **vb1** | "Start to download vip product" / "productSendFinish downloadUrl is Empty ? " |
+| ThemeCheckTool | e26 | **b26** | `getDecryptTheme/getDecryptFile/getDecryptWallpaperFile` |
+
+⇒ 新表 `ThemeStoreMap_20_1_67_303`（取代 67.302 套，后者留给仍停在 .302 的设备）。
+
+同一轮实测还揪出一个既有隐患：**解密工具类 `gl5` 在 .303 已变成不相关的 Rx 类**，三个解密方法整体
+迁进 ThemeCheckTool（`b26`）。旧实现 `loader.loadClass("gl5")` 写死 ⇒ 新版本 W2 付费壁纸解密会走
+「工具类漂移」分支静默放行。现改为 `ThemeStoreHook.decryptToolClass`（从当前命中表的 DECRYPT_PREPARE
+行取），W2 的 `getDecryWallpaperPath` 也从 `task.className` 取，不再写死混淆名。
+
 ## §E.6 付费主题 100%「文件已损坏」定案（2026-11-02，诊断点 + smali 实证）
 
 ### 现象

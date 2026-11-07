@@ -125,7 +125,7 @@ object FeatureCatalog {
                 Feature(KEY_THEME_AD_OFF, R.string.feature_theme_ad_off_title, R.string.feature_theme_ad_off_desc),
             ),
             baselineVersion = "20.1.63.305",   // aapt2 实证（原 ThemeStoreHook 私有常量上提）
-            extraVersions = setOf("20.1.65.302"),   // 2026-10-23 真机升级版：49 点全存活，仅 3 混淆类改名（ThemeStoreMap_20_1_65_302）
+            extraVersions = setOf("20.1.65.302", "20.1.67.302", "20.1.67.303"),   // 65.302 = 10-23（3 混淆类改名）；67.302 = 11-02（f71→wb1）；67.303 = 11-07 实装（4 混淆类改名，ThemeStoreMap_20_1_67_303）
         ),
         Target(
             "com.android.packageinstaller", R.string.target_name_installer,
@@ -216,6 +216,7 @@ object FeatureCatalog {
                 Feature(KEY_MMS_AD_OFF, R.string.feature_mms_ad_off_title, R.string.feature_mms_ad_off_desc),
             ),
             baselineVersion = "19.0.9.306",  // dumpsys 实证 2026-10-19（设备 AAK-AN00；原 MmsHook 私有常量上提）；304→306 挂载点零漂移，adapt 双侧核对（宿主+插件 10.0.41.308）
+            extraVersions = setOf("19.0.10.310"),  // 2026-11-07 实装：宿主侧 2 点 ALIVE；插件侧 3 点（com.ted.sms.*）base.apk 无类属既有设计，随插件加载
         ),
         Target(
             "com.sohu.inputmethod.sogou.honor", R.string.target_name_ime,
@@ -233,6 +234,7 @@ object FeatureCatalog {
                 Feature(KEY_TRACK_BLOCK, R.string.feature_tracking_block_title, R.string.feature_tracking_block_desc),
             ),
             baselineVersion = "18.1.6.312",  // dumpsys 实证 2026-10-19（设备 AAK-AN00）；Tracking Ex 点在本版 SDK 无实现类属预期（a.d() return null），判据仍看 installed N/M
+            extraVersions = setOf("18.1.7.314"),  // 2026-11-07 实装：5/6 ALIVE，Ex.Builder 已删（HonorTrackingHook 运行时探测回落 getInstanceEx，设计内）
             iconKey = "shield",
         ),
         Target(
@@ -256,6 +258,7 @@ object FeatureCatalog {
                 Feature(KEY_MARKET_PURIFY, R.string.feature_market_purify_title, R.string.feature_market_purify_desc),
             ),
             baselineVersion = "16.1.9.302",  // aapt2 实证（2026-10-25 真机拉取，docs/reverse/appmarket.md）
+            extraVersions = setOf("16.1.10.302"),  // 2026-11-07 实装：7/7 ALIVE（tools/adapt_mt.py，MT MCP 逐点）
         ),
         Target(
             "com.hihonor.systemmanager", R.string.target_name_sysmgr,
@@ -263,7 +266,7 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
-            extraVersions = setOf("17.0.0.455", "17.0.0.457"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3（无独立版本表，同套挂载点）
+            extraVersions = setOf("17.0.0.455", "17.0.0.457", "17.0.0.473"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3；473 = 11-07 实装 3/3（无独立版本表，同套挂载点）
         ),
         Target(
             "com.xingin.xhs", R.string.target_name_xhs,
@@ -273,7 +276,7 @@ object FeatureCatalog {
                 Feature(KEY_XHS_SILENT_DOWNLOAD, R.string.feature_xhs_silent_download_title, R.string.feature_xhs_silent_download_desc),
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
-            extraVersions = setOf("9.49.1", "9.51.0"),  // 9.51.0 = 2026-10-23 真机升级版（XhsPoints 9.51 套；albumCopy 落盘闸未定位诚实跳过）
+            extraVersions = setOf("9.49.1", "9.51.0", "9.52.1", "9.53.3"),  // 9.51 = 10-23；9.52.1 = 11-02（XhsPoints 9.52 套）；9.53.3 = 11-07 实装（6 点在位，videoClick/h0/e0 仍无家）
         ),
         // 壁纸两宿主：功能入口已归并到「系统桌面」卡（见 launcher Target），此处留壳供
         // scope 页与 baselineVersionOf 查表——hidden 且 features 为空，UI 不出卡。
@@ -281,12 +284,14 @@ object FeatureCatalog {
             "com.hihonor.wallpapereditor", R.string.target_name_wallpapereditor,
             listOf(),
             baselineVersion = "153.0.0.423",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
+            extraVersions = setOf("153.0.0.502"),  // 2026-11-06 设备升级版：3/3 挂载点 ALIVE（tools/adapt_mt.py，MT MCP 精准校验）
             hidden = true,
         ),
         Target(
             "com.hihonor.livewallpaper.paradise", R.string.target_name_livewallpaper,
             listOf(),
             baselineVersion = "11.0.0.252",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
+            extraVersions = setOf("11.0.0.262"),  // 2026-11-06 设备升级版：3/3 挂载点 ALIVE（tools/adapt_mt.py）
             hidden = true,
         ),
     )

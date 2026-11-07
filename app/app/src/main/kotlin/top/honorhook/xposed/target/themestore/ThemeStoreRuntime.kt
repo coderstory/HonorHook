@@ -121,7 +121,13 @@ internal fun pruneBottomTabPayload(orig: Any?, module: XposedModule): List<*>? {
  *   ③ 付费项每个出口都有判据日志（v1 静默 return 让三分支无法分诊）。
  * 解密复用宿主 `gl5.getDecryptWallpaperFile(serviceId, file)`（gl5 类名混淆，DexKit 锚点 = 解密工具日志串）。
  */
-internal fun decryptPaidWallpaper(chain: XposedInterface.Chain, module: XposedModule, loader: ClassLoader) {
+internal fun decryptPaidWallpaper(
+    chain: XposedInterface.Chain,
+    module: XposedModule,
+    loader: ClassLoader,
+    /** W2 挂载点当前命中的宿主类名（LiveWallpaperHelper 的混淆名，随版本绑定）——不写死 bz2。 */
+    ownerClass: String,
+) {
     runCatching {
         val info = chain.getArg(0) ?: return
         val price = (info.javaClass.getField("price").get(info) as? Double) ?: 0.0
@@ -155,14 +161,17 @@ internal fun decryptPaidWallpaper(chain: XposedInterface.Chain, module: XposedMo
             return
         }
         val serviceId = info.javaClass.getField("serviceId").get(info).toString()
-        val gl5 = runCatching { loader.loadClass("gl5") }.getOrElse {
-            module.log(Log.WARN, TAG, "W2 壁纸解密工具类漂移（gl5），放行原逻辑")
+        // 解密工具类（原 gl5，源名 ThemeCheckTool）的混淆名随版本绑定：优先用当前版本表里
+        // DECRYPT_PREPARE 行给出的类名（ThemeStoreHook.decryptToolClass），老表没有该行才回落 gl5。
+        val toolName = ThemeStoreHook.decryptToolClass ?: "gl5"
+        val gl5 = runCatching { loader.loadClass(toolName) }.getOrElse {
+            module.log(Log.WARN, TAG, "W2 壁纸解密工具类漂移（$toolName），放行原逻辑")
             return
         }
         // ② 新解：先删同名解密缓存（cache/decryWallpaper/<文件名>，宿主 getDecryWallpaperPath 拼法），
         // 否则 getDecryptWallpaperFile 见缓存即复用，半截产物无法自愈
         runCatching {
-            loader.loadClass("bz2").getDeclaredMethod("getDecryWallpaperPath", String::class.java)
+            loader.loadClass(ownerClass).getDeclaredMethod("getDecryWallpaperPath", String::class.java)
                 .invoke(null, file.name) as? String
         }.getOrNull()?.let { java.io.File(it).delete() }
         val decrypted = gl5.getDeclaredMethod("getDecryptWallpaperFile", String::class.java, java.io.File::class.java)

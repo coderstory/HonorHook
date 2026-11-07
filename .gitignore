@@ -71,3 +71,7 @@ libs/xhs-dn-core/build/
 
 # 会话内临时产物（截图/草稿，含真机个人信息，绝不入库）
 scratch/
+
+# 版本适配校验产物（tools/adapt_mt.py 逐包输出；jadx-mvn = 本地 maven 缓存，均可重生成）
+tools/mt-adapt-*.txt
+tools/jadx-mvn/
