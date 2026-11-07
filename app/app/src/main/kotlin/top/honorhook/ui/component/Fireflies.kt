@@ -129,9 +129,10 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 blinkSpeed = 0.05f + rnd.nextFloat() * 0.10f,
                 // 两级尺寸（照参考图）：三成是 6~14dp 的虚焦散景，七成是 1.4~3.6dp 的清晰亮点。
                 // 全都一样大反而假——真实镜头里远近光斑尺寸差一个数量级。
-                sizePx = if (soft) 8.0f + rnd.nextFloat() * 10.0f
-                else if (light) 3.0f + rnd.nextFloat() * 4.0f
-                else 1.4f + rnd.nextFloat() * 2.2f,
+                // 用户两次反馈「太小、太不起眼」：参考图那种 1~3dp 的小点在手机上基本读不出来，
+                // 实际要 4~9dp 才看得见。散景再大一档，负责层次。
+                sizePx = if (soft) 11.0f + rnd.nextFloat() * 11.0f
+                else 4.0f + rnd.nextFloat() * 5.0f,
                 // 放慢：每秒 0.15%~0.4% 屏高（约 4~10px/s），飘得更闲散
                 rise = 0.0015f + rnd.nextFloat() * 0.0025f,
                 colorIndex = rnd.nextInt(6),
@@ -156,7 +157,7 @@ fun Fireflies(modifier: Modifier = Modifier) {
     val tint = FireflyTint.of(AppSettings.fireflyTint)
     val colors = FireflyTint.colors(dark, tint)
     // 亮底上更要收：白底没有「发光」的物理依据，浓度一高就像屏幕脏了
-    val strength = if (dark) 1f else 0.8f
+    val strength = if (dark) 1f else 0.85f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         if (!logged) {
@@ -199,9 +200,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
             // 截图里那些一圈圈的圆环就是这么来的。渐变的英文 stop 直接给到边缘 Transparent，才是无缝化开。
             drawCircle(
                 brush = Brush.radialGradient(
-                    0.00f to core.copy(alpha = (a2 * 0.55f).coerceAtMost(1f)),
-                    0.30f to core.copy(alpha = (a2 * 0.30f).coerceAtMost(1f)),
-                    0.62f to core.copy(alpha = (a2 * 0.10f).coerceAtMost(1f)),
+                    0.00f to core.copy(alpha = (a2 * 0.80f).coerceAtMost(1f)),
+                    0.28f to core.copy(alpha = (a2 * 0.45f).coerceAtMost(1f)),
+                    0.60f to core.copy(alpha = (a2 * 0.16f).coerceAtMost(1f)),
                     1.00f to core.copy(alpha = 0f),
                     center = c,
                     radius = r,
