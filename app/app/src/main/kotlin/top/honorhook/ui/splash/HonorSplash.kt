@@ -65,7 +65,7 @@ import top.yukonga.miuix.kmp.basic.Text
  * 配色沿用「远程开发」悬浮球的语言：近黑底 + 荧光绿描边，与工具箱视觉统一。
  * 动画全部走 Compose 的 infiniteTransition / Animatable，不建 Timer、不碰主线程阻塞。
  */
-private const val HOLD_MS = 1500L
+private const val HOLD_MS = 1200L
 private const val FADE_MS = 420
 
 private val Neon = Color(0xFF39FF88)

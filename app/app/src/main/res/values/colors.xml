@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 冷启动底色：与 Compose splash 顶部渐变同色，系统启动画面→自绘 splash 之间无缝 -->
+    <color name="splash_bg">#0D100E</color>
+</resources>
