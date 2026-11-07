@@ -41,7 +41,7 @@
 ## 五、不在 docs/
 
 - 协作纪律与铁律：根 `CLAUDE.md`；功能台账与验证清单：根 `README.md`
-- 命令与工具路径：`tools/dev.sh help` / `tools/dev.sh env`，索引见 skill `honorhook-dev`
+- 命令与工具路径：`tools/dev.sh help` / `tools/dev.sh env`，索引见 skill `honorhook-dev`；设备侧已装工具台账 [`../tools/ONDEVICE_TOOLCHAIN.md`](../tools/ONDEVICE_TOOLCHAIN.md)
 - 方法论详证（smali/jadx 用法、样本分析、脚手架）：各 skill 的 `SKILL.md` 与 `references/`
 
 ## 六、十分钟接手指南（2026-10-26，P2-5/T11）
@@ -59,6 +59,7 @@
 ### ② 工具怎么跑（2 分钟）
 
 - 一切命令走 `tools/dev.sh`：`help` 看全量、`env` 看工具链解析。常用：`build` / `test` / `modlog-grep 'installed'` / `relaunch <pkg>` / `hook-test` / `meminfo <pkg>`（挂载内存基线，[`perf-baseline.md`](perf-baseline.md)）。
+- **OTA 后第一件事**：`bash tools/dev.sh versions`（实装 vs FeatureCatalog，未适配非 0 退出）→ 再 `python3 tools/adapt_mt.py all` 核对挂载点。流程与实证见 [`reverse/findings-2026-11-07-version-adapt.md`](reverse/findings-2026-11-07-version-adapt.md)。
 - 裸 shell 里没有 java——定向 gradle 任务走 `tools/dev.sh exec ./app/gradlew -p app <task>`。
 - 设备铁律：**禁 reboot**；破坏性操作先问；AI 交付 = 代码 + 构建通过 + 用户自执行的验证清单。
 

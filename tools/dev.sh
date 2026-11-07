@@ -315,6 +315,7 @@ HonorHook 开发工具
   hook-status [前缀]      各 hook 最近一次 installed N/M 汇总（可选按 hook 名前缀过滤）
   app-version <pkg...>    已安装应用 versionName 一览
   lsposed-state [pkg]     LSPosed 里本模块的启用态 + 作用域清单
+  versions [过滤词...]    宿主版本适配体检（实装 vs FeatureCatalog；OTA 后先跑这条）
   enable-module    重装后重新启用 LSPosed 模块（lspctl CLI 通道，含作用域进程强停）
   deploy-release   一键全流程：build-release + install-release + enable-module
   connect <ip[:port]> 无线 adb 连接（省端口默认 5555）
@@ -751,6 +752,14 @@ else:
         "select app_pkg_name from scope where module_pkg_name=? order by app_pkg_name", (pkg,))]
     print(f"  scope {len(apps)} 个: {', '.join(apps)}")
 PYX
+    ;;
+
+  versions)
+    # 宿主版本适配体检：实装 versionName vs FeatureCatalog 支持版本（OTA 后第一件事跑这条）。
+    PY="$(pick_python || true)"
+    [ -n "$PY" ] || die "缺 python3"
+    shift
+    "$PY" "$ROOT/tools/version_check.py" "$@"
     ;;
 
   # 重启作用域进程：root kill（TERM，干净，无 crash 记录不计 LSPosed 安全模式频次）——

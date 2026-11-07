@@ -15,6 +15,13 @@ tools/dev.sh build           # debug APK
 tools/dev.sh build-release   # release APK（混淆+收缩+稳定 keystore 签名）
 tools/dev.sh test            # JVM 单测（= :app:testDebugUnitTest）
 tools/dev.sh deploy-release  # build-release + install-release + enable-module
+
+# 日常（on-device 无 adb 也走同一入口，本机 /storage 是 noexec ⇒ 一律 `bash tools/dev.sh …`）
+bash tools/dev.sh versions           # 版本适配体检：实装 vs FeatureCatalog，未适配非 0 退出（OTA 后第一条）
+bash tools/dev.sh hook-status [前缀]  # 各 hook 最近一次 installed N/M 汇总
+bash tools/dev.sh app-version <pkg…>  # 已装宿主 versionName
+bash tools/dev.sh install-local <apk> # 本机直装（root 中转 /data/local/tmp）
+bash tools/dev.sh stop-app <pkg…>     # 强杀宿主进程（注入判据重采前）
 ```
 
 `README.md` 里那句「或直接 Gradle：`./app/gradlew -p app assembleRelease`」**在裸 shell 里会失败**（PATH 上没有 java，报 "Unable to locate a Java Runtime"）。需要定向 gradle 任务时走带环境的入口：
@@ -65,7 +72,7 @@ XHS_Downloader_Android，**AGPL-3.0**）来自 submodule `reference/xhs/XHS_Down
 
 **DexKit 兜底必须有内容锚点**（混淆不动的字符串常量 / 参数类型序列）。**没有锚点就诚实跳过返回 `NOT_RESOLVED`，绝不猜类名硬兜。** 解析三阶段：直连反射优先（不缓存，赌类稍后加载）→ DexKit 严格轨（方法名/签名钉死）→ 宽松轨（只按内容锚点查，名字/签名只用于排序，唯一胜出才采纳）；abstract/native 不可 hook，**static 可 hook**。
 
-**`tools/adapt_new_version.py` 现提取 140 个挂载点**（2026-10-20 实测：`extract_mounts()` 已改递归 `rglob` 全 `target/`——旧的「只覆盖 9 点」结论作废）。注意**提取数 ≠ 运行期 M**：挂载点声明四格式并存（`HookPoint` 表 / 源码 `addConst`·`addForceArg` / OucHook 字符串对模板 / SDK 内联 `MountTask`，见 `docs/review-findings-2026-10-12.md` #22），且 id 字面量与运行期任务非一一对应（例：mms 4 个 id ↔ `installed 2/2`）。它只回答「反编译产物里这些类/方法还在不在」，**别拿它的计数当覆盖度结论**——口径与逐 hook M 见 `docs/hook-inventory-audit.md` §一/§五。
+**`tools/adapt_new_version.py` 现抽取 178 条挂载点声明**（注意：它只认 `PKG`/`PKG_HN`/`PKG_HNOUC` 三个全局常量 ⇒ 多包/参数化注册的 hook 归属会错，**逐包归属以 `tools/adapt_mt.py` 的 `mounts_for()` 为准**）（2026-10-20 实测：`extract_mounts()` 已改递归 `rglob` 全 `target/`——旧的「只覆盖 9 点」结论作废）。注意**提取数 ≠ 运行期 M**：挂载点声明四格式并存（`HookPoint` 表 / 源码 `addConst`·`addForceArg` / OucHook 字符串对模板 / SDK 内联 `MountTask`，见 `docs/review-findings-2026-10-12.md` #22），且 id 字面量与运行期任务非一一对应（例：mms 4 个 id ↔ `installed 2/2`）。它只回答「反编译产物里这些类/方法还在不在」，**别拿它的计数当覆盖度结论**——口径与逐 hook M 见 `docs/hook-inventory-audit.md` §一/§五。
 
 ## 构建 gotchas
 
