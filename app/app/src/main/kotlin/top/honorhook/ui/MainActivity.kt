@@ -83,7 +83,15 @@ class MainActivity : ComponentActivity() {
         // debug 构建跳过：debug 包版本号跟入库 version.properties（常落后远端发布版），静默查必弹「发现新版本」干扰自装调试；手动检查不受影响
         if (!BuildConfig.DEBUG) UpdateState.checkAsync()
         setContent {
-            HonorHookTheme { AppRoot() }
+            HonorHookTheme {
+                var splashVisible by rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    AppRoot()
+                    if (splashVisible) {
+                        top.honorhook.ui.splash.HonorSplash(onFinish = { splashVisible = false })
+                    }
+                }
+            }
         }
     }
 }
