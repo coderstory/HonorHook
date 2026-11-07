@@ -323,7 +323,28 @@ internal fun ThemeSettingsPage(
                     }
                 }
 
-                // 首页效果：萤火虫配色（配色档位定义在 ui/component/Fireflies.kt 的 FireflyTint）
+                // 首页效果：萤火虫开关 + 配色（配色档位定义在 ui/component/Fireflies.kt 的 FireflyTint）
+                Card(
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth(),
+                ) {
+                    SwitchPreference(
+                        title = "首页萤火虫",
+                        summary = "首页背景的浮动光点，关掉可省一点电",
+                        checked = AppSettings.fireflyEnabled,
+                        onCheckedChange = { AppSettings.setFireflyEnabled(it) },
+                        startAction = {
+                            Icon(
+                                Icons.Rounded.Flare,
+                                modifier = Modifier.padding(end = 6.dp),
+                                contentDescription = "首页萤火虫",
+                                tint = colorScheme.onBackground,
+                            )
+                        },
+                    )
+                }
+
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)

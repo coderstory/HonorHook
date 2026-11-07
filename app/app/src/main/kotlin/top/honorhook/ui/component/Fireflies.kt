@@ -104,9 +104,9 @@ private class Firefly(
 @Composable
 fun Fireflies(modifier: Modifier = Modifier) {
     val dark = isInDarkTheme()
-    // 浅色主题默认不画：白底上加光不可见，只能靠减光，观感就是「屏幕有污渍」。
-    // 想留着看的人可以在 主题设置 → 萤火虫颜色 下面打开开关。
-    if (!dark && !AppSettings.fireflyLight) return
+    // 之前按主题关掉（浅色默认不画），结果用户升级后直接「没效果」——默认能看见比讲究更重要，
+    // 真正的开关放设置里（firefly_enabled）。
+    if (!AppSettings.fireflyEnabled) return
     // 一次算好：不同屏幕比例下按归一化坐标分布，再乘实际尺寸
     val flies = remember(COUNT) {
         val rnd = Random(20261108)

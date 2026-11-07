@@ -62,6 +62,7 @@ object AppSettings {
     private const val KEY_FLOATING_BAR = "floating_bar"
     private const val KEY_FIREFLY_TINT = "firefly_tint"
     private const val KEY_FIREFLY_LIGHT = "firefly_light"
+    private const val KEY_FIREFLY_ENABLED = "firefly_enabled"
 
     /** 主题色板选项（照抄 KernelSU `ui/theme/Colors.kt` 的 keyColorOptions，0 = 默认）。 */
     val keyColorOptions = listOf(
@@ -115,6 +116,11 @@ object AppSettings {
     /** 浅色主题下是否也画萤火虫（默认关：白底没有「发光」，只有减光 → 像屏幕脏）。 */
     val fireflyLight: Boolean get() = _fireflyLight.value
 
+    private val _fireflyEnabled = mutableStateOf(true)
+
+    /** 首页萤火虫总开关（默认开）。 */
+    val fireflyEnabled: Boolean get() = _fireflyEnabled.value
+
     @Volatile
     private var prefs: SharedPreferences? = null
 
@@ -130,7 +136,8 @@ object AppSettings {
         _floatingBarGlass.value = p?.getBoolean(KEY_BAR_GLASS, true) ?: true
         _floatingBar.value = p?.getBoolean(KEY_FLOATING_BAR, true) ?: true
         _fireflyTint.value = p?.getString(KEY_FIREFLY_TINT, "lime") ?: "lime"
-        _fireflyLight.value = p?.getBoolean(KEY_FIREFLY_LIGHT, false) ?: false
+        _fireflyLight.value = p?.getBoolean(KEY_FIREFLY_LIGHT, true) ?: true
+        _fireflyEnabled.value = p?.getBoolean(KEY_FIREFLY_ENABLED, true) ?: true
     }
 
     fun setColorMode(mode: ColorMode) {
@@ -182,6 +189,11 @@ object AppSettings {
     fun setFireflyTint(id: String) {
         _fireflyTint.value = id
         prefs?.edit()?.putString(KEY_FIREFLY_TINT, id)?.apply()
+    }
+
+    fun setFireflyEnabled(enabled: Boolean) {
+        _fireflyEnabled.value = enabled
+        prefs?.edit()?.putBoolean(KEY_FIREFLY_ENABLED, enabled)?.apply()
     }
 
     fun setFireflyLight(enabled: Boolean) {
