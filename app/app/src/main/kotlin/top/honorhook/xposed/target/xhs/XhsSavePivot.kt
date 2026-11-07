@@ -233,15 +233,19 @@ object XhsSavePivot {
         // 服务定位器类名随 R8 漂移：9.50 = i3c.d（u2c/y.java:51 锚）；9.51 = z3c.d
         // （l3c/y smali 实证 sget z3c/d;->Companion 后 e(Class)→ShareService；l3c/y 自带锚串
         // getShortUrlObservableIfNeed success）。9.52.1 = zac.d（lac/y smali 实证
-        // sget zac/d;->Companion 后 e(Class)→ShareService，2026-11-02）。按序试探，新增版本往后追加即可
-        val companion = sequenceOf("zac.d", "z3c.d", "i3c.d").firstNotNullOfOrNull { name ->
+        // sget zac/d;->Companion 后 e(Class)→ShareService，2026-11-02）。9.53.3 = dcc.d（pbc/z smali
+        // 实证 `sget-object v0, Ldcc/d;->Companion:Ldcc/d$a;` → `e(Ljava/lang/Class;)Ljava/lang/Object;`
+        // → ShareService.getShortUrl；同族锚串 getShortUrlObservableIfNeed success/failure 落在
+        // pbc/x·pbc/y，不含定位器调用点）。按序试探，新增版本往前追加即可
+        val candidates = sequenceOf("dcc.d", "zac.d", "z3c.d", "i3c.d")
+        val companion = candidates.firstNotNullOfOrNull { name ->
             runCatching {
                 Class.forName(name, true, loader)
                     .getDeclaredField("Companion")
                     .apply { isAccessible = true }
                     .get(null)
             }.getOrNull()
-        } ?: throw NoSuchFieldException("服务定位器 Companion 未找到（试过 z3c.d / i3c.d）")
+        } ?: throw NoSuchFieldException("服务定位器 Companion 未找到（试过 ${candidates.joinToString(" / ")}）")
         val e = companion.javaClass.methods.first {
             it.name == "e" && it.parameterCount == 1 && it.parameterTypes[0] == Class::class.java
         }
