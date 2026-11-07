@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import top.honorhook.BuildConfig
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.FrameworkState
+import top.honorhook.ui.component.Fireflies
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -99,6 +100,8 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             .only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box {
+            // 背景萤火虫：画在内容层下面、卡片上面（卡片不透明，只在留白 / 卡片间隙透出来）
+            Fireflies(Modifier.fillMaxSize())
             LazyColumn(
                 modifier = Modifier
                     .fillMaxHeight()
