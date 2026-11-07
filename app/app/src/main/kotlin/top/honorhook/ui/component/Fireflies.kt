@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameNanos
@@ -36,9 +37,8 @@ private const val COUNT = 34
 /**
  * 萤火虫配色档位（2026-11-08 用户要求「多一些颜色选择」）。
  *
- * 每档给两组色：深色主题要求高亮度才「发光」，浅色主题必须换成低饱和同色相，
- * 否则白底上的高亮色会发灰、看着像脏点。aura 是外围光晕色，故意和核心色不同相（青绿 / 橙红互补），
- * 这样光点边缘有一圈颜色偏移，更像真实火焰的色散。
+ * 每档给两组色：深色主题要求高亮度才「发光」，浅色主题必须换成同色相的深色版本，
+ * 否则白底上的高亮色会发灰、看着像脏点。
  */
 enum class FireflyTint(
     val id: String,
@@ -65,10 +65,10 @@ enum class FireflyTint(
             Color(0xFFFF9BE0), Color(0xFFB388FF), Color(0xFF9FE8FF),
         )
 
-        /** 浅色主题的同色相降饱和版本：白底上鲜艳色会发灰，必须整体压暗 */
+        /** 浅色主题：同色相但要更深更饱和——白底上粉彩色只会糊成灰雾 */
         private val RainbowLight = listOf(
-            Color(0xFF3E9E86), Color(0xFF5B78C4), Color(0xFFB98F2E),
-            Color(0xFFB4629C), Color(0xFF7E63B8), Color(0xFF4F8FA6),
+            Color(0xFF1F9E7A), Color(0xFF3E6FCB), Color(0xFFD99412),
+            Color(0xFFC0489B), Color(0xFF7A56C8), Color(0xFF2C8CA8),
         )
 
         /** 当前档位在本次主题下的可用颜色 */
@@ -141,9 +141,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
 
     val tint = FireflyTint.of(AppSettings.fireflyTint)
     val colors = FireflyTint.colors(dark, tint)
-    val aura = FireflyTint.auraOf(dark, tint)
-    // 亮底上要收着点，否则一片糊成浅色雾
-    val strength = if (dark) 1f else 0.62f
+    // 亮底上更要收：白底没有「发光」的物理依据，浓度一高就像屏幕脏了
+    val strength = if (dark) 1f else 0.5f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val t = time.floatValue
@@ -168,19 +167,30 @@ fun Fireflies(modifier: Modifier = Modifier) {
             val a = pulse * breathe * strength * edge
 
             val core = colors[f.colorIndex % colors.size]
-            val r = (0.85f + 0.35f * pulse) * f.sizePx.dp.toPx()
-
-            // 荧光光团：由外到内 5 层同心圆，半径递减 / 不透明度递增，凑出「中间亮、边缘化开」的柔和衰减。
-            // 比每帧新建 radialGradient 着色器便宜（30 个粒子 × 60fps 会一直分配 Brush）。
+            val r = (0.85f + 0.30f * pulse) * f.sizePx.dp.toPx() * 1.45f
             val c = Offset(x, y)
-            val halo = if (aura == Color.Transparent) core else aura
-            drawCircle(color = halo.copy(alpha = a * 0.05f), radius = r * 2.2f, center = c)
-            drawCircle(color = halo.copy(alpha = a * 0.07f), radius = r * 1.6f, center = c)
-            drawCircle(color = core.copy(alpha = a * 0.10f), radius = r * 1.15f, center = c)
-            drawCircle(color = core.copy(alpha = a * 0.18f), radius = r * 0.72f, center = c)
-            drawCircle(color = core.copy(alpha = a * 0.30f), radius = r * 0.42f, center = c)
-            // 内核：一个小而亮的实心点，让光团有「灯芯」，否则整团是一块糊的
-            drawCircle(color = core.copy(alpha = (a * 1.4f).coerceAtMost(0.95f)), radius = r * 0.26f, center = c)
+
+            // 荧光光团：**单个径向渐变**，不是多层同心圆。
+            // 5 层实心圆在浅色底上会出现明显的「靶心环」（每层边缘都是硬边 + 一个不透明度台阶），
+            // 截图里那些一圈圈的圆环就是这么来的。渐变的英文 stop 直接给到边缘 Transparent，才是无缝化开。
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.00f to core.copy(alpha = (a * 0.55f).coerceAtMost(1f)),
+                    0.30f to core.copy(alpha = (a * 0.30f).coerceAtMost(1f)),
+                    0.62f to core.copy(alpha = (a * 0.10f).coerceAtMost(1f)),
+                    1.00f to core.copy(alpha = 0f),
+                    center = c,
+                    radius = r,
+                ),
+                radius = r,
+                center = c,
+            )
+            // 灯芯：极小的高亮实心点，保留「点状光源」的实感，不然整团只是一片雾
+            drawCircle(
+                color = core.copy(alpha = (a * 1.6f).coerceAtMost(0.95f)),
+                radius = r * 0.10f,
+                center = c,
+            )
         }
     }
 }
