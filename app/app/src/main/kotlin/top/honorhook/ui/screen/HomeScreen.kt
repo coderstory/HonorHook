@@ -87,6 +87,10 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     val scrollBehavior = MiuixScrollBehavior()
     val isDynamicColor = AppSettings.miuixMonet
 
+    // 萤火虫是**顶层浮层**（2026-11-08 用户要求「至于顶层，不会被卡片遮挡」）：
+    // 画在 Scaffold 之后 → 盖在卡片与文字上，但因为只是几个高亮小点、不透明度低，不挡阅读。
+    // Canvas 不消费触摸事件，点击照常落到下面的列表 / 卡片。
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -100,8 +104,6 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             .only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box {
-            // 背景萤火虫：画在内容层下面、卡片上面（卡片不透明，只在留白 / 卡片间隙透出来）
-            Fireflies(Modifier.fillMaxSize())
             LazyColumn(
                 modifier = Modifier
                     .fillMaxHeight()
@@ -150,6 +152,8 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 }
             }
         }
+    }
+    Fireflies(Modifier.fillMaxSize())
     }
 }
 
