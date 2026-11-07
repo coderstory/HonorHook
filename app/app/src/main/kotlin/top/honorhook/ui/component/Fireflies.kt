@@ -32,7 +32,7 @@ import kotlin.random.Random
  *
  * 只放在首页（HomeScreen）的内容层后面：其它页是列表 / 设置页，密集文字上飘光点会干扰阅读。
  */
-private const val COUNT = 34
+private const val COUNT = 26
 
 /**
  * 萤火虫配色档位（2026-11-08 用户要求「多一些颜色选择」）。
@@ -97,15 +97,21 @@ private class Firefly(
     val rise: Float,
     /** 配色序号：进页面时定下，保证同一只不会每秒变色 */
     val colorIndex: Int,
+    /** 大颗散景（虚焦光斑）：更淡更糊，负责景深；小颗是清晰亮点 */
+    val soft: Boolean,
 )
 
 @Composable
 fun Fireflies(modifier: Modifier = Modifier) {
     val dark = isInDarkTheme()
+    // 浅色主题默认不画：白底上加光不可见，只能靠减光，观感就是「屏幕有污渍」。
+    // 想留着看的人可以在 主题设置 → 萤火虫颜色 下面打开开关。
+    if (!dark && !AppSettings.fireflyLight) return
     // 一次算好：不同屏幕比例下按归一化坐标分布，再乘实际尺寸
     val flies = remember(COUNT) {
         val rnd = Random(20261108)
         List(COUNT) {
+            val soft = rnd.nextFloat() < 0.30f
             Firefly(
                 baseX = rnd.nextFloat(),
                 baseY = rnd.nextFloat(),
@@ -118,11 +124,13 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 speedY = 0.06f + rnd.nextFloat() * 0.09f,
                 phase = rnd.nextFloat() * 6.283f,
                 blinkSpeed = 0.05f + rnd.nextFloat() * 0.10f,
-                // 光团：基准 4~16dp，叠上明灭涨缩后大只直径能到 30dp 上下（用户反馈 2~8 还是太小）
-                sizePx = 4.0f + rnd.nextFloat() * 12.0f,
+                // 两级尺寸（照参考图）：三成是 6~14dp 的虚焦散景，七成是 1.4~3.6dp 的清晰亮点。
+                // 全都一样大反而假——真实镜头里远近光斑尺寸差一个数量级。
+                sizePx = if (soft) 6.0f + rnd.nextFloat() * 8.0f else 1.4f + rnd.nextFloat() * 2.2f,
                 // 放慢：每秒 0.15%~0.4% 屏高（约 4~10px/s），飘得更闲散
                 rise = 0.0015f + rnd.nextFloat() * 0.0025f,
                 colorIndex = rnd.nextInt(6),
+                soft = soft,
             )
         }
     }
@@ -168,6 +176,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
 
             val core = colors[f.colorIndex % colors.size]
             val r = (0.85f + 0.30f * pulse) * f.sizePx.dp.toPx() * 1.45f
+            // 散景整体压暗：大而亮会变成一块「膏药」，参考图里大光斑都很淡
+            val a2 = if (f.soft) a * 0.55f else a
             val c = Offset(x, y)
 
             // 荧光光团：**单个径向渐变**，不是多层同心圆。
@@ -175,9 +185,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
             // 截图里那些一圈圈的圆环就是这么来的。渐变的英文 stop 直接给到边缘 Transparent，才是无缝化开。
             drawCircle(
                 brush = Brush.radialGradient(
-                    0.00f to core.copy(alpha = (a * 0.55f).coerceAtMost(1f)),
-                    0.30f to core.copy(alpha = (a * 0.30f).coerceAtMost(1f)),
-                    0.62f to core.copy(alpha = (a * 0.10f).coerceAtMost(1f)),
+                    0.00f to core.copy(alpha = (a2 * 0.55f).coerceAtMost(1f)),
+                    0.30f to core.copy(alpha = (a2 * 0.30f).coerceAtMost(1f)),
+                    0.62f to core.copy(alpha = (a2 * 0.10f).coerceAtMost(1f)),
                     1.00f to core.copy(alpha = 0f),
                     center = c,
                     radius = r,
@@ -187,8 +197,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
             )
             // 灯芯：极小的高亮实心点，保留「点状光源」的实感，不然整团只是一片雾
             drawCircle(
-                color = core.copy(alpha = (a * 1.6f).coerceAtMost(0.95f)),
-                radius = r * 0.10f,
+                color = core.copy(alpha = (a2 * (if (f.soft) 0.6f else 1.6f)).coerceAtMost(0.95f)),
+                radius = r * (if (f.soft) 0.06f else 0.10f),
                 center = c,
             )
         }
