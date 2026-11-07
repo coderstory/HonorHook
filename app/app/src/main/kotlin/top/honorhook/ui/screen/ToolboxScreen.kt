@@ -58,6 +58,8 @@ import androidx.compose.foundation.clickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.state.ToggleableState
+import top.yukonga.miuix.kmp.basic.Checkbox
 import top.honorhook.ui.toolbox.AppIcon
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.StatusChip
@@ -772,7 +774,7 @@ private fun FreezeRow(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                AppIcon(app.pkg, 36.dp, Modifier.padding(end = 12.dp))
+                AppIcon(app.pkg, 44.dp, Modifier.padding(end = 14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(app.label, fontSize = 15.sp, color = colorScheme.onSurface)
                     Text(app.pkg, fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
@@ -788,14 +790,30 @@ private fun FreezeRow(
         return
     }
     Card(modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) {
-        CheckboxPreference(
-            title = app.label,
-            summary = "${app.pkg}（${app.entry?.cost ?: ""}）",
-            checked = checked,
-            onCheckedChange = { if (enabled) onCheck(it) },
-            // 图标走 AppIconCache：只对可见行解码、96px 内存 LRU（见 ui/toolbox/AppIcons.kt）
-            startAction = { AppIcon(app.pkg, 32.dp, Modifier.padding(end = 10.dp)) },
-        )
+        // 三行文本（名称 / 包名 / 代价说明）＋图标：CheckboxPreference 只有 title+summary 两个槽，
+        // 塞不下第三行，故这里用 Card+Row 自绘；点整行等效勾选，勾选框自身也可点。
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) { onCheck(!checked) }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AppIcon(app.pkg, 44.dp, Modifier.padding(end = 14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(app.label, fontSize = 15.sp, color = colorScheme.onSurface)
+                Text(app.pkg, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                val cost = app.entry?.cost
+                if (!cost.isNullOrBlank()) {
+                    Text(cost, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                }
+            }
+            Checkbox(
+                state = if (checked) ToggleableState.On else ToggleableState.Off,
+                onClick = { if (enabled) onCheck(!checked) },
+                enabled = enabled,
+            )
+        }
     }
 }
 
@@ -806,7 +824,7 @@ private fun RedLineRow(app: AppInfo) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AppIcon(app.pkg, 36.dp, Modifier.padding(end = 12.dp))
+            AppIcon(app.pkg, 44.dp, Modifier.padding(end = 14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = "${app.label}（禁碰）",
