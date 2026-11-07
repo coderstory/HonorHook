@@ -36,6 +36,7 @@ import androidx.compose.material.icons.rounded.CallToAction
 import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DesignServices
+import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WaterDrop
@@ -53,6 +54,7 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.ColorMode
+import top.honorhook.ui.component.FireflyTint
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -319,6 +321,30 @@ internal fun ThemeSettingsPage(
                             onCheckedChange = { AppSettings.setFloatingBarGlass(it) },
                         )
                     }
+                }
+
+                // 首页效果：萤火虫配色（配色档位定义在 ui/component/Fireflies.kt 的 FireflyTint）
+                Card(
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth(),
+                ) {
+                    val tints = FireflyTint.entries
+                    OverlayDropdownPreference(
+                        title = "萤火虫颜色",
+                        summary = "首页背景光点的配色",
+                        startAction = {
+                            Icon(
+                                Icons.Rounded.Flare,
+                                modifier = Modifier.padding(end = 6.dp),
+                                contentDescription = "萤火虫颜色",
+                                tint = colorScheme.onBackground,
+                            )
+                        },
+                        items = tints.map { it.label },
+                        selectedIndex = tints.indexOfFirst { it.id == AppSettings.fireflyTint }.coerceAtLeast(0),
+                        onSelectedIndexChange = { index -> AppSettings.setFireflyTint(tints[index].id) },
+                    )
                 }
 
                 Spacer(

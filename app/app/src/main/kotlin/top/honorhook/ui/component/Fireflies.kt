@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.withFrameNanos
 import kotlin.math.min
 import kotlin.math.sin
+import top.honorhook.ui.AppSettings
 import kotlin.random.Random
 
 /**
@@ -31,6 +32,33 @@ import kotlin.random.Random
  * 只放在首页（HomeScreen）的内容层后面：其它页是列表 / 设置页，密集文字上飘光点会干扰阅读。
  */
 private const val COUNT = 34
+
+/**
+ * 萤火虫配色档位（2026-11-08 用户要求「多一些颜色选择」）。
+ *
+ * 每档给两组色：深色主题要求高亮度才「发光」，浅色主题必须换成低饱和同色相，
+ * 否则白底上的高亮色会发灰、看着像脏点。aura 是外围光晕色，故意和核心色不同相（青绿 / 橙红互补），
+ * 这样光点边缘有一圈颜色偏移，更像真实火焰的色散。
+ */
+enum class FireflyTint(
+    val id: String,
+    val label: String,
+    val darkCore: Color,
+    val darkAura: Color,
+    val lightCore: Color,
+    val lightAura: Color,
+) {
+    LIME("lime", "萤绿", Color(0xFFC6FF6E), Color(0xFF6BFFA8), Color(0xFF8FBF4A), Color(0xFFB7D98A)),
+    GOLD("gold", "暖金", Color(0xFFFFD166), Color(0xFFFFB347), Color(0xFFC08A2E), Color(0xFFE0C07A)),
+    AMBER("amber", "蜜橙", Color(0xFFFFA95E), Color(0xFFFF7A45), Color(0xFFB87A3E), Color(0xFFE2B284)),
+    CYAN("cyan", "青蓝", Color(0xFF7FE3FF), Color(0xFF4FC3F7), Color(0xFF3E8FA6), Color(0xFF9FD4E4)),
+    PINK("pink", "粉紫", Color(0xFFFF9BE0), Color(0xFFB388FF), Color(0xFFB4629C), Color(0xFFD8A8CC)),
+    ICE("ice", "冰白", Color(0xFFEAF6FF), Color(0xFF9FD8FF), Color(0xFF8FA3B0), Color(0xFFC3D4DE));
+
+    companion object {
+        fun of(id: String): FireflyTint = entries.firstOrNull { it.id == id } ?: LIME
+    }
+}
 
 /** 单只萤火虫的固定参数（位置、路径、节奏），只在首次进首页时随机一次 */
 private class Firefly(
@@ -65,7 +93,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 speedY = 0.16f + rnd.nextFloat() * 0.22f,
                 phase = rnd.nextFloat() * 6.283f,
                 blinkSpeed = 0.12f + rnd.nextFloat() * 0.26f,
-                sizePx = 1.0f + rnd.nextFloat() * 1.1f,
+                // 大小跨度 0.8~3.3（原来 1.0~2.1）：近处的「大只」和远处的小点并存，才有景深
+                sizePx = 0.8f + rnd.nextFloat() * 2.5f,
                 rise = 0.004f + rnd.nextFloat() * 0.007f,
             )
         }
@@ -83,8 +112,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
         }
     }
 
-    val core = if (dark) Color(0xFFC6FF6E) else Color(0xFF8FBF4A)
-    val aura = if (dark) Color(0xFF6BFFA8) else Color(0xFFB7D98A)
+    val tint = FireflyTint.of(AppSettings.fireflyTint)
+    val core = if (dark) tint.darkCore else tint.lightCore
+    val aura = if (dark) tint.darkAura else tint.lightAura
     // 亮底上要收着点，否则一片糊成浅黄
     val strength = if (dark) 1f else 0.72f
 
