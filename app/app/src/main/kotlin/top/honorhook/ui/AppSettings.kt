@@ -104,7 +104,7 @@ object AppSettings {
     /** 悬浮底栏（关闭则退回贴边 NavigationBar）。 */
     val floatingBar: Boolean get() = _floatingBar.value
 
-    private val _fireflyTint = mutableStateOf("lime")
+    private val _fireflyTint = mutableStateOf("rainbow")
 
     /** 首页萤火虫配色档位 id（见 `ui/component/Fireflies.kt` 的 FireflyTint）。 */
     val fireflyTint: String get() = _fireflyTint.value
@@ -123,7 +123,7 @@ object AppSettings {
         _liquidGlass.value = p?.getBoolean(KEY_GLASS, true) ?: true
         _floatingBarGlass.value = p?.getBoolean(KEY_BAR_GLASS, true) ?: true
         _floatingBar.value = p?.getBoolean(KEY_FLOATING_BAR, true) ?: true
-        _fireflyTint.value = p?.getString(KEY_FIREFLY_TINT, "lime") ?: "lime"
+        _fireflyTint.value = p?.getString(KEY_FIREFLY_TINT, "rainbow") ?: "rainbow"
     }
 
     fun setColorMode(mode: ColorMode) {

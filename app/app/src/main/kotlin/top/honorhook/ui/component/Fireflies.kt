@@ -48,6 +48,7 @@ enum class FireflyTint(
     val lightCore: Color,
     val lightAura: Color,
 ) {
+    RAINBOW("rainbow", "彩虹", Color(0xFF7CF7C4), Color(0xFF7CF7C4), Color(0xFF3E8F7A), Color(0xFF3E8F7A)),
     LIME("lime", "萤绿", Color(0xFFC6FF6E), Color(0xFF6BFFA8), Color(0xFF8FBF4A), Color(0xFFB7D98A)),
     GOLD("gold", "暖金", Color(0xFFFFD166), Color(0xFFFFB347), Color(0xFFC08A2E), Color(0xFFE0C07A)),
     AMBER("amber", "蜜橙", Color(0xFFFFA95E), Color(0xFFFF7A45), Color(0xFFB87A3E), Color(0xFFE2B284)),
@@ -56,7 +57,28 @@ enum class FireflyTint(
     ICE("ice", "冰白", Color(0xFFEAF6FF), Color(0xFF9FD8FF), Color(0xFF8FA3B0), Color(0xFFC3D4DE));
 
     companion object {
-        fun of(id: String): FireflyTint = entries.firstOrNull { it.id == id } ?: LIME
+        fun of(id: String): FireflyTint = entries.firstOrNull { it.id == id } ?: RAINBOW
+
+        /** 深色主题的「彩虹」多色盘：青、蓝、暖黄、粉、紫、冰蓝，全部高亮度（暗底才有荧光感） */
+        private val RainbowDark = listOf(
+            Color(0xFF6EF7D0), Color(0xFF8AB4FF), Color(0xFFFFD166),
+            Color(0xFFFF9BE0), Color(0xFFB388FF), Color(0xFF9FE8FF),
+        )
+
+        /** 浅色主题的同色相降饱和版本：白底上鲜艳色会发灰，必须整体压暗 */
+        private val RainbowLight = listOf(
+            Color(0xFF3E9E86), Color(0xFF5B78C4), Color(0xFFB98F2E),
+            Color(0xFFB4629C), Color(0xFF7E63B8), Color(0xFF4F8FA6),
+        )
+
+        /** 当前档位在本次主题下的可用颜色 */
+        fun colors(dark: Boolean, self: FireflyTint): List<Color> = when (self) {
+            RAINBOW -> if (dark) RainbowDark else RainbowLight
+            else -> listOf(if (dark) self.darkCore else self.lightCore)
+        }
+
+        fun auraOf(dark: Boolean, self: FireflyTint): Color =
+            if (self == RAINBOW) Color.Transparent else if (dark) self.darkAura else self.lightAura
     }
 }
 
@@ -73,6 +95,8 @@ private class Firefly(
     val sizePx: Float,
     /** 每秒往上飘的归一化距离（屏高比例）；到顶回到底部，像真的往上飞 */
     val rise: Float,
+    /** 配色序号：进页面时定下，保证同一只不会每秒变色 */
+    val colorIndex: Int,
 )
 
 @Composable
@@ -89,13 +113,16 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 driftY = 0.02f + rnd.nextFloat() * 0.04f,
                 // 首版 0.05~0.15 rad/s 慢到 1~2px/s（肉眼「不动」），第二版 0.35~0.9 又偏快。
                 // 现在取中段：0.18~0.42（周期 15~35s），每秒约 6~14px，看得出在飘但不抢视线。
-                speedX = 0.18f + rnd.nextFloat() * 0.24f,
-                speedY = 0.16f + rnd.nextFloat() * 0.22f,
+                // 再放慢一档：0.07~0.17 rad/s（周期 37~90s），配合光团的柔和形态，像缓慢漂浮
+                speedX = 0.07f + rnd.nextFloat() * 0.10f,
+                speedY = 0.06f + rnd.nextFloat() * 0.09f,
                 phase = rnd.nextFloat() * 6.283f,
-                blinkSpeed = 0.12f + rnd.nextFloat() * 0.26f,
-                // 大小跨度 0.8~3.3（原来 1.0~2.1）：近处的「大只」和远处的小点并存，才有景深
-                sizePx = 0.8f + rnd.nextFloat() * 2.5f,
-                rise = 0.004f + rnd.nextFloat() * 0.007f,
+                blinkSpeed = 0.05f + rnd.nextFloat() * 0.10f,
+                // 光团：基准 2~8dp（原来 0.8~3.3），叠上明灭的涨缩后直径能到 20dp 上下
+                sizePx = 2.0f + rnd.nextFloat() * 6.0f,
+                // 放慢：每秒 0.15%~0.4% 屏高（约 4~10px/s），飘得更闲散
+                rise = 0.0015f + rnd.nextFloat() * 0.0025f,
+                colorIndex = rnd.nextInt(6),
             )
         }
     }
@@ -113,10 +140,10 @@ fun Fireflies(modifier: Modifier = Modifier) {
     }
 
     val tint = FireflyTint.of(AppSettings.fireflyTint)
-    val core = if (dark) tint.darkCore else tint.lightCore
-    val aura = if (dark) tint.darkAura else tint.lightAura
-    // 亮底上要收着点，否则一片糊成浅黄
-    val strength = if (dark) 1f else 0.72f
+    val colors = FireflyTint.colors(dark, tint)
+    val aura = FireflyTint.auraOf(dark, tint)
+    // 亮底上要收着点，否则一片糊成浅色雾
+    val strength = if (dark) 1f else 0.62f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val t = time.floatValue
@@ -135,18 +162,25 @@ fun Fireflies(modifier: Modifier = Modifier) {
             // 0.18 的底噪是必须的——纯三次方大多数时间接近 0，画面上等于没有（首版就栽在这）。
             val wave = (sin(t * f.blinkSpeed * 6.283f + f.phase) + 1f) * 0.5f
             val pulse = 0.18f + 0.82f * (wave * wave * wave)
-            val breathe = 0.82f + 0.18f * sin(t * 0.18f + f.phase * 0.3f)
+            val breathe = 0.82f + 0.18f * sin(t * 0.10f + f.phase * 0.3f)
             // 回绕时在顶 / 底边缘淡出淡入，否则虫子飞出屏幕又「啪」地出现在另一头
             val edge = minOf(1f, (yNorm / 0.08f).coerceIn(0f, 1f), ((1f - yNorm) / 0.06f).coerceIn(0f, 1f))
             val a = pulse * breathe * strength * edge
 
-            val r = (1.5f + 1.7f * pulse) * f.sizePx.dp.toPx() * 1.2f
+            val core = colors[f.colorIndex % colors.size]
+            val r = (0.85f + 0.35f * pulse) * f.sizePx.dp.toPx()
 
-            // 三层同心圆凑出「光点 + 光晕」：比径向渐变省一次 Brush 分配，视觉上分不出来。
-            // 光晕收窄（5.0/2.4 → 3.6/1.8）：太大在低透明度下就是一团「闪烁的圆」，不像虫子。
-            drawCircle(color = aura.copy(alpha = a * 0.10f), radius = r * 3.6f, center = Offset(x, y))
-            drawCircle(color = core.copy(alpha = a * 0.22f), radius = r * 1.8f, center = Offset(x, y))
-            drawCircle(color = core.copy(alpha = a.coerceAtMost(1f)), radius = r, center = Offset(x, y))
+            // 荧光光团：由外到内 5 层同心圆，半径递减 / 不透明度递增，凑出「中间亮、边缘化开」的柔和衰减。
+            // 比每帧新建 radialGradient 着色器便宜（30 个粒子 × 60fps 会一直分配 Brush）。
+            val c = Offset(x, y)
+            val halo = if (aura == Color.Transparent) core else aura
+            drawCircle(color = halo.copy(alpha = a * 0.05f), radius = r * 2.2f, center = c)
+            drawCircle(color = halo.copy(alpha = a * 0.07f), radius = r * 1.6f, center = c)
+            drawCircle(color = core.copy(alpha = a * 0.10f), radius = r * 1.15f, center = c)
+            drawCircle(color = core.copy(alpha = a * 0.18f), radius = r * 0.72f, center = c)
+            drawCircle(color = core.copy(alpha = a * 0.30f), radius = r * 0.42f, center = c)
+            // 内核：一个小而亮的实心点，让光团有「灯芯」，否则整团是一块糊的
+            drawCircle(color = core.copy(alpha = (a * 1.5f).coerceAtMost(0.95f)), radius = r * 0.16f, center = c)
         }
     }
 }
