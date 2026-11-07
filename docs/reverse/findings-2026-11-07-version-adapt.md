@@ -99,5 +99,31 @@ bash tools/dev.sh modlog-grep 'ThemeStoreHook|Xhs'
 bash tools/dev.sh wait-hook
 ```
 
-期望：theme `installed 49/49`（新表）、xhs X1 `3/3`、X2b `3/3`、X4 `1/1`、X5 `5/5`、appmarket `7/7`、
+期望：theme `installed 52/52`（新表 20.1.67.303，实测已达）、xhs X1 `3/3`、X2b `3/3`、X4 `1/1`、X5 `5/5`、appmarket `7/7`、
 sysmgr `3/3`、mms `2/2`、totemweather `5/5`（Ex 点运行时二选一）。
+
+## 七、运行时补修（2026-11-07 晚，静态校验抓不到的两处）
+
+### 短信插件 10.0.44.309：T3 主轨 `b(4参)` → `c(5参)`
+
+- **现象**：宿主升到 19.0.10.310（插件 10.0.44.309）后，短信卡片仍显示「打开应用」按钮；
+  日志 `mms-hook 主轨未解析（com.ted.sms.feature.ui.action.SimpleActionLayout#b(4参)，插件版本差异？）`。
+- **实证**（MT MCP，`mt://installed-app/com.hihonor.intelligentmessage`）：
+  - `b()V` 仍在但已是零参方法；4 参版消失。
+  - `c(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/ted/sms/model/TedCard;J)V`
+    与旧 `b(4参)` **同构**：`iput-wide p5->u:J`（新增的时间戳）→ `p2.length()==0 &&
+    (card==null || !"0EFF76FF".equals(code))` → `setVisibility(8); return-void`。参数序
+    `msgId, json, smsNumber, TedCard, long`，第 2 参仍是 json。
+  - 调用方 smaliq 命中 `com.ted.sms.plugin.TedMsgItemProcessor`（卡片渲染主链），非死方法。
+- **处置**：`MmsHook` 改双轨解析——先 `b(4参)`（老插件 10.0.42.x 仍跑）再 `c(5参)`，命中项带自己的
+  任务 id 打判据；`args[1] = ""` 两版语义一致。
+- **真机判据**（2026-11-07 23:21）：`mms-hook 主轨已挂载: com.ted.sms.feature.ui.action.SimpleActionLayout.c(5参)`
+  + `mms-hook 生效: mms:SimpleActionLayout.c …（json 已置空（card=TedCard））`，用户确认按钮消失。
+
+### 小红书 9.53.3：服务定位器类再次改名
+
+- **现象**：分享直下报 `XhsHook·X5 getShortUrl 异常 NoSuchFieldException: 服务定位器 Companion 未找到（试过 z3c.d / i3c.d）`。
+- **实证**：`pbc/z` smali 为 `sget-object v0, Ldcc/d;->Companion:Ldcc/d$a;` → `e(Ljava/lang/Class;)Ljava/lang/Object;`
+  → `ShareService.getShortUrl`；`dcc.d$a` 确有该 `e` 方法（**outline 会漏字段/方法，必须读 smali 复核**）。
+- **处置**：`XhsSavePivot` 候选表前置 `dcc.d`，失败提示列出全部试过的候选。
+- **真机判据**：22:38 装新包后 X1 `3/3`、X2 `3/3`、X4 `1/1`、X5 `5/5`，`getShortUrl` 不再报错。
