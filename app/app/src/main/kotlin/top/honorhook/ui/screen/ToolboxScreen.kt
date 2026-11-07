@@ -58,6 +58,7 @@ import androidx.compose.foundation.clickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.honorhook.ui.toolbox.AppIcon
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.StatusChip
 import top.honorhook.ui.scope.RootShell
@@ -771,6 +772,7 @@ private fun FreezeRow(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                AppIcon(app.pkg, 36.dp, Modifier.padding(end = 12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(app.label, fontSize = 15.sp, color = colorScheme.onSurface)
                     Text(app.pkg, fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
@@ -791,6 +793,8 @@ private fun FreezeRow(
             summary = "${app.pkg}（${app.entry?.cost ?: ""}）",
             checked = checked,
             onCheckedChange = { if (enabled) onCheck(it) },
+            // 图标走 AppIconCache：只对可见行解码、96px 内存 LRU（见 ui/toolbox/AppIcons.kt）
+            startAction = { AppIcon(app.pkg, 32.dp, Modifier.padding(end = 10.dp)) },
         )
     }
 }
@@ -802,6 +806,7 @@ private fun RedLineRow(app: AppInfo) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            AppIcon(app.pkg, 36.dp, Modifier.padding(end = 12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     text = "${app.label}（禁碰）",
