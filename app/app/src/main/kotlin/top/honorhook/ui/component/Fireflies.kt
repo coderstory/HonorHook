@@ -32,7 +32,7 @@ import kotlin.random.Random
  *
  * 只放在首页（HomeScreen）的内容层后面：其它页是列表 / 设置页，密集文字上飘光点会干扰阅读。
  */
-private const val COUNT = 26
+private const val COUNT = 32
 
 /**
  * 萤火虫配色档位（2026-11-08 用户要求「多一些颜色选择」）。
@@ -118,8 +118,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
             Firefly(
                 baseX = rnd.nextFloat(),
                 baseY = rnd.nextFloat(),
-                driftX = 0.03f + rnd.nextFloat() * 0.05f,
-                driftY = 0.02f + rnd.nextFloat() * 0.04f,
+                driftX = 0.02f + rnd.nextFloat() * 0.04f,
+                driftY = 0.01f + rnd.nextFloat() * 0.02f,
                 // 首版 0.05~0.15 rad/s 慢到 1~2px/s（肉眼「不动」），第二版 0.35~0.9 又偏快。
                 // 现在取中段：0.18~0.42（周期 15~35s），每秒约 6~14px，看得出在飘但不抢视线。
                 // 再放慢一档：0.07~0.17 rad/s（周期 37~90s），配合光团的柔和形态，像缓慢漂浮
@@ -131,10 +131,11 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 // 全都一样大反而假——真实镜头里远近光斑尺寸差一个数量级。
                 // 用户两次反馈「太小、太不起眼」：参考图那种 1~3dp 的小点在手机上基本读不出来，
                 // 实际要 4~9dp 才看得见。散景再大一档，负责层次。
-                sizePx = if (soft) 11.0f + rnd.nextFloat() * 11.0f
-                else 4.0f + rnd.nextFloat() * 5.0f,
+                sizePx = if (soft) 12.0f + rnd.nextFloat() * 12.0f
+                else 5.0f + rnd.nextFloat() * 5.0f,
                 // 放慢：每秒 0.15%~0.4% 屏高（约 4~10px/s），飘得更闲散
-                rise = 0.0015f + rnd.nextFloat() * 0.0025f,
+                // 0.7%~1.6% 屏高/秒（2800px 屏 ≈ 20~45px/s）——要能一眼看出在往上飘
+                rise = 0.007f + rnd.nextFloat() * 0.009f,
                 colorIndex = rnd.nextInt(6),
                 soft = soft,
             )
@@ -200,9 +201,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
             // 截图里那些一圈圈的圆环就是这么来的。渐变的英文 stop 直接给到边缘 Transparent，才是无缝化开。
             drawCircle(
                 brush = Brush.radialGradient(
-                    0.00f to core.copy(alpha = (a2 * 0.80f).coerceAtMost(1f)),
-                    0.28f to core.copy(alpha = (a2 * 0.45f).coerceAtMost(1f)),
-                    0.60f to core.copy(alpha = (a2 * 0.16f).coerceAtMost(1f)),
+                    0.00f to core.copy(alpha = (a2 * 0.88f).coerceAtMost(1f)),
+                    0.28f to core.copy(alpha = (a2 * 0.52f).coerceAtMost(1f)),
+                    0.60f to core.copy(alpha = (a2 * 0.20f).coerceAtMost(1f)),
                     1.00f to core.copy(alpha = 0f),
                     center = c,
                     radius = r,
@@ -210,6 +211,17 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 radius = r,
                 center = c,
             )
+            // 拖尾：往上飘时身后留 3 段渐隐余影，方向和速度都靠它读出来（纯靠位移太慢，看不出）
+            val tailLen = f.sizePx.dp.toPx() * (if (f.soft) 0.7f else 0.55f)
+            for (i in 1..3) {
+                val dy = tailLen * i * 0.9f
+                drawCircle(
+                    color = core.copy(alpha = (a2 * (0.22f / i)).coerceAtMost(0.5f)),
+                    radius = r * (1f - 0.18f * i),
+                    center = Offset(x, y + dy),
+                )
+            }
+
             // 灯芯：极小的高亮实心点，保留「点状光源」的实感，不然整团只是一片雾
             drawCircle(
                 color = core.copy(alpha = (a2 * (if (f.soft) 0.6f else 1.6f)).coerceAtMost(0.95f)),
