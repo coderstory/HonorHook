@@ -32,6 +32,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AcUnit
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.Password
+import androidx.compose.material.icons.rounded.TravelExplore
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
@@ -47,6 +52,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -594,22 +601,38 @@ private fun HubTiles(
     val frozen = (apps ?: emptyList()).count { it.frozen }
     val switchCount = ToolSwitchTable.ENTRIES.count { it.group == null }
 
+    // 每格一个语义色（2026-11-08 用户要求「图标整体好看一点」）：
+    // 冷色=清理类、暖色=拦截类、青/紫=工具类，深浅色主题下都能保持对比度。
+    val accentAds = Color(0xFFF2685A)
+    val accentFreeze = Color(0xFF4FA8FF)
+    val accentSwitch = Color(0xFF9B84FF)
+    val accentMfa = Color(0xFF35C77E)
+    val accentWeb = Color(0xFF2BB3C0)
+    val accentRoot = Color(0xFFF0A93B)
+    val accentFiles = Color(0xFF00BFA5)
+
     @Composable
     fun Tile(
         icon: androidx.compose.ui.graphics.vector.ImageVector,
         title: String,
         sub: String,
+        accent: Color,
         onClick: () -> Unit,
     ) {
         Card(modifier = Modifier.fillMaxWidth().fillMaxHeight().clickable(onClick = onClick)) {
             Column(Modifier.padding(16.dp)) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .background(colorScheme.primary.copy(alpha = 0.12f), RoundedCornerShape(13.dp)),
+                        .size(46.dp)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(accent.copy(alpha = 0.30f), accent.copy(alpha = 0.10f)),
+                            ),
+                            RoundedCornerShape(15.dp),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(icon, contentDescription = null, tint = colorScheme.primary, modifier = Modifier.size(22.dp))
+                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(26.dp))
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -626,38 +649,38 @@ private fun HubTiles(
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个系统开关 · 当前开 $adsOn") { onOpen(HubView.PURIFY) }
+                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个系统开关 · 当前开 $adsOn", accentAds) { onOpen(HubView.PURIFY) }
             }
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档") { onOpen(HubView.FREEZE) }
+                Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze) { onOpen(HubView.FREEZE) }
             }
         }
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.ToggleOn, "系统开关", "$switchCount 项可调") { onOpen(HubView.SWITCH) }
+                Tile(Icons.Rounded.Tune, "系统开关", "$switchCount 项可调", accentSwitch) { onOpen(HubView.SWITCH) }
             }
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Key, "MFA 验证器", "TOTP 动态码 · 扫码/导入") { onOpen(HubView.MFA) }
+                Tile(Icons.Rounded.Password, "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa) { onOpen(HubView.MFA) }
             }
         }
         // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）；第三行同尺寸磁贴
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Language, "远程开发", "扫码打开网页 · 全屏浏览器") {
+                Tile(Icons.Rounded.TravelExplore, "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb) {
                     onOpenHubActivity()
                 }
             }
             Box(Modifier.weight(1f)) {
                 // GhostLock（2026-11-03）：第三行右格；payload 不打进 APK，
                 // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
-                Tile(Icons.Rounded.Key, "临时Root", "无 root 提权 · Shizuku") { onOpen(HubView.GHOSTLOCK) }
+                Tile(Icons.Rounded.Terminal, "临时Root", "无 root 提权 · Shizuku", accentRoot) { onOpen(HubView.GHOSTLOCK) }
             }
         }
         // 文件整理（2026-11-04）：第四行左格；规格 project/file-organizer-rules.md v2
         // 右格必须留占位 Box——单格 weight(1f) 会独占整行变成大卡（用户实测指出）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.FolderOpen, "文件整理", "照片按月归档 · 垃圾清理") { onOpen(HubView.FILES) }
+                Tile(Icons.Rounded.PhotoLibrary, "文件整理", "照片按月归档 · 垃圾清理", accentFiles) { onOpen(HubView.FILES) }
             }
             Box(Modifier.weight(1f)) {}
         }
