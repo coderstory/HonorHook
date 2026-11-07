@@ -1331,22 +1331,53 @@ object XhsBatchSave {
                             ?: return Fetch.FAIL
                         // 2026-10-19 进度+取消：insert 后持有（写完即清）——进度卡取消按钮据此删本张半成品
                         currentImageUri = outUri
-                        activity.contentResolver.openOutputStream(outUri)?.use { out ->
-                            // 首块先写入（不能丢），再续读剩余
-                            out.write(head, 0, headFill)
-                            input.use { rest ->
-                                val buf = ByteArray(64 * 1024)
-                                var total = headFill.toLong()
-                                while (true) {
-                                    val n = rest.read(buf)
-                                    if (n < 0) break
-                                    total += n
-                                    if (total > MAX_IMAGE_BYTES) return Fetch.FAIL
-                                    out.write(buf, 0, n)
+                        // 写盘段校验闭环（2026-11-06，用户报「下载文件损坏」根因）：写循环任何失败
+                        // （IOException / 超限 / 字节数与 Content-Length 不符 = 服务端断流截断）都
+                        // 先删半成品行再走失败/回落——旧行为直接上抛/FAIL，半截图留在相册
+                        // （= 损坏文件），且写盘段不重试。删行失败时 cancel 路与 downloadAll 收尾
+                        // 的 currentImageUri 补删兜底（既有机制，无需新加）。
+                        try {
+                            activity.contentResolver.openOutputStream(outUri)?.use { out ->
+                                // 首块先写入（不能丢），再续读剩余
+                                out.write(head, 0, headFill)
+                                input.use { rest ->
+                                    val buf = ByteArray(64 * 1024)
+                                    var total = headFill.toLong()
+                                    while (true) {
+                                        val n = rest.read(buf)
+                                        if (n < 0) break
+                                        total += n
+                                        if (total > MAX_IMAGE_BYTES) {
+                                            module.log(Log.WARN, MountEngine.TAG,
+                                                "$JUDGE_PREFIX 直下 超限（>${MAX_IMAGE_BYTES / 1048576}MB），删半成品")
+                                            activity.contentResolver.delete(outUri, null, null)
+                                            currentImageUri = null
+                                            return Fetch.FAIL
+                                        }
+                                        out.write(buf, 0, n)
+                                    }
+                                    // 完整性校验（对齐 XhsVideoSave 校验 2）：长度已知且不符 = 截断，不留残片
+                                    if (len > 0 && total != len) {
+                                        module.log(Log.WARN, MountEngine.TAG,
+                                            "$JUDGE_PREFIX 直下 字节数不符（收 $total / 期望 $len），删半成品回落重试")
+                                        activity.contentResolver.delete(outUri, null, null)
+                                        currentImageUri = null
+                                        return Fetch.RETRY_FALLBACK
+                                    }
+                                    bytesOut[0] = total
                                 }
-                                bytesOut[0] = total
+                            } ?: run {
+                                activity.contentResolver.delete(outUri, null, null)
+                                currentImageUri = null
+                                return Fetch.FAIL
                             }
-                        } ?: return Fetch.FAIL
+                        } catch (io: java.io.IOException) {
+                            module.log(Log.WARN, MountEngine.TAG,
+                                "$JUDGE_PREFIX 直下 写盘中断（${io.javaClass.simpleName}: ${io.message}），删半成品回落重试")
+                            runCatching { activity.contentResolver.delete(outUri, null, null) }
+                            currentImageUri = null
+                            return Fetch.RETRY_FALLBACK
+                        }
                         // 写完即清：此后取消不得误删本张成品（已下载完成的不处理）
                         currentImageUri = null
                         return Fetch.OK
