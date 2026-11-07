@@ -29,7 +29,7 @@ object ToolSwitchTable {
         val note: String,
         /** 云端可能回写（pushagent global 键等），执行后隔天复查（05 号红线） */
         val cloudRewrite: Boolean = false,
-        /** 同批联动键：UI 一键成组（营销 11 键 / 私有 DNS 成对） */
+        /** 同批联动键：UI 一键成组（营销 11 键） */
         val group: String? = null,
         /** HIGH 风险默认折叠进「更多」 */
         val folded: Boolean = false,
