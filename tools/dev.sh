@@ -312,6 +312,9 @@ HonorHook 开发工具
   install-apk <apk...>    安装任意 APK 文件（-r 覆盖保数据，自动点 ROM 安装弹窗）
   install-local [apk]     本机静默覆盖安装（on-device：中转 /data/local/tmp；缺省装 debug APK）
   stop-app <pkg...>       强杀进程（on-device 走 su kill -9；host 走 su 0 kill -9）
+  hook-status [前缀]      各 hook 最近一次 installed N/M 汇总（可选按 hook 名前缀过滤）
+  app-version <pkg...>    已安装应用 versionName 一览
+  lsposed-state [pkg]     LSPosed 里本模块的启用态 + 作用域清单
   enable-module    重装后重新启用 LSPosed 模块（lspctl CLI 通道，含作用域进程强停）
   deploy-release   一键全流程：build-release + install-release + enable-module
   connect <ip[:port]> 无线 adb 连接（省端口默认 5555）
@@ -692,6 +695,62 @@ EOF
       for pid in $pids; do dev_root "kill -9 $pid" >/dev/null 2>&1 || true; done
       info "$p (pid $(echo $pids | tr '\n' ' ')) 已 kill -9"
     done
+    ;;
+
+  hook-status)
+    # 各 hook 最近一次 installed N/M 汇总（原先每次手写 python 解析日志，2026-11-07 并入本脚本）。
+    # 可选参数：hook 名前缀过滤（如 XhsHook / MmsHook）。
+    PAT="${2:-}"
+    F="$(dev_root "ls -t /data/adb/lspd/log/modules_*.log 2>/dev/null" | tr -d '\r' | head -1 || true)"
+    [ -n "$F" ] || die "取不到 lspd 模块日志（设备未连 / su 不可用）"
+    info "日志: $F"
+    # 同一 hook[pkg] 只留最后一次：tac 后 awk 去重再翻回来（日志按时间追加）
+    dev_root "grep -h 'installed [0-9]' '$F' 2>/dev/null" | tr -d '\r' \
+      | sed -E 's/^.*\] ([^]]+\]: installed [0-9]+\/[0-9]+).*$/\1/' \
+      | if [ -n "$PAT" ]; then grep -F "$PAT"; else cat; fi \
+      | tac | awk -F': installed ' '!seen[$1]++' | tac
+    ;;
+
+  app-version)
+    # 已安装应用的 versionName（dumpsys 在 uid 10607 下无 DUMP 权限，统一走 dev_root）
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh app-version <包名...>"
+    shift
+    for p in "$@"; do
+      [[ "$p" =~ ^[A-Za-z0-9_.]+$ ]] || die "包名非法: $p"
+      # 不用 grep -m1：它命中即退出，上游 su 收到 SIGPIPE → pipefail 下整条赋值失败（set -e 直退）
+      v="$(dev_root "dumpsys package $p 2>/dev/null" | tr -d '\r' | grep 'versionName=' | head -1 | sed 's/.*versionName=//' || true)"
+      if [ -n "$v" ]; then printf '%-45s %s\n' "$p" "$v"; else printf '%-45s %s\n' "$p" "(未安装)"; fi
+    done
+    ;;
+
+  lsposed-state)
+    # LSPosed 里本模块的启用态 + 作用域清单。本机没有 sqlite3 可执行文件，先把 db 拷出来再用
+    # python3 的 sqlite3 模块读（WAL 要一起拷，否则读到旧快照）。
+    PKG="${2:-io.github.coderstory.honorhook}"
+    [[ "$PKG" =~ ^[A-Za-z0-9_.]+$ ]] || die "包名非法: $PKG"
+    D=/data/local/tmp/honorhook-lspd.db
+    dev_root "cp /data/adb/lspd/config/modules_config.db $D; \
+      cp /data/adb/lspd/config/modules_config.db-wal $D-wal 2>/dev/null; \
+      cp /data/adb/lspd/config/modules_config.db-shm $D-shm 2>/dev/null; \
+      chmod 644 $D $D-wal $D-shm 2>/dev/null; true" >/dev/null 2>&1
+    [ -f "$D" ] || die "拷不出 modules_config.db（su 不可用？）"
+    PY="$(pick_python || true)"
+    [ -n "$PY" ] || die "缺 python3（读模块配置库用）"
+    "$PY" - "$D" "$PKG" <<'PYX'
+import sqlite3, sys
+db, pkg = sys.argv[1], sys.argv[2]
+c = sqlite3.connect(db)
+rows = list(c.execute("select user_id, enabled from modules_state where module_pkg_name=?", (pkg,)))
+print(f"module: {pkg}")
+if not rows:
+    print("  未注册（LSPosed 模块列表里没有它）")
+else:
+    for uid, en in rows:
+        print(f"  user {uid}: {'enabled' if en else 'DISABLED'}")
+    apps = [r[0] for r in c.execute(
+        "select app_pkg_name from scope where module_pkg_name=? order by app_pkg_name", (pkg,))]
+    print(f"  scope {len(apps)} 个: {', '.join(apps)}")
+PYX
     ;;
 
   # 重启作用域进程：root kill（TERM，干净，无 crash 记录不计 LSPosed 安全模式频次）——
