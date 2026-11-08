@@ -80,6 +80,46 @@ object EntranceTokens {
 }
 
 /**
+ * 进场「性格」（2026-11-08 用户反馈：功能页与工具箱的卡片动效一模一样，页面之间没有区分）。
+ *
+ * 同族不同味：位移/旋转/缩放/弹簧四个旋钮里只动幅度与弹性，**不引入新的运动类型**，
+ * 所以整页仍然协调——差别在读感（"被风托进来" vs "啪地吸附落位"），不在花哨程度。
+ * 用乘子而不是绝对值：各边的基础行程（上下 190/150dp、左右 210dp）已经调平过，
+ * 乘子保证不同边上的同类卡片仍然同比例。
+ */
+class EntranceMotion(
+    /** 逐张错峰基数（ms）；磁贴这类小卡片用更紧的节奏才有"连续吸附"的连击感 */
+    val staggerMs: Int = EntranceTokens.StaggerMs,
+    /** 弹簧阻尼比：<0.7 会过冲（落位后轻微弹一下），≥0.76 基本不弹 */
+    val dampingRatio: Float = 0.76f,
+    val stiffness: Float = 210f,
+    /** 行程乘子（0 = 原地出现，1 = 沿用该边的标准行程） */
+    val travelScale: Float = 1f,
+    /** 起始缩放距离的乘子：1 = 各边的标准起始缩放，>1 更难看出"远处飘近"而更像"弹出来" */
+    val scaleScale: Float = 1f,
+    /** 倾角乘子（0 = 不歪） */
+    val rotateScale: Float = 1f,
+) {
+    companion object {
+        /** 飞入（默认，首页/功能页/设置页）：保留「花园晨启」的飘入手感 */
+        val Glide = EntranceMotion()
+
+        /**
+         * 吸附（工具箱磁贴）：只上移 ~28dp、起始缩放压到 0.69、弹簧过冲，落位时"咔哒"一下。
+         * 工具箱是六块等大的磁贴，若也做 200dp 的横向飞入，会和功能页的网格读成同一套动作。
+         */
+        val Snap = EntranceMotion(
+            staggerMs = 34,
+            dampingRatio = 0.46f,
+            stiffness = 430f,
+            travelScale = 0.15f,
+            scaleScale = 2.6f,
+            rotateScale = 0f,
+        )
+    }
+}
+
+/**
  * 一次「开场」的播放登记表。一个 tab 一个（`MainActivity` 的 `AnimatedContent` 里 remember），
  * 切 tab 重建 ⇒ 新 tab 的卡片重新入场；同一 tab 内二级页切换复用同一张表（已播过的不重播）。
  */
@@ -123,6 +163,7 @@ fun Modifier.cardEntrance(
     order: Int = 0,
     key: Any? = null,
     edge: EntranceEdge? = null,
+    motion: EntranceMotion = EntranceMotion.Glide,
 ): Modifier {
     val host = LocalEntranceHost.current
     val gate = LocalEntranceGate.current
@@ -135,10 +176,10 @@ fun Modifier.cardEntrance(
 
     LaunchedEffect(fresh, gate) {
         if (!fresh || !gate || settled) return@LaunchedEffect
-        delay((order * EntranceTokens.StaggerMs).coerceAtMost(EntranceTokens.StaggerCapMs).toLong())
+        delay((order * motion.staggerMs).coerceAtMost(EntranceTokens.StaggerCapMs).toLong())
         progress.animateTo(
             targetValue = 1f,
-            animationSpec = spring(dampingRatio = 0.76f, stiffness = 210f),
+            animationSpec = spring(dampingRatio = motion.dampingRatio, stiffness = motion.stiffness),
         )
         settled = true
     }
@@ -147,6 +188,8 @@ fun Modifier.cardEntrance(
 
     // 同一屏里"第几张"决定歪的方向：奇偶交错才有一阵风扫过的感觉（左右入场的倾斜方向由边决定）
     val sway = if (order % 2 == 0) -1f else 1f
+    val travelMul = motion.travelScale
+    val rotateMul = motion.rotateScale
     return this.graphicsLayer {
         val p = progress.value
         val remain = 1f - p
@@ -155,35 +198,39 @@ fun Modifier.cardEntrance(
         transformOrigin = TransformOrigin(0.5f, 0.5f)
         when (from) {
             EntranceEdge.Bottom -> {
-                translationY = remain * EntranceTokens.TravelBottom.toPx()
-                translationX = sway * remain * EntranceTokens.Fan.toPx()
-                rotationZ = sway * remain * EntranceTokens.Rotate
-                setScale(EntranceTokens.ScaleFrom, p)
+                translationY = remain * EntranceTokens.TravelBottom.toPx() * travelMul
+                translationX = sway * remain * EntranceTokens.Fan.toPx() * travelMul
+                rotationZ = sway * remain * EntranceTokens.Rotate * rotateMul
+                setScale(EntranceTokens.ScaleFrom, motion.scaleScale, p)
             }
             EntranceEdge.Top -> {
-                translationY = -remain * EntranceTokens.TravelTop.toPx()
-                rotationZ = -sway * remain * EntranceTokens.RotateTop
-                setScale(EntranceTokens.ScaleFromTop, p)
+                translationY = -remain * EntranceTokens.TravelTop.toPx() * travelMul
+                rotationZ = -sway * remain * EntranceTokens.RotateTop * rotateMul
+                setScale(EntranceTokens.ScaleFromTop, motion.scaleScale, p)
             }
             EntranceEdge.Left -> {
-                translationX = -remain * EntranceTokens.TravelSide.toPx()
-                translationY = remain * EntranceTokens.SideLift.toPx()
-                rotationZ = -remain * EntranceTokens.RotateSide
-                setScale(EntranceTokens.ScaleFromSide, p)
+                translationX = -remain * EntranceTokens.TravelSide.toPx() * travelMul
+                translationY = remain * EntranceTokens.SideLift.toPx() * travelMul
+                rotationZ = -remain * EntranceTokens.RotateSide * rotateMul
+                setScale(EntranceTokens.ScaleFromSide, motion.scaleScale, p)
             }
             EntranceEdge.Right -> {
-                translationX = remain * EntranceTokens.TravelSide.toPx()
-                translationY = remain * EntranceTokens.SideLift.toPx()
-                rotationZ = remain * EntranceTokens.RotateSide
-                setScale(EntranceTokens.ScaleFromSide, p)
+                translationX = remain * EntranceTokens.TravelSide.toPx() * travelMul
+                translationY = remain * EntranceTokens.SideLift.toPx() * travelMul
+                rotationZ = remain * EntranceTokens.RotateSide * rotateMul
+                setScale(EntranceTokens.ScaleFromSide, motion.scaleScale, p)
             }
         }
     }
 }
 
-/** 三个方向共用的缩放插值：起点由各边自己给，落位一律 1f。 */
-private fun androidx.compose.ui.graphics.GraphicsLayerScope.setScale(from: Float, p: Float) {
-    val s = from + (1f - from) * p
+/**
+ * 各方向共用的缩放插值：起点由各边自己给，落位一律 1f。
+ * [distanceScale] 把「起始缩放离 1 的距离」按性格放大（工具箱磁贴用 2.6 ⇒ 从 0.69 弹起）。
+ */
+private fun androidx.compose.ui.graphics.GraphicsLayerScope.setScale(from: Float, distanceScale: Float, p: Float) {
+    val start = (1f - (1f - from) * distanceScale).coerceIn(0.3f, 1f)
+    val s = start + (1f - start) * p
     scaleX = s
     scaleY = s
 }

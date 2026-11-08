@@ -85,6 +85,7 @@ import top.honorhook.ui.toolbox.ToolSwitchTable
 import top.yukonga.miuix.kmp.basic.Button
 import top.honorhook.ui.component.Card
 import top.honorhook.ui.component.motion.EntranceEdge
+import top.honorhook.ui.component.motion.EntranceMotion
 import top.honorhook.ui.component.motion.cardEntrance
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -596,10 +597,15 @@ private fun HubTiles(
                 .fillMaxWidth()
                 .fillMaxHeight()
                 // 每行两格（左右并列）：左列从左、右列从右合拢
+                // 磁贴的动效性格（2026-11-08 用户反馈「功能和工具箱的卡片动效一样」）：
+                // 功能页的网格是「左右合拢飞入」，这里改成「原地弹起 + 回弹吸附」（EntranceMotion.Snap），
+                // 只上浮 ~28dp、从 0.69 弹到 1，错峰也收紧到 34ms ⇒ 六块磁贴像被一块块按在板上，
+                // 与功能页的长途飞入在**读感**上分家，但仍是同一套弹簧 + 错峰语言。
                 .cardEntrance(
                     order,
                     key = "tool.tile.$order",
-                    edge = if (order % 2 == 0) EntranceEdge.Left else EntranceEdge.Right,
+                    edge = EntranceEdge.Bottom,
+                    motion = EntranceMotion.Snap,
                 )
                 // cardClick = clickable + 触感（同 Card(onClick=) 的一档"嗒"）；磁贴把点击挂在 modifier 上
                 .cardClick(onClick = onClick),
