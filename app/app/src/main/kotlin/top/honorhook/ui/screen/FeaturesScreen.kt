@@ -70,6 +70,7 @@ import top.honorhook.ui.component.StatusWarn
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.EntranceEdge
 import top.honorhook.ui.component.motion.cardEntrance
 import top.honorhook.ui.component.motion.revealFade
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -205,7 +206,7 @@ private fun TargetListScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
                         .padding(bottom = 12.dp)
-                        .cardEntrance(1, key = "feat.security"),
+                        .cardEntrance(1, key = "feat.security", edge = EntranceEdge.Bottom),
                 )
             }
             when {
@@ -419,6 +420,8 @@ private fun FeatureCardRow(
                     modifier = Modifier.cardEntrance(
                         order = startIndex + i,
                         key = "feat.${target.packageName}",
+                        // 同一行两张卡从左右合拢：按序号交替会让它们交叉飞，所以显式按列取边
+                        edge = if (i == 0) EntranceEdge.Left else EntranceEdge.Right,
                     ),
                 )
             }
@@ -722,7 +725,11 @@ private fun FeatureListScreen(
                     modifier = Modifier
                         .padding(bottom = 8.dp)
                         // 色条与卡片同挂一个入场层（挂在 Card 上会让色条单独先出现）
-                        .cardEntrance(index, key = "feat.detail.${target.packageName}.$index"),
+                        .cardEntrance(
+                            index,
+                            key = "feat.detail.${target.packageName}.$index",
+                            edge = EntranceEdge.Bottom,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // 左侧 6dp 彩色条：色相由 feature.key 哈希决定，稳定不跳变。
@@ -934,7 +941,7 @@ private fun SecurityListScreen(onBack: () -> Unit, bottomInnerPadding: Dp = 0.dp
                 Row(
                     modifier = Modifier
                         .padding(bottom = 8.dp)
-                        .cardEntrance(index, key = "feat.security.item.$index"),
+                        .cardEntrance(index, key = "feat.security.item.$index", edge = EntranceEdge.Bottom),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val accent = rememberAccentColor(feature.key)

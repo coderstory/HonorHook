@@ -47,6 +47,7 @@ import top.honorhook.ui.AppSettings
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.Fireflies
 import top.honorhook.ui.component.IconBadge
+import top.honorhook.ui.component.motion.EntranceEdge
 import top.honorhook.ui.component.motion.cardEntrance
 import top.honorhook.ui.component.motion.revealFade
 import top.honorhook.ui.component.isInDarkTheme
@@ -146,7 +147,13 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             },
                         )
 
-                        InfoCard(modifier = Modifier.cardEntrance(1, key = "home.info"))
+                        InfoCard(
+                            modifier = Modifier.cardEntrance(
+                                1,
+                                key = "home.info",
+                                edge = EntranceEdge.Bottom,
+                            ),
+                        )
 
                         Spacer(
                             Modifier.height(

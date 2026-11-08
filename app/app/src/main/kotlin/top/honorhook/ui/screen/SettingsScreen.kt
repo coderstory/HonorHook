@@ -55,6 +55,7 @@ import top.honorhook.BuildConfig
 import top.honorhook.ui.update.UpdateChecker
 import top.honorhook.ui.update.UpdateState
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.EntranceEdge
 import top.honorhook.ui.component.motion.cardEntrance
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -148,7 +149,7 @@ private fun SettingsMain(
                         modifier = Modifier
                             .padding(top = 12.dp)
                             .fillMaxWidth()
-                            .cardEntrance(0, key = "settings.0"),
+                            .cardEntrance(0, key = "settings.0", edge = EntranceEdge.Bottom),
                     ) {
                         ArrowPreference(
                             title = "重启目标应用",
@@ -171,7 +172,7 @@ private fun SettingsMain(
                         modifier = Modifier
                             .padding(top = 12.dp)
                             .fillMaxWidth()
-                            .cardEntrance(1, key = "settings.1"),
+                            .cardEntrance(1, key = "settings.1", edge = EntranceEdge.Bottom),
                     ) {
                         ArrowPreference(
                             title = "主题设置",
@@ -195,7 +196,7 @@ private fun SettingsMain(
                         modifier = Modifier
                             .padding(top = 12.dp)
                             .fillMaxWidth()
-                            .cardEntrance(2, key = "settings.2"),
+                            .cardEntrance(2, key = "settings.2", edge = EntranceEdge.Bottom),
                     ) {
                         ArrowPreference(
                             title = "检查更新",

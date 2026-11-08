@@ -5,9 +5,17 @@
 
 ## 概念：花园晨启（Garden Dawn）
 
-`GardenBackdrop` 已经是"静态晨光花园"。进场编排沿用同一个隐喻：**卡片刻在清晨从画面下缘之外被托起**，
+`GardenBackdrop` 已经是"静态晨光花园"。进场编排沿用同一个隐喻：**卡片从画面各边被托进/吹进花园**，
 轻微倾斜、分层错峰，像花园里依次亮起的灯；落位后依次"呼吸"出内容。默认状态即"未入场"——
-用户看到的第一个画面只有背景与顶栏，内容自下而上生长出来。
+用户看到的第一个画面只有背景与顶栏，内容自己生长出来。
+
+**方向不是随机的，按版式角色取边**（v1 全部自下起飞，实机是"一列电梯"，用户 2026-11-08 反馈后改）：
+
+| 版式角色 | 入场边 | 例子 |
+|---|---|---|
+| 页头 / 第一张卡 | 上（落下 150dp，倾角 1.4°） | 首页状态卡、功能页开关卡、主题预览卡 |
+| 成对并排（左列 / 右列） | 左 / 右（横向 210dp + 上抬 18dp，倾角 5.5°） | 功能页网格、工具箱 6 磁贴 |
+| 纵向列表卡 | 下（托起 190dp，奇偶扇开 ±40dp） | InfoCard、设置三张卡、详情/安全类逐条 |
 
 三条硬性约束（来自盘点，避免破坏既有观感）：
 
@@ -20,7 +28,7 @@
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `ui/component/motion/Entrance.kt`（新） | `EntranceState`（一次性播放登记）+ `LocalEntranceHost` / `LocalEntranceGate` + `Modifier.cardEntrance(order, key)` + `Modifier.revealFade(order, delayMs)` |
+| 1 | `ui/component/motion/Entrance.kt`（新） | `EntranceState`（一次性播放登记）+ `LocalEntranceHost` / `LocalEntranceGate` + `Modifier.cardEntrance(order, key, edge)`（`EntranceEdge.Top/Bottom/Left/Right`）+ `Modifier.revealFade(order, delayMs)` + `Modifier.dockRise()` |
 | 2 | `ui/component/Card.kt` | 包边之外加两件装饰：**卡片投影**（三圈逐级放大的实心超椭圆 1.5/3/5.5dp，越外越淡；不用 `Modifier.shadow` 的 RenderEffect 模糊——SDK 31+ 且每卡一层离屏缓冲，滚动掉帧）与**顶部玻璃高光**（裁剪到同一张 squircle 路径的竖直渐变，0 → 45% 高度归零）；画序 = 投影 → 内容 → 高光 → 包边 |
 | 3 | `ui/MainActivity.kt` | ① `splashVisible` 拆成"在屏"与"已退场"（`Gate`），splash 开始淡出即开闸；② `when(selectedTab)` 换成 `AnimatedContent`（淡入 280ms + 上浮 300ms(tween) / 淡出 140ms）；③ 给每个 tab 的内容提供独立 `EntranceState`（切 tab 重播进场） |
 | 4 | `ui/splash/HonorSplash.kt` | 新增 `onLeaving: () -> Unit = {}`，`leaving = true` 时回调一次（开闸时机 = 淡出起点） |
@@ -37,8 +45,9 @@
 
 ## 观感参数（`Entrance.kt` 里的 EntranceTokens）
 
-- 位移：从下方 `+190dp`（约一屏的 1/5，配合淡入读起来就是"从屏幕外托起"）
-- 横向扇开：奇偶卡 `±40dp`，旋转 `±2.8°`，缩放 `0.88f → 1f`（弹簧 `dampingRatio 0.76 / stiffness 210`，有轻微过冲）
+- 位移（四边）：下 `+190dp` / 上 `-150dp` / 左 `-210dp` / 右 `+210dp`（侧入额外上抬 18dp）
+- 倾斜/缩放：下 `±2.8°` + `0.88f`；侧入 `±5.5°` + `0.92f`；上落 `∓1.4°` + `0.93f`；落位一律 1f（弹簧 `dampingRatio 0.76 / stiffness 210`，有轻微过冲）
+- 横向扇开（仅底部入场）：奇偶卡 `±40dp`
 - 错峰：`62ms/张`，单屏封顶 `400ms`（列表再长也不会等到"最后一张"）
 - 内层浮现：`revealFade` 8dp 上移 + 360ms 淡入，`baseDelay 160ms` + `42ms/行`
 - 底栏落座：`dockRise` 26dp 上浮 + 520ms 淡入，比卡片晚 120ms
@@ -46,7 +55,7 @@
 
 ## 验证清单（用户自执行）
 
-1. 冷启动：splash 淡出过程中卡片开始从下往上飞入，首页 2 张卡依次落位，InfoCard 五行随后逐行浮现。
+1. 冷启动：splash 淡出中首页状态卡**从上方落下**、InfoCard 自下托起，随后 InfoCard 五行逐行浮现；功能页第一张卡下落、网格每行两张**从左右合拢**；工具箱三行磁贴同理。
 2. 切换四个 tab：每个 tab 的内容都重新"生长"一次（底栏不动）；冷启动时底栏比内容晚一拍升起，玻璃折射正常。
 3. 二级页（功能页点卡片、工具箱子页、设置-关于/主题）：进入后卡片有进场，返回不闪。
 4. 列表滚动：滚出屏幕再滚回来的卡片**不再重播**（不闪烁）。

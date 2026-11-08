@@ -83,6 +83,7 @@ import top.honorhook.ui.toolbox.ToolQueue
 import top.honorhook.ui.toolbox.ToolSwitchTable
 import top.yukonga.miuix.kmp.basic.Button
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.EntranceEdge
 import top.honorhook.ui.component.motion.cardEntrance
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -593,7 +594,12 @@ private fun HubTiles(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
-                .cardEntrance(order, key = "tool.tile.$order")
+                // 每行两格（左右并列）：左列从左、右列从右合拢
+                .cardEntrance(
+                    order,
+                    key = "tool.tile.$order",
+                    edge = if (order % 2 == 0) EntranceEdge.Left else EntranceEdge.Right,
+                )
                 .clickable(onClick = onClick),
         ) {
             Column(Modifier.padding(16.dp)) {
@@ -671,7 +677,7 @@ private fun AdsGroupCard(
         modifier = Modifier
             .padding(top = 12.dp)
             .fillMaxWidth()
-            .cardEntrance(6, key = "tool.ads"),
+            .cardEntrance(6, key = "tool.ads", edge = EntranceEdge.Bottom),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(

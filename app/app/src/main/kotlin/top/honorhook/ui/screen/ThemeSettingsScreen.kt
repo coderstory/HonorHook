@@ -58,6 +58,7 @@ import top.honorhook.ui.ColorMode
 import top.honorhook.ui.component.FireflyTint
 import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.EntranceEdge
 import top.honorhook.ui.component.motion.cardEntrance
 import top.honorhook.ui.component.motion.revealFade
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -126,7 +127,7 @@ internal fun ThemeSettingsPage(
             item {
                 Spacer(modifier = Modifier.height(32.dp))
                 ThemePreviewCard(
-                    modifier = Modifier.cardEntrance(0, key = "theme.preview"),
+                    modifier = Modifier.cardEntrance(0, key = "theme.preview", edge = EntranceEdge.Top),
                     keyColor = AppSettings.keyColor,
                     isDark = isDark,
                     miuixMonet = AppSettings.miuixMonet,
@@ -192,7 +193,7 @@ internal fun ThemeSettingsPage(
                     modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth()
-                        .cardEntrance(2, key = "theme.2"),
+                        .cardEntrance(2, key = "theme.2", edge = EntranceEdge.Bottom),
                 ) {
                     SwitchPreference(
                         title = "跟随壁纸取色",
@@ -280,7 +281,7 @@ internal fun ThemeSettingsPage(
                     modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth()
-                        .cardEntrance(3, key = "theme.3"),
+                        .cardEntrance(3, key = "theme.3", edge = EntranceEdge.Bottom),
                 ) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         SwitchPreference(
@@ -338,7 +339,7 @@ internal fun ThemeSettingsPage(
                     modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth()
-                        .cardEntrance(4, key = "theme.4"),
+                        .cardEntrance(4, key = "theme.4", edge = EntranceEdge.Bottom),
                 ) {
                     SwitchPreference(
                         title = "首页萤火虫",
@@ -361,7 +362,7 @@ internal fun ThemeSettingsPage(
                     modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth()
-                        .cardEntrance(5, key = "theme.5"),
+                        .cardEntrance(5, key = "theme.5", edge = EntranceEdge.Bottom),
                 ) {
                     SwitchPreference(
                         title = "花园背景",
@@ -383,7 +384,7 @@ internal fun ThemeSettingsPage(
                     modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth()
-                        .cardEntrance(6, key = "theme.6"),
+                        .cardEntrance(6, key = "theme.6", edge = EntranceEdge.Bottom),
                 ) {
                     val tints = FireflyTint.entries
                     OverlayDropdownPreference(
