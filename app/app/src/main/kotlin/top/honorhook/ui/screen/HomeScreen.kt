@@ -212,8 +212,10 @@ private fun StatusCard(
         inactive -> Color(0xFFFFDAD6)
         else -> when {
             isDynamicColor -> colorScheme.secondaryContainer
-            isInDarkTheme() -> Color(0xFF1A3825)
-            else -> Color(0xFFDFFAE4)
+            // 2026-11-08（artwork-theme）：花园时代的嫩绿卡片（#DFFAE4 / #1A3825）换背景后
+            // 跟蓝紫插画、靛紫面板都不在一个色系里，改成同族淡紫。
+            isInDarkTheme() -> Color(0xFF2A2350)
+            else -> Color(0xFFEDE7FF)
         }
     }
 
@@ -240,7 +242,7 @@ private fun StatusCard(
                     tint = when {
                         inactive -> Color(0xFFBA1A1A).copy(alpha = 0.28f)
                         isDynamicColor -> colorScheme.primary.copy(alpha = 0.30f)
-                        else -> Color(0xFF36D167).copy(alpha = 0.34f)
+                        else -> Color(0xFF7C6BEA).copy(alpha = 0.34f)
                     },
                     contentDescription = null,
                 )
