@@ -1,11 +1,12 @@
 {
  "needs": [
-  {"id": 1, "pool": "need", "title": "HonorHook 全维度体检与优化（文档/冗余/性能/架构/历史包袱/业务流程/依赖）", "priority": "P1", "status": "进行中", "blocker": null, "owner": "devflow", "detail": "用户要求并发全维度调研，严格按 devflow 流程。范围：文档漂移、冗余代码配置、性能、设计架构、历史包袱与兼容、业务流程合理性、依赖与注释。产出：归并审计清单 + 分级修复计划 + 构建通过。", "created": "2026-11-08 23:50:29 +0800", "updated": "2026-11-09 00:15:29 +0800", "body": "用户要求并发全维度调研，严格按 devflow 流程。范围：文档漂移、冗余代码配置、性能、设计架构、历史包袱与兼容、业务流程合理性、依赖与注释。产出：归并审计清单 + 分级修复计划 + 构建通过。", "created_by": "devflow", "updated_by": "devflow", "deleted": 0, "stage": "开发中"}
+  {"id": 1, "pool": "need", "title": "HonorHook 全维度体检与优化（文档/冗余/性能/架构/历史包袱/业务流程/依赖）", "priority": "P1", "status": "进行中", "blocker": null, "owner": "devflow", "detail": "用户要求并发全维度调研，严格按 devflow 流程。范围：文档漂移、冗余代码配置、性能、设计架构、历史包袱与兼容、业务流程合理性、依赖与注释。产出：归并审计清单 + 分级修复计划 + 构建通过。", "created": "2026-11-08 23:50:29 +0800", "updated": "2026-11-09 00:16:02 +0800", "body": "用户要求并发全维度调研，严格按 devflow 流程。范围：文档漂移、冗余代码配置、性能、设计架构、历史包袱与兼容、业务流程合理性、依赖与注释。产出：归并审计清单 + 分级修复计划 + 构建通过。", "created_by": "devflow", "updated_by": "devflow", "deleted": 0, "stage": "开发中"}
  ],
  "dev_progress": [
   {"id": 1, "need_id": 1, "time": "2026-11-08 23:51:00 +0800", "note": "用户已明确要求并发调研（m01293）；开工链 排产→进行中", "created_by": null, "updated_by": null, "deleted": 0},
   {"id": 2, "need_id": 1, "time": "2026-11-08 23:51:00 +0800", "note": "已派 7 个只读审计面；devflow 口径 2-4 面/并发≤3，本次为用户明确要求的并发调研波次，归并按面计", "created_by": null, "updated_by": null, "deleted": 0},
-  {"id": 3, "need_id": 1, "time": "2026-11-09 00:15:29 +0800", "note": "首轮修复已提交 c4a4569（build+test 通过）；七面审计已归并为 docs/plans/2026-11-09-optimization-audit.md；安装待用户解锁", "created_by": null, "updated_by": null, "deleted": 0}
+  {"id": 3, "need_id": 1, "time": "2026-11-09 00:15:29 +0800", "note": "首轮修复已提交 c4a4569（build+test 通过）；七面审计已归并为 docs/plans/2026-11-09-optimization-audit.md；安装待用户解锁", "created_by": null, "updated_by": null, "deleted": 0},
+  {"id": 4, "need_id": 1, "time": "2026-11-09 00:16:02 +0800", "note": "首轮修复 c4a4569 + 归并/汇报文档 b9c4d09（build+test 通过）；install-local 待用户解锁重试；下一轮 P0-1 挂载判据出口", "created_by": null, "updated_by": null, "deleted": 0}
  ],
  "bugs": [],
  "acceptance": [],
@@ -22,5 +23,5 @@
  "clues": [
   {"id": 1, "need_id": 1, "domain": "code", "keyword": "", "fact": "全维度体检首轮修复已提交 c4a4569（构建 4m13s 通过、test 全绿）：Fireflies 零分配绘制、SystemUiHook 不再逐节点 getIdentifier、状态栏图标名缓存、splash derivedStateOf、断连开关 pendingKeys 补发、MFA 明文导出确认、工具箱确认文案按动作生成、删 hiddenApiBypass/backdrop 目录项与 fireflyLight 死开关", "source": "", "status": "open", "reason": "", "resolved": null, "resolved_by": null, "created": "2026-11-09 00:15:35 +0800", "by": "devflow", "kind": "fact", "subject": "code:audit-round1", "valid_until": null, "last_verified": "2026-11-09 00:15:35 +0800", "superseded_by": null}
  ],
- "generator": {"hostname": "localhost", "os": "Android-17-aarch64-64bit-ELF", "generated": "2026-11-09 00:15:47 +0800"}
+ "generator": {"hostname": "localhost", "os": "Android-17-aarch64-64bit-ELF", "generated": "2026-11-09 00:16:02 +0800"}
 }
