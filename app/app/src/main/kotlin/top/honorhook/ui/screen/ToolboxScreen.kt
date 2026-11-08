@@ -67,6 +67,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.state.ToggleableState
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.honorhook.ui.component.genshin.GenshinIcons
+import top.honorhook.ui.component.genshin.genshinOr
 import top.honorhook.ui.toolbox.AppIcon
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.cardClick
@@ -641,20 +642,20 @@ private fun HubTiles(
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(GenshinIcons.Pyro, "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds, order = 0) { onOpen(HubView.PURIFY) }
+                Tile(genshinOr(Icons.Rounded.Campaign, GenshinIcons.Pyro), "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds, order = 0) { onOpen(HubView.PURIFY) }
             }
             Box(Modifier.weight(1f)) {
-                Tile(GenshinIcons.Cryo, "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze, order = 1) { onOpen(HubView.FREEZE) }
+                Tile(genshinOr(Icons.Rounded.AcUnit, GenshinIcons.Cryo), "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze, order = 1) { onOpen(HubView.FREEZE) }
             }
         }
         // 2026-11-08 删除「系统开关」整页后重排：3 行 6 格（营销推荐|应用冻结、MFA|远程开发、临时Root|文件整理）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(GenshinIcons.Vision, "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa, order = 2) { onOpen(HubView.MFA) }
+                Tile(genshinOr(Icons.Rounded.Password, GenshinIcons.Vision), "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa, order = 2) { onOpen(HubView.MFA) }
             }
             Box(Modifier.weight(1f)) {
                 // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）
-                Tile(GenshinIcons.Anemo, "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb, order = 3) {
+                Tile(genshinOr(Icons.Rounded.TravelExplore, GenshinIcons.Anemo), "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb, order = 3) {
                     onOpenHubActivity()
                 }
             }
@@ -663,11 +664,11 @@ private fun HubTiles(
             Box(Modifier.weight(1f)) {
                 // GhostLock（2026-11-03）：payload 不打进 APK，
                 // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
-                Tile(GenshinIcons.Geo, "临时Root", "无 root 提权 · Shizuku", accentRoot, order = 4) { onOpen(HubView.GHOSTLOCK) }
+                Tile(genshinOr(Icons.Rounded.Terminal, GenshinIcons.Geo), "临时Root", "无 root 提权 · Shizuku", accentRoot, order = 4) { onOpen(HubView.GHOSTLOCK) }
             }
             Box(Modifier.weight(1f)) {
                 // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
-                Tile(GenshinIcons.Primogem, "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 5) { onOpen(HubView.FILES) }
+                Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 5) { onOpen(HubView.FILES) }
             }
         }
     }

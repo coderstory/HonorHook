@@ -1,5 +1,7 @@
 package top.honorhook.ui.component.genshin
 
+import androidx.compose.runtime.Composable
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
@@ -22,6 +24,16 @@ import androidx.compose.ui.unit.dp
  * 约定：所有图形都画在 24×24 视口、四周留 2 单位空隙，保证与 Material 图标并排时视觉重量一致；
  * 颜色一律 `Color.Black` 由 `Icon(tint = ...)` 染色（`ImageVector` 不携带主题色）。
  */
+/**
+ * 插画主题下用原神图标，其余主题回落 Material（用户 m01154 选「只在插画主题下启用」）。
+ *
+ * 形状是品牌语汇、是否启用是环境变量：这里读 `AppSettings.artworkBackdrop`，
+ * 它是 MutableState 支撑的，切背景时整棵界面会自然重组，不需要额外通知。
+ */
+@Composable
+fun genshinOr(material: androidx.compose.ui.graphics.vector.ImageVector, genshin: androidx.compose.ui.graphics.vector.ImageVector): androidx.compose.ui.graphics.vector.ImageVector =
+    if (top.honorhook.ui.AppSettings.artworkBackdrop) genshin else material
+
 object GenshinIcons {
 
     private fun icon(name: String, block: ImageVector.Builder.() -> Unit): ImageVector =

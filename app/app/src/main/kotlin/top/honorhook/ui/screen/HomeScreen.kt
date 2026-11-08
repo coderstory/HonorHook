@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.honorhook.ui.component.genshin.GenshinIcons
+import top.honorhook.ui.component.genshin.genshinOr
 import top.honorhook.BuildConfig
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.FrameworkState
@@ -237,7 +238,7 @@ private fun StatusCard(
             ) {
                 Icon(
                     modifier = Modifier.size(66.dp),
-                    imageVector = if (inactive) GenshinIcons.Electro else GenshinIcons.Vision,
+                    imageVector = if (inactive) genshinOr(Icons.Rounded.ErrorOutline, GenshinIcons.Electro) else genshinOr(Icons.Rounded.CheckCircleOutline, GenshinIcons.Vision),
                     tint = when {
                         inactive -> Color(0xFFBA1A1A).copy(alpha = 0.28f)
                         AppSettings.artworkBackdrop -> Color(0xFF7C6BEA).copy(alpha = 0.34f)

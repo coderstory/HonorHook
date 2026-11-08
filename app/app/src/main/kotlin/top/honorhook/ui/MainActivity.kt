@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
 import top.honorhook.ui.component.genshin.GenshinIcons
+import top.honorhook.ui.component.genshin.genshinOr
 import top.honorhook.BuildConfig
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
@@ -188,15 +189,15 @@ private fun AppRoot() {
         UpdateDialog(onDismiss = { UpdateState.dismissDialog() })
     }
 
-    val items = remember {
+    // 不 remember：图标要随「插画背景」开关切换（m01154），列表重建成本可忽略。
+    val items =
         listOf(
-            NavigationItem(label = "首页", icon = GenshinIcons.Vision),
-            NavigationItem(label = "功能", icon = GenshinIcons.Dendro),
+            NavigationItem(label = "首页", icon = genshinOr(Icons.Rounded.Cottage, GenshinIcons.Vision)),
+            NavigationItem(label = "功能", icon = genshinOr(Icons.Rounded.Extension, GenshinIcons.Dendro)),
             // 第 4 tab：工具箱（28 号规格书 §3）——root 开关/冻结/活性自检
-            NavigationItem(label = "工具箱", icon = GenshinIcons.Primogem),
-            NavigationItem(label = "设置", icon = GenshinIcons.Mora),
+            NavigationItem(label = "工具箱", icon = genshinOr(Icons.Rounded.Handyman, GenshinIcons.Primogem)),
+            NavigationItem(label = "设置", icon = genshinOr(Icons.Rounded.Settings, GenshinIcons.Mora)),
         )
-    }
 
     // 悬浮底栏是**浮在内容之上**的（不是 Scaffold 那种占据布局高度的 bottomBar），
     // 所以内容区必须自己预留出底栏高度，否则最后一行内容会被药丸盖住。
