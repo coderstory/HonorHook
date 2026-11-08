@@ -358,7 +358,9 @@ internal fun ThemeSettingsPage(
                     )
                 }
 
-                // 背景皮肤（2026-11-08 用户要求：纯白太素，边缘挂一圈篱笆和鲜花）
+                // 背景（2026-11-08 用户要求「加一个主题功能」）：插画 / 花园 / 纯色三档。
+                // 不做三选一的单选控件，而是两张开关：插画优先，关掉插画才轮到花园，
+                // 两个都关 = 纯色底。这样老用户的花园开关不会因为新增插画被悄悄改掉。
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
@@ -366,9 +368,28 @@ internal fun ThemeSettingsPage(
                         .cardEntrance(5, key = "theme.5", edge = EntranceEdge.Bottom),
                 ) {
                     SwitchPreference(
+                        title = "插画背景",
+                        summary = "整屏蓝紫插画，顶栏是一块更厚的磨砂玻璃",
+                        checked = AppSettings.artworkBackdrop,
+                        onCheckedChange = { AppSettings.setArtworkBackdrop(it) },
+                        startAction = {
+                            IconBadge(
+                                icon = Icons.Rounded.Wallpaper,
+                                accent = Color(0xFF9B84FF),
+                                contentDescription = "插画背景",
+                                modifier = Modifier.padding(end = 10.dp),
+                            )
+                        },
+                    )
+                    SwitchPreference(
                         title = "花园背景",
-                        summary = "页面四周的篱笆与花草，关掉回到纯色底",
+                        summary = if (AppSettings.artworkBackdrop) {
+                            "插画背景开启时暂不显示，关掉插画即可看到"
+                        } else {
+                            "页面四周的篱笆与花草，关掉回到纯色底"
+                        },
                         checked = AppSettings.gardenSkin,
+                        enabled = !AppSettings.artworkBackdrop,
                         onCheckedChange = { AppSettings.setGardenSkin(it) },
                         startAction = {
                             IconBadge(
