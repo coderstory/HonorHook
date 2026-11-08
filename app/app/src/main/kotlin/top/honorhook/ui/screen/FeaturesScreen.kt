@@ -153,6 +153,8 @@ private fun TargetListScreen(
     }
 
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = "功能",
@@ -619,6 +621,8 @@ private fun FeatureListScreen(
     val failedPushes = remember { mutableStateMapOf<String, Boolean>() }
 
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = stringResource(target.nameRes),
@@ -832,6 +836,8 @@ private fun SecurityListScreen(onBack: () -> Unit, bottomInnerPadding: Dp = 0.dp
     val failedPushes = remember { mutableStateMapOf<String, Boolean>() }
 
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = "安全类功能",

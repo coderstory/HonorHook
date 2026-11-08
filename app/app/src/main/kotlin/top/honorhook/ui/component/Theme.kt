@@ -97,18 +97,29 @@ fun HonorHookTheme(content: @Composable () -> Unit) {
     MiuixTheme(
         controller = controller,
     ) {
-        CompositionLocalProvider(
-            LocalColorMode provides colorMode.value,
-            LocalContentColor provides MiuixTheme.colorScheme.onBackground,
-        ) {
-            LaunchedEffect(darkTheme) {
-                val window = (context as? Activity)?.window ?: return@LaunchedEffect
-                WindowInsetsControllerCompat(window, window.decorView).apply {
-                    isAppearanceLightStatusBars = !darkTheme
-                    isAppearanceLightNavigationBars = !darkTheme
+        // 卡片磨砂半透明（2026-11-08 用户要求「所有的卡片」）：miuix `Card` 默认色 =
+        // `colorScheme.surfaceContainer`，在主题层统一压一个 alpha，比逐个 Card 传 colors 干净
+        // （散点改必漏）。alpha 不能太低：卡片底下的花园是软背景，0.7 已能看见篱笆轮廓又不糊字。
+        val baseScheme = MiuixTheme.colorScheme
+        val frostedScheme = baseScheme.copy(
+            surfaceContainer = baseScheme.surfaceContainer.copy(
+                alpha = if (darkTheme) 0.62f else 0.72f,
+            ),
+        )
+        MiuixTheme(colors = frostedScheme) {
+            CompositionLocalProvider(
+                LocalColorMode provides colorMode.value,
+                LocalContentColor provides MiuixTheme.colorScheme.onBackground,
+            ) {
+                LaunchedEffect(darkTheme) {
+                    val window = (context as? Activity)?.window ?: return@LaunchedEffect
+                    WindowInsetsControllerCompat(window, window.decorView).apply {
+                        isAppearanceLightStatusBars = !darkTheme
+                        isAppearanceLightNavigationBars = !darkTheme
+                    }
                 }
+                content()
             }
-            content()
         }
     }
 }

@@ -39,14 +39,16 @@ import android.widget.Toast
 import top.honorhook.BuildConfig
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
+import top.honorhook.ui.component.GardenBackdrop
 import top.honorhook.ui.component.HonorHookTheme
+import top.honorhook.ui.component.IconBadge
+import top.honorhook.ui.component.isInDarkTheme
 import top.honorhook.ui.screen.FeaturesScreen
 import top.honorhook.ui.screen.HomeScreen
 import top.honorhook.ui.screen.SettingsScreen
 import top.honorhook.ui.screen.ToolboxScreen
 import top.honorhook.ui.update.UpdateDialog
 import top.honorhook.ui.update.UpdateState
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.NavigationItem
@@ -171,6 +173,15 @@ private fun AppRoot() {
                 .fillMaxSize()
                 .then(if (enableFloatingBlur) Modifier.layerBackdrop(backdrop) else Modifier),
         ) {
+            // 背景皮肤（2026-11-08 用户要求）画在内容层内部、页面之下：
+            // 页面 Scaffold 让出透明底才能看见它；放在 layerBackdrop 里面，玻璃药丸才会把它当成背景折射。
+            if (AppSettings.gardenSkin) {
+                GardenBackdrop(
+                    modifier = Modifier.fillMaxSize(),
+                    dark = isInDarkTheme(),
+                    amoled = AppSettings.colorMode.isAmoled,
+                )
+            }
             when (selectedTab) {
                 0 -> HomeScreen(bottomInnerPadding = bottomBarPadding)
                 1 -> FeaturesScreen(bottomInnerPadding = bottomBarPadding)
@@ -230,6 +241,15 @@ private fun HonorHookBottomBar(
     val bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         .let { inset -> if (inset != 0.dp) 8.dp + inset else 28.dp }
 
+    // 底栏四 tab 的语义色（2026-11-08 用户要求图标彩色且有质感）：
+    // 与工具箱磁贴同一套色板 —— 首页蓝、功能橙、工具箱绿、设置紫。
+    val tabAccents = listOf(
+        Color(0xFF4FA8FF),
+        Color(0xFFF0A93B),
+        Color(0xFF35C77E),
+        Color(0xFF9B84FF),
+    )
+
     FloatingBottomBar(
         modifier = modifier
             .pointerInput(Unit) { detectTapGestures { } }
@@ -248,10 +268,15 @@ private fun HonorHookBottomBar(
                 // 必须靠 defaultMinSize 撑出每项的最小宽度，否则药丸会塌成一个圆。
                 modifier = Modifier.defaultMinSize(minWidth = 76.dp),
             ) {
-                // 图标与文字取 LocalContentColor：药丸内的重影层靠它把内容重新着色成强调色
-                Icon(
-                    imageVector = item.icon,
+                // 图标块自带颜色，不再跟随 LocalContentColor；重影层因此也画出同色徽章，
+                // 玻璃药丸里看到的是该 tab 自身的颜色晕开 —— 正是选中态要的观感
+                IconBadge(
+                    icon = item.icon,
+                    accent = tabAccents.getOrElse(index) { tabAccents.first() },
                     contentDescription = item.label,
+                    size = 26.dp,
+                    iconSize = 15.dp,
+                    corner = 8.dp,
                 )
                 Text(
                     text = item.label,

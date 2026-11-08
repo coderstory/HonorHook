@@ -63,6 +63,7 @@ object AppSettings {
     private const val KEY_FIREFLY_TINT = "firefly_tint"
     private const val KEY_FIREFLY_LIGHT = "firefly_light"
     private const val KEY_FIREFLY_ENABLED = "firefly_enabled"
+    private const val KEY_GARDEN_SKIN = "garden_skin"
 
     /** 主题色板选项（照抄 KernelSU `ui/theme/Colors.kt` 的 keyColorOptions，0 = 默认）。 */
     val keyColorOptions = listOf(
@@ -121,6 +122,11 @@ object AppSettings {
     /** 首页萤火虫总开关（默认开）。 */
     val fireflyEnabled: Boolean get() = _fireflyEnabled.value
 
+    private val _gardenSkin = mutableStateOf(true)
+
+    /** 花园篱笆背景皮肤（2026-11-08 用户要求；默认开，关掉即回到纯色底）。 */
+    val gardenSkin: Boolean get() = _gardenSkin.value
+
     @Volatile
     private var prefs: SharedPreferences? = null
 
@@ -138,6 +144,7 @@ object AppSettings {
         _fireflyTint.value = p?.getString(KEY_FIREFLY_TINT, "rainbow") ?: "rainbow"
         _fireflyLight.value = p?.getBoolean(KEY_FIREFLY_LIGHT, true) ?: true
         _fireflyEnabled.value = p?.getBoolean(KEY_FIREFLY_ENABLED, true) ?: true
+        _gardenSkin.value = p?.getBoolean(KEY_GARDEN_SKIN, true) ?: true
     }
 
     fun setColorMode(mode: ColorMode) {
@@ -199,6 +206,11 @@ object AppSettings {
     fun setFireflyLight(enabled: Boolean) {
         _fireflyLight.value = enabled
         prefs?.edit()?.putBoolean(KEY_FIREFLY_LIGHT, enabled)?.apply()
+    }
+
+    fun setGardenSkin(enabled: Boolean) {
+        _gardenSkin.value = enabled
+        prefs?.edit()?.putBoolean(KEY_GARDEN_SKIN, enabled)?.apply()
     }
 
     /** 关键色是否非默认（主题页决定是否显示「配色风格 / 色规范」二级项）。 */

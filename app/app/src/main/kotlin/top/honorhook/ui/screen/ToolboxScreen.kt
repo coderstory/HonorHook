@@ -36,7 +36,6 @@ import androidx.compose.material.icons.rounded.Password
 import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.PhotoLibrary
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
@@ -96,10 +95,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
- * 工具箱 v1.3.5（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2×2 功能磁贴 + 两级页面。
- * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 四磁贴（营销推荐/
- *   应用冻结/系统开关/执行记录，副标题实时计数）。
- * - 二级页：磁贴点进、返回栏回台；冻结/开关沿用 v1.3.1 组件，营销页 = 一键卡。
+ * 工具箱 v1.3.5（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2 列功能磁贴 + 两级页面。
+ * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 六磁贴（营销推荐/
+ *   应用冻结/MFA/远程开发/临时Root/文件整理，副标题实时计数）。
+ * - 二级页：磁贴点进、返回栏回台；冻结沿用 v1.3.1 组件，营销页 = 一键卡。
+ * - 2026-11-08 用户指令删除「系统开关」整页（连同 18 条非营销开关），不留入口。
  * - 开关行只显「标题 + 功能描述」——key=value 属面板数据不上屏（2026-10-25 拍板：用户看不懂）。
  * - 执行一律进 ToolQueue 事务化队列：冻结批自动快照 + 失败不中断 + 回读判据。
  * - root 失效：全控件只读（状态摘要卡显式说明；已冻结列表与快照免 root 可看）。
@@ -127,10 +127,10 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     }
     val rootOk = probe?.available == true
 
-    // 开关区现值：免 root 读三表（表名定位在执行器做，这里只展示）
+    // 营销键现值：免 root 读三表（表名定位在执行器做，这里只展示；系统开关模块已删，只读 ADS_GROUP）
     var switchValues by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     fun refreshValues() {
-        switchValues = ToolSwitchTable.ENTRIES.associate { e ->
+        switchValues = ToolSwitchTable.ADS_GROUP.associate { e ->
             e.key to (SettingsReader.readAll(context, e.key).values.firstOrNull() ?: "")
         }
     }
@@ -144,7 +144,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
 
     var search by rememberSaveable { mutableStateOf("") }
     var showA by rememberSaveable { mutableStateOf(false) }
-    var showFolded by rememberSaveable { mutableStateOf(false) }
     var view by rememberSaveable { mutableStateOf(HubView.HOME) }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var freezeMenuOpen by remember { mutableStateOf(false) }
@@ -167,6 +166,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     BackHandler(enabled = view != HubView.HOME) { view = HubView.HOME }
 
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             // FILES 页无顶栏（2026-11-05 用户指令：标题文本删除，容器也不占位）；状态栏避让走 contentWindowInsets.Top
             if (view != HubView.FILES) TopAppBar(
@@ -241,34 +242,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                     item {
                         AdsGroupCard(rootOk, switchValues, running) { actions ->
                             request(actions, "营销推荐：全部关闭")
-                        }
-                    }
-                }
-
-                // —— 开关页：功能描述行 ——
-                HubView.SWITCH -> {
-                    item {
-                        SwitchListCard(
-                            entries = ToolSwitchTable.ENTRIES.filter { it.group == null && (!it.folded || showFolded) },
-                            values = switchValues,
-                            enabled = rootOk && !running,
-                            onToggle = { entry, turnOn ->
-                                val value = if (turnOn) entry.onValue else entry.offValue
-                                if (value == null) {
-                                    runResult = "「${entry.title}」是单向开关：只开不关"
-                                } else {
-                                    request(listOf(ToolAction.Switch(entry.table, entry.key, value)), entry.title)
-                                }
-                            },
-                        )
-                    }
-                    if (!showFolded) {
-                        item {
-                            TextButton(
-                                text = "更多开关（含高风险）",
-                                onClick = { showFolded = true },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
                         }
                     }
                 }
@@ -443,7 +416,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
-    HOME("工具箱"), PURIFY("营销推荐"), SWITCH("系统开关"), FREEZE("应用冻结"), MFA("MFA 验证器"),
+    HOME("工具箱"), PURIFY("营销推荐"), FREEZE("应用冻结"), MFA("MFA 验证器"),
     GHOSTLOCK("临时Root"), FILES("文件整理"),
 }
 
@@ -594,13 +567,11 @@ private fun HubTiles(
 ) {
     val adsOn = ToolSwitchTable.ADS_GROUP.count { values[it.key] == "1" }
     val frozen = (apps ?: emptyList()).count { it.frozen }
-    val switchCount = ToolSwitchTable.ENTRIES.count { it.group == null }
 
     // 每格一个语义色（2026-11-08 用户要求「图标整体好看一点」）：
     // 冷色=清理类、暖色=拦截类、青/紫=工具类，深浅色主题下都能保持对比度。
     val accentAds = Color(0xFFF2685A)
     val accentFreeze = Color(0xFF4FA8FF)
-    val accentSwitch = Color(0xFF9B84FF)
     val accentMfa = Color(0xFF35C77E)
     val accentWeb = Color(0xFF2BB3C0)
     val accentRoot = Color(0xFFF0A93B)
@@ -644,40 +615,34 @@ private fun HubTiles(
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个系统开关 · 当前开 $adsOn", accentAds) { onOpen(HubView.PURIFY) }
+                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds) { onOpen(HubView.PURIFY) }
             }
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze) { onOpen(HubView.FREEZE) }
             }
         }
+        // 2026-11-08 删除「系统开关」整页后重排：3 行 6 格（营销推荐|应用冻结、MFA|远程开发、临时Root|文件整理）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Tune, "系统开关", "$switchCount 项可调", accentSwitch) { onOpen(HubView.SWITCH) }
-            }
             Box(Modifier.weight(1f)) {
                 Tile(Icons.Rounded.Password, "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa) { onOpen(HubView.MFA) }
             }
-        }
-        // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）；第三行同尺寸磁贴
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
+                // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）
                 Tile(Icons.Rounded.TravelExplore, "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb) {
                     onOpenHubActivity()
                 }
             }
+        }
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                // GhostLock（2026-11-03）：第三行右格；payload 不打进 APK，
+                // GhostLock（2026-11-03）：payload 不打进 APK，
                 // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
                 Tile(Icons.Rounded.Terminal, "临时Root", "无 root 提权 · Shizuku", accentRoot) { onOpen(HubView.GHOSTLOCK) }
             }
-        }
-        // 文件整理（2026-11-04）：第四行左格；规格 project/file-organizer-rules.md v2
-        // 右格必须留占位 Box——单格 weight(1f) 会独占整行变成大卡（用户实测指出）
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
+                // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
                 Tile(Icons.Rounded.PhotoLibrary, "文件整理", "照片按月归档 · 垃圾清理", accentFiles) { onOpen(HubView.FILES) }
             }
-            Box(Modifier.weight(1f)) {}
         }
     }
 }
@@ -711,54 +676,6 @@ private fun AdsGroupCard(
                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
             ) {
                 Text("全部关闭")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SwitchListCard(
-    entries: List<ToolSwitchTable.Entry>,
-    values: Map<String, String>,
-    enabled: Boolean,
-    onToggle: (ToolSwitchTable.Entry, Boolean) -> Unit,
-) {
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
-        Column {
-            entries.forEachIndexed { i, e ->
-                val current = values[e.key].orEmpty()
-                val on = current == e.onValue
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            text = if (e.risk == ToolSwitchTable.Risk.HIGH) "⚠ ${e.title}" else e.title,
-                            fontSize = 15.sp,
-                            color = colorScheme.onSurface,
-                        )
-                        if (e.summary.isNotBlank()) {
-                            Text(e.summary, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
-                        }
-                        // 单向开关是功能约束（用户需知），保留提示；key/当前值属面板数据不上屏
-                        if (e.offValue == null) {
-                            Text(
-                                text = "单向：只开不关，恢复走系统设置",
-                                fontSize = 11.sp,
-                                color = colorScheme.onSurfaceVariantSummary,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    SafeSwitch(
-                        checked = on,
-                        enabled = enabled && (!on || e.offValue != null),
-                        onCheckedChange = { onToggle(e, it) },
-                    )
-                }
             }
         }
     }

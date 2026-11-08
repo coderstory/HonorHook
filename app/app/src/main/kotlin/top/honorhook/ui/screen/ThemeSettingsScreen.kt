@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DesignServices
 import androidx.compose.material.icons.rounded.Flare
+import androidx.compose.material.icons.rounded.LocalFlorist
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WaterDrop
@@ -55,8 +56,8 @@ import com.materialkolor.rememberDynamicColorScheme
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.ColorMode
 import top.honorhook.ui.component.FireflyTint
+import top.honorhook.ui.component.IconBadge
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TabRow
@@ -96,6 +97,8 @@ internal fun ThemeSettingsPage(
     val isDark = ui.isDark || (ui.isSystem && isSystemInDarkTheme())
 
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = "主题设置",
@@ -158,11 +161,11 @@ internal fun ThemeSettingsPage(
                             title = "纯黑背景（AMOLED）",
                             summary = "深色模式下页面底色改为纯黑（更省电、对比更强）",
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.DarkMode,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                IconBadge(
+                                    icon = Icons.Rounded.DarkMode,
+                                    accent = Color(0xFF9B84FF),
                                     contentDescription = "纯黑背景（AMOLED）",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             checked = ui.isAmoled,
@@ -188,11 +191,11 @@ internal fun ThemeSettingsPage(
                     SwitchPreference(
                         title = "跟随壁纸取色",
                         startAction = {
-                            Icon(
-                                Icons.Rounded.Wallpaper,
-                                modifier = Modifier.padding(end = 6.dp),
+                            IconBadge(
+                                icon = Icons.Rounded.Wallpaper,
+                                accent = Color(0xFF4FA8FF),
                                 contentDescription = "跟随壁纸取色",
-                                tint = colorScheme.onBackground,
+                                modifier = Modifier.padding(end = 10.dp),
                             )
                         },
                         checked = AppSettings.miuixMonet,
@@ -205,11 +208,11 @@ internal fun ThemeSettingsPage(
                             OverlayDropdownPreference(
                                 title = "关键色",
                                 startAction = {
-                                    Icon(
-                                        Icons.Rounded.Colorize,
-                                        modifier = Modifier.padding(end = 6.dp),
+                                    IconBadge(
+                                        icon = Icons.Rounded.Colorize,
+                                        accent = Color(0xFFF2685A),
                                         contentDescription = "关键色",
-                                        tint = colorScheme.onBackground,
+                                        modifier = Modifier.padding(end = 10.dp),
                                     )
                                 },
                                 items = keyColorNames,
@@ -225,11 +228,11 @@ internal fun ThemeSettingsPage(
                                     OverlayDropdownPreference(
                                         title = "配色风格",
                                         startAction = {
-                                            Icon(
-                                                Icons.Rounded.Style,
-                                                modifier = Modifier.padding(end = 6.dp),
+                                            IconBadge(
+                                                icon = Icons.Rounded.Style,
+                                                accent = Color(0xFF2BB3C0),
                                                 contentDescription = "配色风格",
-                                                tint = colorScheme.onBackground,
+                                                modifier = Modifier.padding(end = 10.dp),
                                             )
                                         },
                                         items = styles.map { it.name },
@@ -245,11 +248,11 @@ internal fun ThemeSettingsPage(
                                     OverlayDropdownPreference(
                                         title = "色规范",
                                         startAction = {
-                                            Icon(
-                                                Icons.Rounded.DesignServices,
-                                                modifier = Modifier.padding(end = 6.dp),
+                                            IconBadge(
+                                                icon = Icons.Rounded.DesignServices,
+                                                accent = Color(0xFF35C77E),
                                                 contentDescription = "色规范",
-                                                tint = colorScheme.onBackground,
+                                                modifier = Modifier.padding(end = 10.dp),
                                             )
                                         },
                                         items = specs.map { it.name },
@@ -277,11 +280,11 @@ internal fun ThemeSettingsPage(
                             title = "启用模糊",
                             summary = "顶栏与底栏的背景模糊",
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.BlurOn,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                IconBadge(
+                                    icon = Icons.Rounded.BlurOn,
+                                    accent = Color(0xFF4FA8FF),
                                     contentDescription = "启用模糊",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             checked = AppSettings.liquidGlass,
@@ -292,11 +295,11 @@ internal fun ThemeSettingsPage(
                         title = "悬浮底栏",
                         summary = "关闭则退回贴边导航栏",
                         startAction = {
-                            Icon(
-                                Icons.Rounded.CallToAction,
-                                modifier = Modifier.padding(end = 6.dp),
+                            IconBadge(
+                                icon = Icons.Rounded.CallToAction,
+                                accent = Color(0xFF9B84FF),
                                 contentDescription = "悬浮底栏",
-                                tint = colorScheme.onBackground,
+                                modifier = Modifier.padding(end = 10.dp),
                             )
                         },
                         checked = AppSettings.floatingBar,
@@ -310,11 +313,11 @@ internal fun ThemeSettingsPage(
                             title = "启用玻璃",
                             summary = "底栏按钮的立体折射和高光",
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.WaterDrop,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                IconBadge(
+                                    icon = Icons.Rounded.WaterDrop,
+                                    accent = Color(0xFF2BB3C0),
                                     contentDescription = "启用玻璃",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             checked = AppSettings.floatingBarGlass,
@@ -335,11 +338,33 @@ internal fun ThemeSettingsPage(
                         checked = AppSettings.fireflyEnabled,
                         onCheckedChange = { AppSettings.setFireflyEnabled(it) },
                         startAction = {
-                            Icon(
-                                Icons.Rounded.Flare,
-                                modifier = Modifier.padding(end = 6.dp),
+                            IconBadge(
+                                icon = Icons.Rounded.Flare,
+                                accent = Color(0xFFF0A93B),
                                 contentDescription = "首页萤火虫",
-                                tint = colorScheme.onBackground,
+                                modifier = Modifier.padding(end = 10.dp),
+                            )
+                        },
+                    )
+                }
+
+                // 背景皮肤（2026-11-08 用户要求：纯白太素，边缘挂一圈篱笆和鲜花）
+                Card(
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth(),
+                ) {
+                    SwitchPreference(
+                        title = "花园背景",
+                        summary = "页面四周的篱笆与花草，关掉回到纯色底",
+                        checked = AppSettings.gardenSkin,
+                        onCheckedChange = { AppSettings.setGardenSkin(it) },
+                        startAction = {
+                            IconBadge(
+                                icon = Icons.Rounded.LocalFlorist,
+                                accent = Color(0xFF35C77E),
+                                contentDescription = "花园背景",
+                                modifier = Modifier.padding(end = 10.dp),
                             )
                         },
                     )
@@ -355,11 +380,11 @@ internal fun ThemeSettingsPage(
                         title = "萤火虫颜色",
                         summary = "首页背景光点的配色",
                         startAction = {
-                            Icon(
-                                Icons.Rounded.Flare,
-                                modifier = Modifier.padding(end = 6.dp),
+                            IconBadge(
+                                icon = Icons.Rounded.Flare,
+                                accent = Color(0xFFF0A93B),
                                 contentDescription = "萤火虫颜色",
-                                tint = colorScheme.onBackground,
+                                modifier = Modifier.padding(end = 10.dp),
                             )
                         },
                         items = tints.map { it.label },

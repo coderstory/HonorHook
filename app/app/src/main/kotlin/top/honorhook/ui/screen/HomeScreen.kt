@@ -46,6 +46,7 @@ import top.honorhook.BuildConfig
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.Fireflies
+import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -92,6 +93,8 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     // Canvas 不消费触摸事件，点击照常落到下面的列表 / 卡片。
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
+        // 透明底：背景皮肤（GardenBackdrop）画在 AppRoot 的内容层里，页面必须让出底色才看得见
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = "Re:荣耀",
@@ -260,20 +263,25 @@ private fun StatusCard(
  * 提为顶层函数（原先是声明在 [InfoCard] 内部的嵌套 composable，无法从他处复用）。
  */
 @Composable
-private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPadding: Dp = 24.dp) {
+private fun InfoRow(
+    icon: ImageVector,
+    accent: Color,
+    title: String,
+    content: String,
+    bottomPadding: Dp = 24.dp,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = bottomPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
+        // 2026-11-08 用户要求首页图标改彩色：行图标统一走 IconBadge（淡色底 + 同色字形），逐行一个语义色
+        IconBadge(
+            icon = icon,
+            accent = accent,
             contentDescription = title,
-            modifier = Modifier
-                .padding(end = 12.dp)
-                .size(24.dp),
-            tint = colorScheme.onSurface,
+            modifier = Modifier.padding(end = 12.dp),
         )
         Column {
             Text(
@@ -297,19 +305,19 @@ private fun InfoRow(icon: ImageVector, title: String, content: String, bottomPad
 private fun InfoCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, "模块版本", appVersionLabel())
-            InfoRow(Icons.Filled.DeveloperBoard, "模块包名", BuildConfig.APPLICATION_ID)
+            InfoRow(Icons.Filled.Tag, Color(0xFF4FA8FF), "模块版本", appVersionLabel())
+            InfoRow(Icons.Filled.DeveloperBoard, Color(0xFF9B84FF), "模块包名", BuildConfig.APPLICATION_ID)
             InfoRow(
-                Icons.Filled.Smartphone, "系统版本",
+                Icons.Filled.Smartphone, Color(0xFF2BB3C0), "系统版本",
                 "Android ${Build.VERSION.RELEASE}",
             )
             InfoRow(
-                Icons.Filled.Fingerprint, "设备",
+                Icons.Filled.Fingerprint, Color(0xFFF0A93B), "设备",
                 "${Build.MANUFACTURER} ${Build.MODEL}",
             )
             // 系统架构原来复用了 DeveloperBoard（与"插件包名"同一个图标），换成 Memory
             InfoRow(
-                Icons.Filled.Memory, "系统架构",
+                Icons.Filled.Memory, Color(0xFF35C77E), "系统架构",
                 Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
                 bottomPadding = 0.dp,
             )

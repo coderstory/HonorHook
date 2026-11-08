@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,12 +49,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
+import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.scope.ScopeRestarter
 import top.honorhook.BuildConfig
 import top.honorhook.ui.update.UpdateChecker
 import top.honorhook.ui.update.UpdateState
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -117,6 +118,8 @@ private fun SettingsMain(
     }
 
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = "设置",
@@ -149,11 +152,12 @@ private fun SettingsMain(
                             title = "重启目标应用",
                             summary = "把相关应用关掉后重新打开",
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.RestartAlt,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                // 2026-11-08 图标统一成 IconBadge（淡色底 + 同色字形，同工具箱磁贴的观感）
+                                IconBadge(
+                                    icon = Icons.Rounded.RestartAlt,
+                                    accent = Color(0xFFF0A93B),
                                     contentDescription = "重启目标应用",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             onClick = { showRestart = true },
@@ -170,11 +174,11 @@ private fun SettingsMain(
                             title = "主题设置",
                             summary = "主题色、深浅色与液态玻璃",
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.Palette,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                IconBadge(
+                                    icon = Icons.Rounded.Palette,
+                                    accent = Color(0xFF9B84FF),
                                     contentDescription = "主题设置",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             onClick = onOpenTheme,
@@ -193,11 +197,11 @@ private fun SettingsMain(
                             title = "检查更新",
                             summary = updateSummary,
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.SystemUpdateAlt,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                IconBadge(
+                                    icon = Icons.Rounded.SystemUpdateAlt,
+                                    accent = Color(0xFF4FA8FF),
                                     contentDescription = "检查更新",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             // 手动检查：有新版 → 全局弹窗；无新版/失败 → Toast（UpdateState.notice）
@@ -206,11 +210,11 @@ private fun SettingsMain(
                         ArrowPreference(
                             title = "关于",
                             startAction = {
-                                Icon(
-                                    Icons.Rounded.Info,
-                                    modifier = Modifier.padding(end = 6.dp),
+                                IconBadge(
+                                    icon = Icons.Rounded.Info,
+                                    accent = Color(0xFF2BB3C0),
                                     contentDescription = "关于",
-                                    tint = colorScheme.onBackground,
+                                    modifier = Modifier.padding(end = 10.dp),
                                 )
                             },
                             onClick = onOpenAbout,
@@ -394,6 +398,8 @@ private fun AboutPage(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     Scaffold(
+        // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = "关于",
