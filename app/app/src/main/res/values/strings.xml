@@ -13,7 +13,7 @@
     <string name="target_name_settings">系统设置</string>
     <string name="target_name_exam8">成考题库</string>
     <string name="target_name_launcher">系统桌面</string>
-    <string name="target_name_systemui">状态栏与通知栏</string>
+    <string name="target_name_systemui">状态栏</string>
     <string name="target_name_ouc">系统更新</string>
     <string name="target_name_upgradeguide">升级引导</string>
     <string name="target_name_mms">短信</string>
