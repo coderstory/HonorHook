@@ -26,11 +26,16 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import top.honorhook.R
 
-/** 全幅插画的「轻微虚化」：2dp = 柔化像素锯齿与噪点，但线条仍然清楚（26dp / 9dp 都被嫌糊）。 */
-private val ArtBlur = 2.dp
+/**
+ * 全幅插画的「轻微虚化」：1dp ≈ 只吃掉像素锯齿，几乎看不出糊（26 / 9 / 2dp 都被嫌强，折中到底）。
+ */
+private val ArtBlur = 1.dp
 
-/** 顶部磨砂带的模糊半径：比全幅强一档，才看得出「这块玻璃更厚」。 */
-private val BandBlur = 16.dp
+/**
+ * 顶部磨砂带的模糊半径：仍是全幅的数倍（看得出「这块玻璃更厚」），
+ * 但 16dp 会让整条 banner 变成色块、看不出底下还有画，收回到 6dp。
+ */
+private val BandBlur = 6.dp
 
 /**
  * 插画背景（2026-11-08 用户给的 1254×2760 竖图，`res/drawable-nodpi/artwork_backdrop.jpg`）。
@@ -53,7 +58,7 @@ fun ArtworkBackdrop(modifier: Modifier = Modifier) {
     val top = if (dark) Color(0xFF0B0818).copy(alpha = 0.46f) else Color.White.copy(alpha = 0.30f)
     val mid = if (dark) Color.Black.copy(alpha = 0.02f) else Color.White.copy(alpha = 0.02f)
     val bottom = if (dark) Color(0xFF120E22).copy(alpha = 0.88f) else Color(0xFFF7F5FF).copy(alpha = 0.86f)
-    val bandTint = if (dark) Color(0xFF0B0818).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.44f)
+    val bandTint = if (dark) Color(0xFF0B0818).copy(alpha = 0.38f) else Color.White.copy(alpha = 0.38f)
 
     BoxWithConstraints(modifier) {
         val screenW = constraints.maxWidth
