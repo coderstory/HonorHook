@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.BuildConfig
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
@@ -189,11 +190,11 @@ private fun AppRoot() {
 
     val items = remember {
         listOf(
-            NavigationItem(label = "首页", icon = Icons.Rounded.Cottage),
-            NavigationItem(label = "功能", icon = Icons.Rounded.Extension),
+            NavigationItem(label = "首页", icon = GenshinIcons.Vision),
+            NavigationItem(label = "功能", icon = GenshinIcons.Dendro),
             // 第 4 tab：工具箱（28 号规格书 §3）——root 开关/冻结/活性自检
-            NavigationItem(label = "工具箱", icon = Icons.Rounded.Handyman),
-            NavigationItem(label = "设置", icon = Icons.Rounded.Settings),
+            NavigationItem(label = "工具箱", icon = GenshinIcons.Primogem),
+            NavigationItem(label = "设置", icon = GenshinIcons.Mora),
         )
     }
 

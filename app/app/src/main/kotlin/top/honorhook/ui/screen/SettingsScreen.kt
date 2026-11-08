@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
 import top.honorhook.ui.component.IconBadge
@@ -158,7 +159,7 @@ private fun SettingsMain(
                             startAction = {
                                 // 2026-11-08 图标统一成 IconBadge（淡色底 + 同色字形，同工具箱磁贴的观感）
                                 IconBadge(
-                                    icon = Icons.Rounded.RestartAlt,
+                                    icon = GenshinIcons.Pyro,
                                     accent = Color(0xFFF0A93B),
                                     contentDescription = "重启目标应用",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -180,7 +181,7 @@ private fun SettingsMain(
                             summary = "主题色、深浅色与液态玻璃",
                             startAction = {
                                 IconBadge(
-                                    icon = Icons.Rounded.Palette,
+                                    icon = GenshinIcons.Electro,
                                     accent = Color(0xFF9B84FF),
                                     contentDescription = "主题设置",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -204,7 +205,7 @@ private fun SettingsMain(
                             summary = updateSummary,
                             startAction = {
                                 IconBadge(
-                                    icon = Icons.Rounded.SystemUpdateAlt,
+                                    icon = GenshinIcons.Anemo,
                                     accent = Color(0xFF4FA8FF),
                                     contentDescription = "检查更新",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -227,7 +228,7 @@ private fun SettingsMain(
                             title = "关于",
                             startAction = {
                                 IconBadge(
-                                    icon = Icons.Rounded.Info,
+                                    icon = GenshinIcons.Primogem,
                                     accent = Color(0xFF2BB3C0),
                                     contentDescription = "关于",
                                     modifier = Modifier.padding(end = 10.dp),

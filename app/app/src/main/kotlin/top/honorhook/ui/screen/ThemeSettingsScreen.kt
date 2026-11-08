@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.ui.AppSettings
 import top.honorhook.ui.ColorMode
 import top.honorhook.ui.component.IconBadge
@@ -145,7 +146,7 @@ internal fun ThemeSettingsPage(
                             summary = "顶栏与底栏的背景模糊",
                             startAction = {
                                 IconBadge(
-                                    icon = Icons.Rounded.BlurOn,
+                                    icon = GenshinIcons.Hydro,
                                     accent = Color(0xFF4FA8FF),
                                     contentDescription = "启用模糊",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -160,7 +161,7 @@ internal fun ThemeSettingsPage(
                         summary = "关闭则退回贴边导航栏",
                         startAction = {
                             IconBadge(
-                                icon = Icons.Rounded.CallToAction,
+                                icon = GenshinIcons.Dendro,
                                 accent = Color(0xFF9B84FF),
                                 contentDescription = "悬浮底栏",
                                 modifier = Modifier.padding(end = 10.dp),
@@ -178,7 +179,7 @@ internal fun ThemeSettingsPage(
                             summary = "底栏按钮的立体折射和高光",
                             startAction = {
                                 IconBadge(
-                                    icon = Icons.Rounded.WaterDrop,
+                                    icon = GenshinIcons.Hydro,
                                     accent = Color(0xFF2BB3C0),
                                     contentDescription = "启用玻璃",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -204,7 +205,7 @@ internal fun ThemeSettingsPage(
                         onCheckedChange = { AppSettings.setFireflyEnabled(it) },
                         startAction = {
                             IconBadge(
-                                icon = Icons.Rounded.Flare,
+                                icon = GenshinIcons.Pyro,
                                 accent = Color(0xFFF0A93B),
                                 contentDescription = "首页萤火虫",
                                 modifier = Modifier.padding(end = 10.dp),
@@ -229,7 +230,7 @@ internal fun ThemeSettingsPage(
                         onCheckedChange = { AppSettings.setArtworkBackdrop(it) },
                         startAction = {
                             IconBadge(
-                                icon = Icons.Rounded.Wallpaper,
+                                icon = GenshinIcons.Vision,
                                 accent = Color(0xFF9B84FF),
                                 contentDescription = "插画背景",
                                 modifier = Modifier.padding(end = 10.dp),
@@ -248,7 +249,7 @@ internal fun ThemeSettingsPage(
                         onCheckedChange = { AppSettings.setGardenSkin(it) },
                         startAction = {
                             IconBadge(
-                                icon = Icons.Rounded.LocalFlorist,
+                                icon = GenshinIcons.Dendro,
                                 accent = Color(0xFF35C77E),
                                 contentDescription = "花园背景",
                                 modifier = Modifier.padding(end = 10.dp),
