@@ -196,22 +196,9 @@ private fun TargetListScreen(
                         .cardEntrance(0, key = "feat.switch"),
                 )
             }
-            // 安全类功能置顶卡（T10/#18）：这五项默认开启且关的是安全防护本身，必须比目标卡更醒目。
-            // 常驻置顶（不随安装过滤）：三项宿主均为系统应用恒在装。
-            item {
-                val features = securityFeatures()
-                val enabledCount = features.count { FeatureStore.isEnabled(it.key) }
-                SecurityGroupCard(
-                    enabledCount = enabledCount,
-                    total = features.size,
-                    onClick = onOpenSecurity,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp)
-                        .cardEntrance(1, key = "feat.security", edge = EntranceEdge.Bottom),
-                )
-            }
+            // 2026-11-08 用户：「安全类功能这个卡片删除了」——一级页不再出这张置顶卡。
+            // 聚合页（SecurityListScreen）与 SECURITY_FEATURE_KEYS 暂留不动：五项开关在各自
+            // 宿主目标卡里仍可逐项调整，这里只摘掉入口，没有删功能。
             when {
                 installed == null -> item { EmptyHint("正在读取设备上已安装的应用…") }
                 installed!!.first.isEmpty() -> item {
@@ -819,54 +806,6 @@ private fun securityFeatures(): List<FeatureCatalog.Feature> =
     SECURITY_FEATURE_KEYS.mapNotNull { key ->
         FeatureCatalog.targets.asSequence().flatMap { it.features }.firstOrNull { it.key == key }
     }
-
-/**
- * 一级页安全类置顶卡：盾形图标 + 「默认开启」警示。配色沿用 [SwitchSemanticsCard] 的
- * 警示语言（tertiaryContainer）——本页里「红系容器」= 需要用户知道的事。
- */
-@Composable
-private fun SecurityGroupCard(
-    enabledCount: Int,
-    total: Int,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(onClick = onClick, showIndication = true, modifier = modifier) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            AppIconSlot(
-                packageName = "",
-                fallbackText = "安",
-                iconKey = "shield",
-                modifier = Modifier.size(38.dp),
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = "安全类功能",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colorScheme.onSurface,
-                )
-                Text(
-                    text = "默认开启 · 关闭的是安全检测、病毒扫描与更新通道，点开逐项调整",
-                    fontSize = 11.sp,
-                    color = colorScheme.onSurfaceVariantSummary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(
-                text = "$enabledCount/$total",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = colorScheme.onSurfaceVariantSummary,
-            )
-        }
-    }
-}
 
 /**
  * 安全类功能聚合页（T10/#18）：头部说明卡（默认开启警示 + 关闭后的生效时机）+ 五个开关行。
