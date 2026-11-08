@@ -212,12 +212,12 @@ private fun StatusCard(
         inactive -> Color(0xFFFFDAD6)
         else -> when {
             isDynamicColor -> colorScheme.secondaryContainer
-            // 2026-11-08（artwork-theme）：花园时代的嫩绿卡片（#DFFAE4 / #1A3825）换背景后
-            // 跟蓝紫插画、靛紫面板都不在一个色系里，改成同族淡紫。
-            // 用户 2026-11-08「颜色加深一点」：淡紫再压一档，卡片与白底的层次更清楚，
-            // 但没压到 `primaryContainer` 那么深——那样白字/黑字都不好放。
-            isInDarkTheme() -> Color(0xFF241D47)
-            else -> Color(0xFFDDD3FA)
+            // 卡片配色**跟着背景走**（2026-11-08 用户「刚才那个卡片颜色没切换」）：
+            // 插画背景 → 淡紫（用户当天要求加深过一档）；花园背景 / 纯色底 → 花园时代的嫩绿。
+            // 两套色不混用，否则切回花园后首页第一张卡还是紫的，像漏改。
+            AppSettings.artworkBackdrop -> if (isInDarkTheme()) Color(0xFF241D47) else Color(0xFFDDD3FA)
+            isInDarkTheme() -> Color(0xFF1A3825)
+            else -> Color(0xFFDFFAE4)
         }
     }
 
@@ -244,7 +244,8 @@ private fun StatusCard(
                     tint = when {
                         inactive -> Color(0xFFBA1A1A).copy(alpha = 0.28f)
                         isDynamicColor -> colorScheme.primary.copy(alpha = 0.30f)
-                        else -> Color(0xFF7C6BEA).copy(alpha = 0.34f)
+                        AppSettings.artworkBackdrop -> Color(0xFF7C6BEA).copy(alpha = 0.34f)
+                        else -> Color(0xFF36D167).copy(alpha = 0.34f)
                     },
                     contentDescription = null,
                 )
