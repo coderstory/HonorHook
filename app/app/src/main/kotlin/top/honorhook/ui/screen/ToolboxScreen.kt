@@ -82,7 +82,7 @@ import top.honorhook.ui.toolbox.ToolAction
 import top.honorhook.ui.toolbox.ToolQueue
 import top.honorhook.ui.toolbox.ToolSwitchTable
 import top.yukonga.miuix.kmp.basic.Button
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold

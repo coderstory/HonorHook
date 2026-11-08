@@ -69,7 +69,7 @@ import top.honorhook.ui.component.StatusOk
 import top.honorhook.ui.component.StatusWarn
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text

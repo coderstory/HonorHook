@@ -54,7 +54,7 @@ import top.honorhook.ui.scope.ScopeRestarter
 import top.honorhook.BuildConfig
 import top.honorhook.ui.update.UpdateChecker
 import top.honorhook.ui.update.UpdateState
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text

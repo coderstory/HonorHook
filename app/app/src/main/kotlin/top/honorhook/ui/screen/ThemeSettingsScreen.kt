@@ -57,7 +57,7 @@ import top.honorhook.ui.AppSettings
 import top.honorhook.ui.ColorMode
 import top.honorhook.ui.component.FireflyTint
 import top.honorhook.ui.component.IconBadge
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TabRow

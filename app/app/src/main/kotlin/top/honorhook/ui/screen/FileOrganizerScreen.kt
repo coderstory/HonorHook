@@ -65,7 +65,7 @@ import top.honorhook.ui.toolbox.FileOrganizer.Rule
 import top.honorhook.ui.toolbox.FileOrganizer.RunResult
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.InputField

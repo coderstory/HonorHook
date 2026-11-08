@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.sp
 import top.honorhook.ui.mfa.MfaAccount
 import top.honorhook.ui.mfa.MfaStore
 import top.honorhook.ui.mfa.Totp
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton

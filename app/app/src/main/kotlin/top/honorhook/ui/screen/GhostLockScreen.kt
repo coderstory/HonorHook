@@ -46,7 +46,7 @@ import kotlinx.coroutines.withContext
 import top.honorhook.tools.ghostlock.shizuku.ShizukuExploitRunner
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme

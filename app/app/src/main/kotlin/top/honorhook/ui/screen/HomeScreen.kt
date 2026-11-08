@@ -48,7 +48,7 @@ import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.Fireflies
 import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.component.isInDarkTheme
-import top.yukonga.miuix.kmp.basic.Card
+import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
