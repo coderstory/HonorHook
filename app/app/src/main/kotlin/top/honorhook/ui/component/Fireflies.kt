@@ -190,7 +190,10 @@ fun Fireflies(modifier: Modifier = Modifier) {
 
     // 配色不再可配（用户 2026-11-08「萤火虫颜色这个开关是不是要改一改？或者删了？」）：
     // 插画主题一套色，7 档配色只会让人挑出跟背景打架的颜色，改成跟主色同族的靛紫。
-    val tint = FireflyTint.VIOLET
+    // 2026-11-08 用户：萤火虫配色跟图标一样只在紫色（插画）主题下才变紫。
+    // 插画主题 → 统一靛紫（配合紫蓝背景）；其余主题 → 回到最初的彩虹多色盘，
+    // 否则关掉插画后整屏还是紫点，跟花园绿对不上。
+    val tint = if (AppSettings.artworkBackdrop) FireflyTint.VIOLET else FireflyTint.RAINBOW
     val colors = FireflyTint.colors(dark, tint)
     // 白底没有「发光」的物理依据，浓度一高就像屏幕脏了；描边光圈正好吃得住更高的浓度。
     val strength = if (dark) 1f else 0.85f
