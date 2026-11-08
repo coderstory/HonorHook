@@ -10,7 +10,7 @@
 缺的是它**上面一层**：多版本这件事，被同时编码在四处，且没有任何运行时出口把「版本」与「挂载结果」连起来。
 
 成本曲线现在是：**每来一个宿主小版本 ≈ 反编译 diff + 抄一张表**。theme 在 14 天内出了 3 个精确套
-（`20.1.65.302` / `67.302` / `67.303`，分别对应 3 类、1 类、4 类混淆名改名）——约 **4 天一张**。
+（`20.1.65.302` / `67.302` / `67.303`，分别对应若干混淆类改名）——约 **4 天一张**。
 版本数再涨，四处编码之间的漂移就是概率问题，不是态度问题。
 
 ## 1. 现状分层（明确保留）
@@ -35,44 +35,40 @@
 ### A2 · 「版本不适配时怎么办」是隐式约定，不是显式策略
 - theme：表列表末尾有 `Table(versions = emptySet())` 默认套 ⇒ 任何新版本都盲挂基线表（`ThemeStoreHook.kt:38`）。
 - installer：`installerTables` 没有默认套，新版本回落到源码式 `buildSourcePending()` 基线点（`InstallerHook.kt:126-128`）。
-- **后果**：同为「未适配」，theme 会**尝试挂**（可能挂到错方法，静默错行为），installer 是**照旧挂基线**（点少但语义清楚）。两种行为都合理，但用户/维护者无法从任何地方读到「这个包的策略是哪一种」。
+- **后果**：同为「未适配」，theme 会**尝试挂**（可能挂到错方法，静默错行为），installer 是**照旧挂基线**。两种都合理，但维护者无法从任何地方读到「这个包的策略是哪一种」。
 - 修法：`enum MountPolicy { BlindLatest, Skip, FallbackTo(version) }` 写进 A1 的清单，`pick` 只认策略，不再靠「有没有空集表」推断。
 
 ### A3 · 增量表达（delta）已经存在，但只是惯例而非契约
-- theme 做对了：`THEME_POINTS_20_1_67_302 = THEME_POINTS_20_1_63_305.map { if (className == CLS_...63) copy(className = CLS_...67) else it }`（`ThemeStoreMap_20_1_67_302.kt:15-21`）——1 个类改名只写 1 行，注释还留了 `63.305=f71 → 65.302=g71 → 67.302=wb1` 的推导链。
-- installer/launcher 是整表复制（`InstallerMap_14_0_38_301.kt` 11 点、`LauncherMap_18_0_0_234.kt`），改一个点要在 N 份里同步。
-- **后果**：新版本的工作量与出错面取决于「上一个人用的是哪种写法」，review 无法用统一标准看 diff。
-- 修法：`MountTable = base + List<Overlay>`，overlay 只允许白名单字段（className/methodName/paramCount/returnType/dex 锚点），并加测试：overlay 产物必须与「显式全量表」等价（用现有基线表 + 手工改一行做金标准）。
+- theme 做对了：`THEME_POINTS_20_1_67_302 = THEME_POINTS_20_1_63_305.map { if (className == CLS_..._63) copy(className = CLS_..._67) else it }`（`ThemeStoreMap_20_1_67_302.kt:15-21`）——1 个类改名只写 1 行，注释还留了 `63.305=f71 → 65.302=g71 → 67.302=wb1` 的推导链。
+- installer/launcher 是整表复制（`InstallerMap_14_0_38_301.kt` 11 点、`LauncherMap_18_0_0_234.kt`）。
+- **后果**：新版本工作量与出错面取决于「上一个人用的是哪种写法」，review 无法用统一标准看 diff。
+- 修法：`MountTable = base + List<Overlay>`，overlay 只允许白名单字段，并加测试：overlay 产物必须与显式全量表等价。
 
 ### A4 · 版本号渗进 hook 业务逻辑
 - `ThemeStoreHook.kt:70`：`decryptToolClass = if (pick.matchedVersion == "20.1.67.303") THEME_DECRYPT_TOOL_67_303 else null`。
-- `InstallerHook.kt:128` 起 `buildSourcePending()` 里按功能 key 分支拼点（不是按版本，但同样是「代码里写挂载知识」）。
 - **后果**：版本差异无法数据化 ⇒ 不能审阅、不能测试，新版本只能读 Kotlin 控制流。
-- 修法：这类「某版本某点要换实现」写成表的字段（`toolClassOverride`），hook 体只读表；加 grep 级约束：`matchedVersion ==` / `== "20.1` 只允许出现在 `HostSupport` 适配层。
+- 修法：这类「某版本某点要换实现」写成表的字段（如 `toolClassOverride`），hook 体只读表；约束 `matchedVersion ==` 只允许出现在 `HostSupport` 适配层。
 
 ### A5 · 判据没有运行时出口（最贵的一条）
 - `installed N/M` 只有 `MountSession.logLines`（`MountSession.kt:161-166`）→ LSPosed 日志。
-- UI 侧唯一的状态是 `FrameworkState.active`（服务是否绑上），**不等于「挂上了」**。
-- **后果**：所有「开关看着开着其实没挂上」的投诉，都只能靠让用户抓 LSPosed 日志定位；UI 无法区分「已连接未挂载」「部分挂载」「版本未适配盲挂」。
-- 修法：`MountReport` —— 每会话结束把 `{pkg, hook, actualVersion, matchedVersion, ok, total, failedIds[]}` 写到模块私有文件或远端 prefs 的一个 JSON key，UI 首页/目标卡读它。这是**多版本架构的可观测性底座**：没有它，A1/A2 的漂移永远只能事后靠日志发现。
+- UI 侧唯一状态是 `FrameworkState.active`（服务是否绑上），**不等于「挂上了」**。
+- **后果**：所有「开关看着开着其实没挂上」的投诉，只能让用户抓 LSPosed 日志；UI 无法区分「已连接未挂载」「部分挂载」「版本未适配盲挂」。
+- 修法：`MountReport` —— 每会话结束写 `{pkg, hook, actualVersion, matchedVersion, ok, total, failedIds[]}` 到模块私有文件或远端 prefs 的 JSON key，UI 读它。这是多版本架构的可观测性底座。
 
 ### A6 · 多包目标被建模成 N 次独立注册，改一处要动四处
-- `HonorAdsHook("com.hihonor.calendar")` × 5 包、`HonorTrackingHook` × N 包（`TargetRegistry.kt`）。
-- 每加一个包要动：`TargetRegistry` 一行 + `scope.list` 一行 + `FeatureCatalog.Target` 一项 + `FeatureCatalog.Target` 的 key 常量（若开关分档）。
-- **后果**：作用域与注册表两处手工同步——不一致时 `HookEntry` **收不到回调且零报错**（只有真机「没反应」）。这是这套架构里最容易静默失败的一处。
-- 修法：`PackagedTarget(hook 实现, packages: List<String>)` 一次注册多包；`scope.list` 由 Gradle 任务从注册表**生成**（构建期真值，而不是手写清单）；UI 侧对这些包用一张卡 + 包级开关行，避免功能列表被同质卡淹没。
+- `HonorAdsHook("com.hihonor.calendar")` × 5 包等（`TargetRegistry.kt`）。
+- 加一个包要动：`TargetRegistry` 一行 + `scope.list` 一行 + `FeatureCatalog.Target` 一项（+ 可能的 key 常量）。
+- **后果**：作用域与注册表两处手工同步——不一致时 `HookEntry` **收不到回调且零报错**，真机只表现为「没反应」。
+- 修法：`PackagedTarget(hook, packages: List<String>)` 一次注册多包；`scope.list` 由 Gradle 任务从注册表**生成**。
 
 ### A7 · 「挂载点数据表」这个抽象并不统一
-- 四格式并存：`HookPoint` 表（theme 52 点、installer 8/11 点）、源码 `addConst`/`addForceArg`、OucHook 字符串对模板、SDK 内联 `MountTask`。
-- 更糟的是**字段在半路被丢**：Ouc/Sysmgr/AppMarket 的适配器不消费 `dexStrings`/`value`/`forceArgIndex` ⇒ 表里配了锚点，运行时永远直连轨，混淆点必然 `NOT_RESOLVED`。
-- **后果**：表的能力取决于「哪个 hook 写的」，同一个字段名在不同 target 语义不同。
-- 修法：`HookPoint.toTask()` 收口到 core（单一实现），加字段覆盖单测：遍历 `HookPoint` 所有构造参数，任何未被 `toTask` 消费的字段 = 测试失败。
+- 四格式并存：`HookPoint` 表、源码 `addConst`/`addForceArg`、OucHook 字符串对模板、SDK 内联 `MountTask`。
+- 字段在半路被丢：Ouc/Sysmgr/AppMarket 的适配器不消费 `dexStrings`/`value`/`forceArgIndex` ⇒ 表里配了锚点，运行时永远直连轨，混淆点必然 `NOT_RESOLVED`。
+- 修法：`HookPoint.toTask()` 收口到 core，加字段覆盖单测（未消费字段 = 测试失败）。
 
-### A8 · 护栏测试只钉住了数据，没钉住结构
-- 已有：`RegistryConsistencyTest`（成员一致性）、`DecisionTablesTest`（表契约）。
-- 缺：① `scope.list` ↔ `TargetRegistry` ↔ `FeatureCatalog` 三方一致性；② `HostSupport` ↔ 实际表存在性；③ A7 的字段覆盖。
-- **后果**：A6/A7 这类漂移全都能编译通过、单测全绿，只在真机上表现为「没反应」。
-- 修法：三条 JVM 测试，成本 < 半天，收益是这几类事故从「真机发现」变成「CI 发现」。
+### A8 · 护栏测试只钉住数据，没钉住结构
+- 已有 `RegistryConsistencyTest`、`DecisionTablesTest`；缺 ①`scope.list` ↔ `TargetRegistry` ↔ `FeatureCatalog` 三方一致；②`HostSupport` ↔ 表存在性；③A7 字段覆盖。
+- 成本 < 半天，收益是这几类事故从「真机发现」变成「CI 发现」。
 
 ## 3. 目标结构（v2，最小侵入）
 
@@ -90,28 +86,28 @@ HostSupport（新，纯数据，UI 与 hook 共读）
                             MountReport（新）→ 文件/remote prefs JSON → UI 卡片
 ```
 
-四条新约束（可测）：
-1. 任何 target 的 `versions` 声明必须来自 `HostSupport`，hook 内禁止裸写版本字面量；
+四条可测约束：
+1. 任何 target 的 versions 声明必须来自 `HostSupport`，hook 内禁止裸写版本字面量；
 2. `policy` 显式化，禁止用「空集默认表」隐式表达 blind mount；
 3. `scope.list` 由注册表生成（或由测试强制同步）；
 4. 每次 `MountSession` 必须产出 `MountReport` 一条（缺 = 测试失败）。
 
-## 4. 迁移顺序（按「止血 → 结构化 → 收敛」）
+## 4. 迁移顺序（止血 → 结构化 → 收敛）
 
 | 序 | 动作 | 解决 | 估计 |
 |---|---|---|---|
-| 1 | `HostSupport` + 三方一致性测试 + 字段覆盖测试 | A1/A7/A8（**立即止血**，纯加测试与数据） | 0.5–1 人日 |
+| 1 | `HostSupport` + 三方一致性 + 字段覆盖测试 | A1/A7/A8（**立即止血**，纯加数据与测试） | 0.5–1 人日 |
 | 2 | `MountReport` 出口 + 首页「已挂载 N/M」 | A5（用户可见价值最大） | 1–2 人日 |
-| 3 | `MountTable` overlay 契约 + 把 installer/launcher 表迁成 delta | A3 | 1 人日 |
+| 3 | `MountTable` overlay 契约 + installer/launcher 表迁成 delta | A3 | 1 人日 |
 | 4 | `MountPolicy` 显式化 | A2 | 0.5 人日 |
-| 5 | `PackagedTarget` + 生成式 `scope.list` | A6 | 2–3 人日（拆两步：先测试护栏，再生成） |
-| 6 | 版本知识出代码（A4 的 `toolClassOverride` 等） | A4 | 1 人日 |
+| 5 | `PackagedTarget` + 生成式 `scope.list` | A6 | 2–3 人日 |
+| 6 | 版本知识出代码（`toolClassOverride` 等） | A4 | 1 人日 |
 
 第 1 步单独就能把「UI 说适配了、hook 没适配」的窗口关掉，建议先做。
 
 ## 5. 明确不做
 
-- **不做自动适配/猜锚点**：没有内容锚点就 `NOT_RESOLVED`，这条哲学（`docs/hook-philosophy-manifesto.md`）比任何版本覆盖率都重要。
-- **不把表挪成 JSON/资源**：Kotlin 常量有编译期检查与 IDE 跳转，挪成数据文件换来的是「拼错一个字段名也要真机才发现」。
-- **不合并 theme 的 4 张表**：每张表附带一个版本的实证注释（63.305=f71/65.302=g71/67.302=wb1/67.303=4 类改名），是跨版本推理的历史证据，删了将来无法解释「为什么这里要带降落伞」。
-- **不引 KSP/注解处理器**：构建复杂度换来的只是少写几个 `HookPoint(...)`，不值得。
+- **不做自动适配/猜锚点**：没有内容锚点就 `NOT_RESOLVED`，这条哲学比版本覆盖率重要。
+- **不把表挪成 JSON/资源**：Kotlin 常量有编译期检查与 IDE 跳转。
+- **不合并 theme 的 4 张表**：每张表附带一个版本的实证注释，是跨版本推理的历史证据。
+- **不引 KSP/注解处理器**：构建复杂度换来的只是少写几个 `HookPoint(...)`。
