@@ -32,6 +32,10 @@ metadata:
 | 界面行为不对 | `ui`（View 树 + text/content-desc）· `shot` · `viewdump`；再 `tap` / `swipe` / `text` / `key` |
 | 反编译目标 app | `decompile <apk> [名]`（smali+明文 manifest+res）· `jadx <apk> [名]`（伪代码）· `aapt2 <参数>` · `apkinfo <apk>` |
 | 校验作用域配错没 | `scopes` vs `targets`（不一致 ⇒ 框架静默不回调该包） |
+| **OTA 后：哪些宿主版本没适配** | `versions`（实装 vs `FeatureCatalog`，未适配非 0 退出）→ `python3 tools/adapt_mt.py all`（逐包静态核对挂载点，`all` = 有基线的目标）|
+| 一眼看全量判据 | `hook-status [前缀]`（最新 lspd 日志里各 hook 最近一次 `installed N/M`）|
+| 查宿主版本 / 模块启用态 | `app-version <pkg…>` · `lsposed-state`（启用态 + scope 清单，python 读 db）|
+| 本机装包 / 强杀宿主 | `install-local <apk>`（root 中转 `/data/local/tmp`）· `stop-app <pkg…>` |
 | 体积 / dex 构成 | `size` · `dexstat` |
 | 环境被重置（JDK/aapt2 MISSING、构建起不来） | `env-bootstrap --check`（只体检）→ `env-bootstrap`（重建 JDK21 + aapt2 到可执行前缀 `$PREFIX`）。**这两件不能挪进 `tools/`**：`/storage` 挂 noexec 且禁止建软链，二进制复制过去 `chmod 755` 也照样 `Permission denied` |
 

@@ -49,7 +49,7 @@ am start -a android.intent.action.VIEW \
 MT 弹安装面板，用户手点确认；装后 LSPosed 会停用模块 → `dev.sh enable-module`（桌面）或用户手动重启用 + force-stop 宿主。判据：`dumpsys package io.github.coderstory.honorhook | grep lastUpdateTime`。
 
 自写脚本：`dev.sh`（构建/安装/日志/UI 自动化/反编译统一入口）、`adapt_new_version.py`
-（宿主新版本适配校验：从 hook 源码+数据表提取挂载点，现 140 点，对反编译产物核对类/方法存活；口径见 docs/hook-inventory-audit.md §一）、
+（宿主新版本适配校验：从 hook 源码+数据表抽取挂载点声明，对反编译产物核对类/方法存活；口径见 docs/hook-inventory-audit.md §一；逐包归属用 tools/adapt_mt.py）、
 `rain-decrypt.py`（Rain 参考模块字符串解密，逆向期）。
 下载件：`apktool.jar`（APK→smali，需 JDK 21）、`android-sdk/`（gradle 构建 + aapt2）、
 `bin/apktool`、`bin/jadx`（PATH 垫片）。
@@ -98,7 +98,7 @@ MT 弹安装面板，用户手点确认；装后 LSPosed 会停用模块 → `de
 **2026-10-20 现状已变**：installer 改为「基线表 + 额外版本表」——`14.0.22.326`（8 点）/ `14.0.38.301`（11 点）各一张，
 经 `installerTables` 按精确版本分发（38.301 表真机判据已于 2026-10-20 达成 `installed 11/11`；22.326 表无真机判据）。
 新宿主版本 = 反编译逐点核对 → 手写新表注册 `versionTables`。
-主题商店 49 点已入表；其余目标仍源码 `MountTask` 式，渐进迁移。
+主题商店 52 点已入表（含 20.1.67.303 精确套）；其余目标仍源码 `MountTask` 式，渐进迁移。
 
 ## 哲学
 

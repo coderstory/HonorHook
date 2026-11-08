@@ -107,6 +107,10 @@ bash tools/dev.sh stop-app com.hihonor.mms       # kill -9（am force-stop 被�
 bash tools/dev.sh modlog-grep MmsHook 20         # 本地 su grep，不再要求 adb
 bash tools/dev.sh modlog-f HonorHook
 bash tools/dev.sh restart-scope [pkg...]         # 缺省 = scope.list 全部
+bash tools/dev.sh hook-status [前缀]             # 各 hook 最近一次 installed N/M 汇总
+bash tools/dev.sh app-version <pkg...>           # 已装应用 versionName
+bash tools/dev.sh lsposed-state [pkg]            # 模块启用态 + 作用域清单（python3 读 db）
+bash tools/dev.sh versions [过滤词...]          # 版本适配体检：实装 vs FeatureCatalog（OTA 后第一条）
 ```
 
 坑（都实测过）：

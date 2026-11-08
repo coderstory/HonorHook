@@ -25,18 +25,10 @@ sys.path.insert(0, str(REPO / 'tools'))
 
 import mtmcp                    # noqa: E402
 import adapt_new_version as av  # noqa: E402
+import feature_catalog as fcat  # noqa: E402
 
-# 2026-11-06 实测漂移的 8 个目标（代码基线 vs 设备实装，dumpsys 对照见会话记录）
-DRIFTED = [
-    'com.hihonor.android.thememanager',   # 20.1.67.303（代码 ≤20.1.65.302）
-    'com.hihonor.mms',                    # 19.0.10.310（代码 19.0.9.306）
-    'com.hihonor.android.totemweather',   # 18.1.7.314（代码 18.1.6.312）
-    'com.hihonor.appmarket',              # 16.1.10.302（代码 16.1.9.302）
-    'com.hihonor.systemmanager',          # 17.0.0.473（代码 ≤17.0.0.457）
-    'com.xingin.xhs',                     # 9.53.3（代码 ≤9.51.0）
-    'com.hihonor.wallpapereditor',        # 153.0.0.502（代码 153.0.0.423）
-    'com.hihonor.livewallpaper.paradise', # 11.0.0.262（代码 11.0.0.252）
-]
+# `all` 的包清单不再手写：取 FeatureCatalog 里有基线版本的目标（= 版本敏感的全部宿主）。
+# 手写清单会过期（2026-11-06 那版 8 个包在 11-07 适配后已全部落表，仍留着会误导）。
 
 PLATFORM_PREFIXES = ('java.', 'javax.', 'android.', 'androidx.', 'kotlin.', 'kotlinx.')
 
@@ -209,7 +201,10 @@ def run(pkg: str) -> Path:
 
 
 def main():
-    pkgs = DRIFTED if (len(sys.argv) < 2 or sys.argv[1] == 'all') else sys.argv[1:]
+    if len(sys.argv) < 2 or sys.argv[1] == 'all':
+        pkgs = fcat.version_sensitive()
+    else:
+        pkgs = sys.argv[1:]
     for pkg in pkgs:
         t0 = time.time()
         r = run(pkg)

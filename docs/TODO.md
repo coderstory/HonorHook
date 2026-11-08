@@ -18,7 +18,7 @@
 
 - [ ] **UI 面板「判据日志」页**：面板直读 installed N/M 与模块日志，验证不依赖电脑（杠杆最高）
 - [ ] 主题商店「免费领」tab：搜索页本地硬编码，云控与槽位裁剪都管不到（docs/theme-store.md §七·2，调研已到位）
-- [ ] OTA 适配例行化：ouc 18.0.3.206→230 实证 OTA 常态；荣耀 OTA 后例行跑 `adapt_new_version.py`（现提取 140 点，口径见 hook-inventory-audit.md §一）+ 剩余目标渐进迁 HookPoint 表
+- [x] OTA 适配例行化（2026-11-07 脚本化）：OTA 后三步——① `bash tools/dev.sh versions` 列出未适配宿主（实装 vs FeatureCatalog，非 0 退出即有待办）② `python3 tools/adapt_mt.py all` 逐包静态核对挂载点（`all` = FeatureCatalog 里有基线的目标，不再手工维护清单）③ 需要时按 `docs/reverse/findings-2026-11-07-version-adapt.md` 的流程建精确表。剩余目标渐进迁 HookPoint 表仍待做
 - [ ] 短信 T4 收尾：服务关时验证码卡「复制」按钮渲染路径（docs/reverse/sms-ads.md §五）
 - [ ] 埋点 hook「Ex 工厂收口」1 点持续 2/3 失败（autoCollect 类不存在）：修或降级登记
 - [ ] `docs/reverse/sogou-ime.md` 补皮肤面记录：10-27 的「明确不做」结论已随 56c3d97 删除，现实现（S-COOKIE 复刻 + COS 直链替换 + 付费状态机）在逆向档案里无对应段落

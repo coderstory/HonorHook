@@ -204,12 +204,17 @@ public class WebScanActivity extends Activity {
         webWrap.addView(webColumn, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // 悬浮球样式（2026-11-08 用户要求）：黑底 + 外圈荧光绿。
+        // 单层 setStroke 只能画一圈实线，没有「发光」感，所以叠两层：
+        // 外层 6dp 半透明绿环当辉光，内层黑实心 + 2dp 亮绿描边。
         android.widget.TextView menuBtn = new android.widget.TextView(this);
         menuBtn.setText("☰");
-        menuBtn.setTextColor(0xCC17171A);
+        menuBtn.setTextColor(0xFF39FF88);
         menuBtn.setTextSize(18);
+        menuBtn.setTypeface(Typeface.DEFAULT_BOLD);
         menuBtn.setGravity(Gravity.CENTER);
-        menuBtn.setBackground(roundRect(0x8AFFFFFF, dp(22), dp(1), 0x1A000000));
+        menuBtn.setBackground(fabBackground());
+        menuBtn.setElevation(dp(8));
         FrameLayout.LayoutParams menuLp = new FrameLayout.LayoutParams(dp(44), dp(44));
         menuBtn.setLayoutParams(menuLp);
         setupDraggableFab(menuBtn, menuLp);
@@ -294,11 +299,16 @@ public class WebScanActivity extends Activity {
             @Override
             public void onPageStarted(android.webkit.WebView view, String url, android.graphics.Bitmap favicon) {
                 log("onPageStarted: " + url);
+                // 重定向链里中间地址也记：最终页可能永远走不到 onPageFinished（站点自跳转/被拦截）
+                rememberUrl(url);
             }
 
             @Override
             public void onPageFinished(android.webkit.WebView view, String url) {
                 log("onPageFinished: " + url);
+                // 「最后访问的地址（含 query）」在这里落盘：扫码打开后站点会二次跳转，
+                // 旧实现只在 openUrl 存扫码原址，重开就回到没有会话参数的入口页。
+                rememberUrl(url);
             }
 
         });
@@ -313,15 +323,15 @@ public class WebScanActivity extends Activity {
 
     private static final String KEY_HISTORY = "history";
 
-    /** URL 归一（2026-11-03 用户需求）：判同去掉 query 参数，仅保留 scheme://host/path */
+    /**
+     * URL 归一：判同用「scheme://host/path?query」，只丢 fragment（#锚点）。
+     * 2026-11-03 首版把 query 也丢了，导致 ?sid=.../ ?id=1 与 ?id=2 被当成同一条被去重掉；
+     * 2026-11-08 用户要求历史必须按参数区分。手工截断而不用 URI 重组——
+     * URI 构造器会重新转义已编码的 path，反而不稳。
+     */
     private static String normUrl(String u) {
-        try {
-            java.net.URI uri = new java.net.URI(u);
-            return new java.net.URI(uri.getScheme(), uri.getHost(), uri.getPath(), null).toString();
-        } catch (Exception e) {
-            int q = u.indexOf('?');
-            return q < 0 ? u : u.substring(0, q);
-        }
+        int h = u.indexOf('#');
+        return h < 0 ? u : u.substring(0, h);
     }
 
     /** 记录打开历史：按去参 URL 判重置顶，最多 10 条 */
@@ -419,13 +429,26 @@ public class WebScanActivity extends Activity {
     private void openUrl(String url) {
         log("openUrl: " + url);
         recordHistory(url);
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().putString(KEY_URL, url).apply();
+        rememberUrl(url);
         scanView.setVisibility(View.GONE);
         webWrap.setVisibility(View.VISIBLE);
         webView.setVisibility(View.VISIBLE);
         stopCamera();
         webView.loadUrl(url);
+    }
+
+    /**
+     * 记住「最后访问」的地址（连同 query 参数）。
+     * 触发点：页面开始/结束加载 + 退到后台（SPA 用 pushState 改地址不会触发 page 回调）。
+     * 只认 http(s)：about:blank、intent:// 之类不落盘，避免下次打开变白页。
+     */
+    private void rememberUrl(String url) {
+        if (url == null || url.isEmpty()) return;
+        if (!(url.startsWith("http://") || url.startsWith("https://"))) return;
+        String prev = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, null);
+        if (url.equals(prev)) return;
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
+        log("rememberUrl: " + url);
     }
 
     /** 返回键：网页后退 → 确认回扫码页；扫码页 → 确认退出 */
@@ -438,8 +461,10 @@ public class WebScanActivity extends Activity {
             if (webView.canGoBack()) {
                 webView.goBack();
             } else {
-                showConfirm("返回扫码", "退出当前网页，返回扫码页？\n已登录状态会保留。",
-                        "返回扫码", this::backToScanner, "留在本页");
+                // 三选一（2026-11-08 用户需求）：多一个「返回主页」，不用先回扫码页再退
+                showConfirm3("返回扫码", "退出当前网页，返回扫码页？\n已登录状态会保留。",
+                        new String[]{"返回扫码", "返回主页", "留在本页"},
+                        new Runnable[]{this::backToScanner, this::finish, null}, 0);
             }
             return;
         }
@@ -534,6 +559,8 @@ public class WebScanActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(10), dp(6), dp(10), dp(6));
 
+        box.addView(menuItem("输入网址", () -> { dismissWebMenu(); showUrlInput(); }),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
         box.addView(menuItem("刷新页面", () -> { dismissWebMenu(); webView.reload(); }),
                 new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
         box.addView(menuItem("返回主页面", () -> { dismissWebMenu(); finish(); }),
@@ -570,6 +597,180 @@ public class WebScanActivity extends Activity {
         b.setPadding(dp(14), 0, dp(14), 0);
         b.setOnClickListener(v -> action.run());
         return b;
+    }
+
+    /**
+     * 「输入网址」弹窗（2026-11-08 用户需求）：一个输入框 + 一个跳转按钮。
+     * 跳转走 openUrl()，因此同时进「最近打开的地址」（recordHistory）并成为下次恢复地址。
+     * 只补 https:// 前缀，不猜站点；非 http(s) 一律拒绝，避免 loadUrl 出白页。
+     */
+    private void showUrlInput() {
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this).create();
+        float den = getResources().getDisplayMetrics().density;
+        int pad = (int) (20 * den);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad, pad, (int) (16 * den));
+
+        TextView title = new TextView(this);
+        title.setText("输入网址");
+        title.setTextColor(0xFF17171A);
+        title.setTextSize(17);
+        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(title);
+
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setHint("https://example.com/path?x=1");
+        input.setSingleLine(true);
+        input.setTextSize(14);
+        input.setTextColor(0xFF17171A);
+        input.setHintTextColor(0x6617171A);
+        input.setBackground(roundRect(0xFFF2F3F5, dp(12), 0, 0));
+        input.setPadding(dp(14), 0, dp(14), 0);
+        String cur = webView != null ? webView.getUrl() : null;
+        if (cur != null && (cur.startsWith("http://") || cur.startsWith("https://"))) {
+            input.setText(cur);
+            input.setSelection(0, input.getText().length());
+        }
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        inputLp.topMargin = dp(12);
+        box.addView(input, inputLp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.END);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(16);
+        row.setLayoutParams(rowLp);
+
+        android.widget.Button cancel = new android.widget.Button(this);
+        cancel.setText("取消");
+        cancel.setTextColor(0xFF17171A);
+        cancel.setTextSize(14);
+        cancel.setAllCaps(false);
+        cancel.setStateListAnimator(null);
+        cancel.setBackground(roundRect(0x00000000, dp(22), dp(1), 0x1A000000));
+        cancel.setPadding(dp(20), 0, dp(20), 0);
+        row.addView(cancel, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40)));
+
+        android.widget.Button go = new android.widget.Button(this);
+        go.setText("跳转");
+        go.setTextColor(0xFFFFFFFF);
+        go.setTextSize(14);
+        go.setAllCaps(false);
+        go.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        go.setStateListAnimator(null);
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setColor(0xFF17171A);
+        gd.setCornerRadius(dp(22));
+        go.setBackground(gd);
+        go.setPadding(dp(26), 0, dp(26), 0);
+        LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(40));
+        goLp.leftMargin = dp(10);
+        row.addView(go, goLp);
+        box.addView(row);
+
+        d.setView(box);
+        d.show();
+        if (d.getWindow() != null) {
+            d.getWindow().setBackgroundDrawable(roundRect(0xFFFFFFFF, dp(22), dp(1), 0x1A000000));
+            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        }
+        cancel.setOnClickListener(v -> d.dismiss());
+        go.setOnClickListener(v -> {
+            String raw = input.getText().toString().trim();
+            if (raw.isEmpty()) { toast("请输入网址"); return; }
+            if (!raw.startsWith("http://") && !raw.startsWith("https://")) raw = "https://" + raw;
+            if (!(raw.startsWith("http://") || raw.startsWith("https://"))) { toast("网址格式不对"); return; }
+            d.dismiss();
+            openUrl(raw);
+        });
+    }
+
+    /**
+     * 三选一确认弹窗（2026-11-08 用户需求）：「返回扫码」确认里要能直接回模块主页。
+     * 按钮等宽平分一行；primaryIdx 指定的那个用实底深色（主操作），其余描边次操作。
+     * null 动作 = 仅关闭弹窗（「留在本页」）。
+     */
+    private void showConfirm3(String title, String message,
+                              String[] texts, Runnable[] actions, int primaryIdx) {
+        float den = getResources().getDisplayMetrics().density;
+        int pad = (int) (22 * den);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad, pad, (int) (16 * den));
+
+        TextView tv = new TextView(this);
+        tv.setText(title);
+        tv.setTextColor(0xFF17171A);
+        tv.setTextSize(17);
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        box.addView(tv);
+
+        TextView msg = new TextView(this);
+        msg.setText(message);
+        msg.setTextColor(0x8A17171A);
+        msg.setTextSize(14);
+        msg.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        msgLp.topMargin = dp(10);
+        box.addView(msg, msgLp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = dp(22);
+        row.setLayoutParams(rowLp);
+
+        final android.app.AlertDialog[] holder = new android.app.AlertDialog[1];
+        for (int i = 0; i < texts.length; i++) {
+            final int idx = i;
+            android.widget.Button b = new android.widget.Button(this);
+            b.setText(texts[i]);
+            b.setTextSize(13);
+            b.setAllCaps(false);
+            b.setStateListAnimator(null);
+            b.setPadding(dp(6), 0, dp(6), 0);
+            if (i == primaryIdx) {
+                b.setTextColor(0xFFFFFFFF);
+                b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+                gd.setColor(0xFF17171A);
+                gd.setCornerRadius(dp(20));
+                b.setBackground(gd);
+            } else {
+                b.setTextColor(0xFF17171A);
+                b.setBackground(roundRect(0x00000000, dp(20), dp(1), 0x1A000000));
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+            if (i > 0) lp.leftMargin = dp(8);
+            b.setOnClickListener(v -> {
+                if (holder[0] != null) holder[0].dismiss();
+                if (actions[idx] != null) actions[idx].run();
+            });
+            row.addView(b, lp);
+        }
+        box.addView(row);
+
+        android.app.AlertDialog d = new android.app.AlertDialog.Builder(this).create();
+        holder[0] = d;
+        d.setView(box);
+        d.show();
+        if (d.getWindow() != null) {
+            d.getWindow().setBackgroundDrawable(roundRect(0xFFFFFFFF, dp(22), dp(1), 0x1A000000));
+            d.getWindow().setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.86f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     /** 统一样式确认弹窗：深色圆角卡片 + 渐变主按钮 + 描边次按钮 */
@@ -941,6 +1142,16 @@ public class WebScanActivity extends Activity {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
+    /** 悬浮球背景：外层荧光绿辉光环 + 内层黑实心（层级理由见创建处注释） */
+    private android.graphics.drawable.Drawable fabBackground() {
+        android.graphics.drawable.GradientDrawable glow =
+                roundRect(0x0039FF88, dp(22), dp(6), 0x5539FF88);
+        android.graphics.drawable.GradientDrawable core =
+                roundRect(0xF217171A, dp(22), dp(2), 0xCC39FF88);
+        return new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{glow, core});
+    }
+
     private android.graphics.drawable.GradientDrawable roundRect(
             int fill, float radius, float strokeW, int strokeColor) {
         android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
@@ -970,6 +1181,8 @@ public class WebScanActivity extends Activity {
         // Cookie 立即落盘，保证状态恢复
         android.webkit.CookieManager.getInstance().flush();
         if (webWrap.getVisibility() == View.VISIBLE) {
+            // 离开前台时把当前地址（含 query）定格：前端路由页面不再有 page 回调
+            try { rememberUrl(webView.getUrl()); } catch (Exception ignore) { }
             // 后台冻结网页：停渲染 + 全局暂停 JS 定时器/动画
             webView.onPause();
             webView.pauseTimers();
