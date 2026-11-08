@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
 import top.honorhook.ui.FeatureStore.SetEnabledResult
@@ -333,7 +334,8 @@ private class DrawablePainter(private val drawable: Drawable) : Painter() {
 
 /** iconKey → 内置 vector（虚拟目标专用）；未匹配返回 null 走 PackageManager 图标。 */
 private fun vectorForIconKey(key: String?): ImageVector? = when (key) {
-    "shield" -> Icons.Rounded.Shield
+    // 原神风格：岩=护盾的语义对位（2026-11-08 图标统一换主题）
+    "shield" -> GenshinIcons.Geo
     else -> null
 }
 
