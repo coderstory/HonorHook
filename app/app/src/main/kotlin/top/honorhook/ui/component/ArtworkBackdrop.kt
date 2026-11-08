@@ -7,41 +7,30 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
 import top.honorhook.R
 
 /**
- * 插画背景（2026-11-08 用户给的 1254×1254 蓝紫发角色图，`res/drawable-nodpi/artwork_backdrop.jpg`）。
+ * 插画背景（2026-11-08 用户给的 1254×2760 竖图，`res/drawable-nodpi/artwork_backdrop.jpg`）。
  *
- * 为什么是「大模糊 + 三段遮罩」而不是直接把原图铺底：
- * - 原图是**近景头像**，细节密度极高。完全不糊时卡片的磨砂半透明会把五官切成碎片，
- *   滚动时还有「脸在动」的干扰感；但糊太狠（首版 26dp）就只剩一团颜色，用户看不出是那张图
- *   （2026-11-08 反馈「磨砂太强，看不清」）。现在只糊 `ArtBlur = 9dp`：线条还在，
- *   但已经不足以跟卡片文字抢注意力。
- * - 三段遮罩解决可读性：顶部要托住 TopAppBar 的字（深色主题下白字压在亮紫上会糊），
- *   底部要托住最后一张卡片与悬浮底栏（底栏是玻璃，底下必须是可预期的色块）。中段留透，
- *   让插画的气质还在。
- * - 遮罩色跟着明暗主题走：浅色用白雾（把图洗成淡紫水彩，深色字仍可读），深色用黑雾
- *   （保留饱和度，白字可读）。不在这里判断 Monet——背景色是插画自己的事，与 Monet 无关。
- * - `Modifier.blur` 在 API 31 以下不生效（RenderEffect 缺失）：那几台机器上退化成「原图 + 更浓遮罩」，
- *   仍然能看，不做二套资源。
+ * 为什么是「原图直铺 + 三段遮罩」：
+ * - 首版用的是 1254×1254 方图 + 26dp 模糊，两件事都错：方图裁到竖屏只剩中间一条，
+ *   26dp 糊完认不出是谁（用户两次反馈「磨砂太强」「依旧太模糊」）。换成竖图后它本身就是
+ *   手机壁纸比例，`ContentScale.Crop` 几乎不裁；模糊撤掉，画就是画。
+ * - 不模糊就要靠遮罩管可读性：顶部压深托住 TopAppBar 的字，中段几乎全透（让画当主角），
+ *   底部压结实托住最后一张卡与玻璃底栏。卡片自己那层磨砂（`Theme.kt` 的 surfaceContainer alpha）
+ *   已经把文字和画隔开，不需要再对画动刀。
+ * - 遮罩色跟明暗主题走：浅色用白雾（深色字在淡紫上仍可读），深色用黑雾（保留饱和度 + 白字）。
  */
-/** 模糊半径：9dp = 「认得出是那张画」与「不跟卡片抢注意力」的折中（26dp 太糊、0dp 太吵）。 */
-private val ArtBlur = 9.dp
-
 @Composable
 fun ArtworkBackdrop(modifier: Modifier = Modifier) {
     val dark = isInDarkTheme()
-    // 数值是「让人认出这是那张图」与「字不糊」之间的折中：浅色再厚一档就洗成纯色底，
-    // 深色再薄一档卡片边缘会跟插画的高饱和紫糊在一起。
-    val top = if (dark) Color(0xFF0B0818).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.26f)
-    val mid = if (dark) Color.Black.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.04f)
-    val bottom = if (dark) Color(0xFF120E22).copy(alpha = 0.86f) else Color(0xFFF7F5FF).copy(alpha = 0.84f)
+    val top = if (dark) Color(0xFF0B0818).copy(alpha = 0.46f) else Color.White.copy(alpha = 0.30f)
+    val mid = if (dark) Color.Black.copy(alpha = 0.02f) else Color.White.copy(alpha = 0.02f)
+    val bottom = if (dark) Color(0xFF120E22).copy(alpha = 0.88f) else Color(0xFFF7F5FF).copy(alpha = 0.86f)
 
     Box(modifier) {
         Image(
@@ -49,7 +38,7 @@ fun ArtworkBackdrop(modifier: Modifier = Modifier) {
             contentDescription = null,
             contentScale = ContentScale.Crop,
             alignment = Alignment.TopCenter,
-            modifier = Modifier.fillMaxSize().blur(ArtBlur),
+            modifier = Modifier.fillMaxSize(),
         )
         Box(
             modifier = Modifier
@@ -57,8 +46,8 @@ fun ArtworkBackdrop(modifier: Modifier = Modifier) {
                 .background(
                     Brush.verticalGradient(
                         0f to top,
-                        0.34f to mid,
-                        0.72f to mid,
+                        0.32f to mid,
+                        0.70f to mid,
                         1f to bottom,
                     ),
                 ),
