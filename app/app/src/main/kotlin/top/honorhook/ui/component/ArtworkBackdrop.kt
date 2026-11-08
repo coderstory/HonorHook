@@ -19,9 +19,10 @@ import top.honorhook.R
  * 插画背景（2026-11-08 用户给的 1254×1254 蓝紫发角色图，`res/drawable-nodpi/artwork_backdrop.jpg`）。
  *
  * 为什么是「大模糊 + 三段遮罩」而不是直接把原图铺底：
- * - 原图是**近景头像**，细节密度极高。直接铺在卡片下面，卡片的磨砂半透明会把五官切成碎片，
- *   滚动时还会出现「脸在动」的干扰感。压到 26dp 模糊后它退化成一片同色系的色场，卡片浮在上面，
- *   谁是主体一目了然。
+ * - 原图是**近景头像**，细节密度极高。完全不糊时卡片的磨砂半透明会把五官切成碎片，
+ *   滚动时还有「脸在动」的干扰感；但糊太狠（首版 26dp）就只剩一团颜色，用户看不出是那张图
+ *   （2026-11-08 反馈「磨砂太强，看不清」）。现在只糊 `ArtBlur = 9dp`：线条还在，
+ *   但已经不足以跟卡片文字抢注意力。
  * - 三段遮罩解决可读性：顶部要托住 TopAppBar 的字（深色主题下白字压在亮紫上会糊），
  *   底部要托住最后一张卡片与悬浮底栏（底栏是玻璃，底下必须是可预期的色块）。中段留透，
  *   让插画的气质还在。
@@ -30,14 +31,17 @@ import top.honorhook.R
  * - `Modifier.blur` 在 API 31 以下不生效（RenderEffect 缺失）：那几台机器上退化成「原图 + 更浓遮罩」，
  *   仍然能看，不做二套资源。
  */
+/** 模糊半径：9dp = 「认得出是那张画」与「不跟卡片抢注意力」的折中（26dp 太糊、0dp 太吵）。 */
+private val ArtBlur = 9.dp
+
 @Composable
 fun ArtworkBackdrop(modifier: Modifier = Modifier) {
     val dark = isInDarkTheme()
     // 数值是「让人认出这是那张图」与「字不糊」之间的折中：浅色再厚一档就洗成纯色底，
     // 深色再薄一档卡片边缘会跟插画的高饱和紫糊在一起。
-    val top = if (dark) Color(0xFF0B0818).copy(alpha = 0.52f) else Color.White.copy(alpha = 0.44f)
-    val mid = if (dark) Color.Black.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.10f)
-    val bottom = if (dark) Color(0xFF120E22).copy(alpha = 0.90f) else Color(0xFFF7F5FF).copy(alpha = 0.88f)
+    val top = if (dark) Color(0xFF0B0818).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.26f)
+    val mid = if (dark) Color.Black.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.04f)
+    val bottom = if (dark) Color(0xFF120E22).copy(alpha = 0.86f) else Color(0xFFF7F5FF).copy(alpha = 0.84f)
 
     Box(modifier) {
         Image(
@@ -45,7 +49,7 @@ fun ArtworkBackdrop(modifier: Modifier = Modifier) {
             contentDescription = null,
             contentScale = ContentScale.Crop,
             alignment = Alignment.TopCenter,
-            modifier = Modifier.fillMaxSize().blur(26.dp),
+            modifier = Modifier.fillMaxSize().blur(ArtBlur),
         )
         Box(
             modifier = Modifier
