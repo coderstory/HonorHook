@@ -55,6 +55,7 @@ import top.honorhook.ui.component.motion.revealFade
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TabRow
+import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -120,15 +121,26 @@ internal fun ThemeSettingsPage(
                 // 再叠一层飞入会让「刚进主题页」这段本来就在动的画面更晃。
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Box(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
+                        // 2026-11-08 用户「深色浅色这个卡片，是卡片里套了一个卡片？」
+                        // 是的：外层是我们统一的 Card，而 miuix 的 TabRow 自己还画一层圆角容器
+                        // （`tabRowColors().backgroundColor` 默认 = surface），两层叠起来就成了「卡中卡」。
+                        // 修法不是去掉外层 Card（那会退回用户当初嫌它「跟下面一串 Card 不是一个语汇」
+                        // 的裸条形态），而是把内层容器调透明：只留选中项的胶囊高亮，
+                        // 这样读起来是「一张卡里的分段控件」。
                         TabRow(
                             tabs = listOf("跟随系统", "浅色", "深色"),
                             selectedTabIndex = ui.value.coerceIn(0, 2),
                             onTabSelected = { index ->
                                 AppSettings.setColorMode(ColorMode.fromValue(index))
                             },
+                            colors = TabRowDefaults.tabRowColors(
+                                backgroundColor = Color.Transparent,
+                                selectedBackgroundColor = Color(AppSettings.artworkKeyColor).copy(alpha = 0.22f),
+                                selectedContentColor = colorScheme.onBackground,
+                            ),
                         )
                     }
                 }
