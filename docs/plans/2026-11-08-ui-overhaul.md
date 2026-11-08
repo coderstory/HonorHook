@@ -1,0 +1,54 @@
+# 2026-11-08 · 界面深度美化 v1（实验分支 `experiment/ui-overhaul`）
+
+用户要求（m00025）：界面布局 + 展示特效（卡片默认不显示、从屏幕外飞进来、渐进式展现）+ 装饰细节，
+要"突破固有思维"，但整体必须协调。分支 `experiment/ui-overhaul`（基于 `dev`），不并入 `dev` 之前先给用户看效果。
+
+## 概念：花园晨启（Garden Dawn）
+
+`GardenBackdrop` 已经是"静态晨光花园"。进场编排沿用同一个隐喻：**卡片刻在清晨从画面下缘之外被托起**，
+轻微倾斜、分层错峰，像花园里依次亮起的灯；落位后依次"呼吸"出内容。默认状态即"未入场"——
+用户看到的第一个画面只有背景与顶栏，内容自下而上生长出来。
+
+三条硬性约束（来自盘点，避免破坏既有观感）：
+
+1. 卡片底色已被 `Theme.kt:104-108` 压到 0.62/0.72 alpha，入场 alpha 只能做短促淡入（0→1 在前 45% 行程内完成），
+   主位移交给 `translationY` / `scale` / `rotationZ`，不做长时间半透明悬浮。
+2. 底栏与内容层是**兄弟**（`MainActivity.kt:170-201`，同父会让 backdrop 递归采样 SIGSEGV）——进场只作用于内容层内侧。
+3. `Fireflies` 挂在 `HomeScreen` 顶层（盖在卡上），不参与卡片进场；`GardenBackdrop` 保持静态（全屏 Canvas 逐帧重绘太贵）。
+
+## 变更清单（只改这些）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `ui/component/motion/Entrance.kt`（新） | `EntranceState`（一次性播放登记）+ `LocalEntranceHost` / `LocalEntranceGate` + `Modifier.cardEntrance(order, key)` + `Modifier.revealFade(order, delayMs)` |
+| 2 | `ui/component/Card.kt` | 包边之外加两件装饰：**卡片投影**（三圈逐级放大的实心超椭圆 1.5/3/5.5dp，越外越淡；不用 `Modifier.shadow` 的 RenderEffect 模糊——SDK 31+ 且每卡一层离屏缓冲，滚动掉帧）与**顶部玻璃高光**（裁剪到同一张 squircle 路径的竖直渐变，0 → 45% 高度归零）；画序 = 投影 → 内容 → 高光 → 包边 |
+| 3 | `ui/MainActivity.kt` | ① `splashVisible` 拆成"在屏"与"已退场"（`Gate`），splash 开始淡出即开闸；② `when(selectedTab)` 换成 `AnimatedContent`（淡入 280ms + 上浮 300ms(tween) / 淡出 140ms）；③ 给每个 tab 的内容提供独立 `EntranceState`（切 tab 重播进场） |
+| 4 | `ui/splash/HonorSplash.kt` | 新增 `onLeaving: () -> Unit = {}`，`leaving = true` 时回调一次（开闸时机 = 淡出起点） |
+| 5 | `ui/screen/HomeScreen.kt` | 两张卡挂 `cardEntrance`（order 0/1）；`InfoRow` 挂 `revealFade`（逐行浮现） |
+| 6 | `ui/screen/FeaturesScreen.kt` | 头部两张卡 + 网格按累计序号挂 `cardEntrance`（key 用包名，两组序号不撞）；`FeatureCardRow` / `FeatureGridCard` 加 `modifier` / `startIndex`；总览胶囊行挂 `revealFade(240ms)`；目标详情页与安全类页的头部卡、逐条 Row 也挂序号 |
+| 7 | `ui/screen/ToolboxScreen.kt` | 6 个磁贴手写 0..5（3 个硬编码 Row 无循环）；`AdsGroupCard` 序号 6；`HubTiles` 加 `startIndex` |
+| 8 | `ui/screen/SettingsScreen.kt` | 3 张固定卡序号 0/1/2 |
+| 9 | `ui/screen/ThemeSettingsScreen.kt` | 6 张固定卡 + 预览卡序号（0..6） |
+| 10 | `ui/MainActivity.kt`（底栏） | `HonorHookBottomBar` 挂 `Modifier.dockRise()`：整条从下方 26dp 升起 + 淡入（520ms，比卡片晚 120ms） |
+| 11 | `docs/plans/2026-11-08-ui-overhaul.md`（本文件） | 变更清单 / 观感参数 / 验证清单 |
+
+**不动**：`FloatingBottomBar.kt`、`component/liquid/*`、`InteractiveHighlight.kt`、`DampedDragAnimation.kt`、
+`GardenBackdrop.kt`、`Fireflies.kt`、`FeatureCatalog` / hook 侧、任何倍率/版本文件。
+
+## 观感参数（`Entrance.kt` 里的 EntranceTokens）
+
+- 位移：从下方 `+190dp`（约一屏的 1/5，配合淡入读起来就是"从屏幕外托起"）
+- 横向扇开：奇偶卡 `±40dp`，旋转 `±2.8°`，缩放 `0.88f → 1f`（弹簧 `dampingRatio 0.76 / stiffness 210`，有轻微过冲）
+- 错峰：`62ms/张`，单屏封顶 `400ms`（列表再长也不会等到"最后一张"）
+- 内层浮现：`revealFade` 8dp 上移 + 360ms 淡入，`baseDelay 160ms` + `42ms/行`
+- 底栏落座：`dockRise` 26dp 上浮 + 520ms 淡入，比卡片晚 120ms
+- 整数序号是稳定 key（`order` 当 key），同一 `EntranceState` 内只播一次；LazyColumn 回收后不再重播
+
+## 验证清单（用户自执行）
+
+1. 冷启动：splash 淡出过程中卡片开始从下往上飞入，首页 2 张卡依次落位，InfoCard 五行随后逐行浮现。
+2. 切换四个 tab：每个 tab 的内容都重新"生长"一次（底栏不动）；冷启动时底栏比内容晚一拍升起，玻璃折射正常。
+3. 二级页（功能页点卡片、工具箱子页、设置-关于/主题）：进入后卡片有进场，返回不闪。
+4. 列表滚动：滚出屏幕再滚回来的卡片**不再重播**（不闪烁）。
+5. 深浅色 / AMOLED 各看一遍：投影在浅色下是极淡的绿灰，在纯黑下不可见但无脏边；顶高光不压字。
+6. 关闭「花园皮肤」「萤火虫」后进场仍正常（进场不依赖这两个开关）。

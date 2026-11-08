@@ -83,6 +83,7 @@ import top.honorhook.ui.toolbox.ToolQueue
 import top.honorhook.ui.toolbox.ToolSwitchTable
 import top.yukonga.miuix.kmp.basic.Button
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.cardEntrance
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -583,9 +584,18 @@ private fun HubTiles(
         title: String,
         sub: String,
         accent: Color,
+        // 磁贴是 3 个硬编码 Row 里的固定格子（没有循环序号），所以序号手写 0..5；
+        // key 同时用序号：一个开场里每格只播一次，进子页再回 HOME 不重播。
+        order: Int,
         onClick: () -> Unit,
     ) {
-        Card(modifier = Modifier.fillMaxWidth().fillMaxHeight().clickable(onClick = onClick)) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .cardEntrance(order, key = "tool.tile.$order")
+                .clickable(onClick = onClick),
+        ) {
             Column(Modifier.padding(16.dp)) {
                 Box(
                     modifier = Modifier
@@ -615,20 +625,20 @@ private fun HubTiles(
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds) { onOpen(HubView.PURIFY) }
+                Tile(Icons.Rounded.Campaign, "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds, order = 0) { onOpen(HubView.PURIFY) }
             }
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze) { onOpen(HubView.FREEZE) }
+                Tile(Icons.Rounded.AcUnit, "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze, order = 1) { onOpen(HubView.FREEZE) }
             }
         }
         // 2026-11-08 删除「系统开关」整页后重排：3 行 6 格（营销推荐|应用冻结、MFA|远程开发、临时Root|文件整理）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(Icons.Rounded.Password, "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa) { onOpen(HubView.MFA) }
+                Tile(Icons.Rounded.Password, "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa, order = 2) { onOpen(HubView.MFA) }
             }
             Box(Modifier.weight(1f)) {
                 // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）
-                Tile(Icons.Rounded.TravelExplore, "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb) {
+                Tile(Icons.Rounded.TravelExplore, "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb, order = 3) {
                     onOpenHubActivity()
                 }
             }
@@ -637,11 +647,11 @@ private fun HubTiles(
             Box(Modifier.weight(1f)) {
                 // GhostLock（2026-11-03）：payload 不打进 APK，
                 // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
-                Tile(Icons.Rounded.Terminal, "临时Root", "无 root 提权 · Shizuku", accentRoot) { onOpen(HubView.GHOSTLOCK) }
+                Tile(Icons.Rounded.Terminal, "临时Root", "无 root 提权 · Shizuku", accentRoot, order = 4) { onOpen(HubView.GHOSTLOCK) }
             }
             Box(Modifier.weight(1f)) {
                 // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
-                Tile(Icons.Rounded.PhotoLibrary, "文件整理", "照片按月归档 · 垃圾清理", accentFiles) { onOpen(HubView.FILES) }
+                Tile(Icons.Rounded.PhotoLibrary, "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 5) { onOpen(HubView.FILES) }
             }
         }
     }
@@ -657,7 +667,12 @@ private fun AdsGroupCard(
 ) {
     val entries = ToolSwitchTable.ADS_GROUP
     val onCount = entries.count { values[it.key] == "1" }
-    Card(modifier = Modifier.padding(top = 12.dp).fillMaxWidth()) {
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth()
+            .cardEntrance(6, key = "tool.ads"),
+    ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
                 text = "营销推荐",

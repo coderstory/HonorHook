@@ -5,6 +5,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -21,6 +27,7 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Handyman
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -43,6 +50,10 @@ import top.honorhook.ui.component.GardenBackdrop
 import top.honorhook.ui.component.HonorHookTheme
 import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.component.isInDarkTheme
+import top.honorhook.ui.component.motion.EntranceState
+import top.honorhook.ui.component.motion.LocalEntranceGate
+import top.honorhook.ui.component.motion.LocalEntranceHost
+import top.honorhook.ui.component.motion.dockRise
 import top.honorhook.ui.screen.FeaturesScreen
 import top.honorhook.ui.screen.HomeScreen
 import top.honorhook.ui.screen.SettingsScreen
@@ -87,10 +98,24 @@ class MainActivity : ComponentActivity() {
         setContent {
             HonorHookTheme {
                 var splashVisible by rememberSaveable { androidx.compose.runtime.mutableStateOf(true) }
+                // 进场闸门（2026-11-08 experiment/ui-overhaul）：splash 开始淡出才开闸，
+                // 让卡片飞入与 splash 淡出**同帧叠化**，而不是等 splash 完全消失后画面空一拍再飞。
+                // 默认 false：屏下不启动进场（否则 2.8s 的 splash 期间动画早播完，用户什么都看不到）。
+                var entranceOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
+                // 兜底：万一 splash 的 onLeaving 没触发（异常/被裁掉），4s 后强制开闸，内容不会永远隐身
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(4000)
+                    entranceOpen = true
+                }
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                    AppRoot()
+                    CompositionLocalProvider(LocalEntranceGate provides entranceOpen) {
+                        AppRoot()
+                    }
                     if (splashVisible) {
-                        top.honorhook.ui.splash.HonorSplash(onFinish = { splashVisible = false })
+                        top.honorhook.ui.splash.HonorSplash(
+                            onFinish = { splashVisible = false },
+                            onLeaving = { entranceOpen = true },
+                        )
                     }
                 }
             }
@@ -182,11 +207,29 @@ private fun AppRoot() {
                     amoled = AppSettings.colorMode.isAmoled,
                 )
             }
-            when (selectedTab) {
-                0 -> HomeScreen(bottomInnerPadding = bottomBarPadding)
-                1 -> FeaturesScreen(bottomInnerPadding = bottomBarPadding)
-                2 -> ToolboxScreen(bottomInnerPadding = bottomBarPadding)
-                else -> SettingsScreen(bottomInnerPadding = bottomBarPadding)
+            // 切 tab 的进场（2026-11-08 ui-overhaul）：整页「淡入 + 上浮 12dp」只是**背景层**的过渡，
+            // 主视觉是各屏卡片各自的逐张飞入（cardEntrance）。退场比进场快（140ms），
+            // 否则旧页的卡片还压在新页上，两层飞入会打架。
+            AnimatedContent(
+                targetState = selectedTab,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    (fadeIn(tween(280)) + slideInVertically(tween(300)) { height -> height / 40 })
+                        .togetherWith(fadeOut(tween(140)))
+                },
+                label = "tabSwitch",
+            ) { tab ->
+                // 每个 tab 一张播放登记表：本次进入的卡片才播；同 tab 内的二级页复用这张表，
+                // 所以「功能页 → 点进目标详情 → 返回」不会让已落位的卡重播。
+                val entranceHost = remember { EntranceState() }
+                CompositionLocalProvider(LocalEntranceHost provides entranceHost) {
+                    when (tab) {
+                        0 -> HomeScreen(bottomInnerPadding = bottomBarPadding)
+                        1 -> FeaturesScreen(bottomInnerPadding = bottomBarPadding)
+                        2 -> ToolboxScreen(bottomInnerPadding = bottomBarPadding)
+                        else -> SettingsScreen(bottomInnerPadding = bottomBarPadding)
+                    }
+                }
             }
         }
 
@@ -197,7 +240,9 @@ private fun AppRoot() {
             items = items,
             enableFloating = floatingBar,
             enableBlurSdk = enableFloatingBlur,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .dockRise(),
         )
     }
 }

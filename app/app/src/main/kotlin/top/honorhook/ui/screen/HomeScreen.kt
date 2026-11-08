@@ -47,6 +47,8 @@ import top.honorhook.ui.AppSettings
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.Fireflies
 import top.honorhook.ui.component.IconBadge
+import top.honorhook.ui.component.motion.cardEntrance
+import top.honorhook.ui.component.motion.revealFade
 import top.honorhook.ui.component.isInDarkTheme
 import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -124,6 +126,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         StatusCard(
+                            modifier = Modifier.cardEntrance(0, key = "home.status"),
                             active = active,
                             confirmed = activeState != null,
                             isDynamicColor = isDynamicColor,
@@ -143,7 +146,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             },
                         )
 
-                        InfoCard()
+                        InfoCard(modifier = Modifier.cardEntrance(1, key = "home.info"))
 
                         Spacer(
                             Modifier.height(
@@ -186,6 +189,7 @@ internal fun appVersionLabel(): String {
  */
 @Composable
 private fun StatusCard(
+    modifier: Modifier = Modifier,
     active: Boolean,
     confirmed: Boolean,
     isDynamicColor: Boolean,
@@ -206,7 +210,7 @@ private fun StatusCard(
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.defaultColors(color = containerColor),
         onClick = {},
         showIndication = false,
@@ -269,10 +273,14 @@ private fun InfoRow(
     title: String,
     content: String,
     bottomPadding: Dp = 24.dp,
+    // 逐行浮现的序号（2026-11-08 ui-overhaul）：卡片落位后，行按 42ms 节奏一行行亮出来。
+    // 放在 InfoRow 而不是 InfoCard 的 Column 上：整列一起淡入会像"一块白板"而不是"信息在生长"。
+    revealOrder: Int = 0,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .revealFade(revealOrder, baseDelayMs = 380)
             .padding(bottom = bottomPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -302,24 +310,25 @@ private fun InfoRow(
 
 /** 信息卡 —— 照抄 KernelSU `InfoCard`：单张 `Card`，卡内 `Column(padding 16.dp)` 逐行 [InfoRow]。 */
 @Composable
-private fun InfoCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun InfoCard(modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, Color(0xFF4FA8FF), "模块版本", appVersionLabel())
-            InfoRow(Icons.Filled.DeveloperBoard, Color(0xFF9B84FF), "模块包名", BuildConfig.APPLICATION_ID)
+            InfoRow(Icons.Filled.Tag, Color(0xFF4FA8FF), "模块版本", appVersionLabel(), revealOrder = 0)
+            InfoRow(Icons.Filled.DeveloperBoard, Color(0xFF9B84FF), "模块包名", BuildConfig.APPLICATION_ID, revealOrder = 1)
             InfoRow(
                 Icons.Filled.Smartphone, Color(0xFF2BB3C0), "系统版本",
-                "Android ${Build.VERSION.RELEASE}",
+                "Android ${Build.VERSION.RELEASE}", revealOrder = 2,
             )
             InfoRow(
                 Icons.Filled.Fingerprint, Color(0xFFF0A93B), "设备",
-                "${Build.MANUFACTURER} ${Build.MODEL}",
+                "${Build.MANUFACTURER} ${Build.MODEL}", revealOrder = 3,
             )
             // 系统架构原来复用了 DeveloperBoard（与"插件包名"同一个图标），换成 Memory
             InfoRow(
                 Icons.Filled.Memory, Color(0xFF35C77E), "系统架构",
                 Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
                 bottomPadding = 0.dp,
+                revealOrder = 4,
             )
         }
     }

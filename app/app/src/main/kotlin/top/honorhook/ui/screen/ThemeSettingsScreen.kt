@@ -58,6 +58,8 @@ import top.honorhook.ui.ColorMode
 import top.honorhook.ui.component.FireflyTint
 import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.cardEntrance
+import top.honorhook.ui.component.motion.revealFade
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TabRow
@@ -124,6 +126,7 @@ internal fun ThemeSettingsPage(
             item {
                 Spacer(modifier = Modifier.height(32.dp))
                 ThemePreviewCard(
+                    modifier = Modifier.cardEntrance(0, key = "theme.preview"),
                     keyColor = AppSettings.keyColor,
                     isDark = isDark,
                     miuixMonet = AppSettings.miuixMonet,
@@ -138,6 +141,7 @@ internal fun ThemeSettingsPage(
                 TabRow(
                     tabs = listOf("跟随系统", "浅色", "深色"),
                     selectedTabIndex = ui.toNonMonetMode().coerceIn(0, 2),
+                    modifier = Modifier.revealFade(0, baseDelayMs = 300),
                     onTabSelected = { index ->
                         val picked = ColorMode.fromValue(index)
                         // Monet 开着时切到对应的 Monet 变体（TabRow 只暴露 3 档非 Monet 选项）
@@ -155,7 +159,8 @@ internal fun ThemeSettingsPage(
                     Card(
                         modifier = Modifier
                             .padding(top = 12.dp)
-                            .fillMaxWidth(),
+                            .fillMaxWidth()
+                            .cardEntrance(1, key = "theme.amoled"),
                     ) {
                         SwitchPreference(
                             title = "纯黑背景（AMOLED）",
@@ -186,7 +191,8 @@ internal fun ThemeSettingsPage(
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .cardEntrance(2, key = "theme.2"),
                 ) {
                     SwitchPreference(
                         title = "跟随壁纸取色",
@@ -273,7 +279,8 @@ internal fun ThemeSettingsPage(
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .cardEntrance(3, key = "theme.3"),
                 ) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         SwitchPreference(
@@ -330,7 +337,8 @@ internal fun ThemeSettingsPage(
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .cardEntrance(4, key = "theme.4"),
                 ) {
                     SwitchPreference(
                         title = "首页萤火虫",
@@ -352,7 +360,8 @@ internal fun ThemeSettingsPage(
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .cardEntrance(5, key = "theme.5"),
                 ) {
                     SwitchPreference(
                         title = "花园背景",
@@ -373,7 +382,8 @@ internal fun ThemeSettingsPage(
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .cardEntrance(6, key = "theme.6"),
                 ) {
                     val tints = FireflyTint.entries
                     OverlayDropdownPreference(
@@ -419,6 +429,7 @@ private fun ThemePreviewCard(
     enableFloatingBottomBarBlur: Boolean = false,
     paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
     colorSpec: ColorSpec.SpecVersion = ColorSpec.SpecVersion.SPEC_2021,
+    modifier: Modifier = Modifier,
 ) {
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.toFloat()
@@ -449,7 +460,7 @@ private fun ThemePreviewCard(
     val navUnselectedColor = colorScheme.onSurfaceContainer.copy(alpha = 0.5f)
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(top = 12.dp),
         contentAlignment = Alignment.TopCenter

@@ -70,6 +70,8 @@ import top.honorhook.ui.component.StatusWarn
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.honorhook.ui.component.Card
+import top.honorhook.ui.component.motion.cardEntrance
+import top.honorhook.ui.component.motion.revealFade
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -186,7 +188,8 @@ private fun TargetListScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp),
+                        .padding(bottom = 12.dp)
+                        .cardEntrance(0, key = "feat.switch"),
                 )
             }
             // 安全类功能置顶卡（T10/#18）：这五项默认开启且关的是安全防护本身，必须比目标卡更醒目。
@@ -201,7 +204,8 @@ private fun TargetListScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp),
+                        .padding(bottom = 12.dp)
+                        .cardEntrance(1, key = "feat.security"),
                 )
             }
             when {
@@ -224,23 +228,32 @@ private fun TargetListScreen(
                     // 总览胶囊（设计稿分组双列方案）
                     item {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp, vertical = 2.dp)
+                                .revealFade(0, baseDelayMs = 240),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             StatusChip("${targets.size} 个目标生效", ok = true)
                             if (disabledCount > 0) StatusChip("$disabledCount 项已关", ok = false)
                         }
                     }
+                    // 网格的进场序号要跨"系统/第三方"两组连续累计：每组从 0 重数会让两组各自
+                    // 从头错峰，中间那一下空档看起来像卡了。序号封顶在 EntranceTokens 里做。
+                    var gridCursor = 0
                     if (system.isNotEmpty()) {
                         item { GroupLabel("系统应用") }
                         system.chunked(2).forEach { pair ->
-                            item { FeatureCardRow(pair, versions, onOpenTarget) }
+                            val start = gridCursor
+                            gridCursor += pair.size
+                            item { FeatureCardRow(pair, versions, onOpenTarget, startIndex = start) }
                         }
                     }
                     if (third.isNotEmpty()) {
                         item { GroupLabel("第三方应用") }
                         third.chunked(2).forEach { pair ->
-                            item { FeatureCardRow(pair, versions, onOpenTarget) }
+                            val start = gridCursor
+                            gridCursor += pair.size
+                            item { FeatureCardRow(pair, versions, onOpenTarget, startIndex = start) }
                         }
                     }
                 }
@@ -390,14 +403,24 @@ private fun FeatureCardRow(
     pair: List<FeatureCatalog.Target>,
     versions: Map<String, String>,
     onOpen: (FeatureCatalog.Target) -> Unit,
+    startIndex: Int = 0,
 ) {
     Row(
         modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        pair.forEach { target ->
+        pair.forEachIndexed { i, target ->
             Box(Modifier.weight(1f)) {
-                FeatureGridCard(target, versions[target.packageName], onClick = { onOpen(target) })
+                FeatureGridCard(
+                    target,
+                    versions[target.packageName],
+                    onClick = { onOpen(target) },
+                    // key 用包名而不是序号：两组序号各自累计，纯序号在同一张登记表里会撞
+                    modifier = Modifier.cardEntrance(
+                        order = startIndex + i,
+                        key = "feat.${target.packageName}",
+                    ),
+                )
             }
         }
         if (pair.size == 1) Spacer(Modifier.weight(1f))
@@ -409,14 +432,19 @@ private fun FeatureCardRow(
  * 映射表：原 4/4 计数标签 → 状态行；「已启用」标签 → 状态点颜色；右箭头 → 砍（整卡可点）。
  */
 @Composable
-private fun FeatureGridCard(target: FeatureCatalog.Target, version: String?, onClick: () -> Unit) {
+private fun FeatureGridCard(
+    target: FeatureCatalog.Target,
+    version: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val enabledCount = target.features.count { FeatureStore.isEnabled(it.key) }
     val all = target.features.size
     Card(
         onClick = onClick,
         showIndication = true,
         insideMargin = PaddingValues(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(
@@ -670,7 +698,8 @@ private fun FeatureListScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp),
+                        .padding(bottom = 12.dp)
+                        .cardEntrance(0, key = "feat.header.${target.packageName}"),
                 )
             }
 
@@ -690,7 +719,10 @@ private fun FeatureListScreen(
                 val effectiveOn = enabled && !gatedOff
                 // 整个 Row 统一带上/下边距，保证左侧色条与卡片同步留白
                 Row(
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier
+                        .padding(bottom = 8.dp)
+                        // 色条与卡片同挂一个入场层（挂在 Card 上会让色条单独先出现）
+                        .cardEntrance(index, key = "feat.detail.${target.packageName}.$index"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // 左侧 6dp 彩色条：色相由 feature.key 哈希决定，稳定不跳变。
@@ -868,7 +900,8 @@ private fun SecurityListScreen(onBack: () -> Unit, bottomInnerPadding: Dp = 0.dp
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp),
+                        .padding(bottom = 12.dp)
+                        .cardEntrance(0, key = "feat.security.header"),
                 ) {
                     Column(
                         Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -899,7 +932,9 @@ private fun SecurityListScreen(onBack: () -> Unit, bottomInnerPadding: Dp = 0.dp
                 val feature = features[index]
                 val enabled = FeatureStore.isEnabled(feature.key)
                 Row(
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier
+                        .padding(bottom = 8.dp)
+                        .cardEntrance(index, key = "feat.security.item.$index"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val accent = rememberAccentColor(feature.key)

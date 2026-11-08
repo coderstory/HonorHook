@@ -103,12 +103,17 @@ private val LightPalette = SplashPalette(
     shadowAlpha = 0.16f,
 )
 
+/**
+ * [onLeaving] = 淡出起点（2026-11-08 ui-overhaul 新增）：主界面拿它当进场闸门的开闸信号，
+ * 让卡片飞入与 splash 淡出叠化。缺省空实现，不影响既有调用点。
+ */
 @Composable
-fun HonorSplash(onFinish: () -> Unit) {
+fun HonorSplash(onFinish: () -> Unit, onLeaving: () -> Unit = {}) {
     var leaving by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(HOLD_MS)
         leaving = true
+        onLeaving()
         delay(FADE_MS.toLong())
         onFinish()
     }
