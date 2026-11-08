@@ -9,34 +9,40 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
+import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 import top.honorhook.ui.AppSettings
 
 /**
- * 首页背景的萤火虫（2026-11-08 用户需求：「主界面能加动态萤火虫效果？」）。
+ * 首页背景的萤火虫（2026-11-08 用户需求：「主界面能加动态萤火虫效果？」，
+ * 随后几轮改成「圆形 / 三角形 / 正方形的光圈」）。
  *
  * 设计取舍：
- * - **不引入粒子库**：只是「漂浮 + 明灭」，Canvas 画两个径向渐变就够，省一个依赖和几十 KB。
+ * - **不引入粒子库**：只是「漂浮 + 明灭 + 描一圈发光的几何形」，Canvas 足够，省一个依赖。
+ * - **发光靠「同一个形状描三遍」**：Compose 的 Canvas 没有真正的模糊（BlurMaskFilter 要 API 31+
+ *   且受硬件层限制），所以用同路径三层、宽度递减 + alpha 递增叠出渐隐边缘；单描一圈会很硬。
  * - **状态读在 draw 阶段**：时间变量是 [mutableFloatStateOf]，只在 Canvas 的 draw lambda 里读，
- *   快照系统只会让这一层重绘，不会触发重组（否则每帧重组整棵首页树）。
- * - **帧循环用 withFrameNanos**：跟屏幕刷新对齐，系统进入 doze / 页面不可见时自然停摆，
- *   不像 `while(true) { delay(16) }` 那样在后台空转。
- * - **粒子参数一次算好**：种子固定，每次进首页布局一致（不会因为重新组合就换一套位置）。
- * - **两点注意（都是实测踩出来的）**：
- *   1) 光团必须是**单个径向渐变**。多层实心圆每层都是硬边 + 一个不透明度台阶，白底上会变成一圈圈「靶心」。
- *   2) 浅色主题要单独一套颜色与尺寸：白底上加光不可见（白已经是 255），只能靠减光；1~3dp 的小点
- *      在白底上等于没画，必须放大到 5dp 以上才有存在感。
+ *   快照系统只会重绘这一层，不触发重组（否则每帧重组整棵首页树）。
+ * - **帧循环用 withFrameNanos**：跟屏幕刷新对齐，页面不可见时自然停摆。
+ * - **粒子参数一次算好**：种子固定，每次进首页布局一致。
+ * - 浅色主题单独一套：白底加光不可见，只能减光；尺寸要够大才有存在感，
+ *   而大块实心光斑在白底上只会糊成脏绿 —— 用**描边光圈**而不是实心团，正是为了绕开这一点。
  */
-private const val COUNT = 30
-private const val COUNT_LIGHT = 20
+private const val COUNT = 24
+private const val COUNT_LIGHT = 18
 
 /** 首帧日志只打一次，方便真机确认「到底有没有在画」（不随帧刷屏） */
 private var firstDrawLogged = false
+
+/** 光圈形状（用户要求：圆形 / 三角形 / 正方形） */
+enum class FireflyShape { CIRCLE, TRIANGLE, SQUARE }
 
 /**
  * 萤火虫配色档位（2026-11-08 用户要求「多一些颜色选择」）。
@@ -96,9 +102,35 @@ private class Firefly(
     val rise: Float,
     /** 配色序号：进页面时定下，保证同一只不会每秒变色 */
     val colorIndex: Int,
-    /** 大颗散景（虚焦光斑）：更淡更糊，负责景深；小颗是清晰亮点 */
-    val soft: Boolean,
+    val shape: FireflyShape,
+    /** 缓慢自转（度/秒）：三角/方形不转像贴上去的图形，转起来才像在游动 */
+    val spin: Float,
 )
+
+/**
+ * 按形状构造一个以 [center] 为中心、外接圆半径 [r] 的路径；多边形按 [rotDeg] 绕中心旋转。
+ *
+ * 旋转直接算进顶点角度，而不是用 Matrix 变换路径：Compose 的 `Matrix.rotateZ` 只有
+ * 「绕原点」版本（带 pivot 的重载不存在，写 `rotateZ(deg, center)` 会报参数过多），
+ * 十多只粒子每帧先 translate→rotate→translate 反而更绕。
+ */
+private fun shapePath(shape: FireflyShape, center: Offset, r: Float, rotDeg: Float): Path {
+    val p = Path()
+    if (shape == FireflyShape.CIRCLE) {
+        p.addOval(Rect(center = center, radius = r))
+        return p
+    }
+    // 多边形顶点：三角 -90/30/150，正方形 45/135/225/315（内接于半径 r 的圆，半边长 = r/√2）
+    val baseAngles = if (shape == FireflyShape.TRIANGLE) floatArrayOf(-90f, 30f, 150f)
+                     else floatArrayOf(45f, 135f, 225f, 315f)
+    baseAngles.forEachIndexed { i, deg ->
+        val a = Math.toRadians((deg + rotDeg).toDouble()).toFloat()
+        val pt = Offset(center.x + r * cos(a), center.y + r * sin(a))
+        if (i == 0) p.moveTo(pt.x, pt.y) else p.lineTo(pt.x, pt.y)
+    }
+    p.close()
+    return p
+}
 
 @Composable
 fun Fireflies(modifier: Modifier = Modifier) {
@@ -110,16 +142,14 @@ fun Fireflies(modifier: Modifier = Modifier) {
     val light = !dark
     val count = if (light) COUNT_LIGHT else COUNT
 
-    // 一次算好：不同屏幕比例下按归一化坐标分布，再乘实际尺寸
     val flies = remember(count, light) {
         val rnd = Random(20261108)
         List(count) {
-            // 白底上的大光斑只会糊成一块脏绿（实测截图就是这样），所以浅色主题不画散景，
-            // 只留小而清晰的亮点——看着像「飘着的微粒」，比强行发光干净。
-            val soft = dark && rnd.nextFloat() < 0.28f
             Firefly(
-                baseX = rnd.nextFloat(),
-                baseY = rnd.nextFloat(),
+                // 分布留边：用户要求「出现在屏幕边缘的概率低一点」。基准点收在 10%~90%，
+                // 加上 ±4% 的横向漂移，实际活动范围是 6%~94%，不会再贴着边框打转。
+                baseX = 0.10f + rnd.nextFloat() * 0.80f,
+                baseY = 0.06f + rnd.nextFloat() * 0.88f,
                 driftX = 0.02f + rnd.nextFloat() * 0.04f,
                 driftY = 0.01f + rnd.nextFloat() * 0.02f,
                 // 0.07~0.17 rad/s（周期 37~90s）：慢到像漂浮，但横向摆动仍看得出来
@@ -127,17 +157,19 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 speedY = 0.06f + rnd.nextFloat() * 0.09f,
                 phase = rnd.nextFloat() * 6.283f,
                 blinkSpeed = 0.05f + rnd.nextFloat() * 0.10f,
-                // 两级尺寸：三成虚焦散景，七成清晰亮点。全都一样大反而假。
-                sizePx = when {
-                    soft -> 12.0f + rnd.nextFloat() * 10.0f
-                    dark -> 5.0f + rnd.nextFloat() * 4.5f
-                    // 浅色 5.2~9.4dp：再小就成「屏幕灰尘」，大到 10dp 又像气泡（实测两轮都试过）
-                    else -> 5.2f + rnd.nextFloat() * 4.2f
-                },
+                // 浅色整体更大：白底上小图形很容易被当成灰尘
+                // 用户要求「尺寸放大一些」：6.5~14dp（浅色再多 1dp，白底上更吃尺寸）
+                sizePx = if (dark) 6.5f + rnd.nextFloat() * 7.5f else 7.5f + rnd.nextFloat() * 7.0f,
                 // 0.7%~1.6% 屏高/秒（2800px 屏 ≈ 20~45px/s）——要能一眼看出在往上飘
                 rise = 0.007f + rnd.nextFloat() * 0.009f,
                 colorIndex = rnd.nextInt(6),
-                soft = soft,
+                // 圆形约一半、三角/方形各四分之一：全是多边形会显得太硬
+                shape = when {
+                    rnd.nextFloat() < 0.5f -> FireflyShape.CIRCLE
+                    rnd.nextFloat() < 0.5f -> FireflyShape.TRIANGLE
+                    else -> FireflyShape.SQUARE
+                },
+                spin = if (rnd.nextBoolean()) 6f + rnd.nextFloat() * 10f else -(6f + rnd.nextFloat() * 10f),
             )
         }
     }
@@ -156,9 +188,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
 
     val tint = FireflyTint.of(AppSettings.fireflyTint)
     val colors = FireflyTint.colors(dark, tint)
-    // 白底没有「发光」的物理依据，浓度一高就像屏幕脏了；暗底则要亮才像光。
-    // 浅色取 0.62：点虽小但饱和度高，太浓会在白色卡片上留下明显绿斑。
-    val strength = if (dark) 1f else 0.9f
+    // 白底没有「发光」的物理依据，浓度一高就像屏幕脏了；描边光圈正好吃得住更高的浓度。
+    val strength = if (dark) 1f else 0.85f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         if (!firstDrawLogged) {
@@ -181,67 +212,51 @@ fun Fireflies(modifier: Modifier = Modifier) {
             val y = ((yNorm % 1f) + 1f) % 1f * h
 
             // 明灭：sin 取三次方让「亮起来」短促、「暗下去」长，才像萤火虫。
-            // 0.18 的底噪是必须的——纯三次方大多数时间接近 0，画面上等于没有（首版就栽在这）。
+            // 0.18 的底噪是必须的——纯三次方大多数时间接近 0，画面上等于没有。
             val wave = (sin(t * f.blinkSpeed * 6.283f + f.phase) + 1f) * 0.5f
             val pulse = 0.18f + 0.82f * (wave * wave * wave)
             val breathe = 0.82f + 0.18f * sin(t * 0.10f + f.phase * 0.3f)
             // 回绕时在顶 / 底边缘淡出淡入，否则虫子飞出屏幕又「啪」地出现在另一头
-            val edge = minOf(1f, (yNorm / 0.08f).coerceIn(0f, 1f), ((1f - yNorm) / 0.06f).coerceIn(0f, 1f))
+            // 边缘淡出带加宽到 12%/10%：用户要求「出现在屏幕边缘的概率低一点」，
+            // 光靠收窄初始分布不够——它们会往上飘，淡出带窄了就会在顶边留半只。
+            val edge = minOf(1f, (yNorm / 0.12f).coerceIn(0f, 1f), ((1f - yNorm) / 0.10f).coerceIn(0f, 1f))
             val a = pulse * breathe * strength * edge
+            if (a <= 0.01f) return@forEach
 
             val base = colors[f.colorIndex % colors.size]
-            // 灯芯偏白：真实光源中心是过曝的，纯色芯看着像贴纸
-            val core = lerp(base, Color.White, if (dark) 0.22f else 0.10f)
-            val r = (0.85f + 0.30f * pulse) * f.sizePx.dp.toPx() * (if (f.soft) 1.35f else 1.5f)
-            // 散景整体压暗：大而亮会变成一块「膏药」，参考图里大光斑都很淡
-            val a2 = (if (f.soft) a * 0.5f else a).coerceIn(0f, 1f)
+            // 描边偏白一点：真实光源的勾边是过曝的，纯色线看着像贴纸
+            val stroke = lerp(base, Color.White, if (dark) 0.25f else 0.10f)
+            val r = (0.85f + 0.30f * pulse) * f.sizePx.dp.toPx()
             val c = Offset(x, y)
+            val path = shapePath(f.shape, c, r, t * f.spin + f.phase * 57f)
+            // 线宽跟着 dp 走，小图形也要 >=1.6px，不然抗锯齿会把细线糊成一片灰
+            // 线宽同时跟 dp 与图形大小走：大图形用细线会显得「虚」，小图形用粗线会糊成一团
+            val crisp = ((1.2f + 0.6f * pulse) * density).coerceAtLeast(r * 0.06f)
 
-            // 拖尾只给深色主题：浅色底上余影会糊成一道道水渍，反而脏
-            if (dark) {
-                val tailLen = f.sizePx.dp.toPx() * (if (f.soft) 0.55f else 0.45f)
-                for (i in 1..3) {
-                    drawCircle(
-                        color = base.copy(alpha = (a2 * (0.20f / i)).coerceAtMost(0.45f)),
-                        radius = r * (1f - 0.22f * i),
-                        center = Offset(x, y + tailLen * i * 0.95f),
-                    )
-                }
-            }
-
-            // 光晕：大半径、低浓度、边缘直接归零（径向渐变没有硬边，所以不会出现「靶心环」）
-            drawCircle(
-                brush = Brush.radialGradient(
-                    0.00f to base.copy(alpha = a2 * if (dark) 0.42f else 0.50f),
-                    0.40f to base.copy(alpha = a2 * if (dark) 0.17f else 0.22f),
-                    0.72f to base.copy(alpha = a2 * if (dark) 0.05f else 0.07f),
-                    1.00f to base.copy(alpha = 0f),
-                    center = c,
-                    radius = r,
-                ),
-                radius = r,
-                center = c,
-            )
-            // 灯芯：小而实，负责「有个亮点在这儿」，否则整团只是一片雾
-            val cr = r * (if (f.soft) 0.30f else 0.42f)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    0.00f to core.copy(alpha = a2 * 0.95f),
-                    0.55f to core.copy(alpha = a2 * 0.45f),
-                    1.00f to core.copy(alpha = 0f),
-                    center = c,
-                    radius = cr,
-                ),
-                radius = cr,
-                center = c,
-            )
-            if (!f.soft) {
-                drawCircle(
-                    color = core.copy(alpha = (a2 * 1.1f).coerceAtMost(0.95f)),
-                    radius = cr * 0.34f,
-                    center = c,
+            // 发光：同一个形状由粗到细描三遍（alpha 递增、宽度递减），边缘自然渐隐
+            val haloWidths = floatArrayOf(r * 0.72f, r * 0.36f, r * 0.16f)
+            val haloAlphas = floatArrayOf(0.07f, 0.14f, 0.24f)
+            for (i in 0..2) {
+                drawPath(
+                    path = path,
+                    color = base.copy(alpha = (a * haloAlphas[i] * if (dark) 1f else 1.25f).coerceIn(0f, 1f)),
+                    style = Stroke(width = haloWidths[i].coerceAtLeast(crisp)),
                 )
             }
+            // 内部一层极淡的填充：没有它，白底上就只是一条几何线（像剪贴画），
+            // 有它才读得出「这块区域在发光」。浓度压到 0.10，太实会变成色块。
+            drawPath(
+                path = path,
+                color = base.copy(alpha = (a * 0.10f * if (dark) 1f else 1.15f).coerceIn(0f, 1f)),
+            )
+            // 主描边：这一圈才是「光圈」本体
+            drawPath(
+                path = path,
+                color = stroke.copy(alpha = (a * if (dark) 0.85f else 0.75f).coerceIn(0f, 1f)),
+                style = Stroke(width = crisp),
+            )
+            // 用户要求去掉中心的实心圆点：光圈保持空心，形状语义更干净（三角/方形不会被那一点抢走）。
+            // 需要「有芯」的观感时，靠上面那层 0.10 的内部填充就够。
         }
     }
 }
