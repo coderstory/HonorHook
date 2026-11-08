@@ -14,7 +14,6 @@ coreKtx = "1.17.0"
 # Miuix（KernelSU Manager UI 同源；0.9.4 = Maven Central 最新 release）
 miuix = "0.9.4"
 # MaterialKolor：由种子色生成 M3 色板（KernelSU 主题页的关键色/配色风格/色规范）
-materialKolor = "5.0.1"
 # JVM 单元测试（表驱动决策的回归；跑在 :app:testDebugUnitTest）
 junit = "4.13.2"
 # kotlinx-coroutines：:xhs-dn-core（上游下载器模块）里的挂起函数需要。
@@ -62,7 +61,6 @@ miuix-icons-android = { group = "top.yukonga.miuix.kmp", name = "miuix-icons-and
 # miuix-blur：Backdrop/LayerBackdrop/blur/lens/vibrancy，FloatingBottomBar 的折射高光靠它
 miuix-blur = { group = "top.yukonga.miuix.kmp", name = "miuix-blur", version.ref = "miuix" }
 # MaterialKolor：种子色 → M3 色板（主题页的动态取色）
-material-kolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialKolor" }
 
 # 液态玻璃真·背景模糊（Kyant0 AndroidLiquidGlass，对齐 HyperChanger 2.0.0）
 backdrop = { group = "io.github.kyant0", name = "backdrop", version = "2.0.0" }

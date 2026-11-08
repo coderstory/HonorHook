@@ -213,6 +213,16 @@ private fun SettingsMain(
                             // 手动检查：有新版 → 全局弹窗；无新版/失败 → Toast（UpdateState.notice）
                             onClick = { UpdateState.checkAsync(manual = true) },
                         )
+                    }
+
+                    // 「关于」单独一张卡（2026-11-08 用户要求拆开）：检查更新是动作项、
+                    // 关于是导航项，挤在一张卡里两个右箭头容易连点错
+                    Card(
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .fillMaxWidth()
+                            .cardEntrance(3, key = "settings.3", edge = EntranceEdge.Bottom),
+                    ) {
                         ArrowPreference(
                             title = "关于",
                             startAction = {

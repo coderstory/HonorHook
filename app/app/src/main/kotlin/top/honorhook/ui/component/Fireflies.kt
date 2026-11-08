@@ -62,6 +62,8 @@ enum class FireflyTint(
     AMBER("amber", "蜜橙", Color(0xFFFFA95E), Color(0xFFB4703A)),
     CYAN("cyan", "青蓝", Color(0xFF7FE3FF), Color(0xFF2E8CA6)),
     PINK("pink", "粉紫", Color(0xFFFF9BE0), Color(0xFFA8579A)),
+    // 2026-11-08（artwork-theme）：颜色选择器已从主题页删除，萤火虫跟随插画主色固定为靛紫。
+    VIOLET("violet", "靛紫", Color(0xFFB6A4FF), Color(0xFF5B4FBF)),
     ICE("ice", "冰白", Color(0xFFEAF6FF), Color(0xFF7E93A3));
 
     companion object {
@@ -186,7 +188,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
         }
     }
 
-    val tint = FireflyTint.of(AppSettings.fireflyTint)
+    // 配色不再可配（用户 2026-11-08「萤火虫颜色这个开关是不是要改一改？或者删了？」）：
+    // 插画主题一套色，7 档配色只会让人挑出跟背景打架的颜色，改成跟主色同族的靛紫。
+    val tint = FireflyTint.VIOLET
     val colors = FireflyTint.colors(dark, tint)
     // 白底没有「发光」的物理依据，浓度一高就像屏幕脏了；描边光圈正好吃得住更高的浓度。
     val strength = if (dark) 1f else 0.85f
@@ -196,7 +200,7 @@ fun Fireflies(modifier: Modifier = Modifier) {
             firstDrawLogged = true
             android.util.Log.i(
                 "HonorFireflies",
-                "first draw: dark=$dark tint=${AppSettings.fireflyTint} count=${flies.size} " +
+                "first draw: dark=$dark tint=${tint.id} count=${flies.size} " +
                     "size=${size.width}x${size.height}",
             )
         }

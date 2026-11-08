@@ -89,7 +89,6 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
     val frameworkVersion = FrameworkState.frameworkVersion
 
     val scrollBehavior = MiuixScrollBehavior()
-    val isDynamicColor = AppSettings.miuixMonet
 
     // 萤火虫是**顶层浮层**（2026-11-08 用户要求「至于顶层，不会被卡片遮挡」）：
     // 画在 Scaffold 之后 → 盖在卡片与文字上，但因为只是几个高亮小点、不透明度低，不挡阅读。
@@ -131,8 +130,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                             modifier = Modifier.cardEntrance(0, key = "home.status"),
                             active = active,
                             confirmed = activeState != null,
-                            isDynamicColor = isDynamicColor,
-                            // 默认「工作中」：服务绑定是异步的，绑定结果出来前不预设「未激活」
+                                                // 默认「工作中」：服务绑定是异步的，绑定结果出来前不预设「未激活」
                             // （那等于在还不知道的时候先下结论）。只有确认没绑上才说「未激活」。
                             workingText = when {
                                 activeState == false -> "未激活"
@@ -200,7 +198,6 @@ private fun StatusCard(
     modifier: Modifier = Modifier,
     active: Boolean,
     confirmed: Boolean,
-    isDynamicColor: Boolean,
     workingText: String,
     versionText: String,
 ) {
@@ -211,7 +208,6 @@ private fun StatusCard(
     val containerColor = when {
         inactive -> Color(0xFFFFDAD6)
         else -> when {
-            isDynamicColor -> colorScheme.secondaryContainer
             // 卡片配色**跟着背景走**（2026-11-08 用户「刚才那个卡片颜色没切换」）：
             // 插画背景 → 淡紫（用户当天要求加深过一档）；花园背景 / 纯色底 → 花园时代的嫩绿。
             // 两套色不混用，否则切回花园后首页第一张卡还是紫的，像漏改。
@@ -243,7 +239,6 @@ private fun StatusCard(
                     imageVector = if (inactive) Icons.Rounded.ErrorOutline else Icons.Rounded.CheckCircleOutline,
                     tint = when {
                         inactive -> Color(0xFFBA1A1A).copy(alpha = 0.28f)
-                        isDynamicColor -> colorScheme.primary.copy(alpha = 0.30f)
                         AppSettings.artworkBackdrop -> Color(0xFF7C6BEA).copy(alpha = 0.34f)
                         else -> Color(0xFF36D167).copy(alpha = 0.34f)
                     },

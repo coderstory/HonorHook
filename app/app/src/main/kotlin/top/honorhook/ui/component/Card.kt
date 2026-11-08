@@ -21,6 +21,7 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.squircle.SquircleDefaults
 import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
+import top.honorhook.ui.AppSettings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
@@ -179,7 +180,11 @@ private val ShadowOffsetY = 2.dp
 @Composable
 private fun Modifier.cardRim(cornerRadius: Dp): Modifier {
     val dark = isInDarkTheme()
-    val primary = MiuixTheme.colorScheme.primary
+    // 包边/投影的颜色**跟当前背景主题走**（2026-11-08 用户「紫色主题下，卡片边缘从绿色改成紫色」）：
+    // 插画背景 → 插画主色；花园/纯色 → 面板 primary。
+    // 不能只读 `colorScheme.primary`：主题控制器在部分分支（Monet 关闭 + 关键色 0）下
+    // 会回到 miuix 自带的偏绿 primary，卡片边缘就会露出一圈绿边。
+    val primary = if (AppSettings.artworkBackdrop) Color(AppSettings.artworkKeyColor) else MiuixTheme.colorScheme.primary
     val rim = primary.copy(alpha = if (dark) RimAlphaDark else RimAlphaLight)
     val shadow = if (dark) ShadowDark else primary
     val sheenAlpha = if (isInDarkTheme()) SheenAlphaDark else SheenAlphaLight

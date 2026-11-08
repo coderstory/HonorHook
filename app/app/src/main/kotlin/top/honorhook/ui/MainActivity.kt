@@ -150,8 +150,8 @@ private fun AppRoot() {
     // 照抄 KernelSU MainActivity.kt:352-355 —— 记录层必须先铺 surface 底色再录内容，
     // 否则 drawBackdrop 采样到空/半透明内容，实色 onDrawSurface 会盖住整个药丸，玻璃感全无。
     val surfaceColor = MiuixTheme.colorScheme.surface
-    // AMOLED 纯黑模式：页面底色直接给黑（其余模式不变，避免顺手改掉既有观感）
-    val rootColor = if (AppSettings.colorMode.isAmoled) Color.Black else surfaceColor
+    // 页面底色 = 主题 surface（AMOLED 纯黑模式已于 2026-11-08 随「纯黑背景」开关一起删除）
+    val rootColor = surfaceColor
 
     // **直接订阅 AppSettings 的 State**，不绕 CompositionLocal。
     // 依赖 CompositionLocal 的写法在「从二级页返回」时不会触发重组（CompositionLocal
@@ -227,7 +227,6 @@ private fun AppRoot() {
                 GardenBackdrop(
                     modifier = Modifier.fillMaxSize(),
                     dark = isInDarkTheme(),
-                    amoled = AppSettings.colorMode.isAmoled,
                 )
             }
             // 切 tab 的进场（2026-11-08 ui-overhaul）：整页「淡入 + 上浮 12dp」只是**背景层**的过渡，

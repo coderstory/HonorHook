@@ -135,7 +135,6 @@ dependencies {
     // 液态玻璃：Backdrop/LayerBackdrop/blur/vibrancy/lens（FloatingBottomBar 的 lens 折射高光）
     implementation(libs.miuix.blur)
     // 动态取色：种子色 → M3 色板（KernelSU 主题页的关键色/配色风格/色规范）
-    implementation(libs.material.kolor)
 
     // ---- 原生 Compose 组件（Miuix 未覆盖的部分：Material3 Icon/Text、状态卡色板）----
     implementation(libs.compose.ui)
