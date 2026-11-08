@@ -102,14 +102,32 @@ class MainActivity : ComponentActivity() {
                 // 让卡片飞入与 splash 淡出**同帧叠化**，而不是等 splash 完全消失后画面空一拍再飞。
                 // 默认 false：屏下不启动进场（否则 2.8s 的 splash 期间动画早播完，用户什么都看不到）。
                 var entranceOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
+                // 冷启动白屏（2026-11-08 用户反馈「打开会白屏一秒」）：
+                // Android 12+ 的系统启动画面只认 `windowSplashScreenBackground` 这一个纯色，
+                // 它会一直挂着，直到 App 的第一帧真正上屏。原来这一帧同时组合了 AppRoot
+                // （backdrop 录制层 + 花园背景 + 萤火虫 + LazyColumn + 底栏），首帧成本全压在它身上，
+                // 白屏因此被拉长到 1s 量级（中低端机上更久）。
+                // 现在首帧只画 splash 自身：等它上屏（withFrameNanos）后再让一帧，然后才挂 AppRoot——
+                // 它的组合/测量/首绘全部落进 splash 停留的 2.4s 里，用户看不到这笔开销。
+                // 闸门（entranceOpen）不变：内容即便提前组合好也还是隐身，进场仍等 splash 淡出才播。
+                var contentReady by remember { androidx.compose.runtime.mutableStateOf(false) }
                 // 兜底：万一 splash 的 onLeaving 没触发（异常/被裁掉），4s 后强制开闸，内容不会永远隐身
                 LaunchedEffect(Unit) {
                     kotlinx.coroutines.delay(4000)
+                    contentReady = true
                     entranceOpen = true
                 }
+                LaunchedEffect(Unit) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    // 再让一帧：保证 splash 的第一帧已经落屏，AppRoot 不在首帧插队
+                    kotlinx.coroutines.delay(64)
+                    contentReady = true
+                }
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                    CompositionLocalProvider(LocalEntranceGate provides entranceOpen) {
-                        AppRoot()
+                    if (contentReady) {
+                        CompositionLocalProvider(LocalEntranceGate provides entranceOpen) {
+                            AppRoot()
+                        }
                     }
                     if (splashVisible) {
                         top.honorhook.ui.splash.HonorSplash(
