@@ -37,6 +37,7 @@
 | [`audit-remediation-2026-10-25.md`](audit-remediation-2026-10-25.md) | 2026-10-25 审计整改意见书（执行清单见 plans/） |
 | [`plans/2026-11-08-ui-overhaul.md`](plans/2026-11-08-ui-overhaul.md) | 花园晨启动效实验分支的计划快照（部分条目随后已删除，见文首注记） |
 | [`plans/2026-11-09-optimization-audit.md`](plans/2026-11-09-optimization-audit.md) | 2026-11-09 全维度体检：七面审计归并结论 + 首轮修复清单 + 待办优先序 |
+| [`plans/2026-11-09-hook-architecture.md`](plans/2026-11-09-hook-architecture.md) | Hook 系统架构评审：多 App × 多版本的三源漂移、版本策略隐式、判据无出口与 v2 结构 |
 | [`plans/2026-10-20-xhs-dn-module-extraction.md`](plans/2026-10-20-xhs-dn-module-extraction.md) | 小红书下载器拆分为 `:xhs-dn-core` 独立模块的方案 |
 | [`perf-baseline.md`](perf-baseline.md) | 挂载内存/启动基线（配合 `dev.sh meminfo`） |
 
