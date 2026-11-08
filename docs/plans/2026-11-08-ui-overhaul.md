@@ -37,6 +37,7 @@
 | 7 | `ui/screen/ToolboxScreen.kt` | 6 个磁贴手写 0..5（3 个硬编码 Row 无循环）；`AdsGroupCard` 序号 6；`HubTiles` 加 `startIndex` |
 | 8 | `ui/screen/SettingsScreen.kt` | 3 张固定卡序号 0/1/2 |
 | 9 | `ui/screen/ThemeSettingsScreen.kt` | 6 张固定卡 + 预览卡序号（0..6） |
+| 9b | `ui/component/motion/Entrance.kt`（动效性格） | 新增 `EntranceMotion`（`Glide` 默认 / `Snap` 吸附）：同族不同味，只动位移倍率、起始缩放、弹簧阻尼、错峰四个旋钮，不引入新运动类型。工具箱磁贴改 `Snap`（上浮 28dp、0.69→1、阻尼 0.46 过冲、错峰 34ms），与功能页「左右 210dp 合拢」区分开——用户 2026-11-08 反馈两页动效一模一样 |
 | 10 | `ui/component/Card.kt`（触感） | 可点击卡片点击/长按给一档轻震：`SegmentTick`（"嗒"，不是短震动）/ `LongPress`；自挂 `Modifier.clickable` 的磁贴改走新扩展 `Modifier.cardClick()`，两条路径手感一致。**按下不震**（列表滚动会一路嗡鸣），只在手势判定为点击后震 |
 | 11 | `ui/MainActivity.kt`（底栏） | `HonorHookBottomBar` 挂 `Modifier.dockRise()`：整条从下方 26dp 升起 + 淡入（520ms，比卡片晚 120ms） |
 | 12 | `docs/plans/2026-11-08-ui-overhaul.md`（本文件） | 变更清单 / 观感参数 / 验证清单 |
@@ -53,6 +54,7 @@
 - 内层浮现：`revealFade` 8dp 上移 + 360ms 淡入，`baseDelay 160ms` + `42ms/行`
 - 底栏落座：`dockRise` 26dp 上浮 + 520ms 淡入，比卡片晚 120ms
 - 触感：点击 `HapticFeedbackType.SegmentTick`、长按 `LongPress`；系统关掉触感反馈时静默
+- 冷启动：首帧只画 splash，`AppRoot` 等 splash 上屏后再挂（`withFrameNanos` + 64ms），白屏窗口缩到最短；系统启动画面仍是纯白（`values/colors.xml` 的 `splash_bg`），因为 Android 12+ 只认纯色
 - 整数序号是稳定 key（`order` 当 key），同一 `EntranceState` 内只播一次；LazyColumn 回收后不再重播
 
 ## 验证清单（用户自执行）
