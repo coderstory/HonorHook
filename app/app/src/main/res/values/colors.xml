@@ -3,5 +3,5 @@
     <!-- 冷启动底色：与 Compose splash 顶部渐变同色（亮色主题下为纯白），系统启动画面→自绘 splash 之间无缝。
          深色主题走 values-night/colors.xml；系统启动画面只认系统夜间模式，App 内手动切主题时这一帧可能与
          Compose 那层差一点色，但两者都是「同色系纯色」，肉眼不可辨。 -->
-    <color name="splash_bg">#FFFFFF</color>
+    <color name="splash_bg">#FBFAFF</color>
 </resources>

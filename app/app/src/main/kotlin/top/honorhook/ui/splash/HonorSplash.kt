@@ -81,25 +81,27 @@ private data class SplashPalette(
     val shadowAlpha: Float,
 )
 
+// 2026-11-08（artwork-theme）：配色跟插画改到靛紫 + 淡紫高光，与卡片包边 / 主题主色同一族。
+// 原来是花园时代的绿（#39FF88 / #12B76A），换背景后启动第一帧就与主界面打架。
 private val DarkPalette = SplashPalette(
-    accent = Color(0xFF39FF88),
-    bgTop = Color(0xFF0D100E),
-    bgBottom = Color(0xFF070808),
-    bodyTop = Color(0xFF24282A),
-    bodyBottom = Color(0xFF0F1112),
-    title = Color(0xFFEAF6EF),
-    subtitle = Color(0xFF9FB4A7),
+    accent = Color(0xFFA9A6FF),
+    bgTop = Color(0xFF120E22),
+    bgBottom = Color(0xFF0A0817),
+    bodyTop = Color(0xFF1E1A33),
+    bodyBottom = Color(0xFF120E22),
+    title = Color(0xFFEFEDFF),
+    subtitle = Color(0xFFA9A3C9),
     shadowAlpha = 0.30f,
 )
 
 private val LightPalette = SplashPalette(
-    accent = Color(0xFF12B76A),
-    bgTop = Color(0xFFFFFFFF),
-    bgBottom = Color(0xFFF0F5F1),
+    accent = Color(0xFF5B62D4),
+    bgTop = Color(0xFFFBFAFF),
+    bgBottom = Color(0xFFEDE9FB),
     bodyTop = Color(0xFFFFFFFF),
-    bodyBottom = Color(0xFFE9F0EB),
-    title = Color(0xFF101613),
-    subtitle = Color(0xFF5F6F64),
+    bodyBottom = Color(0xFFE7E1F7),
+    title = Color(0xFF14112A),
+    subtitle = Color(0xFF5E587A),
     shadowAlpha = 0.16f,
 )
 

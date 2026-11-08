@@ -21,6 +21,7 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.squircle.SquircleDefaults
 import top.yukonga.miuix.kmp.squircle.addSquircleRect
 import top.yukonga.miuix.kmp.squircle.isSquircleEnabled
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 
@@ -132,17 +133,26 @@ fun Modifier.cardClick(enabled: Boolean = true, onClick: () -> Unit): Modifier {
     }
 }
 
-/** 包边色：浅色用偏灰的嫩绿（纯亮绿压在白卡上会显廉价），深色提亮一档。 */
-private val RimLight = Color(0xFF8ED2A8).copy(alpha = 0.62f)
-private val RimDark = Color(0xFF7FC79B).copy(alpha = 0.45f)
-
+/**
+ * 包边色：**跟主题主色走**（2026-11-08 artwork-theme）。
+ *
+ * 原先是写死的淡绿（`0xFF8ED2A8` / `0xFF7FC79B`）——那是花园篱笆背景时代的配色。
+ * 换成蓝紫插画背景后，绿边像贴错色卡：同一屏里紫卡 + 绿边读不出「同一套系统」。
+ * 取 `colorScheme.primary` 而不是再写一组紫常量，是因为主题关键色可被用户改（主题页 15 档色板），
+ * 写死就只在默认配色下成立。
+ */
 private val RimWidth = 1.dp
 
+/** 包边不透明度：浅色卡上要「看得见一条边」但不抢字，深色卡提亮一档才不糊进背景。 */
+private const val RimAlphaLight = 0.40f
+private const val RimAlphaDark = 0.50f
+
 /**
- * 投影色（2026-11-08 实验分支 ui-overhaul 的装饰件）：浅色用压暗的花园墨绿，
- * 纯黑（AMOLED）下用黑 —— 黑底上再叠绿会显脏，纯黑投影不可见但也不会出错边。
+ * 投影色（2026-11-08 实验分支 ui-overhaul 的装饰件）：浅色用压暗的**主色**（插画 era：靛紫），
+ * 深色/AMOLED 用纯黑 —— 黑底上叠彩色投影会显脏。
+ *
+ * 这里取不透明色，下面的 `ShadowSteps` 每档各自带 alpha 覆盖它。
  */
-private val ShadowLight = Color(0xFF2B4E3B)
 private val ShadowDark = Color.Black
 
 /** 顶部玻璃高光的强度：浅色卡上白高光要低到"只看见一层光",深色卡更需要一点点提亮边缘。 */
@@ -168,8 +178,10 @@ private val ShadowOffsetY = 2.dp
  */
 @Composable
 private fun Modifier.cardRim(cornerRadius: Dp): Modifier {
-    val rim = if (isInDarkTheme()) RimDark else RimLight
-    val shadow = if (isInDarkTheme()) ShadowDark else ShadowLight
+    val dark = isInDarkTheme()
+    val primary = MiuixTheme.colorScheme.primary
+    val rim = primary.copy(alpha = if (dark) RimAlphaDark else RimAlphaLight)
+    val shadow = if (dark) ShadowDark else primary
     val sheenAlpha = if (isInDarkTheme()) SheenAlphaDark else SheenAlphaLight
     val squircle = isSquircleEnabled()
     return this.drawWithCache {

@@ -64,9 +64,12 @@ object AppSettings {
     private const val KEY_FIREFLY_LIGHT = "firefly_light"
     private const val KEY_FIREFLY_ENABLED = "firefly_enabled"
     private const val KEY_GARDEN_SKIN = "garden_skin"
+    private const val KEY_ARTWORK_BACKDROP = "artwork_backdrop"
 
     /** 主题色板选项（照抄 KernelSU `ui/theme/Colors.kt` 的 keyColorOptions，0 = 默认）。 */
     val keyColorOptions = listOf(
+        // 首项 = 插画主色（artwork-theme 的默认观感），用户挑其他色也随时能回来
+        0xFF6C73E5.toInt(),
         0xFFF44336.toInt(), 0xFFE91E63.toInt(), 0xFF9C27B0.toInt(), 0xFF673AB7.toInt(),
         0xFF3F51B5.toInt(), 0xFF2196F3.toInt(), 0xFF00BCD4.toInt(), 0xFF009688.toInt(),
         0xFF4FAF50.toInt(), 0xFFFFEB3B.toInt(), 0xFFFFC107.toInt(), 0xFFFF9800.toInt(),
@@ -127,6 +130,23 @@ object AppSettings {
     /** 花园篱笆背景皮肤（2026-11-08 用户要求；默认开，关掉即回到纯色底）。 */
     val gardenSkin: Boolean get() = _gardenSkin.value
 
+    private val _artworkBackdrop = mutableStateOf(true)
+
+    /**
+     * 插画背景（2026-11-08 用户给的蓝紫发角色图，见 `component/ArtworkBackdrop.kt`）。
+     * 默认开；开着时花园篱笆让位（绿篱笆与紫插画同框会互相打架），关掉即回到花园/纯色底。
+     */
+    val artworkBackdrop: Boolean get() = _artworkBackdrop.value
+
+    /**
+     * 「默认关键色」= 从插画里取的主色（indigo-violet）。
+     *
+     * 为什么不直接写进 `KEY_KEY_COLOR` 的默认值：那个 pref 的 0 语义是「用户没选过、跟随默认」，
+     * 主题页也靠 `keyColorCustom`（!= 0）决定是否展开二级项。改默认常量就同时改掉了这两处语义；
+     * 让 `Theme.kt` 在「非 Monet 且 0」时落到本色，等于只换「默认长什么样」，不动任何设置项状态。
+     */
+    val artworkKeyColor: Int = 0xFF6C73E5.toInt()
+
     @Volatile
     private var prefs: SharedPreferences? = null
 
@@ -145,6 +165,7 @@ object AppSettings {
         _fireflyLight.value = p?.getBoolean(KEY_FIREFLY_LIGHT, true) ?: true
         _fireflyEnabled.value = p?.getBoolean(KEY_FIREFLY_ENABLED, true) ?: true
         _gardenSkin.value = p?.getBoolean(KEY_GARDEN_SKIN, true) ?: true
+        _artworkBackdrop.value = p?.getBoolean(KEY_ARTWORK_BACKDROP, true) ?: true
     }
 
     fun setColorMode(mode: ColorMode) {
@@ -211,6 +232,11 @@ object AppSettings {
     fun setGardenSkin(enabled: Boolean) {
         _gardenSkin.value = enabled
         prefs?.edit()?.putBoolean(KEY_GARDEN_SKIN, enabled)?.apply()
+    }
+
+    fun setArtworkBackdrop(enabled: Boolean) {
+        _artworkBackdrop.value = enabled
+        prefs?.edit()?.putBoolean(KEY_ARTWORK_BACKDROP, enabled)?.apply()
     }
 
     /** 关键色是否非默认（主题页决定是否显示「配色风格 / 色规范」二级项）。 */

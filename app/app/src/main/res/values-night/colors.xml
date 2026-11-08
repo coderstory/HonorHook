@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 夜间：与 Compose splash 的 DarkPalette.bgTop 同色（#0D100E） -->
-    <color name="splash_bg">#0D100E</color>
+    <!-- 夜间：与 Compose splash 的 DarkPalette.bgTop 同色（#120E22，artwork-theme） -->
+    <color name="splash_bg">#120E22</color>
 </resources>

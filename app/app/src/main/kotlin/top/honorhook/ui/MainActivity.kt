@@ -46,6 +46,7 @@ import android.widget.Toast
 import top.honorhook.BuildConfig
 import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
+import top.honorhook.ui.component.ArtworkBackdrop
 import top.honorhook.ui.component.GardenBackdrop
 import top.honorhook.ui.component.HonorHookTheme
 import top.honorhook.ui.component.IconBadge
@@ -218,7 +219,11 @@ private fun AppRoot() {
         ) {
             // 背景皮肤（2026-11-08 用户要求）画在内容层内部、页面之下：
             // 页面 Scaffold 让出透明底才能看见它；放在 layerBackdrop 里面，玻璃药丸才会把它当成背景折射。
-            if (AppSettings.gardenSkin) {
+            // 插画背景优先于花园篱笆（2026-11-08 artwork-theme）：绿篱笆 + 紫插画同框互相打架，
+            // 开插画时花园让位；关掉插画又没开花园 → 退回纯色底（rootColor）。
+            if (AppSettings.artworkBackdrop) {
+                ArtworkBackdrop(modifier = Modifier.fillMaxSize())
+            } else if (AppSettings.gardenSkin) {
                 GardenBackdrop(
                     modifier = Modifier.fillMaxSize(),
                     dark = isInDarkTheme(),

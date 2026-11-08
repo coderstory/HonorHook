@@ -76,7 +76,10 @@ fun HonorHookTheme(content: @Composable () -> Unit) {
             if (darkTheme) dynamicDarkColorScheme(context).primary
             else dynamicLightColorScheme(context).primary
 
-        else -> null
+        // 2026-11-08（artwork-theme）：非 Monet 且用户没挑过关键色时，落到插画主色（indigo-violet）。
+        // 原先这里是 null = miuix 自带默认（偏绿），换背景后整个面板都得跟图走，
+        // 但「0 = 用户没选过」的语义不能动（主题页的 keyColorCustom 依赖它）。
+        else -> Color(AppSettings.artworkKeyColor)
     }
 
     val controller = ThemeController(
