@@ -29,8 +29,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -59,6 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.ui.component.genshin.genshinOr
@@ -157,6 +161,25 @@ private fun TargetListScreen(
         }
     }
 
+    // 小红书卡是「彩蛋」（用户 m01190）：默认不显示，列表滑到底并停留 1 秒后才出现。
+    // 判定用 LazyListState 的可见项末尾 + 不能再前滑，两个条件都满足才算真到底；
+    // 只在首次到底时触发一次，之后再滚动不会反复收起。
+    val listState = rememberLazyListState()
+    var xhsRevealed by remember { mutableStateOf(false) }
+    val atListEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last != null && last.index >= info.totalItemsCount - 1 && !listState.canScrollForward
+        }
+    }
+    LaunchedEffect(atListEnd) {
+        if (atListEnd && !xhsRevealed) {
+            delay(1000)
+            xhsRevealed = true
+        }
+    }
+
     Scaffold(
         // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
         containerColor = Color.Transparent,
@@ -183,6 +206,7 @@ private fun TargetListScreen(
                 bottom = bottomInnerPadding +
                     WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp,
             ),
+            state = listState,
             overscrollEffect = null,
         ) {
             item {
@@ -226,6 +250,9 @@ private fun TargetListScreen(
                             it.packageName.startsWith("com.android.")
                     }
                     val third = targets.filterNot { it in system }
+                    // 小红书从第三方网格里摘出来，留作列表末尾的彩蛋卡（见上方 xhsRevealed）。
+                    val xhsEgg = third.firstOrNull { it.packageName == XHS_EGG_PACKAGE }
+                    val thirdApps = third.filterNot { it.packageName == XHS_EGG_PACKAGE }
                     val disabledCount = targets.sumOf { t ->
                         t.features.count { !FeatureStore.isEnabled(it.key) }
                     }
@@ -252,12 +279,22 @@ private fun TargetListScreen(
                             item { FeatureCardRow(pair, versions, onOpenTarget, startIndex = start) }
                         }
                     }
-                    if (third.isNotEmpty()) {
+                    if (thirdApps.isNotEmpty() || xhsEgg != null) {
                         item { GroupLabel("第三方应用") }
-                        third.chunked(2).forEach { pair ->
+                        thirdApps.chunked(2).forEach { pair ->
                             val start = gridCursor
                             gridCursor += pair.size
                             item { FeatureCardRow(pair, versions, onOpenTarget, startIndex = start) }
+                        }
+                    }
+                    if (xhsEgg != null && xhsRevealed) {
+                        item {
+                            FeatureCardRow(
+                                pair = listOf(xhsEgg),
+                                versions = versions,
+                                onOpen = onOpenTarget,
+                                startIndex = gridCursor,
+                            )
                         }
                     }
                 }
@@ -265,6 +302,9 @@ private fun TargetListScreen(
         }
     }
 }
+
+/** 小红书彩蛋卡的包名（列表末尾、滑到底停留 1 秒才出现）。 */
+private const val XHS_EGG_PACKAGE = "com.xingin.xhs"
 
 /**
  * 目标真实应用图标。
