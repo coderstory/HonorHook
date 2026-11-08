@@ -210,20 +210,22 @@ private fun StatusCard(
         pressFeedbackType = PressFeedbackType.Tilt,
     ) {
         Box {
-            // 110dp 绿圈勾，故意溢出右下角只露一半
+            // 绿圈勾：放在卡片内右下角的淡水印，不做「溢出裁切」。
+            // 试过照 KernelSU 那样让它溢出卡片右下角（110dp / 92dp 两版），实测截图里
+            // 环被卡片直边切掉一半，看着像渲染出错而不是设计。留在卡内、压到低透明度更干净。
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset(27.dp, 31.dp),
+                    .padding(end = 10.dp, bottom = 6.dp),
                 contentAlignment = Alignment.BottomEnd,
             ) {
                 Icon(
-                    modifier = Modifier.size(110.dp),
+                    modifier = Modifier.size(66.dp),
                     imageVector = if (inactive) Icons.Rounded.ErrorOutline else Icons.Rounded.CheckCircleOutline,
                     tint = when {
-                        inactive -> Color(0xFFBA1A1A).copy(alpha = 0.5f)
-                        isDynamicColor -> colorScheme.primary.copy(alpha = 0.8f)
-                        else -> Color(0xFF36D167)
+                        inactive -> Color(0xFFBA1A1A).copy(alpha = 0.28f)
+                        isDynamicColor -> colorScheme.primary.copy(alpha = 0.30f)
+                        else -> Color(0xFF36D167).copy(alpha = 0.34f)
                     },
                     contentDescription = null,
                 )

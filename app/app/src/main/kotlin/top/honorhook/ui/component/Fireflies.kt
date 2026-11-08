@@ -33,7 +33,7 @@ import top.honorhook.ui.AppSettings
  *      在白底上等于没画，必须放大到 5dp 以上才有存在感。
  */
 private const val COUNT = 30
-private const val COUNT_LIGHT = 22
+private const val COUNT_LIGHT = 20
 
 /** 首帧日志只打一次，方便真机确认「到底有没有在画」（不随帧刷屏） */
 private var firstDrawLogged = false
@@ -59,7 +59,7 @@ enum class FireflyTint(
     ICE("ice", "冰白", Color(0xFFEAF6FF), Color(0xFF7E93A3));
 
     companion object {
-        fun of(id: String): FireflyTint = entries.firstOrNull { it.id == id } ?: LIME
+        fun of(id: String): FireflyTint = entries.firstOrNull { it.id == id } ?: RAINBOW
 
         /** 深色主题的「彩虹」多色盘：青、蓝、暖黄、粉、紫、冰蓝，全部高亮度（暗底才有荧光感） */
         private val RainbowDark = listOf(
@@ -131,7 +131,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
                 sizePx = when {
                     soft -> 12.0f + rnd.nextFloat() * 10.0f
                     dark -> 5.0f + rnd.nextFloat() * 4.5f
-                    else -> 3.2f + rnd.nextFloat() * 2.6f
+                    // 浅色 5.2~9.4dp：再小就成「屏幕灰尘」，大到 10dp 又像气泡（实测两轮都试过）
+                    else -> 5.2f + rnd.nextFloat() * 4.2f
                 },
                 // 0.7%~1.6% 屏高/秒（2800px 屏 ≈ 20~45px/s）——要能一眼看出在往上飘
                 rise = 0.007f + rnd.nextFloat() * 0.009f,
@@ -157,7 +158,7 @@ fun Fireflies(modifier: Modifier = Modifier) {
     val colors = FireflyTint.colors(dark, tint)
     // 白底没有「发光」的物理依据，浓度一高就像屏幕脏了；暗底则要亮才像光。
     // 浅色取 0.62：点虽小但饱和度高，太浓会在白色卡片上留下明显绿斑。
-    val strength = if (dark) 1f else 0.62f
+    val strength = if (dark) 1f else 0.9f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         if (!firstDrawLogged) {
@@ -211,9 +212,9 @@ fun Fireflies(modifier: Modifier = Modifier) {
             // 光晕：大半径、低浓度、边缘直接归零（径向渐变没有硬边，所以不会出现「靶心环」）
             drawCircle(
                 brush = Brush.radialGradient(
-                    0.00f to base.copy(alpha = a2 * 0.42f),
-                    0.40f to base.copy(alpha = a2 * 0.17f),
-                    0.72f to base.copy(alpha = a2 * 0.05f),
+                    0.00f to base.copy(alpha = a2 * if (dark) 0.42f else 0.50f),
+                    0.40f to base.copy(alpha = a2 * if (dark) 0.17f else 0.22f),
+                    0.72f to base.copy(alpha = a2 * if (dark) 0.05f else 0.07f),
                     1.00f to base.copy(alpha = 0f),
                     center = c,
                     radius = r,
