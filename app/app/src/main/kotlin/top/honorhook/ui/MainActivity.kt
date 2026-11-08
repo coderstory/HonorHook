@@ -333,13 +333,16 @@ private fun HonorHookBottomBar(
             ) {
                 // 图标块自带颜色，不再跟随 LocalContentColor；重影层因此也画出同色徽章，
                 // 玻璃药丸里看到的是该 tab 自身的颜色晕开 —— 正是选中态要的观感
+                // 图标块尺寸（2026-11-08 用户要求「tab 图标适度放大一点点」）：
+                // 26→29dp、字形 15→17dp、圆角 8→9dp。只动这一处——徽章本身变大后字形留白也跟着变大，
+                // 若只放大字形会出现「字顶到圆角」的拥挤感。药丸宽度由 defaultMinSize(76dp) 兜住，不会被挤窄。
                 IconBadge(
                     icon = item.icon,
                     accent = tabAccents.getOrElse(index) { tabAccents.first() },
                     contentDescription = item.label,
-                    size = 26.dp,
-                    iconSize = 15.dp,
-                    corner = 8.dp,
+                    size = 29.dp,
+                    iconSize = 17.dp,
+                    corner = 9.dp,
                 )
                 Text(
                     text = item.label,
