@@ -1,0 +1,21 @@
+{
+ "needs": [
+  {"id": 1, "pool": "need", "title": "HonorHook 全维度体检与优化（文档/冗余/性能/架构/历史包袱/业务流程/依赖）", "priority": "P1", "status": "进行中", "blocker": null, "owner": "devflow", "detail": "用户要求并发全维度调研，严格按 devflow 流程。范围：文档漂移、冗余代码配置、性能、设计架构、历史包袱与兼容、业务流程合理性、依赖与注释。产出：归并审计清单 + 分级修复计划 + 构建通过。", "created": "2026-11-08 23:50:29 +0800", "updated": "2026-11-08 23:51:00 +0800", "body": "用户要求并发全维度调研，严格按 devflow 流程。范围：文档漂移、冗余代码配置、性能、设计架构、历史包袱与兼容、业务流程合理性、依赖与注释。产出：归并审计清单 + 分级修复计划 + 构建通过。", "created_by": "devflow", "updated_by": "devflow", "deleted": 0, "stage": "开发中"}
+ ],
+ "dev_progress": [
+  {"id": 1, "need_id": 1, "time": "2026-11-08 23:51:00 +0800", "note": "用户已明确要求并发调研（m01293）；开工链 排产→进行中", "created_by": null, "updated_by": null, "deleted": 0},
+  {"id": 2, "need_id": 1, "time": "2026-11-08 23:51:00 +0800", "note": "已派 7 个只读审计面；devflow 口径 2-4 面/并发≤3，本次为用户明确要求的并发调研波次，归并按面计", "created_by": null, "updated_by": null, "deleted": 0}
+ ],
+ "bugs": [],
+ "acceptance": [],
+ "status_log": [
+  {"id": 1, "need_id": 1, "time": "2026-11-08 23:50:29 +0800", "from_status": null, "to_status": "在池", "reason": "入池", "created_by": "devflow", "updated_by": "devflow", "deleted": 0},
+  {"id": 2, "need_id": 1, "time": "2026-11-08 23:51:00 +0800", "from_status": "在池", "to_status": "排产", "reason": "用户已明确要求并发调研（m01293）；开工链 排产→进行中", "created_by": "devflow", "updated_by": "devflow", "deleted": 0},
+  {"id": 3, "need_id": 1, "time": "2026-11-08 23:51:00 +0800", "from_status": "排产", "to_status": "进行中", "reason": "已派 7 个只读审计面；devflow 口径 2-4 面/并发≤3，本次为用户明确要求的并发调研波次，归并按面计", "created_by": "devflow", "updated_by": "devflow", "deleted": 0}
+ ],
+ "personal_todo": [],
+ "docs": [],
+ "docs_history": [],
+ "clues": [],
+ "generator": {"hostname": "localhost", "os": "Android-17-aarch64-64bit-ELF", "generated": "2026-11-08 23:51:00 +0800"}
+}

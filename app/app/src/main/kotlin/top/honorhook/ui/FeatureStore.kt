@@ -36,6 +36,15 @@ object FeatureStore {
      */
     private val states = mutableStateMapOf<String, Boolean>()
 
+    /**
+     * 未连接期间改过、还没下发的 key（重连后补发）。
+     *
+     * 之前的行为是「本地写保留、远端不写、也不补发」⇒ 用户看到开关已关，hook 下次注入仍读旧值（默认开），
+     * 安全类开关会静默保持开启，只能靠设置页「同步开关并重启应用」人工补救。这里把缺口补上：
+     * 记脏 → 服务绑上时补发一次。
+     */
+    private val pendingKeys = mutableSetOf<String>()
+
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         FeatureCatalog.targets.forEach { target ->
@@ -77,7 +86,36 @@ object FeatureStore {
             PushResult(sent, all.size, true)
         }.getOrElse { t ->
             Log.w(TAG, "远端 prefs 批量下发失败（hook 侧仍按上次远端值运行）", t)
-            PushResult(0, all.size, true)
+            // connected=false 让 UI 走失败文案：此前这里返回 true，异常被显示成「已同步 0/N」。
+            PushResult(0, all.size, false)
+        }
+    }
+
+    /** 互斥对方（开 A 关 B 时被联动的那个 key）；无则 null。 */
+    private fun featuresExcludingSelf(key: String, enabled: Boolean): String? {
+        if (!enabled) return null
+        val other = featureIndex[key]?.excludesWith ?: return null
+        return other.takeIf { it != key && valueIn(states, it) }
+    }
+
+    /**
+     * 把 [pendingKeys] 里未下发的开关补写到远端 prefs；服务未绑定时直接返回 0。
+     * 由 [FrameworkState.onServiceBind] 在绑定成功后调用一次（幂等：集合清空后无事可做）。
+     */
+    fun flushPending(): Int {
+        val keys = synchronized(pendingKeys) { pendingKeys.toList() }
+        if (keys.isEmpty()) return 0
+        val service = FrameworkState.current() ?: return 0
+        return runCatching {
+            val editor = service.getRemotePreferences(FeatureCatalog.REMOTE_GROUP).edit()
+            keys.forEach { editor.putBoolean(it, isEnabled(it)) }
+            editor.apply()
+            synchronized(pendingKeys) { pendingKeys -= keys.toSet() }
+            Log.i(TAG, "补发未下发的开关 ${keys.size} 项: ${keys.joinToString()}")
+            keys.size
+        }.getOrElse { t ->
+            Log.w(TAG, "补发未下发的开关失败（保留待补发）", t)
+            0
         }
     }
 
@@ -109,8 +147,11 @@ object FeatureStore {
         ) { t -> writeError = t }
         when (result) {
             SetEnabledResult.OK -> Unit
-            SetEnabledResult.NOT_CONNECTED ->
-                Log.w(TAG, "LSPosed 未连接，开关只写入本地（hook 侧保持上次远端值）: $key")
+            SetEnabledResult.NOT_CONNECTED -> {
+                pendingKeys += key
+                featuresExcludingSelf(key, enabled)?.let { pendingKeys += it }
+                Log.w(TAG, "LSPosed 未连接，开关只写入本地，已记待补发: $key")
+            }
             SetEnabledResult.WRITE_FAILED ->
                 Log.w(TAG, "远端 prefs 下发失败（本地已回滚，hook 侧保持上次远端值）: $key", writeError)
         }

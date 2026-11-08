@@ -47,8 +47,8 @@ object ThemeStoreHook : TargetHook {
             // DexKit 第二轨兜底（MethodResolver）需要 APK 磁盘路径：param.applicationInfo.sourceDir
             val apkPath = param.applicationInfo?.sourceDir
 
-            // 挂载表 46 项；各项归属见 description 编号（A/B/C/H/T/W/S 系列）。计数注释历史上一再漂移
-            // （评审 #14：43→44→46 三代不符），故不再列分类算术——以表行数与真机 installed N/M 的 M 为准。
+            // 挂载表条目按 description 编号（A/B/C/H/T/W/S 系列）归属；计数注释历史上一再漂移
+            // （评审 #14 记过 43/44/46 三代不符），故不写死数字——以表文件行数与真机 installed N/M 的 M 为准。
             // 数据表 ThemeStoreMap_20_1_63_305.kt 手维护。
             val actual = HostVersion.resolveHostVersion(apkPath, packageName)
             val pick = HostVersion.pick(versionTables, actual)

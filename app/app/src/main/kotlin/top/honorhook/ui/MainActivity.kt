@@ -168,7 +168,7 @@ private fun AppRoot() {
     val enableFloatingBlur =
         floatingBar && floatingBarGlass && liquidGlass && Build.VERSION.SDK_INT >= 33
 
-    // key(rootColor)：backdrop 的 draw 回调只在创建时捕获一次颜色，换深浅色/AMOLED 后
+    // key(rootColor)：backdrop 的 draw 回调只在创建时捕获一次颜色，换深浅色后
     // 若不重建，玻璃底色会停在旧色上。
     val backdrop = key(rootColor) {
         rememberLayerBackdrop {
@@ -189,7 +189,8 @@ private fun AppRoot() {
         UpdateDialog(onDismiss = { UpdateState.dismissDialog() })
     }
 
-    // 不 remember：图标要随「插画背景」开关切换（m01154），列表重建成本可忽略。
+    // 不 remember：图标要随「插画背景」开关切换（开插画用原神图标，关掉回 Material），
+    // 列表重建成本可忽略。
     val items =
         listOf(
             NavigationItem(label = "首页", icon = genshinOr(Icons.Rounded.Cottage, GenshinIcons.Vision)),

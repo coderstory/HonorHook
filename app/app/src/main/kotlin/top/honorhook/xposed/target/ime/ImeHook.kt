@@ -371,7 +371,6 @@ object ImeHook : TargetHook {
     private const val CLS_THEME_PREVIEW = "com.sogou.theme.ThemePreviewActivity"
     private const val CLS_JSON = "org.json.JSONObject"
     private const val CLS_SMART_DETAIL = "com.sogou.theme.SmartThemeSkinDetailActivity"
-    private const val CLS_THEME_CTRL = "com.sogou.theme.b"
     private const val ID_SKIN_R1 = "ime:ThemePreviewActivity.r1"
     private const val ID_SKIN_PAYMENT = "ime:JSONObject.optInt(payment)"
     private const val ID_SMART_N1 = "ime:SmartThemeSkinDetailActivity.N1"

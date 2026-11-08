@@ -12,8 +12,6 @@ import top.honorhook.xposed.target.logDisabled
 
 /** 判据日志前缀 + 常量。 */
 private const val JUDGE_PREFIX = "qinxuan-hook"
-private const val CLS_RECOMMEND_MODEL = "cn.honor.qinxuan.honorchoice.home.recommend.RecommendModel"
-private const val CLS_CARD_CONVERTER = "com.hihonor.module.home.convert.FeatureCardConverterKt"
 private const val RX_OBSERVABLE = "io.reactivex.rxjava3.core.Observable"
 private const val CLS_SPLASH_AD_ACTIVITY = "com.hihonor.library.advertisement.view.SplashAdvertisementActivity"
 private const val TASK_SPLASH_FINISH = "qinxuan:health.splashAd.finish"

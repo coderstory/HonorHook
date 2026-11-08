@@ -431,15 +431,24 @@ object SystemUiHook : TargetHook {
         return true
     }
 
-    /** 按资源 entry name 递归查子视图（运行时 getIdentifier，不硬编码 R.id 数值——资源 id 逐版漂移）。 */
+    /**
+     * 按资源 entry name 递归查子视图（运行时 getIdentifier，不硬编码 R.id 数值——资源 id 逐版漂移）。
+     *
+     * getIdentifier 每次 0.5~2ms（Binder 进 AssetManager），子树几十个节点逐个查会把 bind 拖慢；
+     * 所以 id 只解析一次，递归用 id 比较。
+     */
     private fun findByEntryName(root: android.view.View, entryName: String): android.view.View? {
         val res = root.resources
         val targetId = runCatching { res.getIdentifier(entryName, "id", root.context.packageName) }.getOrNull()
         if (targetId == null || targetId == 0) return null
-        if (root.id == targetId) return root
-        if (root is android.view.ViewGroup) {
-            for (i in 0 until root.childCount) {
-                findByEntryName(root.getChildAt(i), entryName)?.let { return it }
+        return findByViewId(root, targetId)
+    }
+
+    private fun findByViewId(view: android.view.View, targetId: Int): android.view.View? {
+        if (view.id == targetId) return view
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findByViewId(view.getChildAt(i), targetId)?.let { return it }
             }
         }
         return null

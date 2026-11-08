@@ -65,7 +65,6 @@ object MmsHook : TargetHook {
      * [simpleActionTask] intercept 注释），复制按钮存活；云端 menus（「打开国家政务」「应用推荐」
      * 等跳市场按钮）不再被解析，全部消灭。
      */
-    private const val VERIFY_CARD_CODE = "0EFF76FF"
 
     /** TedMenuProcessor 桥接持有字段名（jadx 实证；仅 HW 分支形态用到，取不到按字段扫描兜底）。 */
     private const val FIELD_PROCESSOR = "processor"

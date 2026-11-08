@@ -60,7 +60,11 @@ object FrameworkState {
     @Synchronized
     fun onServiceBind(s: XposedService) {
         service = s
-        mainHandler.post { publish(s) }
+        mainHandler.post {
+            publish(s)
+            // 断连期间拨过的开关在这里补下发（否则 UI 显示关了、hook 侧仍是旧值，直到用户手动同步）
+            FeatureStore.flushPending()
+        }
     }
 
     @Synchronized

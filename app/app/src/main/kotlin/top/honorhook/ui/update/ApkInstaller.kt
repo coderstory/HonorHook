@@ -217,9 +217,7 @@ object ApkInstaller {
 
     /** 触发系统安装器；未授「安装未知应用」时跳授权页并返回 false（授权后重新下载入口再点）。 */
     fun install(context: Context, apk: File): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            !context.packageManager.canRequestPackageInstalls()
-        ) {
+        if (!context.packageManager.canRequestPackageInstalls()) {
             context.startActivity(
                 Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,

@@ -27,10 +27,11 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.basic.Card as MiuixCard
 
 /**
- * 带「淡绿包边」的卡片（2026-11-08 用户要求：「给所有的卡片加一个淡绿色的包边」）。
+ * 带主题色包边的卡片（2026-11-08 用户要求所有卡片加包边；原先固定淡绿，插画主题上线后
+ * 改为跟随主色——见下方 `cardRim` 里 `AppSettings.artworkBackdrop` 分支）。
  *
  * 为什么做成同名同形的包装，而不是给每个 `Card(...)` 传 colors/modifier：
- * - miuix `Card` 没有 border 参数；全工程 40 多处 `Card(` 调用，逐个改必然漏，
+ * - miuix `Card` 没有 border 参数；全工程 44 处 `Card(` 调用，逐个改必然漏，
  *   把 import 从 `top.yukonga.miuix.kmp.basic.Card` 换成本文件即可全覆盖。
  * - 包边必须画在卡片背景**之上**：`Modifier.drawWithCache{ onDrawWithContent { drawContent(); stroke } }`
  *   挂在传进 Card 的 modifier 上，链里它排在 miuix 内部 `.squircleSurface()` 之前，
@@ -149,8 +150,8 @@ private const val RimAlphaLight = 0.40f
 private const val RimAlphaDark = 0.50f
 
 /**
- * 投影色（2026-11-08 实验分支 ui-overhaul 的装饰件）：浅色用压暗的**主色**（插画 era：靛紫），
- * 深色/AMOLED 用纯黑 —— 黑底上叠彩色投影会显脏。
+ * 投影色（实验分支 ui-overhaul 的装饰件）：浅色用压暗的**主色**，深色用纯黑——
+ * 黑底上叠彩色投影会显脏。
  *
  * 这里取不透明色，下面的 `ShadowSteps` 每档各自带 alpha 覆盖它。
  */
@@ -167,7 +168,7 @@ private val ShadowSteps = listOf(1.5f to 0.06f, 3f to 0.035f, 5.5f to 0.018f)
 private val ShadowOffsetY = 2.dp
 
 /**
- * 沿超椭圆轮廓描一圈淡绿边。路径按尺寸缓存（`drawWithCache`），尺寸不变不重建；
+ * 沿超椭圆轮廓描一圈主题色边。路径按尺寸缓存（`drawWithCache`），尺寸不变不重建；
  * 线宽整条压在描边中线，所以内缩半个线宽对齐卡片填充。
  *
  * 2026-11-08（ui-overhaul）在同一层追加两件装饰，画序 = 投影 → 内容 → 顶高光 → 包边：
@@ -182,8 +183,8 @@ private fun Modifier.cardRim(cornerRadius: Dp): Modifier {
     val dark = isInDarkTheme()
     // 包边/投影的颜色**跟当前背景主题走**（2026-11-08 用户「紫色主题下，卡片边缘从绿色改成紫色」）：
     // 插画背景 → 插画主色；花园/纯色 → 面板 primary。
-    // 不能只读 `colorScheme.primary`：主题控制器在部分分支（Monet 关闭 + 关键色 0）下
-    // 会回到 miuix 自带的偏绿 primary，卡片边缘就会露出一圈绿边。
+    // 不能只读 `colorScheme.primary`：主题控制器在部分分支下会回落到 miuix 自带的偏绿 primary，
+    // 卡片边缘就会露出一圈绿边（2026-11-08 用户实测反馈）。
     val primary = if (AppSettings.artworkBackdrop) Color(AppSettings.artworkKeyColor) else MiuixTheme.colorScheme.primary
     val rim = primary.copy(alpha = if (dark) RimAlphaDark else RimAlphaLight)
     val shadow = if (dark) ShadowDark else primary

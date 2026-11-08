@@ -40,7 +40,6 @@ object AppSettings {
     private const val KEY_GLASS = "liquid_glass"
     private const val KEY_BAR_GLASS = "floating_bar_glass"
     private const val KEY_FLOATING_BAR = "floating_bar"
-    private const val KEY_FIREFLY_LIGHT = "firefly_light"
     private const val KEY_FIREFLY_ENABLED = "firefly_enabled"
     private const val KEY_GARDEN_SKIN = "garden_skin"
     private const val KEY_ARTWORK_BACKDROP = "artwork_backdrop"
@@ -62,11 +61,6 @@ object AppSettings {
 
     /** 悬浮底栏（关闭则退回贴边 NavigationBar）。 */
     val floatingBar: Boolean get() = _floatingBar.value
-
-    private val _fireflyLight = mutableStateOf(false)
-
-    /** 浅色主题下是否也画萤火虫（默认关：白底没有「发光」，只有减光 → 像屏幕脏）。 */
-    val fireflyLight: Boolean get() = _fireflyLight.value
 
     private val _fireflyEnabled = mutableStateOf(true)
 
@@ -108,7 +102,6 @@ object AppSettings {
         _liquidGlass.value = p?.getBoolean(KEY_GLASS, true) ?: true
         _floatingBarGlass.value = p?.getBoolean(KEY_BAR_GLASS, true) ?: true
         _floatingBar.value = p?.getBoolean(KEY_FLOATING_BAR, true) ?: true
-        _fireflyLight.value = p?.getBoolean(KEY_FIREFLY_LIGHT, true) ?: true
         _fireflyEnabled.value = p?.getBoolean(KEY_FIREFLY_ENABLED, true) ?: true
         _gardenSkin.value = p?.getBoolean(KEY_GARDEN_SKIN, false) ?: false
         _artworkBackdrop.value = p?.getBoolean(KEY_ARTWORK_BACKDROP, true) ?: true
@@ -142,11 +135,6 @@ object AppSettings {
     fun setFireflyEnabled(enabled: Boolean) {
         _fireflyEnabled.value = enabled
         prefs?.edit()?.putBoolean(KEY_FIREFLY_ENABLED, enabled)?.apply()
-    }
-
-    fun setFireflyLight(enabled: Boolean) {
-        _fireflyLight.value = enabled
-        prefs?.edit()?.putBoolean(KEY_FIREFLY_LIGHT, enabled)?.apply()
     }
 
     fun setGardenSkin(enabled: Boolean) {

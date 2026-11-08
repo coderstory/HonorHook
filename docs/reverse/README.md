@@ -22,10 +22,12 @@
 | 系统管家服务 | `com.hihonor.systemmanager` | 17.0.0.414 | 116MB 巨包；杀毒模块类名可读（`com.hihonor.antivirus.*` 未混淆）；自带 `msc.config.hide_virus` 总开关 | [`sysmgr.md`](sysmgr.md) |
 | 壁纸编辑器（独立桌面视频路线已放弃留档；现行 W16 转码/W18 去限）+ LivePaper 引擎（W17 循环/W19 隐藏暂停） | `com.hihonor.wallpapereditor` + `com.hihonor.livewallpaper.paradise` | 153.0.0.423 / 11.0.0.252 | editor 类名/方法名/字段名都是**源码原名**（非 R8 产物，但无 keep）；**陷阱：jadx 把短字段名改写成 `f<hash><字母>`，运行时是字母本身 ⇒ 以 smali 为准**；mcs 转码库未混淆。paradise 引擎 n4.* 变体（z 手机/w Pad/c0 折叠）混淆，锚点串全类共享 ⇒ DexKit 全挂；受体 l3.l（VisionControllerImpl，pluginsdk 接口）稳定 | [`wallpaper-editor.md`](wallpaper-editor.md) |
 | 小红书 | `com.xingin.xhs` | 9.50.0 | 深混淆但**载荷字段名明文**（gson/kotlinx 双模型并行）；保存业务三入口三路（§九图谱）；**锚点登记表** [`xhs-anchors.md`](xhs-anchors.md) + 流程 skill `xhs-recon` | [`xhs.md`](xhs.md) |
+| 应用市场 | `com.hihonor.appmarket` | 16.1.10.302 | 广告与推送为云控 + 内容下发混合；保留手动检查更新 | [`appmarket.md`](appmarket.md) |
+| 运动健康 | `com.hihonor.health` | 走 SDK 通杀（`HonorAds`/`HonorTracking`/`HonorQinxuan` 按包注册） | 无独立 Hook 类，按 SDK 类注册 | [`health.md`](health.md) |
 
 > **逐次版本适配的实证记录**：[`findings-2026-11-07-version-adapt.md`](findings-2026-11-07-version-adapt.md)（theme 20.1.67.303 四个混淆类改名、xhs 9.53.3 六点坐标、短信插件 b(4参)→c(5参)、小红书定位器 dcc.d；含「工具三缺陷」与待真机判据清单）。每轮适配都落一份 `findings-<日期>-<主题>.md`，别只写进会话。
 >
-> 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` §八 未解决项与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。
+> 挂载点数与口径漂移不在本表（代码可数、且存在文档/代码口径不一致）——见根 `CLAUDE.md` 的「未解决」节与 [`../hook-inventory-audit.md`](../hook-inventory-audit.md) §一。
 >
 > **归档目录 [`archive/`](archive/)**：已关线/已放弃目标的逆向记录留档（`mihealth-face.md` 2026-10-14 关线、`mailmaster.md` 2026-10-13 放弃）——只作历史证据，不在目标总表内。
 
@@ -65,5 +67,5 @@
 |---|---|
 | 改某 app 的 hook 逻辑 | 该 app 的记录（上表）+ [`../hook-inventory-audit.md`](../hook-inventory-audit.md) 对应段 |
 | 主题商店策略/按钮/下载链 | [`../theme-store.md`](../theme-store.md)（设计）→ 证据翻 [`theme-store.md`](theme-store.md) |
-| 加新目标 app | 抄最像的现有实现 → `TargetRegistry` 注册 → `scope.list` 同步 → `FeatureCatalog` 加条目（`CLAUDE.md` §3.2） |
+| 加新目标 app | 抄最像的现有实现 → `TargetRegistry` 注册 → `scope.list` 同步 → `FeatureCatalog` 加条目（`CLAUDE.md` 的「跨版本兼容」节） |
 | 逆一个新 app | skill `reverse-decompile` / `static-analysis` → 命令 `tools/dev.sh decompile|jadx` |

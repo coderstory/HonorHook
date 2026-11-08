@@ -73,6 +73,8 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
     var accounts by remember { mutableStateOf(MfaStore.list(context)) }
     var view by rememberSaveable { mutableStateOf(MfaView.LIST) }
     var showManual by remember { mutableStateOf(false) }
+    // 明文导出前先确认：备份文件落在公共 Download，任何文件管理器/应用都能读——误触代价是全部 2FA 种子泄露。
+    var confirmBackup by remember { mutableStateOf(false) }
     var showImport by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<MfaAccount?>(null) }
     var renaming by remember { mutableStateOf<MfaAccount?>(null) }
@@ -121,12 +123,7 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    IconButton(onClick = {
-                        val name = MfaStore.backup(context)
-                        Toast.makeText(context,
-                            if (name != null) "已备份到 Download/$name" else "备份失败",
-                            Toast.LENGTH_LONG).show()
-                    }) {
+                    IconButton(onClick = { confirmBackup = true }) {
                         Icon(Icons.Rounded.Backup, null, tint = colorScheme.onSurface)
                     }
                     IconButton(onClick = {
@@ -167,6 +164,34 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
                     onRename = { renaming = acc })
             }
             item { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+
+    // —— 明文备份确认 ——
+    if (confirmBackup) {
+        WindowDialog(
+            show = true,
+            title = "导出备份？",
+            summary = null,
+            onDismissRequest = { confirmBackup = false },
+        ) {
+            Column {
+                Text(
+                    "备份文件是明文 JSON（含全部 2FA 密钥），会存到公共 Download 目录，" +
+                        "任何有存储权限的应用都能读取。用完请及时移到安全位置或删除。",
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                TextButton(text = "取消", onClick = { confirmBackup = false }, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                TextButton(text = "仍要导出", onClick = {
+                    confirmBackup = false
+                    val name = MfaStore.backup(context)
+                    Toast.makeText(context,
+                        if (name != null) "已备份到 Download/$name" else "备份失败",
+                        Toast.LENGTH_LONG).show()
+                }, modifier = Modifier.fillMaxWidth())
+            }
         }
     }
 

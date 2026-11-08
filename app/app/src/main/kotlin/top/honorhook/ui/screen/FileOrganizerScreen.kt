@@ -1043,7 +1043,6 @@ private fun RuleEditorPane(
 
     val regexOk = regex.isEmpty() || runCatching { Regex(regex) }.isSuccess
     val formOk = name.isNotBlank() && scope.isNotBlank() && regexOk && (action == "DELETE" || target.isNotBlank())
-    val isDelete = action == "DELETE"
 
     // 系统返回手势回列表，而非退出丢表单（审计 C3）
     androidx.activity.compose.BackHandler { onCancel() }

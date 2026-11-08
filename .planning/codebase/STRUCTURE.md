@@ -4,6 +4,9 @@ last_mapped_at: 2026-10-11
 ---
 # Codebase Structure
 
+> **生成物告警（2026-11-08）**：本文件是早期的代码库快照，未随之后的改动更新——已知过时项包括 Monet/关键色与 AMOLED 档（均已删除）、`materialkolor` 依赖（已移除）、主题预览卡（已删除）、功能 key 数量与代码行数。引用前以当前源码与 `docs/` 为准。
+
+
 **Analysis Date:** 2026-10-11
 
 ## Directory Layout

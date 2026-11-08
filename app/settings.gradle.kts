@@ -35,15 +35,15 @@ dependencyResolutionManagement {
             google()
             mavenCentral()
         }
-        // JetBrains Compose Multiplatform 的 material3/material-icons 只在 Maven Central 有
-        // （阿里云镜像未同步），必须保留直连；国内网络不通时靠前面的阿里云仓兜底。
-        maven { url = uri("https://repo1.maven.org/maven2") }
         // libxposed 离线兜底：限定 group 的 mavenLocal，本地 ~/.m2 有货时优先命中
         mavenLocal {
             content {
                 includeGroup("io.github.libxposed")
             }
         }
+        // JetBrains Compose Multiplatform 的 material3/material-icons 只在 Maven Central 有
+        // （阿里云镜像未同步）——mavenCentral() 就是 repo1.maven.org 直连，
+        // 不要再单独写一条同 URL 的 maven{}（重复仓库会拖慢依赖解析）。
         mavenCentral()
     }
 }

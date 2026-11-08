@@ -16,7 +16,7 @@
 
 | 内容 | 文件 |
 |---|---|
-| 目标总表（13 行 host 对）+ 能力边界 + 已放弃目标结论 + 各 app 逆向记录 | [`reverse/README.md`](reverse/README.md) |
+| 目标总表（15 行 host 对，含应用市场/运动健康）+ 能力边界 + 已放弃目标结论 + 各 app 逆向记录 | [`reverse/README.md`](reverse/README.md) |
 | **2026-10-24 全系统调研交接**（新会话入口：设备铁律/三层法/三轮调研成果/开发路线/未竟清单。62 份报告在 `research/2026-10-24-system-audit/`——含 13 份拿走即写码规格书：22 融合状态栏 / 26 胶囊注入 / 28 工具箱 / 51 相机电影模式 / 52 OTA 拦截 / 53 应用市场 / 54 pushagent / 55 通知 / 56 桌面网关 / 57 负一屏 / 58 锁屏时钟 / 61 hiview / 43 验证剧本） | [`research/HANDOFF-2026-10-24.md`](research/HANDOFF-2026-10-24.md) |
 | **壁纸管线**（wallpapereditor + livewallpaper.paradise 两宿主合一文档。§一–八 = 已放弃路线「视频单独设桌面」W1–W8 留档；§九–十一 = 现行 W16–W19 四点——转码码率 / 时间轴去限 / 桌面循环 / 隐藏暂停，2026-10-18 全验证） | [`reverse/wallpaper-editor.md`](reverse/wallpaper-editor.md) |
 | 主题商店**设计**（需求 / 策略与理由 / 判据 / 未解决项） | [`theme-store.md`](theme-store.md) |
@@ -31,12 +31,20 @@
 | **审计整改 + 彩蛋清理计划**（2026-10-25 意见书 2×P0+3×P1+5×P2 的执行清单，含重审纠偏——与意见书冲突处以本计划为准；状态跟踪在计划内） | [`plans/2026-10-25-audit-remediation.md`](plans/2026-10-25-audit-remediation.md) |
 | [`ui-miuix-overview.md`](ui-miuix-overview.md) | 宿主 UI（Miuix Compose）结构与开关下发通道 |
 | [`hook-philosophy-manifesto.md`](hook-philosophy-manifesto.md) | hook 设计哲学（哲学表述版 + 工程条款版，七条原则与审计应用） |
+| [`hook-mapping.md`](hook-mapping.md) | 挂载点映射与选表器接入现状（表即真相、无生成脚本） |
+| [`lsposed-ui-spec.md`](lsposed-ui-spec.md) | LSPosed 风格 UI 规格（页面结构与交互约定） |
+| [`review-findings-2026-10-12.md`](review-findings-2026-10-12.md) | 2026-10-12 评审意见书（挂载点四格式等历史问题来源） |
+| [`audit-remediation-2026-10-25.md`](audit-remediation-2026-10-25.md) | 2026-10-25 审计整改意见书（执行清单见 plans/） |
+| [`plans/2026-11-08-ui-overhaul.md`](plans/2026-11-08-ui-overhaul.md) | 花园晨启动效实验分支的计划快照（部分条目随后已删除，见文首注记） |
+| [`plans/2026-11-09-optimization-audit.md`](plans/2026-11-09-optimization-audit.md) | 2026-11-09 全维度体检：七面审计归并结论 + 首轮修复清单 + 待办优先序 |
+| [`plans/2026-10-20-xhs-dn-module-extraction.md`](plans/2026-10-20-xhs-dn-module-extraction.md) | 小红书下载器拆分为 `:xhs-dn-core` 独立模块的方案 |
+| [`perf-baseline.md`](perf-baseline.md) | 挂载内存/启动基线（配合 `dev.sh meminfo`） |
 
 ## 四、外部知识库（已 vendor 成项目 skill）
 
 | 位置 | 内容 |
 |---|---|
-| [`.claude/skills/apk-reverse/`](../.claude/skills/apk-reverse/) | 第三方 skill `apk-reverse` 全量副本（MIT · **上游已废弃不更新** · 原样未改 · 作为项目 skill 入库，**会被自动发现**）：117 个文件（44 篇参考 + 54 个脚本 + 证据清单）里的深度逆向路线，覆盖「LSPosed 够不到哪一层」「服务端门 vs 客户端门」「DEX 虚拟化双壳 / Dart AOT / 落盘探查」等本项目缺口。索引见其 `README.md`，用法与冲突处理也在那里 |
+| [`.claude/skills/apk-reverse/`](../.claude/skills/apk-reverse/) | 第三方 skill `apk-reverse` 全量副本（MIT · **上游已废弃不更新** · 原样未改 · 作为项目 skill 入库，**会被自动发现**）：115 个文件（51 篇参考 + 58 个脚本 + 3 个根文件 + 证据清单）里的深度逆向路线，覆盖「LSPosed 够不到哪一层」「服务端门 vs 客户端门」「DEX 虚拟化双壳 / Dart AOT / 落盘探查」等本项目缺口。索引见其 `README.md`，用法与冲突处理也在那里 |
 
 ## 五、不在 docs/
 
@@ -52,7 +60,7 @@
 
 - hook 有效性判据**只有一条**：`installed N/M`，来自 **LSPosed 框架日志** `/data/adb/lspd/log/modules_*.log`（**不在 logcat**）。M = 本次注入尝试的挂载点数，N = 成功数。
 - 逐 hook 的应 M / 最近实测 N 只看一份：[`hook-inventory-audit.md`](hook-inventory-audit.md) §五 判据快照。**N 明显小于 M = 宿主版本错位或选点失效，先别改 hook 实现**（§四 有真机回归教训清单）。
-- 作用域包数 = **24**（scope.list 全量；`RegistryConsistencyTest` 动态断言钉死，引用包数以它为准）。
+- 作用域包数 = **24**（scope.list 全量；`RegistryConsistencyTest` 只钉成员一致性，24/22/33 由脚本复核，引用包数以它为准）。
 - 功能开关默认全开、跨进程远端 prefs 下发、**下次注入才生效**——改开关后要强停宿主再看效果。
 - 覆盖安装后 LSPosed 会停用模块：跑 `tools/dev.sh enable-module`。
 

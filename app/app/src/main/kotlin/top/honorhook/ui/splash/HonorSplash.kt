@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -150,8 +151,11 @@ fun HonorSplash(onFinish: () -> Unit, onLeaving: () -> Unit = {}) {
     val enter = remember { Animatable(0f) }
     LaunchedEffect(Unit) { enter.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 320f)) }
 
+    // 在组合期读 Animatable.value 会把整页拖进每帧重组；derivedStateOf 只在跨过阈值时触发一次。
+    val entered by remember { derivedStateOf { enter.value > 0.85f } }
+
     val textIn by animateFloatAsState(
-        targetValue = if (enter.value > 0.85f) 1f else 0f,
+        targetValue = if (entered) 1f else 0f,
         animationSpec = tween(420, easing = FastOutSlowInEasing),
         label = "splashText",
     )

@@ -52,9 +52,7 @@ object XhsBatchSave {
 
     /** 图片长按面板「保存」点击 lambda（逻辑体 invoke(Object)，jadx ji9/b.java:42 实证；9.49.1 为 mh9/b.java:41，
      *  9.50.0 迁名后旧 mh9/b 成 class_data_off=0 空壳类，findings-x5 2026-10-19）。 */
-    private const val CLS_SAVE_CLICK_LAMBDA = "ji9.b"
     /** 视频保存发起 lambda（a59/q.java:16-53 jadx 实证；9.49.1 为 d49.q，逐行同构迁名）。 */
-    private const val CLS_VIDEO_SAVE_LAMBDA = "a59.q"
     private const val METHOD_INVOKE = "invoke"
 
     /** 直下参数：UA（xhscdn 对无 UA 请求可能 403）、单图体积上限 50MB、超时。 */

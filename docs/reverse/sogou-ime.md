@@ -3,7 +3,7 @@
 宿主：`com.sohu.inputmethod.sogou.honor` **10.32.44.202608251503**（versionCode 3001，aapt2 实证；
 整包拉取到 `system-files/sogou-ime/base.apk`，129MB / 5 dex / 42592 类）。
 MT MCP 工作区 `3npsn0lh`（2026-10-27，本机回环 127.0.0.1:8787；**本文档曾于 2026-10-27 晚被外部清除后重建**，
-内容以本版为准）。已有 hook 面：ImeHook 6 点（验证码候选 5 点 + T5 开屏总闸，见 `ImeHook.kt` 头注）。
+内容以本版为准）。已有 hook 面：ImeHook **12 点**（2026-11-08 复核：11 功能 + 1 观测，见 `ImeHook.kt` 头注与 `hook-inventory-audit.md` §五）。
 
 ## 侦查工具口径
 
@@ -12,7 +12,7 @@ MT MCP 工作区 `3npsn0lh`（2026-10-27，本机回环 127.0.0.1:8787；**本�
   --single-class <fqn> -d <out> <apk>`（tools/bin 垫片在本机无执行位，用 env 解析出的绝对路径）。
 - dex 命令行扫描坑：`grep -E` 下 `\|` 是字面量，多关键词交替必须写 `a|b|c`（2026-10-27 实测踩坑，首轮全空是它）。
 
-## 一、开屏广告链（已落地，T5，2026-10-27 真机 `installed 6/6`）
+## 一、开屏广告链（已落地，T5；2026-10-27 当时真机 `installed 6/6`，现为 12 点见 §五判据）
 
 **入口**：launchable-activity = `com.sohu.inputmethod.sogou.SogouIMELauncher` → 开屏宿主 =
 `com.sohu.inputmethod.splashscreen.SogouLauncherActivity`（super BaseActivity）。

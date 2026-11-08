@@ -809,11 +809,20 @@ private fun ConfirmDialog(
             it is ToolAction.Freeze && GovernanceList.lookup(it.pkg)?.tier == GovernanceList.Tier.B
         }
         var bConfirmed by remember { mutableStateOf(false) }
+        // 确认正文按实际动作类型生成：只有冻结才跑快照，「随时可恢复」不能被开关批次借用——那会让用户
+        // 以为写系统设置也有模块内恢复按钮（实际没有，得去系统设置逐项改）。
+        val hasFreeze = actions.any { it is ToolAction.Freeze }
+        val hasSwitch = actions.any { it is ToolAction.Switch }
+        val notes = buildList {
+            if (hasFreeze) add("冻结前会自动备份，随时可恢复")
+            if (hasSwitch) add("开关项写入系统设置，模块内不提供一键恢复，需到系统设置逐项改回")
+            add("失败不中断，每项都会检查结果")
+        }
         Column {
             Text(
                 text = "将执行 ${actions.size} 项：\n" +
                     actions.joinToString("\n") { describeAction(it) } +
-                    "\n\n冻结前会自动备份，随时可恢复；失败不中断，每项都会检查结果。",
+                    "\n\n" + notes.joinToString("；") + "。",
                 fontSize = 13.sp,
             )
             if (hasBTier) {

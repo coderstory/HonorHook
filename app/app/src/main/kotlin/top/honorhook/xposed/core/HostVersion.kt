@@ -26,7 +26,9 @@ object HostVersion {
     /**
      * 读宿主 versionName（选表用）。
      *
-     * 两条取法，**反射目标全是 public 方法、查询全是公开 API**（不碰 hidden 成员、不需要绕过黑名单）：
+     * 两条取法都依赖 LSPosed 进程里可用、但对 App 是隐藏/@UnsupportedAppUsage 的成员
+     * （`ActivityThread.currentActivityThread` / `getSystemContext`）；任何一环失败都返回 null，
+     * 上层按「版本未知」盲挂并留 WARN，**不绕过 hidden-API 黑名单、不引 hiddenApiBypass**：
      * ① `ActivityThread.currentActivityThread().getSystemContext().packageManager` +
      *    `getPackageArchiveInfo(apkPath, 0)`：系统上下文在 `attach()` 后即可用
      *    （`ContextImpl.createSystemContext` 惰性创建，**不依赖宿主 Application**）⇒ 无时机依赖；

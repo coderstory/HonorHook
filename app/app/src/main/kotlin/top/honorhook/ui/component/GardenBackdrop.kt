@@ -29,7 +29,7 @@ import kotlin.random.Random
  * 只画装饰、不铺底色：页面底色仍由各页 Scaffold 让出的透明 + 根容器 `rootColor` 决定，
  * 卡片照旧不透明 ⇒ 文字对比度不受影响。
  *
- * 深浅色各一套色板；AMOLED 模式整体再压暗一档（纯黑上出现亮块很扎眼）。
+ * 深浅色各一套色板。（旧的 AMOLED 压暗档已随「纯黑背景」开关删除，2026-11-08。）
  * 形状用固定种子生成，重组/旋屏不会换位置。
  */
 
@@ -74,14 +74,12 @@ private val DarkPetals = listOf(
 fun GardenBackdrop(
     modifier: Modifier = Modifier,
     dark: Boolean,
-    amoled: Boolean = false,
 ) {
     // 固定种子 ⇒ 每次重组都长在同一处，不会「花乱跑」
     val blooms = remember { gardenBlooms() }
     val vines = remember { gardenVines() }
 
     val petalColors = if (dark) DarkPetals else LightPetals
-    val dim = if (amoled) 0.72f else 1f
 
     Canvas(modifier = modifier.fillMaxSize()) {
         val w = size.width
@@ -92,7 +90,7 @@ fun GardenBackdrop(
         val vignette = if (dark) Color(0xFF0B0D12) else Color(0xFFFFE7CE)
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(Color.Transparent, vignette.copy(alpha = (if (dark) 0.55f else 0.30f) * dim)),
+                colors = listOf(Color.Transparent, vignette.copy(alpha = if (dark) 0.55f else 0.30f)),
                 center = Offset(w * 0.5f, h * 0.42f),
                 radius = maxOf(w, h) * 0.78f,
             ),
@@ -103,7 +101,7 @@ fun GardenBackdrop(
         val skyGlow = if (dark) Color(0xFF1C2A24) else Color(0xFFFFF0DC)
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(Color.Transparent, skyGlow.copy(alpha = (if (dark) 0.55f else 0.75f) * dim)),
+                colors = listOf(Color.Transparent, skyGlow.copy(alpha = if (dark) 0.55f else 0.75f)),
                 startY = h * 0.55f,
                 endY = h,
             ),
@@ -112,19 +110,19 @@ fun GardenBackdrop(
         )
 
         // ③ 篱笆
-        drawFence(w, h, oneDp, dark, dim)
+        drawFence(w, h, oneDp, dark)
 
         // ④ 四角枝叶
         val leafColor = if (dark) Color(0xFF6FA189) else Color(0xFF8FC7A5)
         val stemColor = if (dark) Color(0xFF7FA593) else Color(0xFF9CCBAE)
-        vines.forEach { v -> drawVine(v, w, h, oneDp, stemColor, leafColor, dim) }
+        vines.forEach { v -> drawVine(v, w, h, oneDp, stemColor, leafColor) }
 
         // ⑤ 花朵（压在篱笆上，花瓣先画外圈再点亮花心）
         blooms.forEach { b ->
             drawBloom(
                 center = Offset(b.fx * w, b.fy * h),
                 radius = b.radiusDp * oneDp,
-                petal = petalColors[b.colorIndex % petalColors.size].copy(alpha = (if (dark) 0.62f else 0.72f) * dim),
+                petal = petalColors[b.colorIndex % petalColors.size].copy(alpha = if (dark) 0.62f else 0.72f),
                 core = if (dark) Color(0xFFFFE3A3).copy(alpha = 0.72f) else Color(0xFFFFD166).copy(alpha = 0.8f),
                 spin = b.spin,
             )
@@ -133,7 +131,7 @@ fun GardenBackdrop(
 }
 
 /** 尖头木条 + 两道横梁；木色按下沉距离略微加深，做出「一排」的纵深。 */
-private fun DrawScope.drawFence(w: Float, h: Float, oneDp: Float, dark: Boolean, dim: Float) {
+private fun DrawScope.drawFence(w: Float, h: Float, oneDp: Float, dark: Boolean) {
     val picketWidth = 15.dp.toPx()
     val gap = 20.dp.toPx()
     val height = 96.dp.toPx()
@@ -141,12 +139,12 @@ private fun DrawScope.drawFence(w: Float, h: Float, oneDp: Float, dark: Boolean,
 
     val wood = if (dark) Color(0xFF5A4433) else Color(0xFFC89A66)
     val woodShadow = if (dark) Color(0xFF3E2F24) else Color(0xFFAE7F4D)
-    val woodAlpha = (if (dark) 0.42f else 0.34f) * dim
+    val woodAlpha = if (dark) 0.42f else 0.34f
 
     // 篱笆脚下的薄雾，把木条「压」进地面，不留生硬的下边缘
     drawRect(
         brush = Brush.verticalGradient(
-            colors = listOf(Color.Transparent, woodShadow.copy(alpha = 0.10f * dim)),
+            colors = listOf(Color.Transparent, woodShadow.copy(alpha = 0.10f)),
             startY = h - 40.dp.toPx(),
             endY = h,
         ),
@@ -197,7 +195,6 @@ private fun DrawScope.drawVine(
     oneDp: Float,
     stem: Color,
     leaf: Color,
-    dim: Float,
 ) {
     val p0 = Offset(v.x0 * w, v.y0 * h)
     val pc = Offset(v.cx * w, v.cy * h)
@@ -207,7 +204,7 @@ private fun DrawScope.drawVine(
         moveTo(p0.x, p0.y)
         quadraticTo(pc.x, pc.y, p1.x, p1.y)
     }
-    drawPath(path, color = stem.copy(alpha = 0.42f * dim), style = Stroke(width = 1.6.dp.toPx()))
+    drawPath(path, color = stem.copy(alpha = 0.42f), style = Stroke(width = 1.6.dp.toPx()))
 
     // 二次贝塞尔上取点：B(t) = (1-t)²P0 + 2(1-t)t·Pc + t²P1
     for (i in 0 until v.leafCount) {
@@ -220,7 +217,7 @@ private fun DrawScope.drawVine(
         listOf(-1f, 1f).forEach { side ->
             rotate(degrees = side * 40f, pivot = Offset(x, y)) {
                 drawOval(
-                    color = leaf.copy(alpha = (if (side < 0) 0.52f else 0.40f) * dim),
+                    color = leaf.copy(alpha = if (side < 0) 0.52f else 0.40f),
                     topLeft = Offset(x + side * leafSize * 0.22f, y - leafSize * 0.5f),
                     size = Size(leafSize * 1.7f, leafSize),
                 )

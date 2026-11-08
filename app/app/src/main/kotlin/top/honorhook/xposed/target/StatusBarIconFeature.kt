@@ -71,6 +71,10 @@ object StatusBarIconFeature {
     private val wifiCache = ConcurrentHashMap<String, Bitmap>()
     private val statusCache = ConcurrentHashMap<String, Bitmap>()
 
+    // resId → entry 名缓存：getResourceEntryName 每次都是一次资源表查询，而图标刷新是高频路径。
+    // 资源 id 在进程生命周期内稳定，上限 512 只是防极端场景无限增长（图标名总数远小于此）。
+    private val entryNameCache = ConcurrentHashMap<Int, String>()
+
     /** 模块 APK 懒开一次（双检；getInputStream 并发调用与上游 ZipFile 用法同款）。 */
     @Volatile private var moduleZip: ZipFile? = null
 
@@ -149,7 +153,9 @@ object StatusBarIconFeature {
         task: MountEngine.SimpleTask,
         module: XposedModule,
     ): BitmapDrawable? {
-        val entry = runCatching { resources.getResourceEntryName(resId) }.getOrNull() ?: return null
+        val entry = entryNameCache[resId] ?: runCatching { resources.getResourceEntryName(resId) }
+            .getOrNull()?.also { if (entryNameCache.size < 512) entryNameCache[resId] = it }
+            ?: return null
         if (wifiEnabled) {
             getIcon(ASSET_WIFI_PREFIX, entry, wifiCache)?.let {
                 session.judge(module, task, JUDGE_PREFIX, "替换 $entry")

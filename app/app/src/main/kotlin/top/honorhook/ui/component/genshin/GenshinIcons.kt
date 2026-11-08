@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
  * 颜色一律 `Color.Black` 由 `Icon(tint = ...)` 染色（`ImageVector` 不携带主题色）。
  */
 /**
- * 插画主题下用原神图标，其余主题回落 Material（用户 m01154 选「只在插画主题下启用」）。
+ * 插画主题下用原神图标，其余主题回落 Material（用户决定：只在插画主题下启用，别的主题保持通用图标）。
  *
  * 形状是品牌语汇、是否启用是环境变量：这里读 `AppSettings.artworkBackdrop`，
  * 它是 MutableState 支撑的，切背景时整棵界面会自然重组，不需要额外通知。

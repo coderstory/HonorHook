@@ -100,7 +100,7 @@ MaterialTextView (fontFamily=monospace, textSize=12sp, color=?colorOnSurface,
 
 | Token | 值 |
 |---|---|
-| 主题 | Material3 DynamicColors 动态取色（HonorHook=现有 Monet/色板体系不变） |
+| 主题 | 固定 M3 色板 + 明暗三档（跟随系统/浅色/深色）；Monet 与 AMOLED 档已于 2026-11-08 删除 |
 | status 卡 | 主色实底（bg=colorPrimary，文字/图标 onPrimary，elevation 6dp 阴影 tint 主色） |
 | 卡片间距/内边距 | 卡间 marginTop=16dp；卡内 padding=24dp |
 | 页面水平 padding | 16dp |

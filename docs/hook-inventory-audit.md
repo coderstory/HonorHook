@@ -5,12 +5,12 @@
 > 逐点逆向依据 = [`reverse/`](reverse/) 下对应 app 的记录，设计理由 = [`theme-store.md`](theme-store.md)。
 > 复核点数（**全命名空间**，勿再漏 `cloud:` / `adsource:` / `btn-hide:` / `ad-request:` / `ad-source:` / `ab-request:`）：
 > `grep -rhoE '"[a-zA-Z0-9-]+:[A-Za-z0-9_.$]+"' app/app/src/main/kotlin/top/honorhook/xposed/target/ | sort -u | wc -l`
-> 当前结果（2026-10-27 复核）：合计 **161**（较 10-20 的 142：+appmarket 7 / ime +1（T5 开屏总闸）/ systemui +1（极客中心）等 v1.2.x 增量；theme 49 / installer 11 + 旧版表 8 / systemui 8 / exam8 10 / launcher 5 / ouc 11 / **ime 6** / mms 4 / xhs 15 / wallpaper 4 / ads 11 = ads+ops+tracking 按包注册 / sysmgr 3 / settings 2 / jd 1 / mfauth 1 / upgradeguide 1 / mihealth 1【已关线未注册】；分目录去重之和 105 + 顶层散件 56 = 161）。
+> 当前结果（2026-11-08 复核）：合计 **168**。逐项目分解（10-27 旧账：分目录去重之和 105 + 顶层散件 56 = 161）已过期不再维护——**逐 hook 应 M 一律看 §五 判据快照**；theme 现为 52 点（`ThemeStoreMap_20_1_67_303`），ime 现为 12 点（`ImeHook` 12 个 `SimpleTask`）。
 > ⚠️ 该命令是**全库去重**计数（逐文件去重之和 152；10 个 id 同时出现在源码与旧版表，如 `installer:SafeModeCard.*`，故分列之和 > 142）；且数的是**源码 id 字面量**（代理口径，与运行期任务非一一对应，例：mms 4 id ↔ `installed 2/2`）⇒ 逐 hook 的应 M 以 §五 判据快照为准。
 
 ## 一、口径与当前基线
 
-- **作用域包数口径（2026-10-26，T11 统一）**：**24 包**（scope.list 全量）/ 22 个已注册 TargetHook 实现 / 33 个注册实例——以 `RegistryConsistencyTest` 动态断言为准（此前 AGENTS.md「22/20」、测试注释「18 行」等漂移数字已清；另 MiHealthHook 已实现未注册，属死代码，不计入）。
+- **作用域包数口径（2026-10-26，T11 统一）**：**24 包**（scope.list 全量）/ 22 个已注册 TargetHook 实现 / 33 个注册实例。`RegistryConsistencyTest` 只断言**成员一致性**（catalog⊆scope、catalog 有注册、SDK 包有注册、scope 有注册），**不钉 24/22/33 这三个数字**——计数由脚本/人工复核（此前 AGENTS.md「22/20」、测试注释「18 行」等漂移数字已清；另 MiHealthHook 已实现未注册，属死代码，不计入）。
 
 ### 版本对照（**别搞反**：代码基线是 hook 编写时反编译的那版，设备实际是跑在真机上的那版）
 
@@ -60,7 +60,7 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
   每资源独立 bean），直连失败后按"包名+方法名+返回类型"兜底 firstOrNull 命中其中一个 bean。
   命中哪个 bean 顺序不保证 ⇒ **不可依赖**，升级宿主后即恢复直连精确命中。
 
-- **唯一权威 = 真机 `installed N/M` 的 M**（落 LSPosed 框架日志）。**口径已于 2026-10-11 对齐**：此前记录的"文档 40/43/39 与代码 37 不一致"是**复核命令写错**造成的假漂移——旧命令的正则只含 6 个命名空间，漏了 `cloud:` / `adsource:` / `btn-hide:` 等，报出的 theme 37 / installer 8 并非真实点数。用上方的全命名空间命令复查，代码计数与 README 完全一致（theme 43 / installer 11）。
+- **唯一权威 = 真机 `installed N/M` 的 M**（落 LSPosed 框架日志）。**口径已于 2026-10-11 对齐**：此前记录的"文档 40/43/39 与代码 37 不一致"是**复核命令写错**造成的假漂移——旧命令的正则只含 6 个命名空间，漏了 `cloud:` / `adsource:` / `btn-hide:` 等，报出的 theme 37 / installer 8 并非真实点数。用上方的全命名空间命令复查，代码计数与 README 的支持版本表一致（2026-11-08 复核：全库去重 168，theme 52 / installer 11）。
 - 2026-10-10 晚真机基线：主题商店 `installed 43/43`、包管理器 `11/11`、设置 `1/1`。SystemUI / 桌面 / exam8 各 1 / 1 / 10。
 - **system_server 守卫 hook = 放弃决策（2026-10-10）**：该 fork 只回调 `onSystemServerLoaded`，libxposed api 102 无此回调类型，合成 stub 成本 > 收益。**勿重新评估**。
 
@@ -96,7 +96,7 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 
 ## 五、应验判据
 
-### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；2026-11-02 复核）
+### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；最新 2026-11-07 重采，2026-11-02 段落保留为历史）
 
 > **最近一次重采：2026-11-07 23:21**（模块 v1.2.8，`bash tools/dev.sh hook-status` 一条命令取，日志 `modules_2026-11-07T21:14:09.531743.log`）：**全绿**——ThemeStoreHook **52/52**（theme 20.1.67.303，新表 `ThemeStoreMap_20_1_67_303`）、MmsHook 2/2（插件 10.0.44.309，T3 双轨 b(4参)/c(5参) 命中 c）、xhs X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.53.3）、AppMarket 7/7（16.1.10.302）、Sysmr 3/3（473，仅 WARN）、Ime 12/12、launcher 5/5、ouc 11/11、settings 2/2、systemui 4/4·U6 3/3·U7 3/3、天气 ads 2/2·tracking 3/3（18.1.7.314）。行为层：小红书保存全链、短信「打开应用」按钮隐藏均由用户真机确认（2026-11-07）。
 >
@@ -106,7 +106,7 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 >
 > **当日宿主版本变化**：**theme 20.1.65.302→20.1.67.302**（f71→wb1，精确表已建）、**小红书 9.51.0→9.52.1**（XhsPoints 9.52.1 覆盖套已建）、天气 tracking 旧账 Ex 工厂已修（SDK 删 HiAnalyticsInstanceEx$Builder，按类存在性二选一）。其余（installer 14.0.38.301 / launcher 18.0.0.259 / sysmgr 17.0.0.472 / settings / ouc / mms / systemui / ime / appmarket 16.1.9.302）与 10-27 快照一致或仅版本号微涨（WARN）。
 >
-> **结论：挂载层全绿**——theme 49/49（67.302，诊断点在时装 50/50、53/53 随诊断增减）、ImeHook 17/17（10.32.44）、XhsHook X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.52.1，M 随版本分档：videoClick/h0/e0 三点 9.51 起显式缺席）、AppMarket 7/7、installer 11/11、launcher 5/5、settings 2/2、sysmgr 3/3（472，仅 WARN）、ouc 11/11、mms 2/2、systemui 4/4·U6 3/3·U7 3/3、日历 ads 2/2·ops 1/1·tracking 3/3、天气 ads 2/2·**tracking 3/3（旧账清零）**、云音乐 3/3、HonorAds 其它包 2/2。行为层：付费主题 100% 自动应用（PATH_MEND）、小红书保存全链（noteId/短链 zac.d）用户真机确认通过。
+> **结论（11-02 历史快照）：挂载层全绿**——theme 49/49（67.302，诊断点在时装 50/50、53/53 随诊断增减）、ImeHook 17/17（10.32.44）、XhsHook X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.52.1，M 随版本分档：videoClick/h0/e0 三点 9.51 起显式缺席）、AppMarket 7/7、installer 11/11、launcher 5/5、settings 2/2、sysmgr 3/3（472，仅 WARN）、ouc 11/11、mms 2/2、systemui 4/4·U6 3/3·U7 3/3、日历 ads 2/2·ops 1/1·tracking 3/3、天气 ads 2/2·**tracking 3/3（旧账清零）**、云音乐 3/3、HonorAds 其它包 2/2。行为层：付费主题 100% 自动应用（PATH_MEND）、小红书保存全链（noteId/短链 zac.d）用户真机确认通过。
 >
 > **行为层遗留**：sysmgr 版本自检 WARN vs 基线 414（挂载全绿）；快游戏/浏览器仍用户停用无判据行。
 

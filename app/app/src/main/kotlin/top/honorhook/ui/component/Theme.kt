@@ -27,8 +27,9 @@ val LocalColorMode = staticCompositionLocalOf { 0 }
 /**
  * 应用主题（**Miuix**，照抄 KernelSU `MiuixKernelSUTheme`）。
  *
- * Miuix 自带 `ThemeController`，把「颜色模式 + 关键色 + 配色风格 + 色规范」一次交给它，
- * 由 Miuix 内部生成色板（支持 Monet 跟随壁纸取色）。
+ * Miuix 自带 `ThemeController`，把「颜色模式（系统/浅/深）+ 关键色」一次交给它，
+ * 由 Miuix 内部生成色板。Monet 跟随壁纸取色与色彩风格/规范两档已于 2026-11-08 删除，
+ * 唯一关键色是 `AppSettings.artworkKeyColor`（插画主色）。
  */
 @Composable
 fun HonorHookTheme(content: @Composable () -> Unit) {

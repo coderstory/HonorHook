@@ -116,8 +116,15 @@ private class Firefly(
  * 「绕原点」版本（带 pivot 的重载不存在，写 `rotateZ(deg, center)` 会报参数过多），
  * 十多只粒子每帧先 translate→rotate→translate 反而更绕。
  */
-private fun shapePath(shape: FireflyShape, center: Offset, r: Float, rotDeg: Float): Path {
-    val p = Path()
+private fun shapePath(shape: FireflyShape, center: Offset, r: Float, rotDeg: Float): Path =
+    shapePathInto(Path(), shape, center, r, rotDeg)
+
+/**
+ * 复用同一个 [Path]：绘制循环里每帧为每只粒子 new 一个 Path 是纯 GC 压力
+ * （默认 40 只 × 每帧 ≈ 2400 个对象/秒），`rewind()` 之后重新描述几何即可。
+ */
+private fun shapePathInto(p: Path, shape: FireflyShape, center: Offset, r: Float, rotDeg: Float): Path {
+    p.rewind()
     if (shape == FireflyShape.CIRCLE) {
         p.addOval(Rect(center = center, radius = r))
         return p
@@ -133,6 +140,10 @@ private fun shapePath(shape: FireflyShape, center: Offset, r: Float, rotDeg: Flo
     p.close()
     return p
 }
+
+/** 发光三圈的宽度系数与 alpha（原先是循环内每帧 new 两个 floatArrayOf） */
+private val HaloWidthFactors = floatArrayOf(0.72f, 0.36f, 0.16f)
+private val HaloAlphas = floatArrayOf(0.07f, 0.14f, 0.24f)
 
 @Composable
 fun Fireflies(modifier: Modifier = Modifier) {
@@ -210,6 +221,8 @@ fun Fireflies(modifier: Modifier = Modifier) {
         val t = time.floatValue
         val w = size.width
         val h = size.height
+        // 所有粒子共用一个 Path：形状每帧重写，省掉每只一次分配
+        val path = Path()
 
         flies.forEach { f ->
             // 横向：正弦左右游走；纵向：正弦上下摆 + 持续上升（到顶回绕）。
@@ -235,19 +248,17 @@ fun Fireflies(modifier: Modifier = Modifier) {
             val stroke = lerp(base, Color.White, if (dark) 0.25f else 0.10f)
             val r = (0.85f + 0.30f * pulse) * f.sizePx.dp.toPx()
             val c = Offset(x, y)
-            val path = shapePath(f.shape, c, r, t * f.spin + f.phase * 57f)
+            shapePathInto(path, f.shape, c, r, t * f.spin + f.phase * 57f)
             // 线宽跟着 dp 走，小图形也要 >=1.6px，不然抗锯齿会把细线糊成一片灰
             // 线宽同时跟 dp 与图形大小走：大图形用细线会显得「虚」，小图形用粗线会糊成一团
             val crisp = ((1.2f + 0.6f * pulse) * density).coerceAtLeast(r * 0.06f)
 
             // 发光：同一个形状由粗到细描三遍（alpha 递增、宽度递减），边缘自然渐隐
-            val haloWidths = floatArrayOf(r * 0.72f, r * 0.36f, r * 0.16f)
-            val haloAlphas = floatArrayOf(0.07f, 0.14f, 0.24f)
             for (i in 0..2) {
                 drawPath(
                     path = path,
-                    color = base.copy(alpha = (a * haloAlphas[i] * if (dark) 1f else 1.25f).coerceIn(0f, 1f)),
-                    style = Stroke(width = haloWidths[i].coerceAtLeast(crisp)),
+                    color = base.copy(alpha = (a * HaloAlphas[i] * if (dark) 1f else 1.25f).coerceIn(0f, 1f)),
+                    style = Stroke(width = (r * HaloWidthFactors[i]).coerceAtLeast(crisp)),
                 )
             }
             // 内部一层极淡的填充：没有它，白底上就只是一条几何线（像剪贴画），

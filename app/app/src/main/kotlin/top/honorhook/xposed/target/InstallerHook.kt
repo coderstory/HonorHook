@@ -13,7 +13,10 @@ import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.InstallerConfigTable
 import top.honorhook.xposed.data.RemoteConfig
 
-/** 包管理器目标（基线 14.0.37.301；另适配 14.0.22.326 / 14.0.38.301 三版，各版结构见对应 Map 表）。 */
+/**
+ * 包管理器目标（基线 14.0.37.301；另有 14.0.22.326 / 14.0.38.301 两张精确表，结构见对应 Map 文件）。
+ * 支持版本集的事实源是 `FeatureCatalog`（`extraVersions`）——不要在注释里再抄一份版本清单。
+ */
 object InstallerHook : TargetHook {
 
     override val packageName = "com.android.packageinstaller"

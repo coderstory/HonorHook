@@ -24,7 +24,7 @@ bash tools/dev.sh install-local <apk> # 本机直装（root 中转 /data/local/t
 bash tools/dev.sh stop-app <pkg…>     # 强杀宿主进程（注入判据重采前）
 ```
 
-`README.md` 里那句「或直接 Gradle：`./app/gradlew -p app assembleRelease`」**在裸 shell 里会失败**（PATH 上没有 java，报 "Unable to locate a Java Runtime"）。需要定向 gradle 任务时走带环境的入口：
+裸 `gradle` / `./app/gradlew` **在裸 shell 里会失败**（PATH 上没有 java，报 "Unable to locate a Java Runtime"）。需要定向 gradle 任务时走带环境的入口：
 
 ```bash
 tools/dev.sh exec ./app/gradlew -p app :app:testDebugUnitTest --tests 'top.honorhook.xposed.data.DecisionTablesTest'
