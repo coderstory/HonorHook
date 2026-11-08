@@ -104,6 +104,7 @@ internal fun ThemeSettingsPage(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = "主题设置",
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,

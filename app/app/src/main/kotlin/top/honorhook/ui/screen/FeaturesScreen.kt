@@ -160,6 +160,7 @@ private fun TargetListScreen(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = "功能",
                 scrollBehavior = scrollBehavior,
             )
@@ -656,6 +657,7 @@ private fun FeatureListScreen(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = stringResource(target.nameRes),
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,
@@ -879,6 +881,7 @@ private fun SecurityListScreen(onBack: () -> Unit, bottomInnerPadding: Dp = 0.dp
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = "安全类功能",
                 navigationIcon = { MiuixBackButton(onBack) },
                 scrollBehavior = scrollBehavior,

@@ -102,11 +102,13 @@ fun HonorHookTheme(content: @Composable () -> Unit) {
     ) {
         // 卡片磨砂半透明（2026-11-08 用户要求「所有的卡片」）：miuix `Card` 默认色 =
         // `colorScheme.surfaceContainer`，在主题层统一压一个 alpha，比逐个 Card 传 colors 干净
-        // （散点改必漏）。alpha 不能太低：卡片底下的花园是软背景，0.7 已能看见篱笆轮廓又不糊字。
+        // （散点改必漏）。alpha 不能太低：卡片底下现在是整幅插画，透太多字会跟画搅在一起。
+        // 2026-11-08（artwork-theme）：插画背景比原来的花园更花，用户反馈卡片要「再白一点」，
+        // 浅色 0.72 → 0.80、深色 0.62 → 0.72（不是不透明，还要留一点「画在玻璃后面」的层次）。
         val baseScheme = MiuixTheme.colorScheme
         val frostedScheme = baseScheme.copy(
             surfaceContainer = baseScheme.surfaceContainer.copy(
-                alpha = if (darkTheme) 0.62f else 0.72f,
+                alpha = if (darkTheme) 0.72f else 0.80f,
             ),
         )
         MiuixTheme(colors = frostedScheme) {

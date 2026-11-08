@@ -100,6 +100,7 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = "Re:荣耀",
                 scrollBehavior = scrollBehavior,
             )

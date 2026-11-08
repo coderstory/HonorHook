@@ -175,6 +175,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         topBar = {
             // FILES 页无顶栏（2026-11-05 用户指令：标题文本删除，容器也不占位）；状态栏避让走 contentWindowInsets.Top
             if (view != HubView.FILES) TopAppBar(
+                color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = if (view == HubView.HOME) "工具箱" else view.title,
                 navigationIcon = { if (view != HubView.HOME) MiuixBackButton { view = HubView.HOME } },
                 scrollBehavior = scrollBehavior,
