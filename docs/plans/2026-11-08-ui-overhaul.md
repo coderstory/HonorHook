@@ -37,8 +37,9 @@
 | 7 | `ui/screen/ToolboxScreen.kt` | 6 个磁贴手写 0..5（3 个硬编码 Row 无循环）；`AdsGroupCard` 序号 6；`HubTiles` 加 `startIndex` |
 | 8 | `ui/screen/SettingsScreen.kt` | 3 张固定卡序号 0/1/2 |
 | 9 | `ui/screen/ThemeSettingsScreen.kt` | 6 张固定卡 + 预览卡序号（0..6） |
-| 10 | `ui/MainActivity.kt`（底栏） | `HonorHookBottomBar` 挂 `Modifier.dockRise()`：整条从下方 26dp 升起 + 淡入（520ms，比卡片晚 120ms） |
-| 11 | `docs/plans/2026-11-08-ui-overhaul.md`（本文件） | 变更清单 / 观感参数 / 验证清单 |
+| 10 | `ui/component/Card.kt`（触感） | 可点击卡片点击/长按给一档轻震：`SegmentTick`（"嗒"，不是短震动）/ `LongPress`；自挂 `Modifier.clickable` 的磁贴改走新扩展 `Modifier.cardClick()`，两条路径手感一致。**按下不震**（列表滚动会一路嗡鸣），只在手势判定为点击后震 |
+| 11 | `ui/MainActivity.kt`（底栏） | `HonorHookBottomBar` 挂 `Modifier.dockRise()`：整条从下方 26dp 升起 + 淡入（520ms，比卡片晚 120ms） |
+| 12 | `docs/plans/2026-11-08-ui-overhaul.md`（本文件） | 变更清单 / 观感参数 / 验证清单 |
 
 **不动**：`FloatingBottomBar.kt`、`component/liquid/*`、`InteractiveHighlight.kt`、`DampedDragAnimation.kt`、
 `GardenBackdrop.kt`、`Fireflies.kt`、`FeatureCatalog` / hook 侧、任何倍率/版本文件。
@@ -51,6 +52,7 @@
 - 错峰：`62ms/张`，单屏封顶 `400ms`（列表再长也不会等到"最后一张"）
 - 内层浮现：`revealFade` 8dp 上移 + 360ms 淡入，`baseDelay 160ms` + `42ms/行`
 - 底栏落座：`dockRise` 26dp 上浮 + 520ms 淡入，比卡片晚 120ms
+- 触感：点击 `HapticFeedbackType.SegmentTick`、长按 `LongPress`；系统关掉触感反馈时静默
 - 整数序号是稳定 key（`order` 当 key），同一 `EntranceState` 内只播一次；LazyColumn 回收后不再重播
 
 ## 验证清单（用户自执行）
@@ -61,3 +63,4 @@
 4. 列表滚动：滚出屏幕再滚回来的卡片**不再重播**（不闪烁）。
 5. 深浅色 / AMOLED 各看一遍：投影在浅色下是极淡的绿灰，在纯黑下不可见但无脏边；顶高光不压字。
 6. 关闭「花园皮肤」「萤火虫」后进场仍正常（进场不依赖这两个开关）。
+7. 触感：点功能网格卡 / 工具箱磁贴，指尖有一声很轻的"嗒"；**滚动列表时手压着卡片滚动不应震**；长按有更明显的按住震动。系统设置里关掉触感后应完全静音。

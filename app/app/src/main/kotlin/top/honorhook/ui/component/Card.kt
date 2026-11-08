@@ -1,9 +1,12 @@
 package top.honorhook.ui.component
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -55,7 +58,24 @@ fun Card(
 }
 
 /**
- * 可点击卡片（目前只有 `FeaturesScreen` 的功能网格在用）。
+ * 卡片触感（2026-11-08 用户要求「卡片加一点触感反馈」）。
+ *
+ * 为什么收口在包装件、且**只在抬手确认时**震：
+ * - 全工程 40 多处卡片，逐处加手感必然漏；包装件是唯一能全覆盖的位置。
+ * - 不在按下（ACTION_DOWN）时震：卡片大多躺在 LazyColumn 里，手指一落就开始滚动，
+ *   按下即震会让"滚动列表"变成一路嗡鸣。`clickable`/卡片自带 onClick 只在手势被判定为点击后
+ *   才回调，天然排除了滚动、拖拽与误触。
+ * - 用 `SegmentTick`（最轻的一档"嗒"）而不是 `LongPress`/`Confirm`：后者是短震动，
+ *   手指在玻璃背板上会听出"嗡"；这一档在多数 ROM 上接近键盘触感，才是"一点"。
+ *   系统设置里关掉触感反馈时 `performHapticFeedback` 自动静默，不用自己判断。
+ */
+private val CardTapHaptic = HapticFeedbackType.SegmentTick
+
+/** 长按已经是"重操作"语义，给按住确认那一档（系统自带的 LONG_PRESS）。 */
+private val CardLongPressHaptic = HapticFeedbackType.LongPress
+
+/**
+ * 可点击卡片（`FeaturesScreen` 的功能网格、详情页头部卡等在用）。
  * 默认值照 0.9.4 源码：pressFeedbackType = None、showIndication = false、onClick/onLongPress 可空。
  */
 @Composable
@@ -71,6 +91,7 @@ fun Card(
     onLongPress: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     MiuixCard(
         modifier = modifier.cardRim(cornerRadius),
         cornerRadius = cornerRadius,
@@ -79,10 +100,36 @@ fun Card(
         pressFeedbackType = pressFeedbackType,
         showIndication = showIndication,
         holdDownState = holdDownState,
-        onClick = onClick,
-        onLongPress = onLongPress,
+        onClick = onClick?.let { callback ->
+            {
+                haptics.performHapticFeedback(CardTapHaptic)
+                callback()
+            }
+        },
+        onLongPress = onLongPress?.let { callback ->
+            {
+                haptics.performHapticFeedback(CardLongPressHaptic)
+                callback()
+            }
+        },
         content = content,
     )
+}
+
+/**
+ * 给「自挂 `Modifier.clickable` 的卡片」用的同款点击：`Card(modifier = ... .cardClick { })`。
+ *
+ * 单独导出是因为工具箱磁贴（`ToolboxScreen.kt` 的 `Tile`）把 `clickable` 挂在 modifier 上而不是
+ * `Card(onClick=)` 参数上——那条路绕过了上面的包装件，不加这一层就会"同一个页面里有的卡响有的不响"。
+ * 后续新卡片优先用 `Card(onClick = …)`，只有需要自定义 clickable 语义时才用本扩展。
+ */
+@Composable
+fun Modifier.cardClick(enabled: Boolean = true, onClick: () -> Unit): Modifier {
+    val haptics = LocalHapticFeedback.current
+    return this.clickable(enabled = enabled) {
+        haptics.performHapticFeedback(CardTapHaptic)
+        onClick()
+    }
 }
 
 /** 包边色：浅色用偏灰的嫩绿（纯亮绿压在白卡上会显廉价），深色提亮一档。 */

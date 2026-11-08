@@ -68,6 +68,7 @@ import androidx.compose.ui.state.ToggleableState
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.honorhook.ui.toolbox.AppIcon
 import top.honorhook.ui.FrameworkState
+import top.honorhook.ui.component.cardClick
 import top.honorhook.ui.component.StatusChip
 import top.honorhook.ui.scope.RootShell
 import top.honorhook.ui.scope.SafeCommands
@@ -600,7 +601,8 @@ private fun HubTiles(
                     key = "tool.tile.$order",
                     edge = if (order % 2 == 0) EntranceEdge.Left else EntranceEdge.Right,
                 )
-                .clickable(onClick = onClick),
+                // cardClick = clickable + 触感（同 Card(onClick=) 的一档"嗒"）；磁贴把点击挂在 modifier 上
+                .cardClick(onClick = onClick),
         ) {
             Column(Modifier.padding(16.dp)) {
                 Box(
