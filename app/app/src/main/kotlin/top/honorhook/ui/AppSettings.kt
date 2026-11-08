@@ -73,16 +73,20 @@ object AppSettings {
     /** 首页萤火虫总开关（默认开）。 */
     val fireflyEnabled: Boolean get() = _fireflyEnabled.value
 
-    private val _gardenSkin = mutableStateOf(true)
+    private val _gardenSkin = mutableStateOf(false)
 
-    /** 花园篱笆背景皮肤（2026-11-08 用户要求；默认开，关掉即回到纯色底）。 */
+    /**
+     * 花园篱笆背景皮肤（2026-11-08 用户要求）。
+     * 与插画背景**互斥**（用户 2026-11-08 指出：两个开关不能都开，把另一个灰掉也不对）：
+     * 打开这个会自动关插画；两个都关 = 纯色底。
+     */
     val gardenSkin: Boolean get() = _gardenSkin.value
 
     private val _artworkBackdrop = mutableStateOf(true)
 
     /**
      * 插画背景（2026-11-08 用户给的蓝紫发角色图，见 `component/ArtworkBackdrop.kt`）。
-     * 默认开；开着时花园篱笆让位（绿篱笆与紫插画同框会互相打架），关掉即回到花园/纯色底。
+     * 默认开；与花园背景互斥，打开这个会自动关花园（绿篱笆与紫插画同框会互相打架）。
      */
     val artworkBackdrop: Boolean get() = _artworkBackdrop.value
 
@@ -106,8 +110,13 @@ object AppSettings {
         _floatingBar.value = p?.getBoolean(KEY_FLOATING_BAR, true) ?: true
         _fireflyLight.value = p?.getBoolean(KEY_FIREFLY_LIGHT, true) ?: true
         _fireflyEnabled.value = p?.getBoolean(KEY_FIREFLY_ENABLED, true) ?: true
-        _gardenSkin.value = p?.getBoolean(KEY_GARDEN_SKIN, true) ?: true
+        _gardenSkin.value = p?.getBoolean(KEY_GARDEN_SKIN, false) ?: false
         _artworkBackdrop.value = p?.getBoolean(KEY_ARTWORK_BACKDROP, true) ?: true
+        // 互斥兜底：旧版本允许两个都存 true（渲染时插画赢），这里把状态收敛成互斥并回写
+        if (_artworkBackdrop.value && _gardenSkin.value) {
+            _gardenSkin.value = false
+            prefs?.edit()?.putBoolean(KEY_GARDEN_SKIN, false)?.apply()
+        }
     }
 
     fun setColorMode(mode: ColorMode) {
@@ -142,11 +151,21 @@ object AppSettings {
 
     fun setGardenSkin(enabled: Boolean) {
         _gardenSkin.value = enabled
-        prefs?.edit()?.putBoolean(KEY_GARDEN_SKIN, enabled)?.apply()
+        // 互斥：开花园即关插画；关花园不动插画（关掉后两个都关 = 纯色底）
+        if (enabled) _artworkBackdrop.value = false
+        prefs?.edit()
+            ?.putBoolean(KEY_GARDEN_SKIN, enabled)
+            ?.putBoolean(KEY_ARTWORK_BACKDROP, _artworkBackdrop.value)
+            ?.apply()
     }
 
     fun setArtworkBackdrop(enabled: Boolean) {
         _artworkBackdrop.value = enabled
-        prefs?.edit()?.putBoolean(KEY_ARTWORK_BACKDROP, enabled)?.apply()
+        // 互斥：开插画即关花园；关插画不动花园（关掉后两个都关 = 纯色底）
+        if (enabled) _gardenSkin.value = false
+        prefs?.edit()
+            ?.putBoolean(KEY_ARTWORK_BACKDROP, enabled)
+            ?.putBoolean(KEY_GARDEN_SKIN, _gardenSkin.value)
+            ?.apply()
     }
 }
