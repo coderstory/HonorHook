@@ -214,8 +214,10 @@ private fun StatusCard(
             isDynamicColor -> colorScheme.secondaryContainer
             // 2026-11-08（artwork-theme）：花园时代的嫩绿卡片（#DFFAE4 / #1A3825）换背景后
             // 跟蓝紫插画、靛紫面板都不在一个色系里，改成同族淡紫。
-            isInDarkTheme() -> Color(0xFF2A2350)
-            else -> Color(0xFFEDE7FF)
+            // 用户 2026-11-08「颜色加深一点」：淡紫再压一档，卡片与白底的层次更清楚，
+            // 但没压到 `primaryContainer` 那么深——那样白字/黑字都不好放。
+            isInDarkTheme() -> Color(0xFF241D47)
+            else -> Color(0xFFDDD3FA)
         }
     }
 
