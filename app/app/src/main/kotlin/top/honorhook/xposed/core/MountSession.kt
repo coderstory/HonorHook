@@ -2,6 +2,7 @@ package top.honorhook.xposed.core
 
 import android.util.Log
 import io.github.libxposed.api.XposedInterface
+import top.honorhook.FeatureCatalog
 import io.github.libxposed.api.XposedModule
 
 /**
@@ -171,6 +172,17 @@ class MountSession internal constructor(
             }
             module.log(level, MountEngine.TAG, line.text)
         }
+        // 判据出口（架构 v2 · A5）：同一份 summary 写远端 prefs，UI 读得到「已挂载 N/M」。
+        // 写入失败只 WARN——判据可读性是增强项，绝不能让上报把挂载流程带崩。
+        MountReport.publish(
+            prefs = runCatching { module.getRemotePreferences(FeatureCatalog.REMOTE_GROUP) }.getOrNull(),
+            hookName = hookName,
+            hostPackage = hostPackage,
+            actualVersion = actualVersion,
+            ok = summary.ok(),
+            total = summary.total(),
+            failed = summary.failedDescriptions(),
+        )
     }
 
     /**

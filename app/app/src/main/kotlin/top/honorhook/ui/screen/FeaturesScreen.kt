@@ -64,6 +64,7 @@ import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.ui.component.genshin.genshinOr
 import top.honorhook.FeatureCatalog
 import top.honorhook.ui.FeatureStore
+import top.honorhook.ui.MountReportStore
 import top.honorhook.ui.FeatureStore.SetEnabledResult
 import top.honorhook.ui.FrameworkState
 import top.honorhook.ui.component.StatusChip
@@ -470,6 +471,21 @@ private fun FeatureGridCard(
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // 挂载判据（架构 v2 · A5）：宿主最近一次注入的 installed N/M。没记录就不占位——
+                    // 「未上报」比一个猜出来的数字更诚实（宿主没被拉起过时本来就没有事实）。
+                    MountReportStore.reportFor(target.packageName)?.let { report ->
+                        Text(
+                            text = "已挂载 ${report.ratio}",
+                            fontSize = 10.sp,
+                            color = if (report.complete) {
+                                Color(0xFF35C77E)
+                            } else {
+                                Color(0xFFF0A93B)
+                            },
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
             Row(

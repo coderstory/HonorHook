@@ -120,6 +120,7 @@ HostSupport（新，纯数据，UI 与 hook 共读）
 | 时间 | 批次 | 内容 | 提交 |
 |---|---|---|---|
 | 2026-11-09 | 第一批（A1/A2/A8-②） | theme 版本集从 catalog 派生；`MountPolicy` 显式化；`versionsSharingBaseline`；`VersionSupportTest` 双向对账（build + test 通过） | 见 `git log --grep=架构` |
+| 2026-11-09 | 第二批（A5） | `MountReport`（钩子侧每会话把 `ok/total/failed/实测版本` 写远端 prefs 的 `mount_report:<pkg>`）；`MountReportStore`（UI 侧解析 + 缓存命中即用）；目标卡第二行显示「已挂载 N/M」，全绿/部分黄（build + test 通过）。**宿主进程没重新注入过就没有记录，UI 不占位** | 同左 |
 
 第一批同时发现一处真实漂移：launcher 的 `18.0.0.259` 在 catalog 里登记为受支持，但 hook 侧没有精确套——此前靠「默认套盲挂」蒙对，现在由 `versionsSharingBaseline` 显式记录「该版本无类改名、可沿用基线表」。这正是本架构评审想防的那类静默一致。
 
