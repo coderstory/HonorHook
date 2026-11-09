@@ -101,6 +101,24 @@ object FeatureCatalog {
         val baselineVersion: String? = null,
         /** 基线之外额外适配的精确套版本（如 installer 旧版 14.0.22.326、新版 14.0.38.301，与 InstallerHook.installerTables 联动，勿单侧改）。 */
         val extraVersions: Set<String> = emptySet(),
+        /**
+         * [extraVersions] 里**不需要独立精确套**的版本：混淆结构未变，直接沿用基线表。
+         *
+         * 例如 launcher `18.0.0.259`：升级后 5/5 挂载点全活、无类改名 ⇒ 不该为它复制一张同内容表。
+         * 加这个字段是为了让 VersionSupportTest 能断言「catalog 声明的每个额外版本，要么有精确套，
+         * 要么显式登记为沿用基线」——否则「UI 说支持、hook 却只有默认套盲挂」这种漂移无法在 CI 发现。
+         */
+        val versionsSharingBaseline: Set<String> = emptySet(),
+        /**
+         * 宿主版本**未适配**（既不是基线也不在 extraVersions）时的挂载策略。
+         *
+         * - [MountPolicy.BlindLatest]（默认）：按默认套盲挂最新一张表，靠 `installed N/M` 事后判读；
+         * - [MountPolicy.Skip]：不盲挂版本表，回落到源码式基线点（点更少但语义确定）。
+         *
+         * 以前这个选择是**隐式**的——由「表列表末尾有没有空集默认套」决定，读代码才能看出来。
+         * 现在显式声明，并由 VersionSupportTest 断言「策略与实际表结构一致」（有默认套 ⇔ BlindLatest）。
+         */
+        val mountPolicy: MountPolicy = MountPolicy.BlindLatest,
         /** 仅从「功能」一级列表隐藏（功能入口归并到别的卡）；scope 页与版本查表仍走这里。
          *  用于多宿主合一的功能：宿主 Target 留壳（baseline/包名），UI 不单独出卡。 */
         val hidden: Boolean = false,
@@ -137,6 +155,8 @@ object FeatureCatalog {
             ),
             baselineVersion = "14.0.37.301",  // aapt2 实证（原 InstallerHook 私有常量上提）
             extraVersions = setOf("14.0.22.326", "14.0.38.301"),
+            // installer 没有空集默认套：未适配版本回落到 buildSourcePending() 的基线点，不盲挂旧表
+            mountPolicy = MountPolicy.Skip,
         ),
         Target(
             "com.android.settings", R.string.target_name_settings,
@@ -177,6 +197,7 @@ object FeatureCatalog {
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
             extraVersions = setOf("18.0.0.259"),  // 2026-10-20 设备升级版；无独立版本表（同套挂载点），5/5 挂载全活（10-20/10-27 两轮真机判据）
+            versionsSharingBaseline = setOf("18.0.0.259"),
         ),
         Target(
             "com.android.systemui", R.string.target_name_systemui,
@@ -301,4 +322,22 @@ object FeatureCatalog {
 
     /** 查表：基线之外额外适配的精确套版本（未登记返回空集）。 */
     fun extraVersionsOf(packageName: String): Set<String> = targets.firstOrNull { it.packageName == packageName }?.extraVersions ?: emptySet()
+
+    /** 查表：宿主版本未适配时的挂载策略（未登记 = 盲挂最新表，保守默认）。 */
+    fun mountPolicyOf(packageName: String): MountPolicy =
+        targets.firstOrNull { it.packageName == packageName }?.mountPolicy ?: MountPolicy.BlindLatest
+
+    /**
+     * 宿主版本未适配（含读不到版本）时的挂载策略。
+     *
+     * 这枚举存在的唯一理由是**把隐式约定变成可读、可测的声明**：theme 靠表列表末尾的空集默认套盲挂，
+     * installer 没有默认套、因此回落到源码式基线点。两种都合理，但以前只能从表结构反推。
+     */
+    enum class MountPolicy {
+        /** 盲挂：挑一张表按「最新支持的版本」挂，运气交给 `installed N/M` 与行为验证。 */
+        BlindLatest,
+
+        /** 跳过版本表：不挂精确套，走调用方自己的基线路径（点更少、语义确定）。 */
+        Skip,
+    }
 }

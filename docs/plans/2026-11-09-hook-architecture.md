@@ -31,12 +31,14 @@
 - 表文件名/表对象名（`ThemeStoreMap_20_1_67_303.kt`、`INSTALLER_POINTS_14_0_38_301`）。
 - **后果**：UI 说「已适配 20.1.67.302」，而 hook 侧表被改名/漏注册时，`pick` 落默认套**盲挂**——界面绿标、实际按旧表挂，`installed N/M` 只在日志里。这正是 installer 曾 `0/11` 那类事故的温床。
 - 修法：一张 `HostSupport` 清单（包名 → 基线 + 每条版本 → 表引用 + 策略 + 判据来源），UI 与 hook 都读它；配一条一致性单测。
+- **已修（2026-11-09，第一批）**：保留 `FeatureCatalog` 作为唯一声明处（不再新造第三处），theme 的版本集合改为 `FeatureCatalog.extraVersionsOf(packageName)` 派生，hook 内字面量删除；新增 `Target.versionsSharingBaseline` 表达「这个版本无需独立表」；`VersionSupportTest` 双向断言 catalog ↔ 表。
 
 ### A2 · 「版本不适配时怎么办」是隐式约定，不是显式策略
 - theme：表列表末尾有 `Table(versions = emptySet())` 默认套 ⇒ 任何新版本都盲挂基线表（`ThemeStoreHook.kt:38`）。
 - installer：`installerTables` 没有默认套，新版本回落到源码式 `buildSourcePending()` 基线点（`InstallerHook.kt:126-128`）。
 - **后果**：同为「未适配」，theme 会**尝试挂**（可能挂到错方法，静默错行为），installer 是**照旧挂基线**。两种都合理，但维护者无法从任何地方读到「这个包的策略是哪一种」。
 - 修法：`enum MountPolicy { BlindLatest, Skip, FallbackTo(version) }` 写进 A1 的清单，`pick` 只认策略，不再靠「有没有空集表」推断。
+- **已修（2026-11-09，第一批）**：`FeatureCatalog.MountPolicy{BlindLatest, Skip}` + `Target.mountPolicy`（installer 显式 `Skip`），`VersionSupportTest` 断言「策略 ⇔ 表结构」（BlindLatest 必须有默认套、Skip 必须没有）。
 
 ### A3 · 增量表达（delta）已经存在，但只是惯例而非契约
 - theme 做对了：`THEME_POINTS_20_1_67_302 = THEME_POINTS_20_1_63_305.map { if (className == CLS_..._63) copy(className = CLS_..._67) else it }`（`ThemeStoreMap_20_1_67_302.kt:15-21`）——1 个类改名只写 1 行，注释还留了 `63.305=f71 → 65.302=g71 → 67.302=wb1` 的推导链。
@@ -67,7 +69,8 @@
 - 修法：`HookPoint.toTask()` 收口到 core，加字段覆盖单测（未消费字段 = 测试失败）。
 
 ### A8 · 护栏测试只钉住数据，没钉住结构
-- 已有 `RegistryConsistencyTest`、`DecisionTablesTest`；缺 ①`scope.list` ↔ `TargetRegistry` ↔ `FeatureCatalog` 三方一致；②`HostSupport` ↔ 表存在性；③A7 字段覆盖。
+- **更正（2026-11-09 复核）**：①三方一致其实**已有** `RegistryConsistencyTest`（scope.list ↔ FeatureCatalog ↔ TargetRegistry，含 6 个 SDK 通杀包）与 `FeatureKeyCoverageTest`；我写本文时漏查，特此纠正。
+- 真缺的只有：②版本声明 ↔ 实际表（现已补 `VersionSupportTest`）；③`HookPoint` 字段覆盖（适配器丢字段，仍缺）。
 - 成本 < 半天，收益是这几类事故从「真机发现」变成「CI 发现」。
 
 ## 3. 目标结构（v2，最小侵入）
@@ -111,3 +114,13 @@ HostSupport（新，纯数据，UI 与 hook 共读）
 - **不把表挪成 JSON/资源**：Kotlin 常量有编译期检查与 IDE 跳转。
 - **不合并 theme 的 4 张表**：每张表附带一个版本的实证注释，是跨版本推理的历史证据。
 - **不引 KSP/注解处理器**：构建复杂度换来的只是少写几个 `HookPoint(...)`。
+
+## 6. 执行进度
+
+| 时间 | 批次 | 内容 | 提交 |
+|---|---|---|---|
+| 2026-11-09 | 第一批（A1/A2/A8-②） | theme 版本集从 catalog 派生；`MountPolicy` 显式化；`versionsSharingBaseline`；`VersionSupportTest` 双向对账（build + test 通过） | 见 `git log --grep=架构` |
+
+第一批同时发现一处真实漂移：launcher 的 `18.0.0.259` 在 catalog 里登记为受支持，但 hook 侧没有精确套——此前靠「默认套盲挂」蒙对，现在由 `versionsSharingBaseline` 显式记录「该版本无类改名、可沿用基线表」。这正是本架构评审想防的那类静默一致。
+
+下一批：`MountReport`（A5）——判据出口，用户可见价值最大。

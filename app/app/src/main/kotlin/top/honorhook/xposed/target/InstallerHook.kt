@@ -126,6 +126,12 @@ object InstallerHook : TargetHook {
             }
             ?: emptyList()
 
+    /** 测试缝：本 hook 实际注册的精确套版本集合。 */
+    internal fun installerTableVersions(): Set<String> = installerTables.flatMap { it.versions }.toSet()
+
+    /** 测试缝：installer 无默认套（未适配版本走 buildSourcePending 基线路径）。 */
+    internal fun installerHasDefaultTable(): Boolean = installerTables.any { it.versions.isEmpty() }
+
     /** 基线 14.0.37.301 挂载表 11 项（广告 2 + AB 1 + 云控 3 + 安全模式弹窗/卡 3 + 检测分发器 1 + 指纹 1）；**以真机 `installed N/M` 的 M 为准。** */
     private fun buildSourcePending(): List<MountTask> {
         val pending = mutableListOf<MountTask>()

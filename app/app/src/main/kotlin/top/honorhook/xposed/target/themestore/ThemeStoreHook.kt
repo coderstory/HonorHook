@@ -7,6 +7,7 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.HostVersion
+import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.core.MountSession
@@ -29,13 +30,29 @@ object ThemeStoreHook : TargetHook {
     @Volatile
     internal var decryptToolClass: String? = null
 
-    /** 版本选表：精确套优先，默认套（基线点）任何版本兜底。 */
-    private val versionTables = listOf(
-        HostVersion.Table(versions = setOf("20.1.67.303")) { THEME_POINTS_20_1_67_303 },
-        HostVersion.Table(versions = setOf("20.1.67.302")) { THEME_POINTS_20_1_67_302 },
-        HostVersion.Table(versions = setOf("20.1.65.302")) { THEME_POINTS_20_1_65_302 },
-        HostVersion.Table(versions = emptySet()) { THEME_POINTS_20_1_63_305 },
-    )
+    /**
+     * 版本选表：精确套优先，默认套（基线点）任何版本兜底。
+     *
+     * 版本集合**从 FeatureCatalog.extraVersionsOf(packageName) 派生**，不在本文件写死字面量——
+     * 否则「UI 说已适配」与「hook 真的选了哪张表」会各说各话（VersionSupportTest 双向断言）。
+     * 未在 catalog 登记的版本 = 无精确套 ⇒ 落默认套盲挂（与 [FeatureCatalog.MountPolicy.BlindLatest] 一致）。
+     */
+    private val versionTables: List<HostVersion.Table<HookPoint>> = buildList {
+        FeatureCatalog.extraVersionsOf(packageName).forEach { version ->
+            when (version) {
+                "20.1.67.303" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_67_303 })
+                "20.1.67.302" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_67_302 })
+                "20.1.65.302" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_65_302 })
+            }
+        }
+        add(HostVersion.Table(versions = emptySet()) { THEME_POINTS_20_1_63_305 })
+    }
+
+    /** 测试缝：本 hook 实际能精确命中的版本集合（VersionSupportTest 与 catalog 对账用）。 */
+    internal fun pinnedTableVersions(): Set<String> = versionTables.filter { it.versions.isNotEmpty() }.flatMap { it.versions }.toSet()
+
+    /** 测试缝：是否存在任意版本兜底的默认套（= 隐含 BlindLatest 策略）。 */
+    internal fun hasDefaultTable(): Boolean = versionTables.any { it.versions.isEmpty() }
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader

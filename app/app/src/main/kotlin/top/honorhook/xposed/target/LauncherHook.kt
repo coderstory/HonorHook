@@ -55,6 +55,12 @@ object LauncherHook : TargetHook {
         HostVersion.Table(versions = emptySet()) { LAUNCHER_POINTS_18_0_0_234 },
     )
 
+    /** 测试缝：本 hook 精确命中的版本集合（当前无精确套 ⇒ 空集）。 */
+    internal fun pinnedTableVersions(): Set<String> = versionTables.filter { it.versions.isNotEmpty() }.flatMap { it.versions }.toSet()
+
+    /** 测试缝：是否有任意版本兜底的默认套。 */
+    internal fun hasDefaultTable(): Boolean = versionTables.any { it.versions.isEmpty() }
+
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         hostLoader = loader
