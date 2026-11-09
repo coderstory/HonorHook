@@ -20,7 +20,6 @@
 
     <!-- MFA 验证器扫码（2026-11-03）：CameraX 取景 + zxing 解码 otpauth 二维码。 -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <!-- 文件整理（2026-11-04，工具箱 FILES 页）：跨应用媒体移动 + 全盘空目录清理
          在 MediaStore-only 模型下做不到（审计 D-M7 架构级结论），唯一路线 = 全文件访问，
@@ -85,22 +84,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- GhostLock（2026-11-03）：Shizuku API 授权通道 provider（照 ghostlock AndroidManifest.xml:26-31）-->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
-        <!-- GhostLock UserService：由 Shizuku server 以 shell uid 拉起（类名经 UserServiceArgs
-             ComponentName 绑定，不可混淆；proguard 有具名 keep） -->
-        <service
-            android:name="top.honorhook.tools.ghostlock.shizuku.GhostlockUserService"
-            android:exported="false"
-            tools:ignore="Instantiatable" />
     </application>
 
 </manifest>

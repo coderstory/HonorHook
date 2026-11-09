@@ -34,7 +34,6 @@ import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Password
 import androidx.compose.material.icons.rounded.TravelExplore
-import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Key
@@ -102,8 +101,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 工具箱 v1.3.5（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2 列功能磁贴 + 两级页面。
- * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 六磁贴（营销推荐/
- *   应用冻结/MFA/远程开发/临时Root/文件整理，副标题实时计数）。
+ * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 五磁贴（营销推荐/
+ *   应用冻结/MFA/远程开发/文件整理，副标题实时计数）。
+ * - 2026-11-09 用户指令删除「临时Root」（GhostLock CVE 提权整链，含 Shizuku 通道与 payload assets）。
  * - 二级页：磁贴点进、返回栏回台；冻结沿用 v1.3.1 组件，营销页 = 一键卡。
  * - 2026-11-08 用户指令删除「系统开关」整页（连同 18 条非营销开关），不留入口。
  * - 开关行只显「标题 + 功能描述」——key=value 属面板数据不上屏（2026-10-25 拍板：用户看不懂）。
@@ -191,10 +191,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         if (view == HubView.MFA) {
             // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
             MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
-        } else if (view == HubView.GHOSTLOCK) {
-            // GhostLock 临时提权（2026-11-03）：极简整页，接住返回键回工作台
-            GhostLockScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
-        } else if (view == HubView.FILES) {
+
             // 文件整理（2026-11-04）：规则引擎 + 页面见 ui/toolbox/FileOrganizer.kt（规格 project/file-organizer-rules.md v2）
             // FILES 页无顶栏：Miuix Scaffold 不渲染 TopAppBar 时 innerPadding 仍按顶栏高度预留 → 改用纯状态栏高度
             FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding,
@@ -257,8 +254,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 HubView.FREEZE -> {}
                 // MFA 页走独立整页分支（见 when 外层）
                 HubView.MFA -> {}
-                // GhostLock 页走独立整页分支（见 when 外层）
-                HubView.GHOSTLOCK -> {}
             }
 
             item {
@@ -424,7 +419,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), FREEZE("应用冻结"), MFA("MFA 验证器"),
-    GHOSTLOCK("临时Root"), FILES("文件整理"),
+    FILES("文件整理"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -581,7 +576,6 @@ private fun HubTiles(
     val accentFreeze = Color(0xFF4FA8FF)
     val accentMfa = Color(0xFF35C77E)
     val accentWeb = Color(0xFF2BB3C0)
-    val accentRoot = Color(0xFFF0A93B)
     val accentFiles = Color(0xFF00BFA5)
 
     @Composable
@@ -648,7 +642,7 @@ private fun HubTiles(
                 Tile(genshinOr(Icons.Rounded.AcUnit, GenshinIcons.Cryo), "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze, order = 1) { onOpen(HubView.FREEZE) }
             }
         }
-        // 2026-11-08 删除「系统开关」整页后重排：3 行 6 格（营销推荐|应用冻结、MFA|远程开发、临时Root|文件整理）
+        // 2026-11-09 删「临时Root」后重排：2 行 4 格 + 文件整理单格（营销推荐|应用冻结、MFA|远程开发）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
                 Tile(genshinOr(Icons.Rounded.Password, GenshinIcons.Vision), "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa, order = 2) { onOpen(HubView.MFA) }
@@ -662,13 +656,8 @@ private fun HubTiles(
         }
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                // GhostLock（2026-11-03）：payload 不打进 APK，
-                // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
-                Tile(genshinOr(Icons.Rounded.Terminal, GenshinIcons.Geo), "临时Root", "无 root 提权 · Shizuku", accentRoot, order = 4) { onOpen(HubView.GHOSTLOCK) }
-            }
-            Box(Modifier.weight(1f)) {
                 // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
-                Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 5) { onOpen(HubView.FILES) }
+                Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 4) { onOpen(HubView.FILES) }
             }
         }
     }

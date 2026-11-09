@@ -21,13 +21,8 @@ kotlinxCoroutines = "1.9.0"
 # MFA 扫码（2026-11-03）：zxing 纯 Java 解码核心 + CameraX 相机栈
 zxing = "3.5.3"
 camerax = "1.4.2"
-# GhostLock 集成（2026-11-03）：Shizuku 授权通道，坐标照 ghostlock app/build.gradle.kts:187-188
-shizuku = "13.1.5"
 
 [libraries]
-# GhostLock（2026-11-03）：Shizuku 授权/绑定
-shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
-shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "camerax" }
 camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "camerax" }

@@ -148,10 +148,6 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.androidx.core.ktx)
 
-    // ---- GhostLock 集成（2026-11-03）：Shizuku 授权/绑定，坐标照 ghostlock app/build.gradle.kts:187-188 ----
-    implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
-
     // ---- MFA 验证器扫码（2026-11-03）：zxing 解码 + CameraX 取景 ----
     implementation(libs.zxing.core)
     implementation(libs.camera.core)

@@ -33,11 +33,3 @@
 # 功能目录 / 配置存储为跨进程共用（宿主写、hook 侧读远端 key 字面量一致），防 R8 重命名其成员/常量
 -keep class top.honorhook.FeatureCatalog { *; }
 -keep class top.honorhook.xposed.data.RemoteConfig { *; }
-
-# ---- GhostLock（2026-11-03）----
-# Shizuku UserService 按全限定类名绑定（ShizukuExploitRunner UserServiceArgs ComponentName
-# + manifest service），R8 改名 = bindUserService 永远失败；AIDL Stub 也依赖类名/方法名。
--keep class top.honorhook.tools.ghostlock.** { *; }
-# shizuku-api 反射拉 provider，官方推荐 keep
--keep class rikka.shizuku.** { *; }
--dontwarn rikka.shizuku.**
