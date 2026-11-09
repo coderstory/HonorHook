@@ -26,7 +26,8 @@ object FileDedup {
     /** 扫描全盘重复文件。onProgress(fileStage, hashed) 供 UI 显示进度 */
     fun scan(onProgress: (Int, Int) -> Unit): List<Group> {
         val t0 = System.currentTimeMillis()
-        // ① 全盘收集（>1MB 才参与：缩略图/空文件无查重价值，大文件才是用户痛点）
+        // ① 全盘收集（>1KB 才参与：2026-11-09 用户拍板由 1MB 降到 1KB——小文件也要查；
+        //    0 字节文件仍排除，内容全同无意义）
         val bySize = HashMap<Long, MutableList<File>>()
         var visited = 0
         fun walk(dir: File) {
@@ -39,7 +40,7 @@ object FileDedup {
                 } else {
                     visited++
                     if (visited % 200 == 0) onProgress(visited, 0)
-                    if (c.length() > 1L shl 20) bySize.getOrPut(c.length()) { mutableListOf() }.add(c)
+                    if (c.length() > 1L shl 10) bySize.getOrPut(c.length()) { mutableListOf() }.add(c)
                 }
             }
         }

@@ -306,7 +306,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                             light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
                             icon = Icons.Rounded.ContentCopy,
                             headline = "文件查重",
-                            sub = "扫描 >1MB 的重复文件，按首尾内容比对",
+                            sub = "扫描 >1KB 的重复文件，按首尾内容比对",
                             ctas = listOf(HeroCta("开始扫描", primary = true) { dedupScan() }),
                         )
                     }
