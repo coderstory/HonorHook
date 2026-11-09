@@ -191,7 +191,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         if (view == HubView.MFA) {
             // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
             MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
-
+        } else if (view == HubView.FILES) {
             // 文件整理（2026-11-04）：规则引擎 + 页面见 ui/toolbox/FileOrganizer.kt（规格 project/file-organizer-rules.md v2）
             // FILES 页无顶栏：Miuix Scaffold 不渲染 TopAppBar 时 innerPadding 仍按顶栏高度预留 → 改用纯状态栏高度
             FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding,
@@ -659,6 +659,8 @@ private fun HubTiles(
                 // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
                 Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 4) { onOpen(HubView.FILES) }
             }
+            // 占位空格：单格 weight(1f) 会独占整行（上两行是两格对半分），补一个等重空格保持对半宽度
+            Box(Modifier.weight(1f))
         }
     }
 }
