@@ -135,4 +135,8 @@
     <string name="target_name_appmarket">应用市场</string>
     <string name="feature_market_purify_title">拦弹窗、推送与后台自检</string>
     <string name="feature_market_purify_desc">应用市场不再弹运营弹窗和悬浮推送，不再发更新提醒通知、不再显示假未读红点，也不再定时唤醒自己做后台静默检查；手动检查更新和搜索不受影响</string>
+
+    <string name="target_name_photos">图库</string>
+    <string name="feature_photos_ai_title">AI 超清 / AI 扩图后台直调</string>
+    <string name="feature_photos_ai_desc">在图库进程内直接调用系统视觉引擎的 AI 超清和 AI 扩图能力：外部发一条任务广播传入图片路径即可后台出图（扩图可选四边扩展比例），不打开编辑器、不模拟点击；与编辑器手点功能共用同一套引擎与权益配额</string>
 </resources>

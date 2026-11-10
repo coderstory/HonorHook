@@ -61,6 +61,9 @@ object FeatureCatalog {
     /** 小红书图片/视频下载后台静默（2026-11-03 用户需求）：开 = 不弹进度卡（视频 HD 卡/图片批量卡），完成提示卡保留。 */
     const val KEY_XHS_SILENT_DOWNLOAD = "xhs.silent_download"
 
+    /** 荣耀图库 AI 能力执行器（2026-11-10）：AI 超清 / AI 扩图后台直调（visionkit 进程内调用）。 */
+    const val KEY_PHOTOS_AI = "photos.ai_capability"
+
     const val KEY_WALLPAPER_TRANSCODE_QUALITY = "wallpaper.transcode_quality"
     const val KEY_WALLPAPER_TIMELINE_UNLIMITED = "wallpaper.timeline_unlimited"
     const val KEY_WALLPAPER_LOOP = "wallpaper.loop"
@@ -298,6 +301,13 @@ object FeatureCatalog {
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
             extraVersions = setOf("9.49.1", "9.51.0", "9.52.1", "9.53.3"),  // 9.51 = 10-23；9.52.1 = 11-02（XhsPoints 9.52 套）；9.53.3 = 11-07 实装（6 点在位，videoClick/h0/e0 仍无家）
+        ),
+        Target(
+            "com.hihonor.photos", R.string.target_name_photos,
+            listOf(
+                Feature(KEY_PHOTOS_AI, R.string.feature_photos_ai_title, R.string.feature_photos_ai_desc),
+            ),
+            baselineVersion = "153.0.0.582",  // dumpsys 实证 2026-11-10；无挂载点（能力注入型），版本只作记录
         ),
         // 壁纸两宿主：功能入口已归并到「系统桌面」卡（见 launcher Target），此处留壳供
         // scope 页与 baselineVersionOf 查表——hidden 且 features 为空，UI 不出卡。

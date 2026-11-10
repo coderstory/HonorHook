@@ -9,6 +9,7 @@ import top.honorhook.xposed.target.ime.ImeHook
 import top.honorhook.xposed.target.jd.JdHook
 import top.honorhook.xposed.target.mfauth.MfaAuthHook
 import top.honorhook.xposed.target.mms.MmsHook
+import top.honorhook.xposed.target.photos.PhotosAiHook
 import top.honorhook.xposed.target.themestore.ThemeStoreHook
 import top.honorhook.xposed.target.wallpaper.WallpaperLoopHook
 import top.honorhook.xposed.target.wallpaper.WallpaperTimelineHook
@@ -77,6 +78,8 @@ object TargetRegistry {
         register(SysmgrHook)
         // 小红书（第 12 目标）：保存解锁/去水印/原图/视频直链/批量五路；scope.list 已同步。
         register(XhsHook)
+        // 荣耀图库（第 13 目标，2026-11-10）：AI 超清/扩图后台直调能力（visionkit SDK 进程内调用）。
+        register(PhotosAiHook)
     }
 
     /** 注册目标（同包多次注册并存为列表；仅 [init] 期静态注册使用）。 */
