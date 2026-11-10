@@ -96,7 +96,9 @@ object XhsPoints {
         // - saveClick：串锚 "onDownloadClick, noteId=" → gr9.b，invoke(Object)→Object 不变
         // - x2b：串锚 disableAiWaterMark + andr_image_save_white_bg_optimized → jm8.j，b(Context,Z)Bitmap 不变
         // - noteSaveEntry：串锚 "save video failed:" 落在内部类 vj9.q1$a，真身是外层 vj9.q1#b，
-        //   9 参 (Z,Activity,z0,NoteFeed,I,Z,ViewGroup,Function1,Function0)V 不变
+        //   9 参 (Z,Activity,z0,NoteFeed,I,Z,ViewGroup,Function1,Function0)V 不变；
+        //   ⚠ 2026-11-10 实证 NoteFeed.u0() 本版改返 GroupShare，noteId getter = J0()
+        //   （NoteFeed.java:1143，classes5.dex）——noteId 直取一律走 XhsSavePivot.noteIdOf（24hex 门扫描），勿按名找
         // - aigcEditLaunch：串锚 tag_video_edit_download_loading → gq4.b（cf3.b 是 global_edit 副本不取）
         // - downloaderEntry：串锚 addDownloadTask → tg5.h，static e 13 参形状不变
         // - albumCopy.videoStore：串锚 "saveVideo start copy file." → l79.s，static a 5 参 void 不变

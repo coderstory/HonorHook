@@ -30,7 +30,6 @@ object GovernanceList {
         "com.hihonor.medialibrary",
         "com.hihonor.android.internal.app",
         "com.hihonor.secime",
-        "com.baidu.input_hihonor",
         "com.sohu.inputmethod.sogou.honor",
         "com.hihonor.mms",
         "com.hihonor.contacts",
@@ -43,7 +42,6 @@ object GovernanceList {
         "com.hihonor.keychain",
         "com.hihonor.fitness.healthservice",
         "com.hihonor.health",
-        "com.hihonor.ouc",
         "com.hihonor.systemappsupdater",
         "com.hihonor.android.upgradeguide",
         "com.hihonor.desktop.systemui",
@@ -59,6 +57,13 @@ object GovernanceList {
 
     /** B 档：功能可选冻（有真实代价，逐项标注）。 */
     val TIER_B: List<Entry> = listOf(
+        // 非默认输入法（本机默认=搜狗，搜狗仍留红线）。冻结前提：确认搜狗是当前输入法；
+        // 若日后换回百度为默认，此项必须先移回红线（12 号治理名单 §红线）
+        Entry("com.baidu.input_hihonor", Tier.B, "非默认输入法时可冻；冻结前确认搜狗为当前输入法"),
+        // 2026-11-09 A 档降级：冻结代价可控（断 OTA / 升级引导 / NFC 刷卡），可解冻恢复
+        Entry("com.hihonor.ouc", Tier.B, "系统更新(OTA)通道断；不打算 OTA 则无感知"),
+        Entry("com.hihonor.android.upgradeguide", Tier.B, "升级引导 UI 消失，影响小"),
+        Entry("com.hihonor.nfc", Tier.B, "无 NFC 刷卡/门禁/公交；不用 NFC 则无影响"),
         Entry("com.hihonor.calendar", Tier.B, "无日历/日程提醒"),
         Entry("com.hihonor.photos", Tier.B, "无相册（代价大，慎冻）"),
         Entry("com.hihonor.filemanager", Tier.B, "失去文件管理器"),

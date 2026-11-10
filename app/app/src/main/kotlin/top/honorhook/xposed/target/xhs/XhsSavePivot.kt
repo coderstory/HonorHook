@@ -160,6 +160,24 @@ object XhsSavePivot {
     }
 
     /**
+     * NoteFeed noteId 直取（2026-11-10）：u0() 是混淆名随版本漂移——9.53.3 实证 u0() 已改返 GroupShare，
+     * noteId getter 换成 J0()（NoteFeed.java:1143）。不再按名字找，扫「无参 + 返回 String + 产物过
+     * 24hex 门」的方法（与 [findFeedAndNoteId] isNoteFeed 分支同款口径，版本无关）。
+     */
+    fun noteIdOf(feed: Any?): String? {
+        if (feed == null) return null
+        return runCatching {
+            val m = feed.javaClass.declaredMethods.firstOrNull {
+                it.parameterCount == 0 && it.returnType == String::class.java &&
+                    runCatching { it.isAccessible = true; (it.invoke(feed) as? String)?.matches(HEX24) == true }
+                        .getOrDefault(false)
+            }
+            m?.isAccessible = true
+            (m?.invoke(feed) as? String)?.takeIf { it.matches(HEX24) }
+        }.getOrNull()
+    }
+
+    /**
      * 接管判定（hook 线程同步、全内存、无网络）：解析失败/全空的 noteId 已被 [parsedEmptyNotes] 拉黑
      * → 返 null，XhsBatchSave 两分支既有回落路放行宿主原生保存；否则看 noteShares 长链可得性
      * （[XhsVideoSave.shareLinkOf]）。签名对齐旧版（module 留参）。

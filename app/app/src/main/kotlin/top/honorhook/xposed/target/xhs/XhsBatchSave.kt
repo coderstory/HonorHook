@@ -259,7 +259,7 @@ object XhsBatchSave {
                 paramCount = 9,
                 returnType = "void",
                 id = "xhs:videoSave.noteSaveEntry",
-                description = "X5 笔记视频保存总入口·ab9.r1#b(boolean,Activity,z0,NoteFeed,int,boolean,ViewGroup,Function1,Function0)（r1.java:189 起：网络检查→建 SaveProgressView「正在保存到相册」→postDelayed(1s)→r1.d→function1(noteFeed.u0())=save 请求+下载流，2026-10-20 00:03 实证笔记保存正主链）→ 链接可得：不 proceed（view 不弹+请求不发+下载不跑）+ 模块管线弹卡直下原片；链接 miss：proceed 宿主原生保底",
+                description = "X5 笔记视频保存总入口·ab9.r1#b(boolean,Activity,z0,NoteFeed,int,boolean,ViewGroup,Function1,Function0)（r1.java:189 起：网络检查→建 SaveProgressView「正在保存到相册」→postDelayed(1s)→r1.d→function1(noteFeed.u0())=save 请求+下载流，2026-10-20 00:03 实证笔记保存正主链）→ noteId 合法且未拉黑即不 proceed（2026-11-09 拦截拍板：旧「链接可得才拦」拿异步解析当同步门，宿主 720p 全量泄漏）；模块管线后台解析弹卡直下原片；解析失败拉黑记名，下次点击放行宿主原生保底",
                 dex = DexHint(strings = listOf("save video failed:")),
         ) }
         return pending
@@ -299,8 +299,8 @@ object XhsBatchSave {
                         .firstOrNull { it.type.name == "com.xingin.entities.notedetail.NoteFeed" }
                         ?.apply { isAccessible = true }
                         ?.get(chain.thisObject)
-                    (feed?.javaClass?.getMethod("u0")?.apply { isAccessible = true }?.invoke(feed) as? String)
-                        ?.takeIf { it.matches(hex24) }
+                    // 2026-11-10：u0 已漂移（9.53.3 返 GroupShare），同改扫描口径
+                    XhsSavePivot.noteIdOf(feed)?.takeIf { it.matches(hex24) }
                 }.getOrNull()
                 if (noteId == null) {
                     // ③ WARN 路径（现状不变）：拦截判定无从做起，放行宿主原生保存
@@ -374,13 +374,21 @@ object XhsBatchSave {
         session.mount(task, module, hostLoader!!) { chain ->
             val noteId = runCatching {
                 val feed = chain.getArg(3) ?: return@runCatching null
-                val id = feed.javaClass.getMethod("u0").invoke(feed) as? String
+                // 2026-11-10：u0() 随版本漂移（9.53.3 改返 GroupShare，noteId getter = J0），弃名找改扫描
+                // （XhsSavePivot.noteIdOf：无参 + 返 String + 24hex 门，版本无关）
+                val id = XhsSavePivot.noteIdOf(feed)
                 // 24hex 门（findFeedAndNoteId 同款）：NoteFeed u0() 产物形如 6ad5d4d6000000002a00fa1b
                 id?.takeIf { Regex("^[0-9a-f]{24}$").matches(it) }
             }.getOrNull()
-            if (noteId == null || XhsSavePivot.availableShareLink(noteId, module) == null) {
-                return@mount chain.proceed()
-            }
+            if (noteId == null) return@mount chain.proceed()
+            // 2026-11-09 接管拍板：noteId 合法且未被拉黑即拦（不再要求链接已在内存表）——原门
+            // `availableShareLink != null` 拿异步解析结果当同步拦截门，网络解析（秒级）几乎总是晚于
+            // 点击 ⇒ 每次都 proceed，宿主 720p 全量下载落盘、模块事后 deleteLowQuality 兜底（真机
+            // 2026-11-09 23:33 日志实证：解析成功 23:33:16 vs 宿主文件已删 23:33:22，全程零「已断」
+            // 判据）。拦截后走 startHdAsk 异步解析弹卡，语义闭环：成功 = HD 直下零宿主下载；失败 =
+            // failCard 弹失败卡 + parsedEmptyNotes 记名，**下次点击命中拉黑放行宿主原生保存**（保底
+            // 仍在，死循环不可能）。
+            if (noteId in XhsSavePivot.parsedEmptyNotes) return@mount chain.proceed()
             module.log(Log.INFO, MountEngine.TAG,
                 "$JUDGE_PREFIX 笔记保存总入口已断（ab9.r1.b，宿主零提示零请求零下载）noteId=$noteId")
             session.judge(module, task, JUDGE_PREFIX, "笔记保存总入口已断（ab9.r1.b，链接可得不 proceed）")

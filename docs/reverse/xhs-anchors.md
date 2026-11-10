@@ -40,6 +40,8 @@
 
 9.53.3 实测手法：全程走 MT MCP（`tools/mtmcp.py strings <pkg> <锚>` → 唯一宿主类），
 再用 outline 核对方法名 + 参数数；`noteSaveEntry` 的锚串落在内部类 `vj9.q1$a`，真身取外层 `vj9.q1#b`（9 参）。
+⚠ 2026-11-10：`NoteFeed.u0()` 本版改返 GroupShare，noteId getter = `J0()`（NoteFeed.java:1143，classes5.dex）
+——模块 noteId 直取一律走 `XhsSavePivot.noteIdOf`（24hex 门扫描），勿按名找（findings-2026-11-10-noteid-u0-drift）。
 同名类被 R8 重用是常态（9.51 的 b75.h 就是同名 SuspendLambda）⇒ 一律以串锚唯一宿主为准，不得按类名存在性判存活。
 
 ## 已知非挂载但关键的宿主结构（业务图谱见 xhs.md §九）
