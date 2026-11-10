@@ -152,18 +152,18 @@ object PhotosAiHook : TargetHook {
     // ---- 任务处理 ----
 
     private fun handleTask(ctx: Context, intent: Intent, module: XposedModule) {
-        val path = intent.getStringExtra("path") ?: return reply(ctx, module, -1, null, "path 缺失")
+        val path = intent.getStringExtra("path") ?: return reply(ctx, module, intent.getStringExtra("reqId"), -1, null, "path 缺失")
         val mode = intent.getStringExtra("mode") ?: "enhance"
         val out = intent.getStringExtra("out") ?: defaultOutPath(path, mode)
         val bitmap = decodeCapped(path)
-            ?: return reply(ctx, module, -2, null, "解码失败（路径不存在或非图片）: $path")
+            ?: return reply(ctx, module, intent.getStringExtra("reqId"), -2, null, "解码失败（路径不存在或非图片）: $path")
 
         val (code, msg) = when (mode) {
             "enhance" -> runEnhance(ctx, bitmap, intent, out)
             "outpaint" -> runOutpaint(ctx, bitmap, intent, out)
             else -> -3 to "未知 mode: $mode"
         }
-        reply(ctx, module, code, if (code == 0) out else null, msg)
+        reply(ctx, module, intent.getStringExtra("reqId"), code, if (code == 0) out else null, msg)
     }
 
     /** AI 超清：返回 (resultCode, 消息)。photoMode=true 走人像长边增强（PHOTO_IMAGE_ENHANCE）。 */
@@ -320,10 +320,11 @@ object PhotosAiHook : TargetHook {
         return File(dir, "$stem-hh-${mode}-${System.currentTimeMillis()}.png").absolutePath
     }
 
-    private fun reply(ctx: Context, module: XposedModule, code: Int, out: String?, msg: String) {
-        module.log(if (code == 0) Log.INFO else Log.WARN, "HonorHook", "$JUDGE_PREFIX: code=$code out=$out msg=$msg")
+    private fun reply(ctx: Context, module: XposedModule, reqId: String?, code: Int, out: String?, msg: String) {
+        module.log(if (code == 0) Log.INFO else Log.WARN, "HonorHook", "$JUDGE_PREFIX: reqId=$reqId code=$code out=$out msg=$msg")
         runCatching {
             ctx.sendBroadcast(Intent(ACTION_RESULT)
+                .putExtra("reqId", reqId)
                 .putExtra("code", code)
                 .putExtra("out", out)
                 .putExtra("msg", msg)
