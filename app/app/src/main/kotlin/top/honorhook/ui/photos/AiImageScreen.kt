@@ -98,12 +98,13 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
         }
     }
 
-    var job: kotlinx.coroutines.Job? = null
+    // remember 持有：普通 var 重组即重置，取消按钮拿到 null（审计 P1-3）
+    val job = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     fun run() {
         val src = selected ?: return
         busy = true
-        job = scope.launch {
+        job.value = scope.launch {
             val r = try {
                 // 图库冷启动后 hook 注册通道需 ~3s（PhotosAiClient.ensureGalleryAlive 内置余量）
                 if (!PhotosAiClient.ensureGalleryAlive(context)) {
@@ -296,7 +297,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
         ) {
             TextButton(
                 text = "取消",
-                onClick = { job?.cancel() },
+                onClick = { job.value?.cancel() },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

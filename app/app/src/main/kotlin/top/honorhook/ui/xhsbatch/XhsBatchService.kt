@@ -55,25 +55,31 @@ object XhsBatchControllerHolder {
 class XhsBatchService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var notifyJob: kotlinx.coroutines.Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInForeground()
         val controller = XhsBatchControllerHolder.get(this)
-        serviceScope.launch {
-            controller.progress.collectLatest { p ->
-                updateNotification(p)
-                // 终态（无进行中任务）即撤岗；进程内任务继续收尾，服务只管前台身份
-                if (p.state != XhsBatchState.Running && p.state != XhsBatchState.Fetching &&
-                    p.state != XhsBatchState.Paused
-                ) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+        // 防重复 collect（审计 P2：每次 onStartCommand 都新增一个 collect 会叠加通知更新）
+        if (notifyJob?.isActive != true) {
+            notifyJob = serviceScope.launch {
+                controller.progress.collectLatest { p ->
+                    updateNotification(p)
+                    // 终态（无进行中任务）即撤岗；进程内任务继续收尾，服务只管前台身份
+                    val terminal = p.state != XhsBatchState.Running && p.state != XhsBatchState.Fetching &&
+                        p.state != XhsBatchState.Paused
+                    // 队列还有待执行任务时保持前台（下一个任务马上会跑）
+                    if (terminal && !controller.hasQueued()) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
                 }
             }
         }
-        return START_NOT_STICKY
+        // START_STICKY：ROM 杀进程后系统择机拉起，Holder 归一化 Interrupted → 用户可一键恢复
+        return START_STICKY
     }
 
     override fun onDestroy() {

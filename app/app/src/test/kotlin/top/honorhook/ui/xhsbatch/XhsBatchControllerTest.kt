@@ -58,18 +58,25 @@ class XhsBatchControllerTest {
             XhsSerialDownloader().deleteRecursivelyCounted(dir)
     }
 
-    /** url → note 映射；resolveHook 在每次 resolve 前回调（做暂停/取消编排）。 */
+    /**
+     * url → note 映射；resolveHook 在每次 resolve 前回调（做暂停/取消编排）。
+     * badNoteIds 命中的篇返回 BadNote（验证页/删帖场景）；未注册的 url 返回 Throttled（限流场景）。
+     */
     private inner class FakeResolver(
         val byUrl: MutableMap<String, ResolvedNote> = mutableMapOf(),
         private val alwaysThrow: Boolean = false,
         private val resolveHook: suspend (Int) -> Unit = {},
     ) : XhsBatchController.NoteResolver {
         var resolveCalls = 0
-        override suspend fun resolve(url: String, cookie: String): ResolvedNote? {
+        val badNoteIds = mutableSetOf<String>()
+        override suspend fun resolve(url: String, cookie: String): XhsBatchController.ResolveOutcome {
             resolveCalls++
             resolveHook(resolveCalls)
             if (alwaysThrow) throw IllegalStateException("rate limited")
-            return byUrl[url]
+            val id = url.substringAfter("/explore/").substringBefore("?")
+            if (id in badNoteIds) return XhsBatchController.ResolveOutcome.BadNote("<html>verify page</html>")
+            return byUrl[url]?.let { XhsBatchController.ResolveOutcome.Ok(it) }
+                ?: XhsBatchController.ResolveOutcome.Throttled
         }
     }
 
@@ -93,6 +100,9 @@ class XhsBatchControllerTest {
         resolver: XhsBatchController.NoteResolver,
         notesByUrl: Map<String, ResolvedNote> = emptyMap(),
     ): Pair<XhsBatchController, File> {
+        // 压真实 delay：delay 在 IO 上下文走真实时间，秒级节奏会拖死虚拟时间等待
+        XhsBatchPacing.NOTE_DELAY_MIN_MS = 5; XhsBatchPacing.NOTE_DELAY_MAX_MS = 10
+        XhsBatchPacing.MEDIA_DELAY_MIN_MS = 5; XhsBatchPacing.MEDIA_DELAY_MAX_MS = 10
         if (resolver is FakeResolver) notesByUrl.forEach { (url, n) -> resolver.byUrl[url] = n }
         val root = tmp.newFolder()
         val c = XhsBatchController(
@@ -253,17 +263,135 @@ class XhsBatchControllerTest {
     }
 
     @Test
-    fun `start while running is ignored`() = runTest {
+    fun `queued task runs automatically after current finishes`() = runTest {
+        val store = FakeStore()
+        val feed = FakeFeed(listOf(feed("n1")))
+        val dl = FakeDownloader()
+        val (c, _) = makeController(store, feed, dl, FakeResolver(), notesByUrl = mapOf(detailUrl("n1") to note("n1")))
+        c.start("1504334302")
+        // 运行中添加第二个任务 → 待执行
+        c.start("2000000001")
+        assertEquals(1, c.queuedUserIds().size)
+        assertEquals(XhsBatchState.Queued, store.list().last { it.userId == "2000000001" }.state)
+        var guard = 0
+        while (store.list().last { it.userId == "2000000001" }.state != XhsBatchState.Done) {
+            if (guard % 10 == 0) java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("Q guard=$guard B=${store.list().last { it.userId == "2000000001" }.state} prog=${c.progress.value.state}/${c.progress.value.userId}/${c.progress.value.currentAction} q=${c.queuedUserIds()} dl=${dl.downloads}\n")
+            delay(100); check(++guard < 200000) { "second task never finished" }
+        }
+        val rec2 = store.list().last { it.userId == "2000000001" }
+        assertEquals(XhsBatchState.Done, rec2.state)
+        assertEquals(1, rec2.notesProcessed)
+        assertEquals(0, c.queuedUserIds().size)
+    }
+
+    @Test
+    fun `resume with persisted notes skips fetching and starts at nextIndex`() = runTest {
+        val store = FakeStore()
+        val feed = FakeFeed(listOf(feed("n1"), feed("n2"), feed("n3")))
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        val notesByUrl = mapOf(detailUrl("n1") to note("n1"), detailUrl("n2") to note("n2"), detailUrl("n3") to note("n3"))
+        val (c, _) = makeController(store, feed, dl, resolver, notesByUrl = notesByUrl)
+        // 预置一条已中断记录：清单 3 篇、游标 1（n1 已处理过）
+        store.upsert(
+            XhsBatchTaskRecord(
+                taskId = "t1", userId = "1504334302", createdAt = 1L, updatedAt = 1L,
+                state = XhsBatchState.Interrupted,
+                notesFound = 3, notesProcessed = 1, notesFailed = 0,
+                imagesDone = 2, videosDone = 0, totalBytes = 2048L,
+                dirPath = "",
+                notes = listOf("n1|token-n1", "n2|token-n2", "n3|token-n3"), nextIndex = 1,
+            ),
+        )
+        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("BEFORE-START\n")
+        c.start("1504334302")
+        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("AFTER-START state=${c.progress.value.state}\n")
+        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("LOOP-ENTER state=${c.progress.value.state}\n")
+        var last = ""
+        while (c.progress.value.state != XhsBatchState.Done) {
+            if (c.progress.value.state.name + c.progress.value.currentAction != last) {
+                last = c.progress.value.state.name + c.progress.value.currentAction
+                java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("DBG state=${c.progress.value.state} action=${c.progress.value.currentAction} fetch=${feed.fetchCalls} dl=${dl.downloads}\n")
+            }
+            delay(100)
+        }
+        // 断点续传核心判据：恢复不重新抓列表（fetchCalls==0），从游标 1 起只处理 n2/n3
+        assertEquals(0, feed.fetchCalls)
+        assertEquals(2, dl.downloads.size)
+        assertTrue(dl.downloads.none { it.startsWith("n1-") })
+        assertEquals(3, c.progress.value.notesFound)
+    }
+
+    @Test
+    fun `start while running queues the second task`() = runTest {
         val store = FakeStore()
         val gate = CompletableDeferred<Unit>()
         val resolver = FakeResolver(resolveHook = { gate.await() })
         val (c, _) = makeController(store, FakeFeed(listOf(feed("n1"))), FakeDownloader(), resolver, notesByUrl = mapOf(detailUrl("n1") to note("n1")))
         c.start("1504334302")
         while (!c.isRunning()) delay(10)
-        c.start("9999999999") // 应被忽略：不产生第二个任务
-        assertEquals(1, store.records.size)
+        c.start("9999999999") // 运行中 → 排队（待执行）
+        assertEquals(XhsBatchState.Queued, store.records.values.first { it.userId == "9999999999" }.state)
         gate.complete(Unit)
+        // 第一个跑完后队列自动开跑，第二个任务也到终态
+        var guard = 0
+        while (store.records.values.first { it.userId == "9999999999" }.state != XhsBatchState.Done) {
+            delay(100); check(++guard < 200000) { "queued task never finished" }
+        }
+    }
+
+    // ---- 2026-11-11 重构新增：失败分类 + 失败重试 ----
+
+    @Test
+    fun `bad note is skipped without stopping the batch`() = runTest {
+        val store = FakeStore()
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        resolver.badNoteIds.add("n1")
+        val (c, _) = makeController(
+            store, FakeFeed(listOf(feed("n1"), feed("n2"))), dl, resolver,
+            notesByUrl = mapOf(detailUrl("n2") to note("n2")),
+        )
+        c.start("1504334302")
         while (c.progress.value.state != XhsBatchState.Done) delay(100)
-        assertEquals(null, store.records.values.firstOrNull { it.userId == "9999999999" })
+        // 坏笔记：计 1 篇失败但不退避不停批（好笔记照常下载到 Done）
+        assertEquals(XhsBatchState.Done, c.progress.value.state)
+        assertEquals(1, c.progress.value.notesFailed)
+        assertEquals(2, c.progress.value.notesProcessed)
+        // 坏笔记只试 1 次（无退避），好笔记 1 次
+        assertEquals(2, resolver.resolveCalls)
+        assertEquals(listOf("n2-0.jpg"), dl.downloads)
+        // 失败篇落账 failedNotes（「重试失败资源」的数据源）
+        assertEquals(listOf("n1"), store.records.values.single().failedNotes)
+    }
+
+    @Test
+    fun `retryFailed reruns only the failed notes`() = runTest {
+        val store = FakeStore()
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        val feed = FakeFeed(emptyList()) // retryFailed 不得抓列表：fetchCalls 必须 == 0
+        val (c, _) = makeController(
+            store, feed, dl, resolver,
+            notesByUrl = mapOf(detailUrl("n2") to note("n2")),
+        )
+        // 预置 Done 记录：清单 3 篇，其中 n2 失败
+        store.upsert(
+            XhsBatchTaskRecord(
+                taskId = "t1", userId = "1504334302", createdAt = 1L, updatedAt = 1L,
+                state = XhsBatchState.Done,
+                notesFound = 3, notesProcessed = 2, notesFailed = 1,
+                imagesDone = 2, videosDone = 0, totalBytes = 2048L,
+                dirPath = "",
+                notes = listOf("n1|token-n1", "n2|token-n2", "n3|token-n3"),
+                failedNotes = listOf("n2"),
+            ),
+        )
+        c.retryFailed("1504334302")
+        while (c.progress.value.state != XhsBatchState.Done) delay(100)
+        // 只重跑 n2：不抓列表、不碰 n1/n3
+        assertEquals(0, feed.fetchCalls)
+        assertEquals(listOf("n2-0.jpg"), dl.downloads)
+        assertEquals(1, resolver.resolveCalls)
     }
 }

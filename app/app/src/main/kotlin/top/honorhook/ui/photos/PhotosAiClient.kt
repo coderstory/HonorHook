@@ -139,6 +139,10 @@ object PhotosAiClient {
                     .putExtra("out", out)
             )
             withTimeout(timeoutMs) { deferred.await() }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            // 超时≠用户取消：withTimeout 的取消须转失败结果，否则界面误报「已取消」（审计 P1-4）
+            pending.remove(reqId)
+            AiResult(code = -995, out = null, msg = "处理超时")
         } catch (e: kotlinx.coroutines.CancellationException) {
             // 用户取消：清理 pending 后原样上抛（吞掉会破坏结构化取消，2026-11-11 AI 取消功能）
             pending.remove(reqId)

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -119,6 +120,28 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomInnerPadding + 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // ---- 电池白名单引导（荣耀 PowerKeeper 杀后台实锤 2026-11-11：FGS 也被杀）----
+            item {
+                val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+                if (!pm.isIgnoringBatteryOptimizations(context.packageName)) {
+                    Text(
+                        "⚠ 后台下载被系统限制：点击加入电池优化白名单，否则退后台可能停止",
+                        fontSize = 12.sp,
+                        color = androidx.compose.ui.graphics.Color(0xFFF57C00),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                            .setData(android.net.Uri.parse("package:" + context.packageName)),
+                                    )
+                                }
+                            }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
+            }
             // ---- 账户状态卡（登录入口收拢到这里，不再占头部图标位）----
             item {
                 if (loggedIn == null) {
@@ -197,6 +220,21 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
                                     .background(sc.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
                                     .padding(horizontal = 8.dp, vertical = 2.dp),
                             )
+                            // 「继续」：终态任务重跑同 userId（PRD §3.0：v1 无断点续传，继续=重跑+已下载文件去重）
+                            if (r.state in CONTINUABLE) {
+                                // 小号文字入口（TextButton 太大，2026-11-11 用户反馈）
+                                Text(
+                                    "继续",
+                                    fontSize = 13.sp,
+                                    color = colorScheme.primary,
+                                    modifier = Modifier
+                                        .clickable {
+                                            controller.start(r.userId)
+                                            top.honorhook.ui.xhsbatch.XhsBatchService.start(context)
+                                        }
+                                        .padding(horizontal = 6.dp),
+                                )
+                            }
                             IconButton(onClick = { store.delete(r.taskId); records = store.list() }) {
                                 Icon(Icons.Rounded.Delete, contentDescription = "删除记录")
                             }
@@ -268,41 +306,128 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
     }
 
     // ---- 详情/进度对话框（运行中实时刷新 progress，结束后显示记录快照）----
+    // 2026-11-11 重设计：状态胶囊 + 进度条 + 指标网格 + 按状态分组操作区
     val detail = openRecord
     if (detail != null) {
         val p = if (controller.isRunning() && progress.userId == detail.userId) progress else null
+        val st = p?.state ?: detail.state
+        val notesFound = p?.notesFound ?: detail.notesFound
+        val notesProcessed = p?.notesProcessed ?: detail.notesProcessed
+        val notesFailed = p?.notesFailed ?: detail.notesFailed
+        val images = p?.imagesDone ?: detail.imagesDone
+        val videos = p?.videosDone ?: detail.videosDone
+        val mb = (p?.totalBytes ?: detail.totalBytes) / 1048576.0
+        val action = p?.currentAction
         WindowDialog(
             show = true,
-            title = "任务详情 · 用户 ${detail.userId}",
+            title = "用户 ${detail.userId}",
             summary = null,
             onDismissRequest = { openRecord = null },
             content = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stateLabel(p?.state ?: detail.state), fontSize = 14.sp, color = stateColor(p?.state ?: detail.state))
-                    Text(
-                        "文章 ${p?.notesFound ?: detail.notesFound} 篇 · 已处理 ${p?.notesProcessed ?: detail.notesProcessed}" +
-                            " · 图片 ${p?.imagesDone ?: detail.imagesDone} 张 · 视频 ${p?.videosDone ?: detail.videosDone} 个" +
-                            " · 累计 %.1f MB".format((p?.totalBytes ?: detail.totalBytes) / 1048576.0),
-                        fontSize = 13.sp,
-                    )
-                    val action = p?.currentAction
-                    if (!action.isNullOrBlank()) {
-                        Text(action, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // 状态胶囊 + 当前动作
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            stateLabel(st), fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                            color = stateColor(st),
+                            modifier = Modifier
+                                .background(stateColor(st).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                        if (!action.isNullOrBlank()) {
+                            Text(action, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+                        }
                     }
-                    if (p != null) {
+                    // 进度条（已处理 / 总篇数）
+                    if (notesFound > 0) {
+                        val frac = (notesProcessed.toFloat() / notesFound).coerceIn(0f, 1f)
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .background(colorScheme.onSurfaceVariantSummary.copy(alpha = 0.15f), RoundedCornerShape(3.dp)),
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(frac)
+                                    .height(6.dp)
+                                    .background(stateColor(st), RoundedCornerShape(3.dp)),
+                            )
+                        }
+                        Text("已处理 $notesProcessed / $notesFound 篇 · 失败 $notesFailed", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                    }
+                    // 指标 2×2 网格：图片 / 视频 / 体积 / 失败
+                    listOf(
+                        listOf("图片" to "$images 张", "视频" to "$videos 个"),
+                        listOf("体积" to "%.1f MB".format(mb), "失败" to "$notesFailed 篇"),
+                    ).forEach { rowItems ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            rowItems.forEach { (label, value) ->
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .background(colorScheme.onSurfaceVariantSummary.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+                                        .padding(10.dp),
+                                ) {
+                                    Text(value, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(label, fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                                }
+                            }
+                        }
+                    }
+                    // 目录
+                    Text(detail.dirPath, fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary)
+                    // 操作区（按状态分组）
+                    if (p != null && (st == XhsBatchState.Running || st == XhsBatchState.Paused)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(
-                                text = if (p.state == XhsBatchState.Paused) "恢复" else "暂停",
+                                text = if (st == XhsBatchState.Paused) "恢复" else "暂停",
                                 onClick = {
-                                    if (p.state == XhsBatchState.Paused) controller.resumeRun() else controller.pause()
+                                    if (st == XhsBatchState.Paused) controller.resumeRun() else controller.pause()
                                     records = store.list()
                                 },
+                                modifier = Modifier.weight(1f),
                             )
-                            TextButton(text = "取消", onClick = { controller.cancel(); records = store.list() })
-                            TextButton(text = "撤回", onClick = { confirmWithdraw = true })
+                            TextButton(
+                                text = "取消", onClick = { controller.cancel(); records = store.list() },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
-                    } else {
-                        TextButton(text = "撤回（删除已下载文件）", onClick = { confirmWithdraw = true })
+                        Text(
+                            "撤回（取消并删除全部文件）",
+                            fontSize = 12.sp, color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { confirmWithdraw = true }
+                                .padding(vertical = 6.dp),
+                        )
+                    } else if (st == XhsBatchState.Queued) {
+                        TextButton(text = "取消排队", onClick = {
+                            controller.cancelQueued(detail.userId)
+                            records = store.list()
+                            openRecord = null
+                        }, modifier = Modifier.fillMaxWidth())
+                    } else if (st in CONTINUABLE) {
+                        TextButton(text = "继续下载", onClick = {
+                            controller.start(detail.userId)
+                            top.honorhook.ui.xhsbatch.XhsBatchService.start(context)
+                            openRecord = null
+                        }, modifier = Modifier.fillMaxWidth())
+                        if (detail.failedNotes.isNotEmpty()) {
+                            TextButton(text = "重试失败资源（${detail.failedNotes.size}）", onClick = {
+                                controller.retryFailed(detail.userId)
+                                top.honorhook.ui.xhsbatch.XhsBatchService.start(context)
+                                openRecord = null
+                            }, modifier = Modifier.fillMaxWidth())
+                        }
+                        Text(
+                            "撤回（删除已下载文件）",
+                            fontSize = 12.sp, color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { confirmWithdraw = true }
+                                .padding(vertical = 6.dp),
+                        )
                     }
                 }
             },
@@ -359,6 +484,7 @@ private fun stateLabel(s: XhsBatchState): String = when (s) {
     XhsBatchState.Fetching -> "抓取中"
     XhsBatchState.Running -> "下载中"
     XhsBatchState.Paused -> "已暂停"
+    XhsBatchState.Queued -> "待执行"
     XhsBatchState.Done -> "已完成"
     XhsBatchState.Cancelled -> "已取消"
     XhsBatchState.Withdrawn -> "已撤回"
@@ -366,10 +492,16 @@ private fun stateLabel(s: XhsBatchState): String = when (s) {
     XhsBatchState.Failed -> "已失败"
 }
 
+// 可「继续」重跑的终态（Running/Fetching/Paused 由进度面板接管；Withdrawn 无文件可续）
+private val CONTINUABLE = setOf(
+    XhsBatchState.Interrupted, XhsBatchState.Failed, XhsBatchState.Done, XhsBatchState.Cancelled,
+) // Queued 不在此列：排队中由「取消排队」接管
+
 private fun stateColor(s: XhsBatchState) = when (s) {
     XhsBatchState.Done -> androidx.compose.ui.graphics.Color(0xFF35C77E)
     XhsBatchState.Failed, XhsBatchState.Interrupted -> androidx.compose.ui.graphics.Color(0xFFF2685A)
     XhsBatchState.Running, XhsBatchState.Fetching -> androidx.compose.ui.graphics.Color(0xFF4FA8FF)
+    XhsBatchState.Queued -> androidx.compose.ui.graphics.Color(0xFF9C6BFF)
     else -> androidx.compose.ui.graphics.Color(0xFF888888)
 }
 
@@ -408,17 +540,22 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                 Icon(Icons.Rounded.Close, contentDescription = "关闭")
             }
         }
-        // 登录态检测：探活 /user/self（cookie 名判断会误报，匿名访客也有 web_session）
-        val loggedIn = remember {
-            top.honorhook.ui.xhsbatch.XhsFeedClient.isWebLoggedInBlocking(
-                android.webkit.CookieManager.getInstance().getCookie("https://www.xiaohongshu.com"),
-            ) ?: (android.webkit.CookieManager.getInstance()
-                .getCookie("https://www.xiaohongshu.com")?.contains("web_session") == true)
+        // 登录态检测：探活 /user/self 必须走 IO（主线程 HTTP 抛 NetworkOnMainThread 被吞，审计 P1-5）
+        // 三态：null=检测中
+        var loggedIn by androidx.compose.runtime.remember {
+            androidx.compose.runtime.mutableStateOf<Boolean?>(null)
+        }
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            val cookie = android.webkit.CookieManager.getInstance().getCookie("https://www.xiaohongshu.com")
+            loggedIn = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                top.honorhook.ui.xhsbatch.XhsFeedClient.isWebLoggedInBlocking(cookie)
+                    ?: (cookie?.contains("web_session") == true)
+            }
         }
         Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            val sc = if (loggedIn) androidx.compose.ui.graphics.Color(0xFF35C77E) else colorScheme.onSurfaceVariantSummary
+            val sc = if (loggedIn == true) androidx.compose.ui.graphics.Color(0xFF35C77E) else colorScheme.onSurfaceVariantSummary
             Text(
-                if (loggedIn) "已登录 · 复用 cookie" else "未登录",
+                if (loggedIn == true) "已登录 · 复用 cookie" else "未登录",
                 fontSize = 11.sp,
                 color = sc,
                 modifier = Modifier
@@ -426,7 +563,7 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                     .padding(horizontal = 8.dp, vertical = 2.dp),
             )
             Text(
-                if (loggedIn) "扫码可刷新登录态；完成后点右上关闭" else "扫码或手机号登录；完成后点右上关闭",
+                if (loggedIn == true) "扫码可刷新登录态；完成后点右上关闭" else "扫码或手机号登录；完成后点右上关闭",
                 fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(start = 8.dp),
             )

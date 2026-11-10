@@ -11,6 +11,7 @@ package top.honorhook.ui.xhsbatch
 enum class XhsBatchState {
     Idle, Fetching, Running, Paused, Done, Cancelled, Withdrawn,
     /** App 被杀等造成的运行中断（技术方案 §3.0：继续 = 同 userId 重跑 + 按已存在文件去重）。 */
+    Queued,      // 待执行：已有任务在跑，本任务排队等轮
     Interrupted,
     /** 退避重试耗尽（PRD F11）。 */
     Failed,
@@ -44,6 +45,12 @@ data class XhsBatchTaskRecord(
     val videosDone: Int,
     val totalBytes: Long,
     val dirPath: String,
+    // 断点续传（2026-11-11 SDD 裁决）：笔记清单 "noteId|xsecToken" 列表 + 下一篇游标。
+    // 恢复时清单在 → 跳过抓取直接续跑；清单与记录同生共死（撤回/删除即清）
+    val notes: List<String> = emptyList(),
+    val nextIndex: Int = 0,
+    // 失败重试（2026-11-11）：失败篇 noteId 集合；成功即移除，「重试失败资源」只跑这个子集
+    val failedNotes: List<String> = emptyList(),
 )
 
 /** 任务持久化口：Controller 只依赖接口，JVM 单测用内存 fake。 */
@@ -56,12 +63,12 @@ interface XhsBatchTaskStore {
 /** 风控节奏常量表（技术方案 §5：收紧风控时一刀调这里）。 */
 object XhsBatchPacing {
     /** 逐篇解析页间隔（含抖动）区间 ms。 */
-    const val NOTE_DELAY_MIN_MS = 2000L
-    const val NOTE_DELAY_MAX_MS = 4000L
+    var NOTE_DELAY_MIN_MS = 2000L   // var=测试缝：单测把真实秒级 delay 压到 ms 级（JVM delay 走 IO 是真实时间）
+    var NOTE_DELAY_MAX_MS = 4000L
 
-    /** 逐媒体文件间隔（含抖动）区间 ms。 */
-    const val MEDIA_DELAY_MIN_MS = 500L
-    const val MEDIA_DELAY_MAX_MS = 1500L
+    /** 逐媒体文件间隔（含抖动）区间 ms。CDN 直链低风险：200-500（2026-11-11 从 500-1500 收紧提速）。 */
+    var MEDIA_DELAY_MIN_MS = 200L
+    var MEDIA_DELAY_MAX_MS = 500L
 
     /** WebView 翻页注入滚动间隔区间 ms。 */
     const val PAGE_DELAY_MIN_MS = 2000L

@@ -35,6 +35,9 @@ class FileXhsBatchTaskStore(context: Context) : XhsBatchTaskStore {
                     videosDone = o.optInt("videosDone"),
                     totalBytes = o.optLong("totalBytes"),
                     dirPath = o.optString("dirPath"),
+                    notes = o.optJSONArray("notes")?.let { ja -> (0 until ja.length()).map { ja.optString(it) } } ?: emptyList(),
+                    nextIndex = o.optInt("nextIndex"),
+                    failedNotes = o.optJSONArray("failedNotes")?.let { ja -> (0 until ja.length()).map { ja.optString(it) } } ?: emptyList(),
                 )
             }
         }.getOrDefault(emptyList())
@@ -68,7 +71,10 @@ class FileXhsBatchTaskStore(context: Context) : XhsBatchTaskStore {
                     .put("imagesDone", r.imagesDone)
                     .put("videosDone", r.videosDone)
                     .put("totalBytes", r.totalBytes)
-                    .put("dirPath", r.dirPath),
+                    .put("dirPath", r.dirPath)
+                    .put("notes", org.json.JSONArray(r.notes))
+                    .put("nextIndex", r.nextIndex)
+                    .put("failedNotes", org.json.JSONArray(r.failedNotes)),
             )
         }
         file.parentFile?.mkdirs()
