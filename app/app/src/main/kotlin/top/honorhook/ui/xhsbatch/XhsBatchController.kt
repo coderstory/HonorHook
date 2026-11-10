@@ -9,6 +9,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -244,6 +246,9 @@ class XhsBatchController(
         activeDir = dir
         init(taskStore.list().lastOrNull { it.userId == id })
         persist(XhsBatchState.Fetching)
+        // 不得先 launch 再赋 job：scope 用 Main.immediate，主线程 launch 体立即同步执行，
+        // 协程内读到 job==null → 判活失败静默 return（2026-11-11 恢复卡死 0/210 的根因）。
+        // 判活一律用 currentCoroutineContext().isActive（协程自身），job 字段只留给外部 cancel/isRunning。
         job = scope.launch { runBatch(dir) }
     }
 
@@ -271,20 +276,30 @@ class XhsBatchController(
         startNextIfAny() // 队列还有待执行任务则自动开跑（用户已排队，视为愿意继续）
     }
 
-    /** 撤回 = 取消 + 删除本次整个 userId 目录（PRD F9）。返回 (删除文件数, 失败数)。 */
-    suspend fun withdraw(): Pair<Int, Int> {
-        val j = job
-        j?.cancel()
-        job = null
-        // join 后再删：否则在途协程还在写 .part/rename，删完被重建（审计 P1-2）
-        j?.join()
-        _progress.value = _progress.value.copy(state = XhsBatchState.Cancelled)
-        val dir = activeDir
-        return if (dir != null && dir.isDirectory) {
+    /**
+     * 撤回 = 取消 + 删除该 userId 的整个下载目录（PRD F9）。返回 (删除文件数, 失败数)。
+     * [userId] 指定撤回对象：只有正在跑的就是它才取消 job；目录按 userId 解析，
+     * 不用 activeDir——activeDir 是 controller 级字段，撤回非当前任务时会删错目录（2026-11-11 实锤）。
+     * 缺省 = 撤回当前/最近任务（旧语义，单任务场景等价）。
+     */
+    suspend fun withdraw(userId: String? = null): Pair<Int, Int> {
+        val target = userId ?: activeUserId
+        if (target != null && activeUserId == target) {
+            val j = job
+            j?.cancel()
+            job = null
+            // join 后再删：否则在途协程还在写 .part/rename，删完被重建（审计 P1-2）
+            j?.join()
+            _progress.value = _progress.value.copy(state = XhsBatchState.Cancelled)
+        }
+        val dir = downloaderRoot().resolve(target ?: return 0 to 0)
+        return if (dir.isDirectory) {
             val result = withContext(Dispatchers.IO) { downloader.deleteRecursivelyCounted(dir) }
-            _progress.value = _progress.value.copy(state = XhsBatchState.Withdrawn, currentAction = "已撤回：删除 ${result.first} 个文件")
-            persist(XhsBatchState.Withdrawn)
-            startNextIfAny()
+            if (activeUserId == target) {
+                _progress.value = _progress.value.copy(state = XhsBatchState.Withdrawn, currentAction = "已撤回：删除 ${result.first} 个文件")
+                persist(XhsBatchState.Withdrawn)
+                startNextIfAny()
+            }
             result
         } else {
             0 to 0
@@ -295,6 +310,7 @@ class XhsBatchController(
 
     private suspend fun runBatch(dir: File) {
         val userId = activeUserId ?: return
+        XhsFetchLog.w("runBatch begin user=$userId activeNotes=${activeNotes.size} resumeIndex=$resumeIndex subset=$retrySubsetMode")
         try {
             val notes: List<XhsUserFeedClient.FeedNote>
             if (activeNotes.isNotEmpty()) {
@@ -327,12 +343,13 @@ class XhsBatchController(
 
             val cookie = feedClient.currentCookie()
             for ((index, note) in notes.withIndex()) {
-                if (job?.isActive != true) return
+                if (currentCoroutineContext().isActive.not()) return
                 if (index < resumeIndex) continue
                 waitForUnpause()
                 _progress.value = _progress.value.copy(
                     currentAction = "正在处理第 ${index + 1}/${notes.size} 篇：${note.noteId}",
                 )
+                XhsFetchLog.w("note[$index/${notes.size}] begin ${note.noteId}")
                 when (val outcome = obtainResolved(note, cookie)) {
                     NoteOutcome.Cancelled -> return
                     NoteOutcome.Skip -> {
@@ -412,7 +429,7 @@ class XhsBatchController(
      */
     private suspend fun resolveWithBackoff(note: XhsUserFeedClient.FeedNote, cookie: String): ResolveStep {
         for (attempt in XhsBatchPacing.BACKOFF_MS.indices) {
-            if (job?.isActive != true) return ResolveStep.Cancelled
+            if (currentCoroutineContext().isActive.not()) return ResolveStep.Cancelled
             when (val outcome = runCatching { noteResolver.resolve(detailUrlOf(note), cookie) }
                 .onFailure { XhsFetchLog.w("resolver threw: $it") }
                 .getOrDefault(ResolveOutcome.Throttled)) {
@@ -493,7 +510,7 @@ class XhsBatchController(
         var didWork = false
         XhsFetchLog.w("download begin ${resolved.noteId} media=${resolved.orderedMedia.size}")
         resolved.orderedMedia.forEachIndexed { i, media ->
-            if (job?.isActive != true) return@withContext allOk to didWork
+            if (currentCoroutineContext().isActive.not()) return@withContext allOk to didWork
             waitForUnpause()
             val target = File(dir, fileNameOf(resolved, media, i))
             val url = downloadUrlOf(media) // 只算一次（旧实现下载失败分支重复调用）
@@ -524,7 +541,7 @@ class XhsBatchController(
     }
 
     private suspend fun waitForUnpause() {
-        while (paused && (job?.isActive == true)) delay(300)
+        while (paused && currentCoroutineContext().isActive) delay(300)
     }
 
     // ---- 辅助 ----

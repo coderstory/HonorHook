@@ -346,7 +346,8 @@ private fun Thumb(f: File, modifier: Modifier = Modifier, big: Boolean = false) 
     }
     val v = img
     if (v != null) {
-        Image(v, contentDescription = f.name, contentScale = ContentScale.Crop, modifier = modifier)
+        // 缩略图用 Crop（网格定比例裁切合理）；预览大图必须 Fit——Crop 会裁掉画面、比例失真（用户实测「UI 比例不对」）
+        Image(v, contentDescription = f.name, contentScale = if (big) ContentScale.Fit else ContentScale.Crop, modifier = modifier)
     } else {
         Box(modifier.background(colorScheme.surfaceVariant))
     }

@@ -203,6 +203,25 @@ class XhsBatchControllerTest {
         assertEquals(XhsBatchState.Withdrawn, c.progress.value.state)
     }
 
+    /** 回归：撤回 A 用户时若 B 在跑，只能删 A 的目录、不许碰 B（withdraw 曾删 activeDir=错目录，2026-11-11 实锤）。 */
+    @Test
+    fun `withdraw by userId only deletes that user's directory`() = runTest {
+        val store = FakeStore()
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        val (c, root) = makeController(store, FakeFeed(listOf(feed("n1"), feed("n2"))), dl, resolver, notesByUrl = mapOf(
+            detailUrl("n1") to note("n1"), detailUrl("n2") to note("n2")))
+        c.start("1504334302")
+        while (c.progress.value.state != XhsBatchState.Done) delay(100)
+        // 造一个"另一个用户"的目录，模拟 B 任务存在
+        val otherDir = java.io.File(root, "999").apply { mkdirs(); java.io.File(this, "keep.jpg").writeBytes(ByteArray(10)) }
+        val (deleted, failed) = c.withdraw("1504334302")
+        assertEquals(2, deleted) // 两篇各 1 文件都落在本用户目录
+        assertEquals(0, failed)
+        assertFalse(userDir(root).exists())
+        assertTrue(otherDir.exists()) // B 的文件原封不动
+    }
+
     @Test
     fun `backoff exhaustion stops the batch as failed`() = runTest {
         val store = FakeStore()

@@ -1,0 +1,126 @@
+==> 运行 JVM 单元测试（:app:testDebugUnitTest）
+Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/data/user/0/com.dsharnessmobile.shell/files/home/tmp -Duser.home=/data/data/com.dsharnessmobile.shell/files/home 
+WARNING: linker: library "/storage/emulated/0/project/HonorHook/tools/gradle-home/native/660c5614fbf4a5f2a75b1949f50a0caf5cd603558e7d8a26e50b933a0cfb79d1/linux-aarch64/libnative-platform.so" ("/storage/emulated/0/project/HonorHook/tools/gradle-home/native/660c5614fbf4a5f2a75b1949f50a0caf5cd603558e7d8a26e50b933a0cfb79d1/linux-aarch64/libnative-platform.so") needed or dlopened by "/data/data/com.dsharnessmobile.shell/files/usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so" is not accessible for the namespace: [name="(default)", ld_library_paths="/data/data/com.dsharnessmobile.shell/files/usr/lib", default_library_paths="/system/lib64:/product_h/lib64:/system_ext/lib64", permitted_paths="/system/lib64/drm:/system/lib64/extractors:/system/lib64/hw:/system/lib64/vulkan:/system_ext/lib64:/system/framework:/system/app:/system/priv-app:/system_ext/framework:/system_ext/app:/system_ext/priv-app:/vendor/framework:/vendor/app:/vendor/priv-app:/system/vendor/framework:/system/vendor/app:/system/vendor/priv-app:/odm/framework:/odm/app:/odm/priv-app:/oem/app:/product/framework:/product/app:/product/priv-app:/product/lib64/vulkan:/data:/mnt/expand:/apex/com.android.runtime/lib64/bionic:/system/lib64/bootstrap"]
+Warning: Unable to set daemon's environment variables to match the client because: 
+  There is no native integration with this operating environment.
+  If the daemon was started with a significantly different environment from the client, and your build 
+  relies on environment variables, you may experience unexpected behavior.
+
+> Configure project :app
+WARNING: The option setting 'android.aapt2FromMavenOverride=/data/data/com.dsharnessmobile.shell/files/usr/bin/aapt2' is experimental.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :xhs-dn-core:syncXhsDnUpstream UP-TO-DATE
+> Task :xhs-dn-core:preBuild UP-TO-DATE
+> Task :xhs-dn-core:preDebugBuild UP-TO-DATE
+> Task :xhs-dn-core:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :xhs-dn-core:generateDebugResources UP-TO-DATE
+> Task :xhs-dn-core:packageDebugResources UP-TO-DATE
+> Task :xhs-dn-core:parseDebugLocalResources UP-TO-DATE
+> Task :xhs-dn-core:generateDebugRFile UP-TO-DATE
+> Task :xhs-dn-core:compileDebugKotlin UP-TO-DATE
+> Task :xhs-dn-core:javaPreCompileDebug UP-TO-DATE
+> Task :xhs-dn-core:compileDebugJavaWithJavac NO-SOURCE
+> Task :xhs-dn-core:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :xhs-dn-core:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :xhs-dn-core:extractDeepLinksDebug UP-TO-DATE
+> Task :xhs-dn-core:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :xhs-dn-core:mapDebugSourceSetPaths UP-TO-DATE
+> Task :xhs-dn-core:compileDebugLibraryResources UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :xhs-dn-core:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :xhs-dn-core:processDebugJavaRes UP-TO-DATE
+> Task :app:compileDebugKotlin
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/ui/screen/FileOrganizerScreen.kt:120:26 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/ui/screen/FileOrganizerScreen.kt:375:54 Redundant call of conversion method.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/ui/screen/FileOrganizerScreen.kt:685:91 'val Icons.Rounded.CallMerge: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.CallMerge.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/ui/screen/FileOrganizerScreen.kt:876:39 'val Icons.Rounded.CallMerge: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.CallMerge.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/ui/screen/FileOrganizerScreen.kt:1284:67 Unnecessary safe call on a non-null receiver of type '() -> Unit'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/ui/screen/MfaScanScreen.kt:52:26 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/DualSignalFeature.kt:168:94 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/InstallerHook.kt:49:44 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/InstallerHook.kt:462:50 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/InstallerHook.kt:490:46 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/InstallerHook.kt:510:50 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/InstallerHook.kt:565:44 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/LauncherHook.kt:69:48 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/SettingsHook.kt:39:90 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/StatusBarIconFeature.kt:89:58 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/StatusBarIconFeature.kt:90:94 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ads/HonorAdsHook.kt:47:90 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ads/HonorOpsAdHook.kt:41:92 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ads/HonorQinxuanHook.kt:52:94 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ads/HonorQinxuanHook.kt:187:34 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/exam8/Exam8Hook.kt:53:87 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ime/ImeHook.kt:84:85 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ime/ImeHook.kt:235:42 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ime/ImeHook.kt:253:45 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ime/ImeHook.kt:268:41 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/ime/ImeHook.kt:285:36 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/jd/JdHook.kt:39:84 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/mfauth/MfaAuthHook.kt:47:89 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/mihealth/MiHealthHook.kt:72:90 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/mihealth/MiHealthHook.kt:73:44 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/mihealth/MiHealthHook.kt:91:28 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/mms/MmsHook.kt:89:85 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/mms/MmsHook.kt:282:42 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreHook.kt:65:48 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreHook.kt:237:42 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreHook.kt:257:42 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreHook.kt:330:42 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreRuntime.kt:45:83 This class is not recommended for use in Kotlin. Use 'kotlin.collections.List' instead.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreRuntime.kt:163:25 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'Any?'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreRuntime.kt:301:55 This class is not recommended for use in Kotlin. Use 'kotlin.Int' instead.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreRuntime.kt:304:58 This class is not recommended for use in Kotlin. Use 'kotlin.Long' instead.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreRuntime.kt:366:31 Elvis operator (?:) always returns the left operand of non-nullable type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/themestore/ThemeStoreRuntime.kt:449:15 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'Array<(out) CapturedType(*)!>?'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/tracking/HonorTrackingHook.kt:37:95 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsBatchSave.kt:127:44 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsBatchSave.kt:295:39 No cast needed.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsBatchSave.kt:486:49 Unnecessary safe call on a non-null receiver of type '(Mutable)List<Any!>'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsHook.kt:76:88 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsVideoSave.kt:154:93 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsWatermark.kt:56:44 Unnecessary safe call on a non-null receiver of type 'ApplicationInfo'.
+w: file:///storage/emulated/0/project/HonorHook/app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsWatermark.kt:196:35 This class is not recommended for use in Kotlin. Use 'kotlin.Annotation' instead.
+
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest
+Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/data/user/0/com.dsharnessmobile.shell/files/home/tmp -Duser.home=/data/data/com.dsharnessmobile.shell/files/home 
+
+[Incubating] Problems report is available at: file:///storage/emulated/0/project/HonorHook/app/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 12s
+42 actionable tasks: 5 executed, 37 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.1/userguide/configuration_cache_enabling.html

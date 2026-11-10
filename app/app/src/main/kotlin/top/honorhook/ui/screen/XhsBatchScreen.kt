@@ -237,7 +237,25 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: (
                                         .padding(horizontal = 6.dp),
                                 )
                             }
-                            IconButton(onClick = { store.delete(r.taskId); records = store.list() }) {
+                            // 排队中的任务卡直接给「取消排队」（删记录不摘队列，到点照样开跑）
+                            if (r.state == XhsBatchState.Queued) {
+                                Text(
+                                    "取消排队",
+                                    fontSize = 13.sp,
+                                    color = androidx.compose.ui.graphics.Color(0xFFE53935),
+                                    modifier = Modifier
+                                        .clickable {
+                                            controller.cancelQueued(r.userId)
+                                            records = store.list()
+                                        }
+                                        .padding(horizontal = 6.dp),
+                                )
+                            }
+                            // 删除记录：排队中的先摘队列，否则记录删了任务照样开跑
+                            IconButton(onClick = {
+                                if (r.state == XhsBatchState.Queued) controller.cancelQueued(r.userId)
+                                store.delete(r.taskId); records = store.list()
+                            }) {
                                 Icon(Icons.Rounded.Delete, contentDescription = "删除记录")
                             }
                         }
@@ -453,9 +471,11 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: (
                         text = "确认删除",
                         onClick = {
                             confirmWithdraw = false
+                            // confirmWithdraw 块在 `if (detail != null)` 之外，detail 不做智能转换——自己取
+                            val wUid = openRecord?.userId
                             openRecord = null
-                            scope.launch {
-                                val (deleted, failed) = controller.withdraw()
+                            if (wUid != null) scope.launch {
+                                val (deleted, failed) = controller.withdraw(wUid)
                                 Toast.makeText(
                                     context,
                                     if (failed == 0) "已撤回：删除 $deleted 个文件" else "已撤回：删除 $deleted 个，失败 $failed 个",

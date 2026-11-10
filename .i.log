@@ -1,0 +1,2 @@
+==> on-device 静默安装: app-debug.apk (35M)
+cmd: Failure calling service package: Failed transaction (2147483646)

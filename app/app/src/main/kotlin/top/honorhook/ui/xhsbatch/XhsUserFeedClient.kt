@@ -21,10 +21,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
-/** 诊断文件日志：本 ROM logcat 丢弃 App 自有 tag（见 XhsLoginLog 同因），抓取流程落文件取证 */
+/** 诊断文件日志：本 ROM logcat 丢弃 App 自有 tag（见 XhsLoginLog 同因），抓取流程落文件取证。
+ *  双路：主路 Download/xhs_login_debug.log；写失败（权限被重置/FUSE 异常）静默丢 = 排障盲区（2026-11-11 实锤），
+ *  故失败时兜底写应用外置目录 Android/data/<pkg>/files/xhs_fetch.log（免权限、root 可见）。 */
 internal object XhsFetchLog {
+    private const val PKG = "io.github.coderstory.honorhook"
     // JVM 单测无 Android 框架：Environment 调用抛 not-mocked，lazy+runCatching 使对象初始化与写日志双双无副作用
-    private val f: java.io.File? by lazy {
+    private val main: java.io.File? by lazy {
         runCatching {
             java.io.File(
                 android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
@@ -32,9 +35,19 @@ internal object XhsFetchLog {
             )
         }.getOrNull()
     }
+    private val fallback: java.io.File? by lazy {
+        runCatching {
+            java.io.File(
+                java.io.File(android.os.Environment.getExternalStorageDirectory(), "Android/data/$PKG/files"),
+                "xhs_fetch.log",
+            )
+        }.getOrNull()
+    }
     fun w(msg: String) {
-        val file = f ?: return
-        runCatching { file.appendText("${System.currentTimeMillis()} fetch: $msg\n") }
+        val line = "${System.currentTimeMillis()} fetch: $msg\n"
+        runCatching { main?.appendText(line) }.onFailure {
+            runCatching { fallback?.let { f -> f.parentFile?.mkdirs(); f.appendText(line) } }
+        }
     }
 }
 

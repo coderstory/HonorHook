@@ -29,7 +29,9 @@ WARNING: The option setting 'android.aapt2FromMavenOverride=/data/data/com.dshar
 > Task :xhs-dn-core:javaPreCompileDebug UP-TO-DATE
 > Task :xhs-dn-core:compileDebugJavaWithJavac NO-SOURCE
 > Task :xhs-dn-core:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
 > Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
 > Task :xhs-dn-core:writeDebugAarMetadata UP-TO-DATE
 > Task :app:checkDebugAarMetadata UP-TO-DATE
 > Task :app:mapDebugSourceSetPaths UP-TO-DATE
@@ -45,15 +47,46 @@ WARNING: The option setting 'android.aapt2FromMavenOverride=/data/data/com.dshar
 > Task :xhs-dn-core:mapDebugSourceSetPaths UP-TO-DATE
 > Task :xhs-dn-core:compileDebugLibraryResources UP-TO-DATE
 > Task :app:processDebugResources UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
 > Task :app:preDebugUnitTestBuild UP-TO-DATE
 > Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
 > Task :xhs-dn-core:bundleLibRuntimeToJarDebug UP-TO-DATE
 > Task :xhs-dn-core:processDebugJavaRes UP-TO-DATE
-> Task :app:compileDebugKotlin
-> Task :app:compileDebugJavaWithJavac UP-TO-DATE
-> Task :app:bundleDebugClassesToRuntimeJar
-> Task :app:processDebugJavaRes UP-TO-DATE
 > Task :app:bundleDebugClassesToCompileJar
 > Task :app:compileDebugUnitTestKotlin
 > Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
 > Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :app:testDebugUnitTest
+Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/data/user/0/com.dsharnessmobile.shell/files/home/tmp -Duser.home=/data/data/com.dsharnessmobile.shell/files/home 
+
+XhsBatchControllerTest > resume with persisted notes skips fetching and starts at nextIndex FAILED
+    kotlinx.coroutines.test.UncompletedCoroutinesError at TestBuilders.kt:354
+
+XhsBatchControllerTest > backoff exhaustion stops the batch as failed FAILED
+    java.lang.AssertionError at XhsBatchControllerTest.kt:197
+
+176 tests completed, 2 failed, 1 skipped
+
+> Task :app:testDebugUnitTest FAILED
+
+[Incubating] Problems report is available at: file:///storage/emulated/0/project/HonorHook/app/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///storage/emulated/0/project/HonorHook/app/app/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 1m 18s
+42 actionable tasks: 4 executed, 38 up-to-date
