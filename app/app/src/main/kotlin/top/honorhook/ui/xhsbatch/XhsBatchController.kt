@@ -566,9 +566,12 @@ class XhsBatchController(
             conn.setRequestProperty("Referer", "https://www.xiaohongshu.com/")
             if (conn.responseCode !in 200..299) {
                 XhsFetchLog.w("detail http=${conn.responseCode}")
+                runCatching { conn.errorStream?.close() }
+                conn.disconnect()
                 return null
             }
             conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                .also { conn.disconnect() }
         }.getOrNull()
     }
 

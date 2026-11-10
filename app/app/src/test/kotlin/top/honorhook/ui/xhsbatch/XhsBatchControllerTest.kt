@@ -415,6 +415,38 @@ class XhsBatchControllerTest {
         assertEquals(1, resolver.resolveCalls)
     }
 
+    /** 回归：cancel/pause 落盘曾用 nextIndex=0 覆盖续传游标，「继续」被迫从头重扫（2026-11-11 单测实锤）。 */
+    @Test
+    fun `pause and cancel preserve the resume cursor`() = runTest {
+        val store = FakeStore()
+        val feed = FakeFeed(listOf(feed("n1"), feed("n2"), feed("n3"), feed("n4"), feed("n5")))
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        val notesByUrl = (1..5).associate { detailUrl("n$it") to note("n$it") }
+        val (c, _) = makeController(store, feed, dl, resolver, notesByUrl = notesByUrl)
+        store.upsert(
+            XhsBatchTaskRecord(
+                taskId = "t1", userId = "1504334302", createdAt = 1L, updatedAt = 1L,
+                state = XhsBatchState.Interrupted,
+                notesFound = 5, notesProcessed = 3, notesFailed = 0,
+                imagesDone = 3, videosDone = 0, totalBytes = 3072L,
+                dirPath = "",
+                notes = (1..5).map { "n$it|token-n$it" }, nextIndex = 3,
+            ),
+        )
+        backgroundScope.launch {
+            while (true) {
+                if (c.progress.value.state == XhsBatchState.Running) { c.pause(); break }
+                delay(10)
+            }
+        }
+        c.start("1504334302")
+        while (c.progress.value.state != XhsBatchState.Paused) delay(10)
+        assertEquals(3, store.records.values.last { it.userId == "1504334302" }.nextIndex) // 暂停不丢游标
+        c.cancel()
+        assertEquals(3, store.records.values.last { it.userId == "1504334302" }.nextIndex) // 取消不丢游标
+    }
+
     // ---- 2026-11-11 验收场景补齐：大量数据 + 进程被杀后恢复 ----
 
     /** 大量数据：40 篇全量跑完，串行顺序与计数一致（有大量数据的场景）。 */
