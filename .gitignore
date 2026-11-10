@@ -75,3 +75,4 @@ scratch/
 # 版本适配校验产物（tools/adapt_mt.py 逐包输出；jadx-mvn = 本地 maven 缓存，均可重生成）
 tools/mt-adapt-*.txt
 tools/jadx-mvn/
+/build/
