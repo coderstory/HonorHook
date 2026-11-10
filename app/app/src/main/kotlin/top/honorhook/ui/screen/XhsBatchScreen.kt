@@ -57,7 +57,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  * 纯 UI 侧功能，零 hook 依赖；业务在 XhsBatchController。
  */
 @Composable
-fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
+fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember { FileXhsBatchTaskStore(context) }
@@ -102,6 +102,8 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
             .padding(horizontal = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // 页内返回键（顶栏已对本页豁免，防标题重复；返回由 Toolbox BackHandler 兜底）
+            MiuixBackButton(onClick = onBack)
             Text("小红书批量下载", fontWeight = FontWeight.Medium, fontSize = 17.sp, modifier = Modifier.weight(1f))
             IconButton(onClick = {
                 if (controller.isRunning()) {

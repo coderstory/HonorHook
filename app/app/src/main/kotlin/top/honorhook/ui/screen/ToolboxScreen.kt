@@ -178,8 +178,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
         containerColor = Color.Transparent,
         topBar = {
-            // FILES 页无顶栏（2026-11-05 用户指令：标题文本删除，容器也不占位）；状态栏避让走 contentWindowInsets.Top
-            if (view != HubView.FILES) TopAppBar(
+            // FILES / XHS_BATCH / AI_IMAGE 页无顶栏（自带标题行 + 页内返回键，2026-11-11 修顶栏与页内标题重复）；
+            // 状态栏避让走 contentWindowInsets.Top
+            if (view != HubView.FILES && view != HubView.XHS_BATCH && view != HubView.AI_IMAGE) TopAppBar(
                 color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = if (view == HubView.HOME) "工具箱" else view.title,
                 navigationIcon = { if (view != HubView.HOME) MiuixBackButton { view = HubView.HOME } },
@@ -200,11 +201,16 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding,
                 topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding())
         } else if (view == HubView.XHS_BATCH) {
-            // 小红书批量下载（2026-11-10）：自带 LazyColumn 与标题行的整页，接住返回键回工作台
-            XhsBatchScreen(bottomInnerPadding = bottomInnerPadding, topInset = innerPadding.calculateTopPadding())
+            // 小红书批量下载（2026-11-10）：自带 LazyColumn 与标题行的整页，接住返回键回工作台；
+            // 无顶栏（同 FILES）：Miuix Scaffold 仍按顶栏高度预留 innerPadding → 用纯状态栏高度
+            XhsBatchScreen(bottomInnerPadding = bottomInnerPadding,
+                topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding(),
+                onBack = { view = HubView.HOME })
         } else if (view == HubView.AI_IMAGE) {
             // AI 图像工具（2026-11-10）：AI 超清/扩图，能力来自 PhotosAiClient（图库注入通道），见 ui/photos/AiImageScreen.kt
-            AiImageScreen(bottomInnerPadding = bottomInnerPadding, topInset = innerPadding.calculateTopPadding())
+            AiImageScreen(bottomInnerPadding = bottomInnerPadding,
+                topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding(),
+                onBack = { view = HubView.HOME })
         } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,

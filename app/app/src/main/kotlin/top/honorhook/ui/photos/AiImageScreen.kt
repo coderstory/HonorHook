@@ -65,7 +65,7 @@ import java.io.File
  * 设计决策与原型 primary source 见 docs/spec-ai-image-refactor.md。
  */
 @Composable
-fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
+fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember { AiImageEngine(scope) }
@@ -128,8 +128,9 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
             .padding(top = topInset + 4.dp)
             .padding(horizontal = 12.dp),
     ) {
-        // 头部：标题 + 来源切换 + 刷新
+        // 头部：返回 + 标题 + 来源切换 + 刷新（顶栏已对本页豁免，防标题重复）
         Row(verticalAlignment = Alignment.CenterVertically) {
+            top.honorhook.ui.screen.MiuixBackButton(onClick = onBack)
             Text("AI 图像工具", fontWeight = FontWeight.Medium, fontSize = 17.sp, modifier = Modifier.weight(1f))
             Text(
                 if (useCustomDir) "📁 自定义 ▾" else "📁 小红书 ▾",

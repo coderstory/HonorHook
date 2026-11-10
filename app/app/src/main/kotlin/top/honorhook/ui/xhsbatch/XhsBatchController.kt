@@ -50,8 +50,7 @@ class XhsBatchController(
         data object Throttled : ResolveOutcome
     }
 
-    /** 判定「页面拿到了」的字节阈值：低于此值视为网络/风控壳页，走退避而非跳过。 */
-    private val HTML_BAD_NOTE_MIN_BYTES = 20_000
+    /** 判定「页面拿到了」的字节阈值：低于此值视为网络/风控壳页，走退避而非跳过。（值在 companion object） */
 
     /** 单篇解析：[cookie] 来自网页会话（XhsFeedClient.currentCookie）。 */
     interface NoteResolver {
@@ -531,6 +530,9 @@ class XhsBatchController(
     // ---- 辅助 ----
 
     companion object {
+        /** 判定「页面拿到了」的字节阈值：低于此值视为网络/风控壳页，走退避而非跳过。 */
+        private const val HTML_BAD_NOTE_MIN_BYTES = 20_000
+
         private fun fetchHtmlDirect(url: String, cookie: String): String? = runCatching {
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.connectTimeout = 15_000
