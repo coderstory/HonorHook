@@ -1,0 +1,91 @@
+==> 编译 debug APK（JAVA_HOME=/data/data/com.dsharnessmobile.shell/files/usr/lib/jvm/java-21-openjdk）
+Picked up JAVA_TOOL_OPTIONS: -Djava.io.tmpdir=/data/user/0/com.dsharnessmobile.shell/files/home/tmp -Duser.home=/data/data/com.dsharnessmobile.shell/files/home 
+WARNING: linker: library "/storage/emulated/0/project/HonorHook/tools/gradle-home/native/660c5614fbf4a5f2a75b1949f50a0caf5cd603558e7d8a26e50b933a0cfb79d1/linux-aarch64/libnative-platform.so" ("/storage/emulated/0/project/HonorHook/tools/gradle-home/native/660c5614fbf4a5f2a75b1949f50a0caf5cd603558e7d8a26e50b933a0cfb79d1/linux-aarch64/libnative-platform.so") needed or dlopened by "/data/data/com.dsharnessmobile.shell/files/usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so" is not accessible for the namespace: [name="(default)", ld_library_paths="/data/data/com.dsharnessmobile.shell/files/usr/lib", default_library_paths="/system/lib64:/product_h/lib64:/system_ext/lib64", permitted_paths="/system/lib64/drm:/system/lib64/extractors:/system/lib64/hw:/system/lib64/vulkan:/system_ext/lib64:/system/framework:/system/app:/system/priv-app:/system_ext/framework:/system_ext/app:/system_ext/priv-app:/vendor/framework:/vendor/app:/vendor/priv-app:/system/vendor/framework:/system/vendor/app:/system/vendor/priv-app:/odm/framework:/odm/app:/odm/priv-app:/oem/app:/product/framework:/product/app:/product/priv-app:/product/lib64/vulkan:/data:/mnt/expand:/apex/com.android.runtime/lib64/bionic:/system/lib64/bootstrap"]
+Warning: Unable to set daemon's environment variables to match the client because: 
+  There is no native integration with this operating environment.
+  If the daemon was started with a significantly different environment from the client, and your build 
+  relies on environment variables, you may experience unexpected behavior.
+
+> Configure project :app
+WARNING: The option setting 'android.aapt2FromMavenOverride=/data/data/com.dsharnessmobile.shell/files/usr/bin/aapt2' is experimental.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :xhs-dn-core:syncXhsDnUpstream UP-TO-DATE
+> Task :xhs-dn-core:preBuild UP-TO-DATE
+> Task :xhs-dn-core:preDebugBuild UP-TO-DATE
+> Task :xhs-dn-core:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :xhs-dn-core:generateDebugResources UP-TO-DATE
+> Task :xhs-dn-core:packageDebugResources UP-TO-DATE
+> Task :xhs-dn-core:parseDebugLocalResources UP-TO-DATE
+> Task :xhs-dn-core:generateDebugRFile UP-TO-DATE
+> Task :xhs-dn-core:compileDebugKotlin UP-TO-DATE
+> Task :xhs-dn-core:javaPreCompileDebug UP-TO-DATE
+> Task :xhs-dn-core:compileDebugJavaWithJavac NO-SOURCE
+> Task :xhs-dn-core:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :xhs-dn-core:generateDebugAssets UP-TO-DATE
+> Task :xhs-dn-core:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:generateDebugGlobalSynthetics UP-TO-DATE
+> Task :xhs-dn-core:processDebugJavaRes UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :xhs-dn-core:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :xhs-dn-core:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:compileDebugNavigationResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :xhs-dn-core:extractDeepLinksDebug UP-TO-DATE
+> Task :xhs-dn-core:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :xhs-dn-core:mapDebugSourceSetPaths UP-TO-DATE
+> Task :xhs-dn-core:compileDebugLibraryResources UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :xhs-dn-core:mergeDebugJniLibFolders UP-TO-DATE
+> Task :xhs-dn-core:mergeDebugNativeLibs NO-SOURCE
+> Task :xhs-dn-core:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :app:mergeDebugNativeLibs UP-TO-DATE
+> Task :app:stripDebugDebugSymbols UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:dexBuilderDebug
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleDebug
+
+[Incubating] Problems report is available at: file:///storage/emulated/0/project/HonorHook/app/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 17s
+57 actionable tasks: 4 executed, 53 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.1/userguide/configuration_cache_enabling.html
+-rw-rw----. 1 u0_a189 media_rw 35M Nov 11 00:19 /storage/emulated/0/project/HonorHook/app/app/build/outputs/apk/debug/app-debug.apk

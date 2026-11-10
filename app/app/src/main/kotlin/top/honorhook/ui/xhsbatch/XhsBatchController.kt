@@ -42,8 +42,19 @@ class XhsBatchController(
 
     /** 默认实现：上游仓库解析（fetchHtml 注入 = HttpURLConnection 直连）；失败抛 XhsResolveException → 上层退避。 */
     private object WebViewNoteResolver : NoteResolver {
-        override suspend fun resolve(url: String, cookie: String): ResolvedNote? =
-            DefaultXhsContentRepository(fetchHtml = { fetchHtmlDirect(it, cookie) }).resolve(url)
+        override suspend fun resolve(url: String, cookie: String): ResolvedNote? {
+            XhsFetchLog.w("resolve begin ${url.take(120)}")
+            return try {
+                DefaultXhsContentRepository(fetchHtml = { u ->
+                    fetchHtmlDirect(u, cookie)?.also {
+                        XhsFetchLog.w("resolve html ${it.length}B")
+                    } ?: run { XhsFetchLog.w("resolve html null"); null }
+                }).resolve(url).also { XhsFetchLog.w("resolve ok media=${it?.orderedMedia?.size}") }
+            } catch (t: Throwable) {
+                XhsFetchLog.w("resolve fail: $t")
+                throw t
+            }
+        }
     }
 
     private val _progress = MutableStateFlow(XhsBatchProgress())
@@ -63,8 +74,20 @@ class XhsBatchController(
 
     fun start(userId: String) {
         val id = userId.trim()
-        if (!id.matches(Regex("\\d+"))) {
-            _progress.value = _progress.value.copy(state = XhsBatchState.Failed, currentAction = "用户 ID 必须是纯数字")
+        // 输入允许 24 位 hex 用户 id 或小红书号（字母/数字/下划线，实测 red_id 形态）；
+        // 小红书号在 FeedClient 里经搜索页解析成 hex id（需网页登录态）
+        if (!id.matches(Regex("[0-9a-fA-F]{24}|[A-Za-z0-9_]{2,24}"))) {
+            _progress.value = _progress.value.copy(state = XhsBatchState.Failed, currentAction = "请输入合法的小红书号或用户 ID")
+            return
+        }
+        // 下载落 Pictures/小红书/xhs/（公共目录）：targetSdk 34 必须「所有文件访问」权限，
+        // 未授予时逐文件 IO 全挂（2026-11-10 实测 30 篇全失败），这里前置拦截给出明确指引
+        // appContext == null 是 JVM 单测缝（无 Android 框架），跳过运行时权限门
+        if (appContext != null && !android.os.Environment.isExternalStorageManager()) {
+            _progress.value = _progress.value.copy(
+                state = XhsBatchState.Failed,
+                currentAction = "需要「所有文件访问」权限：设置 → 应用 → HonorHook → 权限 → 文件和媒体",
+            )
             return
         }
         if (isRunning()) return
@@ -72,7 +95,7 @@ class XhsBatchController(
         activeUserId = id
         activeCreatedAt = System.currentTimeMillis()
         activeRecordId = "t${activeCreatedAt}-${taskId.incrementAndGet()}"
-        val dir = File(downloaderRoot(), "xhs").resolve(id)
+        val dir = downloaderRoot().resolve(id)
         activeDir = dir
         _progress.value = XhsBatchProgress(userId = id, state = XhsBatchState.Fetching, currentAction = "正在抓取笔记列表…")
         persist(XhsBatchState.Fetching)
@@ -161,6 +184,7 @@ class XhsBatchController(
         } catch (t: kotlinx.coroutines.CancellationException) {
             throw t // cancel 已置状态，这里只负责穿透
         } catch (t: Throwable) {
+            top.honorhook.ui.xhsbatch.XhsFetchLog.w("runBatch fatal: $t")
             finish(XhsBatchState.Failed, "异常终止：${t.message}")
         }
     }
@@ -179,16 +203,26 @@ class XhsBatchController(
         dir: File,
     ): Boolean = withContext(Dispatchers.IO) {
         var allOk = true
+        XhsFetchLog.w("download begin ${resolved.noteId} media=${resolved.orderedMedia.size}")
         resolved.orderedMedia.forEachIndexed { i, media ->
             if (!job!!.isActive) return@withContext allOk
             waitForUnpause()
             val target = File(dir, fileNameOf(resolved, media, i))
-            when (val r = downloader.download(media.sourceUrl, target)) {
+            when (val r = downloader.download(downloadUrlOf(media), target)) {
                 is XhsSerialDownloader.Result.Ok -> {
-                    if (r.bytes > 0) countByType(media, r.bytes)
+                    if (r.bytes > 0) {
+                        countByType(media, r.bytes)
+                        // 相册可见性：写公共 Pictures 目录后必须触发 MediaStore 扫描，否则图库不索引
+                        appContext?.let {
+                            android.media.MediaScannerConnection.scanFile(
+                                it, arrayOf(target.absolutePath), null, null,
+                            )
+                        }
+                    }
                 }
                 is XhsSerialDownloader.Result.Failure -> {
                     // 单文件失败不弃整篇；篇级失败由本返回值聚合
+                    XhsFetchLog.w("download fail: ${r.message} url=${downloadUrlOf(media).take(80)}")
                     allOk = false
                 }
             }
@@ -237,12 +271,31 @@ class XhsBatchController(
             if (cookie.isNotBlank()) conn.setRequestProperty("Cookie", cookie)
             conn.setRequestProperty(
                 "User-Agent",
-                "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/124.0.0.0 Mobile Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
-            if (conn.responseCode !in 200..299) return null
+            conn.setRequestProperty("Referer", "https://www.xiaohongshu.com/")
+            if (conn.responseCode !in 200..299) {
+                XhsFetchLog.w("detail http=${conn.responseCode}")
+                return null
+            }
             conn.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
         }.getOrNull()
+    }
+
+    /**
+     * 原图地址：页面给的图片 URL 带 ！水印/压缩修饰（下载的是压缩图，2026-11-10 用户实锤）。
+     * 复刻上游 XHSDownloader.transformXhsCdnUrl（reference/xhs，AGPL）：取 token 重构 ci.xiaohongshu.com 直链 = 原图。
+     * 视频/livePhoto 直链不动。
+     */
+    private fun downloadUrlOf(media: ResolvedMedia): String {
+        val url = media.sourceUrl
+        if (media !is ResolvedMedia.Image || !url.contains("xhscdn.com")) return url
+        if (url.contains("sns-video")) return url
+        val parts = url.split('/')
+        if (parts.size <= 5) return url
+        val token = parts.drop(5).joinToString("/").substringBefore('!').substringBefore('?')
+        return "https://ci.xiaohongshu.com/$token"
     }
 
     /** 平铺文件名：`<noteId>-<序号>.<ext>`（PRD F4：无子目录，前缀防跨篇重名）。 */

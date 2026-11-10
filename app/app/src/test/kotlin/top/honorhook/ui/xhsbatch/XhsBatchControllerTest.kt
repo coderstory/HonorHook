@@ -108,7 +108,7 @@ class XhsBatchControllerTest {
         return c to root
     }
 
-    private fun userDir(root: File) = File(root, "xhs/1504334302")
+    private fun userDir(root: File) = File(root, "1504334302") // 2026-11-11 目录去 xhs 层
 
     // ---- cases ----
 
@@ -209,11 +209,12 @@ class XhsBatchControllerTest {
     }
 
     @Test
-    fun `non numeric user id is rejected without fetching`() = runTest {
+    fun `illegal user id is rejected without fetching`() = runTest {
         val store = FakeStore()
         val feed = FakeFeed(emptyList())
         val c = makeController(store, feed, FakeDownloader(), FakeResolver()).first
-        c.start("abc123")
+        // 输入放宽为 小红书号/hex id（[A-Za-z0-9_]{2,24}），只剩带非法字符的输入才拒绝
+        c.start(" abc!123 ")
         assertEquals(XhsBatchState.Failed, c.progress.value.state)
         assertEquals(0, feed.fetchCalls)
     }

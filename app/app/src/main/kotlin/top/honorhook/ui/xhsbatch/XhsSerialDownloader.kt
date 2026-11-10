@@ -30,12 +30,14 @@ class XhsSerialDownloader(
      * 技术方案 §3.0），返回 Ok 且 bytes=0 表示「跳过」——调用方不重复计数。
      */
     override fun download(url: String, target: File): Result {
+        // 小红书 CDN 会给 http:// 直链，明文被 targetSdk 禁（Cleartext not permitted）→ 升级 https
+        val safeUrl = if (url.startsWith("http://")) "https://" + url.removePrefix("http://") else url
         if (target.isFile && target.length() > 0) return Result.Ok(target, 0)
         val dir = target.parentFile ?: return Result.Failure("无父目录: ${target.path}")
         if (!dir.isDirectory) dir.mkdirs()
         val part = File(dir, target.name + ".part")
         return try {
-            val conn = URL(url).openConnection() as HttpURLConnection
+            val conn = URL(safeUrl).openConnection() as HttpURLConnection
             conn.connectTimeout = 15_000
             conn.readTimeout = 60_000
             conn.instanceFollowRedirects = true

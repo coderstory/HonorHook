@@ -118,7 +118,9 @@ dependencies {
     //   （仅注解，无序列化调用，无 serialization 编译器插件；运行期无反射查询，不进 APK）。
     // - kotlinx-coroutines：模块内挂起函数用。此前靠 UI 依赖树（compose runtime api）隐式可见，
     //   现显式声明（compileOnly 不影响打包，运行期仍由 compose 依赖树提供）。
-    compileOnly("com.squareup.okhttp3:okhttp:5.5.0")
+    // 2026-11-11：okhttp 运行期需求移到 :xhs-dn-core（implementation，见该模块 build.gradle.kts 注释）；
+    // 本模块不再声明，避免双份依赖。XhsSavePivot 等宿主进程路径仍不引用 okhttp。
+    // compileOnly("com.squareup.okhttp3:okhttp:5.5.0") // 原 compileOnly 声明，已由 xhs-dn-core implementation 接管
     compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
     compileOnly(libs.kotlinx.coroutines.core)
 

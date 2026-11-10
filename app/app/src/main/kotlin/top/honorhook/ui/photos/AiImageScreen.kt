@@ -63,7 +63,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
     var files by remember { mutableStateOf<List<File>>(emptyList()) }
     var selected by remember { mutableStateOf<File?>(null) }
     var photoMode by remember { mutableStateOf(false) } // 超清：false=通用 true=人像
-    var ratioIdx by remember { mutableStateOf(0) } // 扩图：0=1:1 1=16:9 2=9:16
+    var ratioIdx by remember { mutableStateOf(0) } // 扩图：0=1:1 1=16:9 2=9:16 3=壁纸(9:19.5)
     var busy by remember { mutableStateOf(false) }
     var resultMsg by remember { mutableStateOf<String?>(null) }
 
@@ -98,10 +98,12 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
         }
     }
 
+    var job: kotlinx.coroutines.Job? = null
+
     fun run() {
         val src = selected ?: return
         busy = true
-        scope.launch {
+        job = scope.launch {
             val r = try {
                 // 图库冷启动后 hook 注册通道需 ~3s（PhotosAiClient.ensureGalleryAlive 内置余量）
                 if (!PhotosAiClient.ensureGalleryAlive(context)) {
@@ -120,6 +122,12 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
                         )
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 用户取消：提示后原样上抛（PhotosAiClient 已透传取消）
+                busy = false
+                resultMsg = "已取消"
+                Toast.makeText(context, resultMsg, Toast.LENGTH_SHORT).show()
+                throw e
             } catch (e: Exception) {
                 PhotosAiClient.AiResult(-996, null, "调用失败: ${e.message}")
             }
@@ -278,7 +286,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
         )
     }
 
-    // 处理中：不可关（广播进图库后无法中断，只能等 120s 超时回结果）
+    // 处理中：等待可取消（客户端停止等待；广播已进图库侧无法中断，输出若完成后仅是多余文件）
     if (busy) {
         WindowDialog(
             show = true,
@@ -286,6 +294,11 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
             summary = "已提交图库引擎（云端管线，约 10~60s）\n${selected?.let { relName(it) } ?: ""}",
             onDismissRequest = {},
         ) {
+            TextButton(
+                text = "取消",
+                onClick = { job?.cancel() },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 
@@ -307,7 +320,13 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
 }
 
 /** 扩图目标比例表（label, w/h）。 */
-private val RATIOS = listOf("1:1" to 1.0f, "16:9" to 16f / 9f, "9:16" to 9f / 16f)
+private val RATIOS = listOf(
+    "1:1" to 1.0f,
+    "16:9" to 16f / 9f,
+    "9:16" to 9f / 16f,
+    // 手机壁纸竖屏（2026-11-11 用户要求）：主流全面屏 9:19.5；outpaintScales 单边 cap 1.0 ⇒ 最高扩 3x，足够
+    "壁纸" to 9f / 19.5f,
+)
 
 /** 只解码边界拿宽高（不加载像素），失败返回 null。 */
 private suspend fun withDimension(f: File): Pair<Int, Int>? =

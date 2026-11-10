@@ -1,7 +1,10 @@
 package top.honorhook.ui.screen
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,19 +62,34 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
     val store = remember { FileXhsBatchTaskStore(context) }
     // Controller 用独立 SupervisorJob scope：页面离开/重组不掐任务（取消只能由用户显式触发）；
     // Web 端进度更新走 StateFlow，页面重进后从 store 记录恢复展示
-    val controller = remember {
-        XhsBatchController(
-            scope = kotlinx.coroutines.CoroutineScope(
-                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate,
-            ),
-            taskStore = store,
-            appContext = context,
-        )
-    }
+    // Controller 是应用级单例（Holder）+ 前台服务保活（2026-11-11「后台不会继续下载」）：
+    // 页面只是视图层，Service 才是生命周期锚；页面重进从 progress StateFlow / store 记录恢复展示
+    val controller = remember { top.honorhook.ui.xhsbatch.XhsBatchControllerHolder.get(context) }
     var records by remember { mutableStateOf(store.list()) }
+    // 列表实时刷新：运行中任务每篇落一次盘，这里 2s 轮询重读（单文件小 JSON，开销可忽略）
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2000)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { store.list() }
+                .let { if (it != records) records = it }
+        }
+    }
     var showNewTask by remember { mutableStateOf(false) }
     var newUserId by remember { mutableStateOf("") }
     var confirmWithdraw by remember { mutableStateOf(false) }
+    var showLogin by remember { mutableStateOf(false) }
+    // 登录态常驻显示（web_session = 小红书网页登录标志 cookie）；从登录页返回时重查
+    // 登录态三态：null=检测中；不能拿 cookie 名判断（匿名访客也有 web_session，实测误报）
+    var loggedIn by remember { mutableStateOf<Boolean?>(null) }
+    fun refreshLogin() {
+        val cookie = android.webkit.CookieManager.getInstance()
+            .getCookie("https://www.xiaohongshu.com")
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val probe = top.honorhook.ui.xhsbatch.XhsFeedClient.isWebLoggedInBlocking(cookie)
+            loggedIn = probe ?: (cookie?.contains("web_session") == true)
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { refreshLogin() }
     var openRecord by remember { mutableStateOf<XhsBatchTaskRecord?>(null) }
 
     val progress by controller.progress.collectAsState()
@@ -98,11 +119,59 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = bottomInnerPadding + 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // ---- 账户状态卡（登录入口收拢到这里，不再占头部图标位）----
+            item {
+                if (loggedIn == null) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "正在检测登录态…",
+                            fontSize = 13.sp, color = colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        )
+                    }
+                } else if (loggedIn == true) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.foundation.layout.Box(
+                                Modifier.padding(end = 8.dp).size(8.dp).background(
+                                    androidx.compose.ui.graphics.Color(0xFF35C77E),
+                                    androidx.compose.foundation.shape.CircleShape,
+                                ),
+                            )
+                            Text("小红书网页 · 已登录", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                            Text(
+                                "重新登录",
+                                fontSize = 12.sp,
+                                color = colorScheme.primary,
+                                modifier = Modifier
+                                    .clickable { showLogin = true }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("需要登录小红书网页版", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            Text(
+                                "抓取笔记列表与解析小红书号都需要网页登录态；cookie 存在本模块内（外部浏览器登录不共享）",
+                                fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                            TextButton(
+                                text = "登录小红书网页版",
+                                onClick = { showLogin = true },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
             if (records.isEmpty()) {
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "暂无任务\n点右上 + 新建：输入小红书用户 ID，抓取其公开笔记并串行下载图片与视频\n下载目录：Pictures/小红书/<用户ID>",
+                            "暂无任务\n点右上 + 新建：输入小红书号（如 moranmoai00）或用户 ID，抓取其公开笔记并串行下载图片与视频\n下载目录：Pictures/小红书/<用户ID>",
                             fontSize = 13.sp, color = colorScheme.onSurfaceVariantSummary,
                             modifier = Modifier.padding(16.dp),
                         )
@@ -115,17 +184,25 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
                         .fillMaxWidth()
                         .clickable { openRecord = r },
                 ) {
-                    Column(Modifier.padding(14.dp)) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("用户 ${r.userId}", fontWeight = FontWeight.Medium, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                            Text(stateLabel(r.state), fontSize = 12.sp, color = stateColor(r.state))
+                            // 状态胶囊：同色系浅底 + 实色字，比裸文字醒目
+                            val sc = stateColor(r.state)
+                            Text(
+                                stateLabel(r.state),
+                                fontSize = 11.sp,
+                                color = sc,
+                                modifier = Modifier
+                                    .background(sc.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
                             IconButton(onClick = { store.delete(r.taskId); records = store.list() }) {
                                 Icon(Icons.Rounded.Delete, contentDescription = "删除记录")
                             }
                         }
                         Text(
-                            "${r.imagesDone} 图 · ${r.videosDone} 视频 · %.1f MB".format(r.totalBytes / 1048576.0) +
-                                " · 处理 ${r.notesProcessed}/${r.notesFound}" +
+                            "已处理 ${r.notesProcessed}/${r.notesFound} · 图 ${r.imagesDone} · 视频 ${r.videosDone} · %.1f MB".format(r.totalBytes / 1048576.0) +
                                 (if (r.notesFailed > 0) " · 失败 ${r.notesFailed}" else ""),
                             fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
                         )
@@ -146,11 +223,11 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     InputField(
                         query = newUserId,
-                        onQueryChange = { newUserId = it.filter(Char::isDigit) },
+                        onQueryChange = { newUserId = it.filter { c -> c.isLetterOrDigit() || c == '_' } },
                         onSearch = {},
                         expanded = false,
                         onExpandedChange = {},
-                        label = "小红书用户 ID（纯数字）",
+                        label = "小红书号 / 用户 ID",
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
@@ -163,9 +240,23 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
                             val id = newUserId.trim()
                             if (id.isEmpty()) {
                                 Toast.makeText(context, "请输入用户 ID", Toast.LENGTH_SHORT).show()
+                            } else if (!android.os.Environment.isExternalStorageManager()) {
+                                // MANAGE_EXTERNAL_STORAGE 只能跳系统页授权（没有运行时弹窗）
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                            android.net.Uri.parse("package:io.github.coderstory.honorhook"),
+                                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                    Toast.makeText(context, "请授予「所有文件访问」后重新开始", Toast.LENGTH_LONG).show()
+                                }.onFailure {
+                                    Toast.makeText(context, "需要「所有文件访问」权限才能下载", Toast.LENGTH_LONG).show()
+                                }
                             } else {
                                 showNewTask = false
                                 controller.start(id)
+                                top.honorhook.ui.xhsbatch.XhsBatchService.start(context)
                                 records = store.list()
                             }
                         },
@@ -253,6 +344,14 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp) {
             },
         )
     }
+
+    // ---- 网页登录覆盖层（全屏，盖住任务列表）----
+    if (showLogin) {
+        XhsLoginOverlay(topInset = topInset, onClose = {
+            showLogin = false
+            refreshLogin()
+        })
+    }
 }
 
 private fun stateLabel(s: XhsBatchState): String = when (s) {
@@ -272,4 +371,135 @@ private fun stateColor(s: XhsBatchState) = when (s) {
     XhsBatchState.Failed, XhsBatchState.Interrupted -> androidx.compose.ui.graphics.Color(0xFFF2685A)
     XhsBatchState.Running, XhsBatchState.Fetching -> androidx.compose.ui.graphics.Color(0xFF4FA8FF)
     else -> androidx.compose.ui.graphics.Color(0xFF888888)
+}
+
+/**
+ * 网页登录覆盖层：在本模块进程内开可见 WebView 登录小红书网页版。
+ * WebView cookie 存本 App 的 CookieManager（按 App 沙箱隔离），登录一次后
+ * 离屏抓取（XhsUserFeedClient / XhsBatchController.fetchHtmlDirect）即带登录态。
+ */
+// 诊断用文件日志：本 ROM logcat 丢弃 App 自有 tag，只能写文件取证
+private object XhsLoginLog {
+    private val f = java.io.File(
+        android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+        "xhs_login_debug.log",
+    )
+    fun w(msg: String) {
+        try {
+            f.appendText("${System.currentTimeMillis()} $msg\n")
+        } catch (_: Throwable) {
+        }
+    }
+}
+
+@Composable
+private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
+    // 不透明底：覆盖层必须完全盖住下面的任务列表，否则两层内容叠印（实测踩坑）
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(colorScheme.background)
+            .padding(top = topInset + 4.dp)
+            .padding(horizontal = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("登录小红书网页版", fontWeight = FontWeight.Medium, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClose) {
+                Icon(Icons.Rounded.Close, contentDescription = "关闭")
+            }
+        }
+        // 登录态检测：探活 /user/self（cookie 名判断会误报，匿名访客也有 web_session）
+        val loggedIn = remember {
+            top.honorhook.ui.xhsbatch.XhsFeedClient.isWebLoggedInBlocking(
+                android.webkit.CookieManager.getInstance().getCookie("https://www.xiaohongshu.com"),
+            ) ?: (android.webkit.CookieManager.getInstance()
+                .getCookie("https://www.xiaohongshu.com")?.contains("web_session") == true)
+        }
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            val sc = if (loggedIn) androidx.compose.ui.graphics.Color(0xFF35C77E) else colorScheme.onSurfaceVariantSummary
+            Text(
+                if (loggedIn) "已登录 · 复用 cookie" else "未登录",
+                fontSize = 11.sp,
+                color = sc,
+                modifier = Modifier
+                    .background(sc.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+            Text(
+                if (loggedIn) "扫码可刷新登录态；完成后点右上关闭" else "扫码或手机号登录；完成后点右上关闭",
+                fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        // AndroidView 常驻组合：登录期间 WebView 必须真实挂在视图树上才能渲染/执行 JS
+        androidx.compose.runtime.SideEffect {
+            XhsLoginLog.w("overlay composed")
+        }
+        androidx.compose.ui.viewinterop.AndroidView(
+            modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+            factory = { ctx ->
+                XhsLoginLog.w("factory: WebView created")
+                android.webkit.WebView(ctx).apply {
+                    // 软件渲染层：硬件合成下 H5 视频层 + 荣耀 VRR 变帧率会让 WebView 表面
+                    // 在「完整渲染↔纯白」间闪烁（2026-11-10 连拍实帧）；登录页一次性场景可接受
+                    setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    // 桌面 UA（用户要求：PC 版登录页才有完整登录方式）。之前怀疑桌面 UA 导致
+                    // 刷新循环，实锤是 http 明文跳转被禁（见下方 https 升级），不是 UA。
+                    settings.userAgentString =
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    // 钉死字号：useWideViewPort 下 WebView 的 font boosting 会把文字放大数倍
+                    //（真机实测整页巨型字），textZoom=100 关掉
+                    settings.textZoom = 100
+                    // 禁 Force Dark：荣耀 ROM 深色模式下 HwForceDarkManager 会对 WebView 反复
+                    // 反色重绘（实测 isViewAllowedForceDark true↔false 翻转、整页闪烁）
+                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                        settings.setAlgorithmicDarkeningAllowed(false)
+                    }
+                    @Suppress("DEPRECATION")
+                    if (android.os.Build.VERSION.SDK_INT >= 29) {
+                        settings.forceDark = android.webkit.WebSettings.FORCE_DARK_OFF
+                    }
+                    setBackgroundColor(android.graphics.Color.WHITE)
+                    // CookieManager 自动持久化到本 App 数据目录，无需手动同步
+                    // 拦外部跳转：小红书页面会发 intent:// 想唤起自家 App，
+                    // 不拦就会落到默认浏览器（实测弹 Edge）；http(s) 一律留在内置 WebView
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: android.webkit.WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                        ): Boolean {
+                            val url = request?.url?.toString() ?: return false
+                            XhsLoginLog.w("override: $url")
+                            val scheme = request.url.scheme ?: return false
+                            // 明文 http 一律升级 https 加载（targetSdk 28+ 禁 cleartext，
+                            // 不升级会 ERR_CLEARTEXT_NOT_PERMITTED → 页面反复重试 = 闪烁）
+                            if (scheme == "http") {
+                                view?.loadUrl(url.replaceFirst("http://", "https://"))
+                                return true
+                            }
+                            return scheme != "https"
+                        }
+
+                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                            XhsLoginLog.w("finished: $url")
+                        }
+
+                        override fun doUpdateVisitedHistory(view: android.webkit.WebView?, url: String?, isReload: Boolean) {
+                            XhsLoginLog.w("history: $url reload=$isReload")
+                        }
+
+                        override fun onReceivedError(view: android.webkit.WebView?, req: android.webkit.WebResourceRequest?, err: android.webkit.WebResourceError?) {
+                            XhsLoginLog.w("error: ${req?.url} code=${err?.errorCode} desc=${err?.description}")
+                        }
+                    }
+                    loadUrl("https://www.xiaohongshu.com")
+                }
+            },
+        )
+    }
 }

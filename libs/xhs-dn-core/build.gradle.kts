@@ -23,6 +23,8 @@ val upstreamWhitelist = listOf(
     "com/neoruaa/xhsdn/data/storage/StoredMediaRef.kt",
     "com/neoruaa/xhsdn/data/xhs/XhsContentRepository.kt",
     "com/neoruaa/xhsdn/data/xhs/XhsNoteParser.kt",
+    // 上游 bc810a6 起 XhsNoteParser 引用 xhsText（定义在此文件）——不加则解析链编译失败
+    "com/neoruaa/xhsdn/data/xhs/XhsAuthorProfileResolver.kt",
     "com/neoruaa/xhsdn/data/xhs/XhsUrlParser.kt",
     "com/neoruaa/xhsdn/domain/download/DownloadContracts.kt",
 )
@@ -97,7 +99,10 @@ dependencies {
     // - kotlinx-serialization-core：ResolvedNote/StoredMediaRef 的 @Serializable 注解（仅注解）。
     // - kotlinx-coroutines：挂起函数与 Dispatchers。
     // compileOnly 不传递给消费方 ⇒ app 模块必须自己声明同样三条（见 app/app/build.gradle.kts）。
-    compileOnly("com.squareup.okhttp3:okhttp:5.5.0")
+    // 2026-11-11 改 implementation：上游 bc810a6 的 XhsAuthorProfileResolver 在运行期用 okhttp3.HttpUrl
+    // （resolve 直连路径真实加载）⇒ compileOnly+R8 剥离导致 NoClassDefFoundError（xhs_login_debug.log 实锤）。
+    // 打包体积增量约 0.8MB（R8 只保留可达类）。app:compileOnly 行同步降级为注释说明。
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
     compileOnly("org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3")
     compileOnly(libs.kotlinx.coroutines.core)
 }
