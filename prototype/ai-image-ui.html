@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<!-- PROTOTYPE (throwaway) — AI 图像工具重构 UI demo，单文件双击即开。
+     问题：「图优先 + 勾选选中/点按预览 + 底部操作区 + 会话内结果列表」该长什么样？
+     三个结构不同的变体，?variant=A|B|C 切换，浮条 + ←/→ 方向键循环。
+     变体 A：网格 + 底部常驻操作条；B：网格/队列上下分屏；C：底部展开式工作表。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 图像工具 · UI 原型</title>
+<style>
+  :root { --bg:#f5f5f7; --card:#fff; --primary:#5b7cff; --txt:#222; --sub:#8a8a90; --ok:#34a853; --err:#e5484d; }
+  * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
+  body { background:#333; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; display:flex; justify-content:center; min-height:100vh; }
+  .phone { width:390px; height:780px; background:var(--bg); border-radius:28px; margin:24px; overflow:hidden; position:relative; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  header { padding:14px 16px 8px; display:flex; align-items:center; gap:8px; }
+  header h1 { font-size:17px; font-weight:600; flex:1; }
+  .src { font-size:12px; color:var(--sub); background:var(--card); padding:4px 10px; border-radius:12px; border:1px solid #e5e5ea; }
+  .grid { flex:1; overflow-y:auto; padding:4px 10px 10px; }
+  .cells { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .cell { position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; cursor:pointer; }
+  .ph { position:absolute; inset:0; display:flex; align-items:flex-end; padding:4px; font-size:9px; color:#fffcc; }
+  .badge { position:absolute; top:5px; right:5px; width:18px; height:18px; border-radius:50%; border:2px solid #fff; background:#0006; }
+  .cell.sel .badge { background:var(--primary); }
+  .cell.sel::after { content:""; position:absolute; inset:0; box-shadow:inset 0 0 0 2.5px var(--primary); border-radius:10px; }
+  .cap { font-size:10px; position:absolute; top:5px; left:5px; background:#0007; color:#fff; padding:1px 5px; border-radius:6px; }
+  /* chips / buttons */
+  .chip { font-size:12px; padding:6px 12px; border-radius:9px; background:var(--card); color:var(--txt); border:1px solid #e5e5ea; cursor:pointer; white-space:nowrap; }
+  .chip.on { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .chiprow { display:flex; gap:6px; overflow-x:auto; padding:6px 12px; }
+  .btn { border:none; border-radius:12px; padding:12px; font-size:15px; font-weight:600; cursor:pointer; background:var(--primary); color:#fff; }
+  .btn:disabled { background:#c5cbef; }
+  .btn.ghost { background:#e9e9ee; color:var(--txt); }
+  /* bottom action bar (A) */
+  .barA { background:var(--card); border-top:1px solid #e8e8ec; padding:10px 12px calc(12px + env(safe-area-inset-bottom)); }
+  /* split (B) */
+  .splitB { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  .splitB .grid { flex:6; }
+  .queueB { flex:4; background:var(--card); border-top:1px solid #e8e8ec; display:flex; flex-direction:column; }
+  .queueB h2 { font-size:13px; padding:8px 12px 2px; color:var(--sub); font-weight:600; }
+  .queueB .rows { flex:1; overflow-y:auto; padding:4px 12px; }
+  /* sheet (C) */
+  .sheetC { background:var(--card); border-radius:16px 16px 0 0; box-shadow:0 -6px 24px #0002; padding:12px 14px calc(14px + env(safe-area-inset-bottom)); transform:translateY(75%); transition:transform .25s; position:relative; z-index:5; }
+  .sheetC.up { transform:translateY(0); }
+  .grab { width:36px; height:4px; border-radius:2px; background:#d5d5da; margin:0 auto 10px; }
+  /* results rows */
+  .row { display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid #f0f0f3; font-size:12px; }
+  .row .thumb { width:34px; height:34px; border-radius:7px; flex:none; }
+  .row .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .st { font-size:11px; padding:2px 8px; border-radius:8px; }
+  .st.run { background:#eef1ff; color:var(--primary); }
+  .st.ok  { background:#e9f7ee; color:var(--ok); }
+  .st.err { background:#fdecec; color:var(--err); }
+  .st.wait{ background:#f0f0f3; color:var(--sub); }
+  .retry { font-size:11px; color:var(--primary); cursor:pointer; }
+  /* preview overlay */
+  .ov { position:absolute; inset:0; background:#111e; z-index:20; display:none; align-items:center; justify-content:center; flex-direction:column; gap:12px; }
+  .ov.show { display:flex; }
+  .ov .big { width:78%; aspect-ratio:1; border-radius:14px; }
+  .ov .meta { color:#fff; font-size:13px; }
+  .ov .close { background:#fff3; color:#fff; border:none; border-radius:10px; padding:8px 20px; }
+  /* toast */
+  .toast { position:absolute; bottom:110px; left:50%; transform:translateX(-50%); background:#000c; color:#fff; font-size:12px; padding:8px 14px; border-radius:10px; z-index:30; display:none; }
+  /* prototype switcher */
+  .pbar { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:#111; color:#fff; border-radius:999px; display:flex; align-items:center; gap:10px; padding:8px 14px; z-index:99; box-shadow:0 4px 16px #0007; font-size:13px; }
+  .pbar button { background:none; border:none; color:#fff; font-size:16px; cursor:pointer; }
+  .hint { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#ffe9a8; color:#6b5300; font-size:12px; padding:5px 12px; border-radius:8px; z-index:99; }
+</style>
+</head>
+<body>
+<div class="hint">PROTOTYPE · 三个 UI 变体，←/→ 或浮条切换</div>
+<div class="phone">
+  <header>
+    <h1>AI 图像工具</h1>
+    <span class="src" onclick="toast('来源：Pictures/小红书 → 点击切换目录/picker')">📁 小红书 ▾</span>
+  </header>
+  <div class="caprow" id="caprow"></div>
+  <div id="main"></div>
+  <div class="ov" id="ov" onclick="this.classList.remove('show')">
+    <div class="big" id="ovimg"></div>
+    <div class="meta" id="ovmeta"></div>
+    <button class="close">关闭预览</button>
+  </div>
+  <div class="toast" id="toast"></div>
+</div>
+<div class="pbar">
+  <button onclick="cycle(-1)">←</button>
+  <span id="plabel"></span>
+  <button onclick="cycle(1)">→</button>
+</div>
+<script>
+/* ---------- 假数据：渐变占位图 ---------- */
+const GRADS = ["linear-gradient(135deg,#ff9a9e,#fecfef)","linear-gradient(135deg,#a18cd1,#fbc2eb)","linear-gradient(135deg,#84fab0,#8fd3f4)","linear-gradient(135deg,#ffecd2,#fcb69f)","linear-gradient(135deg,#5ee7df,#b490ca)","linear-gradient(135deg,#f6d365,#fda085)","linear-gradient(135deg,#66a6ff,#89f7fe)","linear-gradient(135deg,#f093fb,#f5576c)","linear-gradient(135deg,#4facfe,#00f2fe)"];
+const IMGS = GRADS.map((g,i)=>({id:i, name:`IMG_2026${String(1101+i).padStart(4,"0")}_0${i}.jpg`, grad:g, kb:800+i*173}));
+let sel = new Set([0,2]);
+let cap = 0;                 // 0=AI超清 1=AI扩图
+let mode = 0, ratio = 0;     // 超清模式 / 扩图比例
+let results = [];            // {img, capLabel, st: wait|run|ok|err, out}
+let running = false;
+
+/* ---------- 状态渲染 ---------- */
+function render(){
+  document.getElementById("caprow").innerHTML = caprowHtml();
+  const v = variant();
+  const main = document.getElementById("main");
+  main.style.flex = "1"; main.style.display = "flex"; main.style.flexDirection = "column"; main.style.overflow = "hidden";
+  main.innerHTML = v==="A" ? htmlA() : v==="B" ? htmlB() : htmlC();
+  bind();
+  document.getElementById("plabel").textContent = v + " · " + {A:"网格+底部操作条",B:"网格/队列分屏",C:"展开式工作表"}[v];
+  document.querySelector(".caprow").innerHTML = caprowHtml();
+}
+function caprowHtml(){
+  const chips = ["AI 超清","AI 扩图"].map((t,i)=>`<span class="chip ${cap===i?"on":""}" data-cap="${i}">${t}</span>`).join("");
+  return `<div class="chiprow">${chips}</div>`;
+}
+function gridHtml(){
+  return `<div class="grid"><div class="cells">` + IMGS.map(f=>`
+    <div class="cell ${sel.has(f.id)?"sel":""}" data-id="${f.id}">
+      <div class="ph" style="background:${f.grad}">${f.kb} KB</div>
+      ${results.some(r=>r.img.id===f.id&&r.st==="ok")?`<span class="cap">已出图</span>`:""}
+      <span class="badge"></span>
+    </div>`).join("") + `</div></div>`;
+}
+function rowsHtml(){
+  if(!results.length) return `<div style="color:var(--sub);font-size:12px;padding:14px 0">暂无处理记录——勾选图片后点「开始处理」</div>`;
+  return results.map((r,i)=>`<div class="row">
+    <div class="thumb" style="background:${r.img.grad}"></div>
+    <div class="nm">${r.img.name}<br><span style="color:var(--sub)">${r.capLabel} → ${r.out}</span></div>
+    <span class="st ${r.st}">${{wait:"排队",run:"处理中…",ok:"完成",err:"失败"}[r.st]}</span>
+    ${r.st==="err"?`<span class="retry" data-retry="${i}">重试</span>`:""}
+  </div>`).join("");
+}
+function paramsHtml(){
+  return cap===0
+    ? `<div class="chiprow">${["通用","人像"].map((t,i)=>`<span class="chip ${mode===i?"on":""}" data-mode="${i}">${t}增强</span>`).join("")}<span style="font-size:10px;color:var(--sub);align-self:center">倍率引擎定死</span></div>`
+    : `<div class="chiprow">${["1:1","16:9","9:16","壁纸"].map((t,i)=>`<span class="chip ${ratio===i?"on":""}" data-ratio="${i}">${t}</span>`).join("")}<span style="font-size:10px;color:var(--sub);align-self:center">居中扩展</span></div>`;
+}
+function runBtn(){ const n=sel.size; return `<button class="btn" data-run ${n===0||running?"disabled":""}>${running?"处理中…":`开始处理（已选 ${n} 张）`}</button>`; }
+
+/* ---------- 变体 A：网格 + 常驻底部操作条 ---------- */
+function htmlA(){
+  return `${gridHtml()}
+  <div class="barA">
+    ${paramsHtml()}
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn ghost" style="flex:1" onclick="toast('结果列表：见变体 B / C（A 变体用 toast+对话框）')">结果</button>
+      ${runBtn()}
+    </div>
+  </div>`;
+}
+/* ---------- 变体 B：网格 / 队列上下分屏 ---------- */
+function htmlB(){
+  return `<div class="splitB">${gridHtml()}
+    <div class="queueB"><h2>处理队列</h2><div class="rows">${rowsHtml()}</div></div>
+    <div class="barA" style="border-top:1px solid #e8e8ec">${paramsHtml()}<div style="margin-top:8px">${runBtn()}</div></div>
+  </div>`;
+}
+/* ---------- 变体 C：展开式底部工作表 ---------- */
+function htmlC(){
+  return `${gridHtml()}
+  <div class="sheetC up" id="sheet">
+    <div class="grab"></div>
+    <div style="display:flex;align-items:center;margin-bottom:6px"><b style="font-size:14px;flex:1">已选 ${sel.size} 张</b><span style="font-size:12px;color:var(--primary);cursor:pointer" data-sheet>${running?"收起":"配置并处理 ▴"}</span></div>
+    <div class="rows" style="max-height:150px;overflow-y:auto">${rowsHtml()}</div>
+    ${paramsHtml()}
+    <div style="margin-top:10px">${runBtn()}</div>
+  </div>`;
+}
+
+/* ---------- 交互 ---------- */
+function bind(){
+  document.querySelectorAll("[data-cap]").forEach(el=>el.onclick=()=>{cap=+el.dataset.cap; render();});
+  document.querySelectorAll("[data-mode]").forEach(el=>el.onclick=()=>{mode=+el.dataset.mode; render();});
+  document.querySelectorAll("[data-ratio]").forEach(el=>el.onclick=()=>{ratio=+el.dataset.ratio; render();});
+  document.querySelectorAll("[data-retry]").forEach(el=>el.onclick=e=>{e.stopPropagation(); retryOne(+el.dataset.retry);});
+  document.querySelectorAll(".cell").forEach(el=>{
+    el.onclick=()=>preview(+el.dataset.id);
+    // 勾选：角标本身点击 = 选中/取消
+    el.querySelector(".badge").onclick=e=>{e.stopPropagation(); toggleSel(+el.dataset.id);};
+  });
+  const r=document.querySelector("[data-run]"); if(r) r.onclick=run;
+  const s=document.querySelector("[data-sheet]"); if(s) s.onclick=()=>document.getElementById("sheet").classList.toggle("up");
+}
+function toggleSel(id){ sel.has(id)?sel.delete(id):sel.add(id); render(); }
+function preview(id){
+  const f=IMGS[id];
+  document.getElementById("ovimg").style.background=f.grad;
+  document.getElementById("ovmeta").textContent=f.name+" · "+f.kb+" KB";
+  const ov=document.getElementById("ov"); ov.classList.add("show");
+  // 预览里也能勾选
+  ov.querySelector(".close").onclick=e=>{e.stopPropagation(); ov.classList.remove("show");};
+}
+function toast(t){ const el=document.getElementById("toast"); el.textContent=t; el.style.display="block"; setTimeout(()=>el.style.display="none",1800); }
+
+/* ---------- 模拟云端管线（串行队列） ---------- */
+function run(){
+  if(running||!sel.size) return;
+  running=true;
+  const capLabel = cap===0 ? `超清·${["通用","人像"][mode]}` : `扩图·${["1:1","16:9","9:16","壁纸"][ratio]}`;
+  [...sel].forEach(id=>results.push({img:IMGS[id], capLabel, st:"wait", out:`同目录 -ai`}));
+  sel.clear(); render();
+  pump();
+}
+function pump(){
+  const cur=results.find(r=>r.st==="wait");
+  if(!cur){ running=false; render(); toast("队列处理完毕"); return; }
+  cur.st="run"; render();
+  setTimeout(()=>{
+    // 每 4 张模拟 1 张失败，演示失败可见/可重试
+    cur.st = Math.random()<0.25 ? "err" : "ok";
+    if(cur.st==="ok") cur.out = cur.img.name.replace(".jpg","-ai.jpg");
+    render(); pump();
+  }, 900+Math.random()*1200);
+}
+function retryOne(i){ results[i].st="wait"; if(!running){running=true; pump();} }
+
+/* ---------- 变体切换 ---------- */
+function variant(){ const v=new URLSearchParams(location.search).get("variant"); return ["A","B","C"].includes(v)?v:"A"; }
+function cycle(d){
+  const vs=["A","B","C"]; const i=(vs.indexOf(variant())+d+3)%3;
+  history.replaceState(null,"","?variant="+vs[i]); render();
+}
+addEventListener("keydown",e=>{
+  if(["INPUT","TEXTAREA"].some(t=>document.activeElement?.matches(t))) return;
+  if(e.key==="ArrowLeft")cycle(-1); if(e.key==="ArrowRight")cycle(1);
+});
+render();
+</script>
+</body>
+</html>
