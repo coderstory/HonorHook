@@ -159,4 +159,6 @@ dependencies {
     testImplementation(libs.junit)
     // UpdateChecker 网络测试用真实 JSON 解析器（Android 运行时自带 org.json，JVM stub 会抛 Stub!）
     testImplementation("org.json:json:20240303")
+    // XhsBatchControllerTest 用虚拟时间跑串行节奏（真实 jitter 是秒级，不能真等）
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
