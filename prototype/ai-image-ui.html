@@ -215,10 +215,13 @@ function pump(){
 function retryOne(i){ results[i].st="wait"; if(!running){running=true; pump();} }
 
 /* ---------- 变体切换 ---------- */
-function variant(){ const v=new URLSearchParams(location.search).get("variant"); return ["A","B","C"].includes(v)?v:"A"; }
+let curVariant = ["A","B","C"].includes(new URLSearchParams(location.search).get("variant")) ? new URLSearchParams(location.search).get("variant") : "A";
+function variant(){ return curVariant; }
 function cycle(d){
-  const vs=["A","B","C"]; const i=(vs.indexOf(variant())+d+3)%3;
-  history.replaceState(null,"","?variant="+vs[i]); render();
+  const vs=["A","B","C"]; const i=(vs.indexOf(curVariant)+d+3)%3;
+  curVariant=vs[i];
+  try{ history.replaceState(null,"","?variant="+vs[i]); }catch(_){ /* file:// 下部分 WebView 禁 replaceState，忽略 */ }
+  render();
 }
 addEventListener("keydown",e=>{
   if(["INPUT","TEXTAREA"].some(t=>document.activeElement?.matches(t))) return;
