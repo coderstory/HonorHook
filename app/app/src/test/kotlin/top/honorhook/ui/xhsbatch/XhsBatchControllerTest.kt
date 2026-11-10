@@ -92,19 +92,20 @@ class XhsBatchControllerTest {
     private fun detailUrl(id: String) =
         "https://www.xiaohongshu.com/explore/$id?xsec_token=token-$id&xsec_source=pc_user"
 
-    /** 返回 (controller, rootOverride)，避免反射读私有缝。 */
+    /** 返回 (controller, rootOverride)，避免反射读私有缝。[root] 传入时复用目录（模拟进程重启后同一磁盘状态）。 */
     private fun TestScope.makeController(
         store: FakeStore,
         feed: XhsFeedClient,
         downloader: XhsDownloader,
         resolver: XhsBatchController.NoteResolver,
         notesByUrl: Map<String, ResolvedNote> = emptyMap(),
+        root: File? = null,
     ): Pair<XhsBatchController, File> {
         // 压真实 delay：delay 在 IO 上下文走真实时间，秒级节奏会拖死虚拟时间等待
         XhsBatchPacing.NOTE_DELAY_MIN_MS = 5; XhsBatchPacing.NOTE_DELAY_MAX_MS = 10
         XhsBatchPacing.MEDIA_DELAY_MIN_MS = 5; XhsBatchPacing.MEDIA_DELAY_MAX_MS = 10
         if (resolver is FakeResolver) notesByUrl.forEach { (url, n) -> resolver.byUrl[url] = n }
-        val root = tmp.newFolder()
+        val rootDir = root ?: tmp.newFolder()
         val c = XhsBatchController(
             scope = backgroundScope,
             taskStore = store,
@@ -113,9 +114,9 @@ class XhsBatchControllerTest {
             appContext = null, // 只透传 feedClient，fake 不用
             random = Random(0),
             noteResolver = resolver,
-            rootOverride = root,
+            rootOverride = rootDir,
         )
-        return c to root
+        return c to rootDir
     }
 
     private fun userDir(root: File) = File(root, "1504334302") // 2026-11-11 目录去 xhs 层
@@ -294,7 +295,7 @@ class XhsBatchControllerTest {
         assertEquals(XhsBatchState.Queued, store.list().last { it.userId == "2000000001" }.state)
         var guard = 0
         while (store.list().last { it.userId == "2000000001" }.state != XhsBatchState.Done) {
-            if (guard % 10 == 0) java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("Q guard=$guard B=${store.list().last { it.userId == "2000000001" }.state} prog=${c.progress.value.state}/${c.progress.value.userId}/${c.progress.value.currentAction} q=${c.queuedUserIds()} dl=${dl.downloads}\n")
+            if (guard % 10 == 0) java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("Q guard=$guard B=${store.list().last { it.userId == "2000000001" }.state} prog=${c.progress.value.state}/${c.progress.value.userId}/${c.progress.value.currentAction} q=${c.queuedUserIds()} dl=${dl.downloads.toList()}\n")
             delay(100); check(++guard < 200000) { "second task never finished" }
         }
         val rec2 = store.list().last { it.userId == "2000000001" }
@@ -330,7 +331,7 @@ class XhsBatchControllerTest {
         while (c.progress.value.state != XhsBatchState.Done) {
             if (c.progress.value.state.name + c.progress.value.currentAction != last) {
                 last = c.progress.value.state.name + c.progress.value.currentAction
-                java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("DBG state=${c.progress.value.state} action=${c.progress.value.currentAction} fetch=${feed.fetchCalls} dl=${dl.downloads}\n")
+                java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("DBG state=${c.progress.value.state} action=${c.progress.value.currentAction} fetch=${feed.fetchCalls} dl=${dl.downloads.toList()}\n")
             }
             delay(100)
         }
@@ -412,5 +413,83 @@ class XhsBatchControllerTest {
         assertEquals(0, feed.fetchCalls)
         assertEquals(listOf("n2-0.jpg"), dl.downloads)
         assertEquals(1, resolver.resolveCalls)
+    }
+
+    // ---- 2026-11-11 验收场景补齐：大量数据 + 进程被杀后恢复 ----
+
+    /** 大量数据：40 篇全量跑完，串行顺序与计数一致（有大量数据的场景）。 */
+    @Test
+    fun `large batch of 40 notes completes fully and in order`() = runTest {
+        val store = FakeStore()
+        val ids = (1..40).map { "n$it" }
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        val notesByUrl = ids.associate { detailUrl(it) to note(it) }
+        val (c, _) = makeController(store, FakeFeed(ids.map { feed(it) }), dl, resolver, notesByUrl = notesByUrl)
+        c.start("1504334302")
+        var guard = 0
+        while (c.progress.value.state != XhsBatchState.Done) { delay(100); check(++guard < 200000) { "large batch never finished: ${c.progress.value}" } }
+        assertEquals(40, c.progress.value.notesFound)
+        assertEquals(40, c.progress.value.notesProcessed)
+        assertEquals(40, c.progress.value.imagesDone)
+        assertEquals(0, c.progress.value.notesFailed)
+        assertEquals(40, dl.downloads.size)
+        // 串行判据：首篇 n1、末篇 n40，且严格按清单序
+        assertEquals("n1-0.jpg", dl.downloads.first())
+        assertEquals("n40-0.jpg", dl.downloads.last())
+        assertEquals((1..40).map { "n$it-0.jpg" }, dl.downloads)
+    }
+
+    /** 进程被杀后恢复：controller1 下载 2 篇后模拟进程死亡（记录残留 Running→Holder 归一化 Interrupted），
+     *  controller2 从同一 store + 同一磁盘目录恢复——不重抓、快进到游标、剩余 3 篇下载到 Done。 */
+    @Test
+    fun `process kill then new controller resumes from persisted cursor`() = runTest {
+        val store = FakeStore()
+        val ids = listOf("n1", "n2", "n3", "n4", "n5")
+        val notesByUrl = ids.associate { detailUrl(it) to note(it) }
+        val dl1 = FakeDownloader()
+        val gate = CompletableDeferred<Unit>()
+        // 卡住第 3 篇解析（n1/n2 已落盘），模拟"下载过程中进程被杀"
+        val resolver1 = FakeResolver(resolveHook = { call -> if (call == 3) gate.await() })
+        val (_, root) = makeController(store, FakeFeed(emptyList()), dl1, resolver1, notesByUrl = notesByUrl)
+        val feed1 = FakeFeed(ids.map { feed(it) })
+        val c1 = XhsBatchController(
+            scope = backgroundScope, taskStore = store, feedClient = feed1, downloader = dl1,
+            appContext = null, random = Random(0), noteResolver = resolver1, rootOverride = root,
+        )
+        c1.start("1504334302")
+        // 等游标 2 落盘（下载完成 ≠ persist 完成，等记录本身才无竞态）
+        while ((store.records.values.lastOrNull { it.userId == "1504334302" }?.nextIndex ?: 0) < 2) delay(10)
+        c1.cancel() // kill 前的取消落 Cancelled（RESUMABLE）；gate 释放让协程退场
+        gate.complete(Unit)
+        while (c1.isRunning()) delay(10)
+        // 模拟 Holder 归一化：下次启动把残留态落 Interrupted（清单与游标必须已持久化）
+        val killed = store.records.values.last { it.userId == "1504334302" }
+        store.upsert(killed.copy(state = XhsBatchState.Interrupted))
+        assertEquals(5, killed.notesFound)
+        assertEquals(listOf("n1|token-n1", "n2|token-n2", "n3|token-n3", "n4|token-n4", "n5|token-n5"), killed.notes)
+        assertEquals(2, killed.nextIndex)
+        assertTrue(killed.notesProcessed >= 2)
+
+        // "重启进程"：全新 controller + 全新 feed/downloader，同一 store、同一磁盘目录
+        val feed2 = FakeFeed(ids.map { feed(it) })
+        val dl2 = FakeDownloader()
+        val resolver2 = FakeResolver()
+        notesByUrl.forEach { (u, n) -> resolver2.byUrl[u] = n }
+        val c2 = XhsBatchController(
+            scope = backgroundScope, taskStore = store, feedClient = feed2, downloader = dl2,
+            appContext = null, random = Random(0), noteResolver = resolver2, rootOverride = root,
+        )
+        c2.start("1504334302")
+        var guard = 0
+        while (c2.progress.value.state != XhsBatchState.Done) { delay(100); check(++guard < 200000) { "resume never finished: ${c2.progress.value}" } }
+        // 真恢复判据：不重抓列表；只下载剩余 3 篇；旧文件去重（n1/n2 不重下）
+        assertEquals(0, feed2.fetchCalls)
+        assertEquals(listOf("n3-0.jpg", "n4-0.jpg", "n5-0.jpg"), dl2.downloads)
+        assertEquals(5, c2.progress.value.notesFound)
+        assertEquals(5, c2.progress.value.notesProcessed)
+        // 磁盘最终状态：5 个文件齐全
+        assertEquals(5, userDir(root).listFiles()!!.size)
+        assertEquals(XhsBatchState.Done, store.records.values.last { it.userId == "1504334302" }.state)
     }
 }

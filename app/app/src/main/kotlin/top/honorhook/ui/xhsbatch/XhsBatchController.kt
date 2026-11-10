@@ -116,6 +116,7 @@ class XhsBatchController(
     // 待执行队列（2026-11-11 用户裁决）：运行中允许添加任务，新任务排队，当前结束自动开跑
     // （同一时刻仍只有一个任务在跑，不破坏串行防风控）
     private val pendingQueue = ArrayDeque<String>()
+    @Volatile private var currentCursor = 0
     fun hasQueued(): Boolean = pendingQueue.isNotEmpty()
     fun queuedUserIds(): List<String> = pendingQueue.toList()
 
@@ -245,6 +246,7 @@ class XhsBatchController(
         val dir = downloaderRoot().resolve(id)
         activeDir = dir
         init(taskStore.list().lastOrNull { it.userId == id })
+        currentCursor = resumeIndex
         persist(XhsBatchState.Fetching)
         // 不得先 launch 再赋 job：scope 用 Main.immediate，主线程 launch 体立即同步执行，
         // 协程内读到 job==null → 判活失败静默 return（2026-11-11 恢复卡死 0/210 的根因）。
@@ -627,7 +629,11 @@ class XhsBatchController(
         }
     }
 
-    private fun persist(state: XhsBatchState, nextIndex: Int = 0) {
+    private fun persist(state: XhsBatchState, nextIndex: Int = -1) {
+        // 游标记账：cancel/pause 等落盘时不知道循环位置，用 currentCursor 保住续传快进点
+        //（曾因缺省 0 覆盖游标，取消后「继续」从头重扫——2026-11-11 单测实锤）
+        if (nextIndex >= 0) currentCursor = nextIndex
+        val cursor = if (nextIndex >= 0) nextIndex else currentCursor
         val p = _progress.value
         val id = activeRecordId ?: return
         val dirPath = activeDir?.path ?: ""
@@ -641,7 +647,7 @@ class XhsBatchController(
                 notesFound = p.notesFound, notesProcessed = p.notesProcessed, notesFailed = p.notesFailed,
                 imagesDone = p.imagesDone, videosDone = p.videosDone, totalBytes = p.totalBytes,
                 dirPath = dirPath,
-                notes = notes, nextIndex = nextIndex,
+                notes = notes, nextIndex = cursor,
                 failedNotes = activeFailedNotes.toList(),
             ),
         )
