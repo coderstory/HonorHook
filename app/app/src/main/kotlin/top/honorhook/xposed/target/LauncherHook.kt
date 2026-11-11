@@ -24,10 +24,12 @@ import java.util.concurrent.CountDownLatch
  * **荣耀 ClearBox 清后台链路（N1/N2）**：垃圾桶按钮（`clear_all_recents_image_button`）的唯一
  * listener 是 `HnRecentsClearBox.onClick(View)`（:406，onFinishInflate :366-374 绑定）；清后台唯一
  * 收口是 shlib 的 `ActivityManagerWrapperEx.removeHwAllTask()`（:124，`RemoveTaskThread` →
- * `HwRecentsTaskUtils.sendRemoveAllTask` 广播系统管家）。quickstep 的 `dismissAllTasks`/`startHome`
+ * `HwRecentsTaskUtils.sendRemoveAllTask` 广播系统管家）；**18.0.0.331 起 shlib 该方法已删**，
+ * 收口改到 quickstep `SystemUiProxy.removeHnAllTask()`（唯一调用方仍是 RemoveTaskThread，
+ * LauncherMap_18_0_0_234 N2 已随版更新）。quickstep 的 `dismissAllTasks`/`startHome`
  * 与 shlib `removeAllRecentTasks` 在荣耀上永不触发——旧 K1/K2/K3 三点已删（真机 dump +
  * 反编译直证，docs/reverse/launcher-recents-keepcurrent.md §一）。N1 在 onClick 捕获保留集
- * （running task）与移除集（其余卡片 ids + Task 对象）；N2 在 removeHwAllTask 整条替换：
+ * （running task）与移除集（其余卡片 ids + Task 对象）；N2 在收口（331 起 removeHnAllTask）整条替换：
  * A=ATMS 逐个 `removeTask`（单卡划走同 API）/ B=逐个 `sendRemoveTaskToSystemManager` 广播管家，
  * A/B 互斥、同开 A 优先。无论成败都要反射 countDown `HnRecentsClearBox.sCountDownLatch`
  * （public static，:158）——A/B 都产生不了管家那条 REPLY_TRIM_ALL 回执（原生唯一 countDown 在
@@ -122,10 +124,10 @@ object LauncherHook : TargetHook {
                     }
                     chain.proceed()
                 }
-                // N2 全杀收口替换：`ActivityManagerWrapperEx.removeHwAllTask()`（:124，public 无参 void）
-                // 是荣耀清后台唯一收口（RemoveTaskThread → sendRemoveAllTask 广播系统管家）。
+                // N2 全杀收口替换：`SystemUiProxy.removeHnAllTask()`（18.0.0.331 起；旧收口
+                // shlib removeHwAllTask 已删，见数据表 N2 注释）。
                 // flag 有效时整条替换，不 proceed；无效（未捕获/已超时/开关全关）透传原生全杀。
-                // 消费即全清：ClearBox 链路里 removeHwAllTask 是单点同步收口（旧 quickstep 链路的
+                // 消费即全清：ClearBox 链路里 removeHnAllTask 是单点同步收口（旧 quickstep 链路的
                 // K2/K3 线程交错问题在此不存在），kill/keep 集先接局部变量再置空字段——postHotReturn
                 // 是 600ms 后的主线程动作，期间任何再入不该读到半清状态。
                 MountKind.REMOVE_HW_ALL_KEEP_CURRENT -> {
@@ -140,7 +142,7 @@ object LauncherHook : TargetHook {
                     killTaskObjs = null
                     keepCapturedAtMs = 0L
                     if ((!atms && !manager) || keep == null || kill == null || stale) {
-                        // 垃圾桶 flow 之外的任何 removeHwAllTask 调用方一律透传，绝不拦截。
+                        // 垃圾桶 flow 之外的任何收口调用方一律透传，绝不拦截。
                         chain.proceed()
                     } else {
                         if (atms && manager) {
@@ -290,7 +292,7 @@ object LauncherHook : TargetHook {
 
     /**
      * flag 是否已超时。垃圾桶 flow 若被中断（动画异常、进程切换）残留脏标记，10s 内必失效，
-     * 防止污染之后的任何 `removeHwAllTask` 调用方。
+     * 防止污染之后的任何收口方法调用方。
      */
     private fun keepFlagStale(): Boolean =
         keepCapturedAtMs <= 0L || SystemClock.elapsedRealtime() - keepCapturedAtMs > KEEP_FLAG_TIMEOUT_MS
@@ -429,10 +431,10 @@ object LauncherHook : TargetHook {
      *
      * **为什么不再需要旧 K2/K3 式「拆分消费」（2026-10-13 缺陷修复的结论随之作废）**：
      * 旧 quickstep 链路里 `removeAllRecentTasks()` post 到后台线程、`startHome()` 主线程先行，
-     * 两个消费点线程交错才需要互不清对方集合；荣耀 ClearBox 链路里 `removeHwAllTask` 是
+     * 两个消费点线程交错才需要互不清对方集合；荣耀 ClearBox 链路里收口（331 前 removeHwAllTask / 起 removeHnAllTask）是
      * **唯一收口、单点同步执行**（RemoveTaskThread 线程），N1/N2 一写一读，消费即全清即可。
      *
-     * **为什么需要门控**：`removeHwAllTask` 收口无排除参数只能整条替换——不门控就会把
+     * **为什么需要门控**：收口无排除参数只能整条替换——不门控就会把
      * 「开关全关的垃圾桶清后台」与 flow 之外的任何调用方一并改掉。N1 在两开关全关时
      * 不捕获（零反射开销），N2 无 flag 一律透传。
      */
@@ -496,7 +498,7 @@ object LauncherHook : TargetHook {
     /**
      * 挂载任务类型：CONST 常量短路；ARM_FOLDER_REOPEN 记下打开的文件夹；REOPEN_FOLDER_ON_RESUME 回到桌面时重开；
      * ARM_KEEP_CURRENT / REMOVE_HW_ALL_KEEP_CURRENT = 清后台保留当前应用两步
-     * （N1 荣耀垃圾桶 onClick 捕获 → N2 全杀收口 removeHwAllTask 替换，docs/reverse/launcher-recents-keepcurrent.md）。
+     * （N1 荣耀垃圾桶 onClick 捕获 → N2 全杀收口替换：331 前 removeHwAllTask / 331 起 removeHnAllTask，docs/reverse/launcher-recents-keepcurrent.md）。
      */
     internal enum class MountKind {
         CONST, ARM_FOLDER_REOPEN, REOPEN_FOLDER_ON_RESUME,

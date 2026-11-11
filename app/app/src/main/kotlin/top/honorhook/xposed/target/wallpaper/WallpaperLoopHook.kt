@@ -19,7 +19,7 @@ import top.honorhook.xposed.target.logDisabled
  * `l3.k#onPlaybackStateChanged(7=STATE_COMPLETED)` → `PlayerStateListener.onPlayerCompleted()`
  * （实现 = n4.i/f/v/y 四个变体之一，锚点串重复、运行时走哪个不确定）→ 回调体内 release = 播一次停。
  *
- * 手法：四个变体的 onPlayerCompleted **全部挂**，桌面态吞回调（release 不发生）+ 反射
+ * 手法：全部 listener 变体的 onPlayerCompleted **都挂**（变体清单随版本漂移，串锚点全挂），桌面态吞回调（release 不发生）+ 反射
  * listener → 宿主 player → `VisionController`（l3.l）→ `seekTo(0)`（int 参数，传 Long 会被
  * IllegalArgumentException 静默吞）——引擎状态 8（SEEK_COMPLETED）→ onPlayerSeekCompleted
  * → `A.start()` 续播 = 循环。锁屏态放行原生（播完释放省电）。
@@ -63,10 +63,12 @@ object WallpaperLoopHook : TargetHook {
     private fun installVisibilityGuard(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         val apk = param.applicationInfo.sourceDir
-        // 锚点串在 n4.z（手机）/n4.w（Pad）两个 player 变体重复 ⇒ 全挂，活一个即生效
+        // 锚点串在多个 player 变体中重复（11.0.0.300 实证：b5/e0,k0,y + e4/b + f4/d，真机日志
+        // 串原样存活）⇒ 全挂，活一个即生效。不再限定 searchPackages——混淆包名随版本漂移
+        // （252/262 时 n4.* → 300 起 b5/e4/f4.*），串锚点 + boolean 参数已足够窄。
         val visibilityAll = DexKitHelper.withBridge(apk) { bridge ->
             bridge.findMethod(
-                FindMethod.create().searchPackages("n4").matcher(
+                FindMethod.create().matcher(
                     MethodMatcher.create()
                         .usingStrings("onVisibilityChanged: v = %b, firstApply = %b")
                         .paramTypes("boolean"),
@@ -112,7 +114,7 @@ object WallpaperLoopHook : TargetHook {
                             null
                         },
                     )
-                module.log(Log.INFO, TAG, "W19 已挂载: ${vis.declaringClass.name}.F(boolean)")
+                module.log(Log.INFO, TAG, "W19 已挂载: ${vis.declaringClass.name}.(boolean 可见性)")
             }
         }
     }
@@ -120,10 +122,11 @@ object WallpaperLoopHook : TargetHook {
     private fun installCompletedSwap(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         val apk = param.applicationInfo.sourceDir
-        // 锚点串在 n4.i/f/v/y 四个 listener 变体中重复（真机两轮命中类不同实证）⇒ 全挂。
+        // 锚点串在多个 listener 变体中重复（11.0.0.300 实证：b5/e0$a,h$a,o$a,y$a + f4/d，串原样
+        // 存活）⇒ 全挂。同 W19 不再限定 searchPackages（混淆包名随版本漂移），串锚点已唯一。
         val completedAll = DexKitHelper.withBridge(apk) { bridge ->
             bridge.findMethod(
-                FindMethod.create().searchPackages("n4").matcher(
+                FindMethod.create().matcher(
                     MethodMatcher.create()
                         .usingStrings("onPlayerCompleted goingToSleep = %b, which = %d ")
                         .paramTypes(),

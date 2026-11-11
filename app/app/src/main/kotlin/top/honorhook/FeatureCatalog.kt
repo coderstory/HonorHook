@@ -199,8 +199,8 @@ object FeatureCatalog {
                 Feature(KEY_WALLPAPER_LOOP, R.string.feature_wallpaper_loop_title, R.string.feature_wallpaper_loop_desc),
             ),
             baselineVersion = "18.0.0.234",  // dumpsys package 实证（原 LauncherHook 私有常量上提）
-            extraVersions = setOf("18.0.0.259"),  // 2026-10-20 设备升级版；无独立版本表（同套挂载点），5/5 挂载全活（10-20/10-27 两轮真机判据）
-            versionsSharingBaseline = setOf("18.0.0.259"),
+            extraVersions = setOf("18.0.0.259", "18.0.0.331"),  // 259 = 2026-10-20 设备升级版（5/5 挂载全活，10-20/10-27 两轮真机判据）；331 = 2026-11-11 实装：N2 收口换 SystemUiProxy.removeHnAllTask（LauncherMap_18_0_0_234 同表更新），其余 4 点零漂移（adapt_mt ALIVE 4/5→换点后 5/5）
+            versionsSharingBaseline = setOf("18.0.0.259", "18.0.0.331"),  // 同一默认套：331 起 N2 收口点已随版更新（SystemUiProxy.removeHnAllTask），仍共用一张表
         ),
         Target(
             "com.android.systemui", R.string.target_name_systemui,
@@ -225,6 +225,7 @@ object FeatureCatalog {
                 Feature(KEY_OTA_BLOCK, R.string.feature_ota_block_title, R.string.feature_ota_block_desc),
             ),
             baselineVersion = "18.0.3.230",  // 2026-10-13 荣耀 OTA（真机日志 dumpsys 实证）；挂载点 11/11 全活（manifest 稳定组件名）
+            extraVersions = setOf("18.0.4.115"),  // 2026-11-11 实装：11/11 ALIVE（tools/adapt_mt.py，MT MCP 精准校验）
         ),
         // 升级引导（2026-10-25 归并）：与 ouc 同键（KEY_OTA_BLOCK）——UI 侧两个开关控同一状态本就冗余，
         // 入口并入「系统更新」卡；Target 留壳供 scope 页与 baselineVersionOf 查表（壁纸壳同款）。
@@ -290,7 +291,7 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
-            extraVersions = setOf("17.0.0.455", "17.0.0.457", "17.0.0.473"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3；473 = 11-07 实装 3/3（无独立版本表，同套挂载点）
+            extraVersions = setOf("17.0.0.455", "17.0.0.457", "17.0.0.473", "17.0.0.583"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3；473 = 11-07 实装 3/3；583 = 11-11 实装 3/3（均无独立版本表，同套挂载点）
         ),
         Target(
             "com.xingin.xhs", R.string.target_name_xhs,
@@ -315,14 +316,14 @@ object FeatureCatalog {
             "com.hihonor.wallpapereditor", R.string.target_name_wallpapereditor,
             listOf(),
             baselineVersion = "153.0.0.423",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
-            extraVersions = setOf("153.0.0.502"),  // 2026-11-06 设备升级版：3/3 挂载点 ALIVE（tools/adapt_mt.py，MT MCP 精准校验）
+            extraVersions = setOf("153.0.0.502", "153.0.0.567"),  // 502 = 2026-11-06 设备升级版 3/3 ALIVE；567 = 2026-11-11 实装 3/3 ALIVE（tools/adapt_mt.py，MT MCP 精准校验）
             hidden = true,
         ),
         Target(
             "com.hihonor.livewallpaper.paradise", R.string.target_name_livewallpaper,
             listOf(),
             baselineVersion = "11.0.0.252",  // dumpsys 实证 2026-10-16（docs/reverse/wallpaper-editor.md §一）
-            extraVersions = setOf("11.0.0.262"),  // 2026-11-06 设备升级版：3/3 挂载点 ALIVE（tools/adapt_mt.py）
+            extraVersions = setOf("11.0.0.262", "11.0.0.300"),  // 262 = 2026-11-06 设备升级版 3/3 ALIVE；300 = 2026-11-11 实装：VisionControllerImpl l3.l→z3.o（运行期按 VisionController 类型名反射定位，代码零改动；adapt 静态表已同步）
             hidden = true,
         ),
     )

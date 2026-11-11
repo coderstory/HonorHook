@@ -215,7 +215,9 @@ def extract_mounts() -> list:
     # 壁纸系（W16/W17/W18/W19，2026-10-18）：loadClass/DexKit 运行时解析，两种既有格式都不认——
     # 静态可比对的锚定点在此登记；**改 wallpaper hook 时同步此表**
     # （docs/reverse/wallpaper-editor.md §十一·4）。W17/W19 目标方法是混淆名（运行时 DexKit
-    # 串锚点），退而校验其稳定受体 l3.l（VisionControllerImpl，pluginsdk 接口）的方法存活；
+    # 串锚点），退而校验其稳定受体（VisionControllerImpl，pluginsdk 接口实现类）的方法存活：
+    # 11.0.0.252/262 = l3.l → 11.0.0.300 起 = z3.o（2026-11-11 MT MCP 实证；接口不变，运行期
+    # 按字段类型名反射定位、不写死混淆名）；
     # W18 的 j/k/f 字段名本脚本不校验（方法级工具），字段漂移靠 modlog `No field` 兜底。
     WALLPAPER_STATIC = [
         ('com.hihonor.wallpapereditor', 'WallpaperTranscodeHook.kt',
@@ -224,9 +226,9 @@ def extract_mounts() -> list:
          'com.hihonor.gallery.wallpaper.ui.SingleCutProgressView', 'setLeftCropPosition', 1),
         ('com.hihonor.wallpapereditor', 'WallpaperTimelineHook.kt',
          'com.hihonor.gallery.wallpaper.ui.SingleCutProgressView', 'setRightCropPosition', 1),
-        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'l3.l', 'seekTo', 1),
-        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'l3.l', 'start', 0),
-        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'l3.l', 'pause', 0),
+        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'z3.o', 'seekTo', 1),
+        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'z3.o', 'start', 0),
+        ('com.hihonor.livewallpaper.paradise', 'WallpaperLoopHook.kt', 'z3.o', 'pause', 0),
     ]
     for wpkg, wfname, wcls, wmethod, wpcount in WALLPAPER_STATIC:
         _add(mounts, seen, wfname, wpkg, wcls, wmethod, wpcount, '', 'wallpaper:static')

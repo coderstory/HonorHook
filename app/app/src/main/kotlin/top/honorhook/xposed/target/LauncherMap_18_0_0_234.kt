@@ -64,15 +64,18 @@ val LAUNCHER_POINTS_18_0_0_234 = listOf(
         feature = "",
         description = "N1 荣耀垃圾桶捕获：记保留集（运行任务）与移除集（其余卡片 ids+Task 对象），供 N2 消费",
     ),
-    // N2 全杀收口替换：removeHwAllTask 是荣耀清后台唯一收口（RemoveTaskThread → 广播系统管家，
-    // ActivityManagerWrapperEx.java:124）。flag 有效时整条替换（A=ATMS 逐个 removeTask / B=逐个
-    // sendRemoveTaskToSystemManager 广播），随后反射 countDown sCountDownLatch（public static，
-    // 不放行会卡 await 20s），不 proceed；无效透传原生。
+    // N2 全杀收口替换：18.0.0.331 起收口改到 quickstep `SystemUiProxy.removeHnAllTask()`
+    // （public 无参 void，2026-11-11 MT MCP 反编译实证）——shlib `ActivityManagerWrapperEx
+    // .removeHwAllTask` 已随该版删除。唯一调用方仍是 HnRecentsClearBox$RemoveTaskThread
+    // （handleClear 尾部，clearAppTasks 之后），单点性与旧收口相同。flag 有效时整条替换
+    // （A=ATMS 逐个 removeTask / B=逐个 sendRemoveTaskToSystemManager 广播），随后反射
+    // countDown sCountDownLatch（public static，不放行会卡 await 20s），不 proceed；
+    // 无效透传原生。
     HookPoint(
-        id = "launcher:ActivityManagerWrapperEx.removeHwAllTask",
+        id = "launcher:SystemUiProxy.removeHnAllTask",
         kind = "REMOVE_HW_ALL_KEEP_CURRENT",
-        className = "com.hihonor.android.systemuisharedlib.systemui.shared.system.ActivityManagerWrapperEx",
-        methodName = "removeHwAllTask",
+        className = "com.android.quickstep.SystemUiProxy",
+        methodName = "removeHnAllTask",
         paramCount = 0,
         returnType = "void",
         feature = "",
