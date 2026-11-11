@@ -567,13 +567,19 @@ class XhsBatchController(
             when (val r = downloader.download(url, target)) {
                 is XhsSerialDownloader.Result.Ok -> {
                     if (r.bytes > 0) {
-                        didWork = true
-                        countByType(media, r.bytes)
-                        // 相册可见性：写公共 Pictures 目录后必须触发 MediaStore 扫描，否则图库不索引
-                        appContext?.let {
-                            android.media.MediaScannerConnection.scanFile(
-                                it, arrayOf(target.absolutePath), null, null,
-                            )
+                        // 低清过滤（2026-11-11 用户要求）：图片短边 <1080px 自动删除，不计数不进相册
+                        if (media is ResolvedMedia.Image && !isAtLeast1080(target)) {
+                            XhsFetchLog.w("low-res deleted ${target.name}")
+                            target.delete()
+                        } else {
+                            didWork = true
+                            countByType(media, r.bytes)
+                            // 相册可见性：写公共 Pictures 目录后必须触发 MediaStore 扫描，否则图库不索引
+                            appContext?.let {
+                                android.media.MediaScannerConnection.scanFile(
+                                    it, arrayOf(target.absolutePath), null, null,
+                                )
+                            }
                         }
                     }
                 }
@@ -599,6 +605,13 @@ class XhsBatchController(
     companion object {
         /** 判定「页面拿到了」的字节阈值：低于此值视为网络/风控壳页，走退避而非跳过。 */
         private const val HTML_BAD_NOTE_MIN_BYTES = 20_000
+
+        /** 低清过滤阈值：图片短边 <1080px 删（2026-11-11 用户要求）。只解 bounds 不吃内存。 */
+        private fun isAtLeast1080(f: File): Boolean = runCatching {
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(f.absolutePath, opts)
+            opts.outWidth >= 1080 && opts.outHeight >= 1080
+        }.getOrDefault(true) // 解码失败（损坏文件）按通过处理，走既有失败路径，不静默吞
 
         private fun fetchHtmlDirect(url: String, cookie: String): String? = runCatching {
             val conn = URL(url).openConnection() as HttpURLConnection
