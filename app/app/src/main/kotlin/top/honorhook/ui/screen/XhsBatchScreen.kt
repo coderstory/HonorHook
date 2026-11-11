@@ -658,6 +658,10 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                                   var m=document.querySelector('meta[name=viewport]');
                                   if(m){m.setAttribute('content','width=device-width, initial-scale=1, minimum-scale=0.3, maximum-scale=5, user-scalable=yes');}
                                   window.scrollTo(0,0);
+                                  // captcha 页按桌面高度排版，.qrcode-img 会被定位到视口上方（实测 top=-95.7px）：
+                                  // 把它的容器整体推回视口内
+                                  var q=document.querySelector('.qrcode-img');
+                                  if(q){var r0=q.getBoundingClientRect(); if(r0.top<0){var c0=document.querySelector('.qrcode-container')||q; c0.style.position='relative'; c0.style.top=(-r0.top+24)+'px';}}
                                   var els=[].slice.call(document.querySelectorAll('img,canvas')).slice(0,6).map(function(e){
                                     var r=e.getBoundingClientRect();
                                     var p=e, chain=[];
