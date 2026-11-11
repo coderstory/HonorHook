@@ -120,6 +120,10 @@ class XhsBatchControllerTest {
         return c to rootDir
     }
 
+    // 调试留痕只在本机 Termux 会话有落点；CI runner 无此路径，静默跳过（不能炸测试）
+    private fun dbg(msg: String) = runCatching {
+        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText(msg)
+    }
     private fun userDir(root: File) = File(root, "1504334302") // 2026-11-11 目录去 xhs 层
 
     // ---- cases ----
@@ -296,7 +300,7 @@ class XhsBatchControllerTest {
         assertEquals(XhsBatchState.Queued, store.list().last { it.userId == "2000000001" }.state)
         var guard = 0
         while (store.list().last { it.userId == "2000000001" }.state != XhsBatchState.Done) {
-            if (guard % 10 == 0) java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("Q guard=$guard B=${store.list().last { it.userId == "2000000001" }.state} prog=${c.progress.value.state}/${c.progress.value.userId}/${c.progress.value.currentAction} q=${c.queuedUserIds()} dl=${dl.downloads.toList()}\n")
+            if (guard % 10 == 0) dbg("Q guard=$guard B=${store.list().last { it.userId == "2000000001" }.state} prog=${c.progress.value.state}/${c.progress.value.userId}/${c.progress.value.currentAction} q=${c.queuedUserIds()} dl=${dl.downloads.toList()}\n")
             delay(100); check(++guard < 200000) { "second task never finished" }
         }
         val rec2 = store.list().last { it.userId == "2000000001" }
@@ -324,15 +328,15 @@ class XhsBatchControllerTest {
                 notes = listOf("n1|token-n1", "n2|token-n2", "n3|token-n3"), nextIndex = 1,
             ),
         )
-        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("BEFORE-START\n")
+        dbg("BEFORE-START\n")
         c.start("1504334302")
-        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("AFTER-START state=${c.progress.value.state}\n")
-        java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("LOOP-ENTER state=${c.progress.value.state}\n")
+        dbg("AFTER-START state=${c.progress.value.state}\n")
+        dbg("LOOP-ENTER state=${c.progress.value.state}\n")
         var last = ""
         while (c.progress.value.state != XhsBatchState.Done) {
             if (c.progress.value.state.name + c.progress.value.currentAction != last) {
                 last = c.progress.value.state.name + c.progress.value.currentAction
-                java.io.File("/data/data/com.dsharnessmobile.shell/files/home/.dbg.log").appendText("DBG state=${c.progress.value.state} action=${c.progress.value.currentAction} fetch=${feed.fetchCalls} dl=${dl.downloads.toList()}\n")
+                dbg("DBG state=${c.progress.value.state} action=${c.progress.value.currentAction} fetch=${feed.fetchCalls} dl=${dl.downloads.toList()}\n")
             }
             delay(100)
         }
