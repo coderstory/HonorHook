@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.captionBar
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material3.Icon
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -588,6 +590,14 @@ private fun HubTiles(
     val adsOn = ToolSwitchTable.ADS_GROUP.count { values[it.key] == "1" }
     val frozen = (apps ?: emptyList()).count { it.frozen }
 
+    // 磁贴固定宽（2026-11-11 用户要求「不要自适应，计算出固定值」）：weight(1f) 会随内容/
+    // 父容器变化微调，改为一进页面按屏宽算死：屏宽 - 页面左右 12dp*2 - 两格间 12dp，再对半。
+    // 记住本次打开的计算值，重组不重算（顺转/数据刷新不会让卡片抖宽度）。
+    val screenDp = LocalConfiguration.current.screenWidthDp.dp
+    val tileWidth = remember(screenDp) {
+        (screenDp - 24.dp - 12.dp) / 2
+    }
+
     // 每格一个语义色（2026-11-08 用户要求「图标整体好看一点」）：
     // 冷色=清理类、暖色=拦截类、青/紫=工具类，深浅色主题下都能保持对比度。
     val accentAds = Color(0xFFF2685A)
@@ -609,7 +619,7 @@ private fun HubTiles(
     ) {
         Card(
             modifier = Modifier
-                .fillMaxWidth()
+                .width(tileWidth)
                 .fillMaxHeight()
                 // 每行两格（左右并列）：左列从左、右列从右合拢
                 // 磁贴的动效性格（2026-11-08 用户反馈「功能和工具箱的卡片动效一样」）：
