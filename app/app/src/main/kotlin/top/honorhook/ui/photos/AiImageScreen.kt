@@ -245,8 +245,8 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
         }
 
         // ---- 参数 chips + 执行：常驻底部，封进一张卡片（2026-11-11 用户要求）----
-        Card(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Column(Modifier.fillMaxWidth().padding(10.dp)) {
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 4.dp).padding(bottom = bottomInnerPadding + 12.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (cap == 0) {
                         listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
@@ -277,7 +277,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                         }
                     },
                     enabled = !engine.running && sel.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = bottomInnerPadding + 12.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
