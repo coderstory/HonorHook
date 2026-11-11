@@ -31,6 +31,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- 小红书批量下载后台保活：电池优化白名单弹窗（荣耀 PowerKeeper 杀后台实锤） -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Android 13+ 运行时权限：缺它 FGS 常驻通知全被拦（dumpsys numBlocked=646 实锤，2026-11-11） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 纯 hook 模块：无 Activity、无图标、无 launcher 入口、无主题资源。
          仅保留 Xposed 基础标识供 LSPosed Manager 识别与激活。

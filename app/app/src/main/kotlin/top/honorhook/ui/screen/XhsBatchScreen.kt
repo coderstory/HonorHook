@@ -149,7 +149,25 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: (
             // ---- 通知禁用引导（dumpsys 实锤 numBlocked=646：荣耀对新装 App 默认关通知，
             // FGS 常驻通知一条都出不来；设置页无命令行开关，只能用户手点）----
             item {
-                if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                // Android 13+ 运行时权限：未授权时直接弹系统授权框（比跳设置页少一步）
+                val notifPerm = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+                ) { }
+                if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                    androidx.core.content.ContextCompat.checkSelfPermission(
+                        context, android.Manifest.permission.POST_NOTIFICATIONS,
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    Text(
+                        "⚠ 通知权限未授权：点击授权，否则看不到下载常驻通知",
+                        fontSize = 12.sp,
+                        color = androidx.compose.ui.graphics.Color(0xFFF57C00),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { notifPerm.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                } else if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
                     Text(
                         "⚠ 通知已被系统关闭：点击去设置开启，否则看不到下载常驻通知",
                         fontSize = 12.sp,
