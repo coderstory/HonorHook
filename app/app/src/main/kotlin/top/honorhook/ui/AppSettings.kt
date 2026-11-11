@@ -43,6 +43,9 @@ object AppSettings {
     private const val KEY_FIREFLY_ENABLED = "firefly_enabled"
     private const val KEY_GARDEN_SKIN = "garden_skin"
     private const val KEY_ARTWORK_BACKDROP = "artwork_backdrop"
+    private const val KEY_ARTWORK_KEY_COLOR = "artwork_key_color"
+    /** 默认种子 = 插画 indigo-violet（原硬编码值） */
+    const val DEFAULT_ARTWORK_KEY_COLOR = 0xFF6C73E5.toInt()
 
     private val _colorMode = mutableStateOf(ColorMode.SYSTEM)
     val colorMode: ColorMode get() = _colorMode.value
@@ -85,12 +88,19 @@ object AppSettings {
     val artworkBackdrop: Boolean get() = _artworkBackdrop.value
 
     /**
-     * 主题主色 = 从插画里取的 indigo-violet。
+     * 主题主色种子。整套配色都从这一个种子生成：卡片包边、按钮、投影、启动页（2026-11-11 起
+     * splash 从它派生）全部跟随。
      *
-     * 2026-11-08 删掉「跟随壁纸取色 / 关键色」后，颜色不再可配：整套配色都从这一个种子生成，
-     * 卡片包边、投影、启动页都跟它同族（换插画时改这一个常量即可）。
+     * 2026-11-11 用户拍板「改全局主题色」：从固定常量改为可配置（主题设置页选色），默认仍是
+     * 插画 indigo-violet。
      */
-    val artworkKeyColor: Int = 0xFF6C73E5.toInt()
+    private val _artworkKeyColor = mutableStateOf(DEFAULT_ARTWORK_KEY_COLOR)
+    val artworkKeyColor: Int get() = _artworkKeyColor.value
+
+    fun setArtworkKeyColor(argb: Int) {
+        _artworkKeyColor.value = argb
+        prefs?.edit()?.putInt(KEY_ARTWORK_KEY_COLOR, argb)?.apply()
+    }
 
     @Volatile
     private var prefs: SharedPreferences? = null
@@ -105,6 +115,8 @@ object AppSettings {
         _fireflyEnabled.value = p?.getBoolean(KEY_FIREFLY_ENABLED, true) ?: true
         _gardenSkin.value = p?.getBoolean(KEY_GARDEN_SKIN, false) ?: false
         _artworkBackdrop.value = p?.getBoolean(KEY_ARTWORK_BACKDROP, true) ?: true
+        _artworkKeyColor.value = p?.getInt(KEY_ARTWORK_KEY_COLOR, DEFAULT_ARTWORK_KEY_COLOR)
+            ?: DEFAULT_ARTWORK_KEY_COLOR
         // 互斥兜底：旧版本允许两个都存 true（渲染时插画赢），这里把状态收敛成互斥并回写
         if (_artworkBackdrop.value && _gardenSkin.value) {
             _gardenSkin.value = false

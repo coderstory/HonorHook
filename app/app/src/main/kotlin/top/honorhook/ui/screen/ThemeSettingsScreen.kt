@@ -5,6 +5,7 @@ import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -32,6 +33,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.CallToAction
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.LocalFlorist
 import androidx.compose.material.icons.rounded.Wallpaper
@@ -55,6 +58,7 @@ import top.honorhook.ui.component.motion.cardEntrance
 import top.honorhook.ui.component.motion.revealFade
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -63,6 +67,16 @@ import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+
+/** 全局主题色候选（2026-11-11 用户拍板「改全局主题色」）：主界面按钮/卡片包边/启动页跟随 */
+private val THEME_KEY_COLORS = listOf(
+    "靛紫" to 0xFF6C73E5.toInt(),
+    "湖蓝" to 0xFF3E8EDE.toInt(),
+    "青碧" to 0xFF2BB3A6.toInt(),
+    "松绿" to 0xFF4CAF6D.toInt(),
+    "琥珀" to 0xFFE09B3C.toInt(),
+    "绯红" to 0xFFE05C6C.toInt(),
+)
 
 /**
  * 主题设置页 —— **照抄 KernelSU `ColorPaletteScreenMiuix.kt`**：
@@ -143,6 +157,53 @@ internal fun ThemeSettingsPage(
                                 selectedContentColor = colorScheme.onBackground,
                             ),
                         )
+                    }
+                }
+
+                // 主题色（2026-11-11 用户拍板「改全局主题色」）：主按钮/卡片包边/启动页全部跟随
+                Card(
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .fillMaxWidth()
+                        .cardEntrance(1, key = "theme.keycolor", edge = EntranceEdge.Bottom),
+                ) {
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
+                        Text("主题色", fontSize = 15.sp, color = colorScheme.onSurface)
+                        Text(
+                            "按钮、卡片包边、启动画面都跟随此色",
+                            fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        ) {
+                            THEME_KEY_COLORS.forEach { (label, argb) ->
+                                val selected = AppSettings.artworkKeyColor == argb
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(Color(argb))
+                                            .clickable { AppSettings.setArtworkKeyColor(argb) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (selected) {
+                                            Icon(
+                                                Icons.Rounded.Check,
+                                                contentDescription = "已选中",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                    }
+                                    Text(label, fontSize = 11.sp, color = colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.padding(top = 4.dp))
+                                }
+                            }
+                        }
                     }
                 }
 
