@@ -80,8 +80,11 @@ object XhsBatchPacing {
     /** 风控熔断：连续这么多篇详情页是验证页 → 立即停批（2026-11-11 账号被风控的教训）。 */
     const val RISK_BREAKER_BAD_NOTES = 3
 
-    /** 单次运行篇数上限（防风控）：跑满即 Done，「继续」从游标接着跑。 */
+    /** 单次运行篇数上限（防风控）：跑满即休息，休息完自动续跑下一批。 */
     const val MAX_NOTES_PER_RUN = 50
+
+    /** 批间休息时长（防风控自动续跑，2026-11-11 用户拍板；var=测试缝）。 */
+    var BATCH_REST_MS = 30 * 60_000L
 
     /** 首屏拦截超时：超时回落 __INITIAL_STATE__ 兜底解析。 */
     const val FIRST_PAGE_TIMEOUT_MS = 15_000L

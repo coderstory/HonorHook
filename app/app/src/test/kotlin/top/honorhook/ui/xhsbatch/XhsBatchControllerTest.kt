@@ -526,6 +526,26 @@ class XhsBatchControllerTest {
         assertEquals((1..40).map { "n$it-0.jpg" }, dl.downloads)
     }
 
+    /** 单批上限自动续跑（2026-11-11 用户拍板）：60 篇 > 上限 50，跑满一批休息后自动续，全程无人值守到 Done。 */
+    @Test
+    fun `batch cap auto rests and continues without manual resume`() = runTest {
+        val store = FakeStore()
+        val ids = (1..60).map { "n$it" }
+        val dl = FakeDownloader()
+        val resolver = FakeResolver()
+        val notesByUrl = ids.associate { detailUrl(it) to note(it) }
+        val (c, _) = makeController(store, FakeFeed(ids.map { feed(it) }), dl, resolver, notesByUrl = notesByUrl)
+        XhsBatchPacing.BATCH_REST_MS = 100 // 测试缝压休息时长
+        try {
+            c.start("1504334302")
+            var guard = 0
+            while (c.progress.value.state != XhsBatchState.Done) { delay(100); Thread.sleep(20); check(++guard < 40000) { "batch rest run never finished: ${c.progress.value}" } }
+        } finally { XhsBatchPacing.BATCH_REST_MS = 30 * 60_000L }
+        assertEquals(60, c.progress.value.notesProcessed)
+        assertEquals(60, dl.downloads.size)
+        assertEquals((1..60).map { "n$it-0.jpg" }, dl.downloads)
+    }
+
     /** 进程被杀后恢复：controller1 下载 2 篇后模拟进程死亡（记录残留 Running→Holder 归一化 Interrupted），
      *  controller2 从同一 store + 同一磁盘目录恢复——不重抓、快进到游标、剩余 3 篇下载到 Done。 */
     @Test

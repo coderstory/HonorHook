@@ -353,9 +353,9 @@ class XhsBatchController(
             val cookie = feedClient.currentCookie()
             // 风控熔断（2026-11-11 真机实锤：连续验证页=风控信号，继续打会升级成会话级封禁）
             var consecutiveBad = 0
-            // 单批篇数上限（防风控）：跑满即 Done，稍后「继续」从游标续
-            val runStartProcessed = _progress.value.notesProcessed
-            for ((index, note) in notes.withIndex()) {
+            // 单批篇数上限（防风控）：跑满休息 BATCH_REST_MS 后自动续跑
+            var runStartProcessed = _progress.value.notesProcessed
+            noteLoop@ for ((index, note) in notes.withIndex()) {
                 if (currentCoroutineContext().isActive.not()) return
                 if (index < resumeIndex) continue
                 waitForUnpause()
@@ -386,8 +386,15 @@ class XhsBatchController(
                         if (retrySubsetMode.not() &&
                             _progress.value.notesProcessed - runStartProcessed >= XhsBatchPacing.MAX_NOTES_PER_RUN
                         ) {
-                            finish(XhsBatchState.Done, "本批已跑 ${XhsBatchPacing.MAX_NOTES_PER_RUN} 篇（防风控单批上限），稍后点「继续」接着跑")
-                            return
+                            // 自动续跑（2026-11-11 用户拍板）：跑满一批不落终态，休息后原地接着跑
+                            _progress.value = _progress.value.copy(
+                                state = XhsBatchState.Running,
+                                currentAction = "本批已跑 ${XhsBatchPacing.MAX_NOTES_PER_RUN} 篇（防风控单批上限），休息中，到点自动续跑",
+                            )
+                            persist(XhsBatchState.Running, index + 1)
+                            delay(XhsBatchPacing.BATCH_REST_MS)
+                            runStartProcessed = _progress.value.notesProcessed
+                            continue@noteLoop
                         }
                         persist(_progress.value.state, index + 1)
                         delay(XhsBatchPacing.jitter(XhsBatchPacing.NOTE_DELAY_MIN_MS, XhsBatchPacing.NOTE_DELAY_MAX_MS, random))
