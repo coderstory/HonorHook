@@ -240,43 +240,43 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                     QueueRow(it) { engine.retry(context, idx) }
                 }
             }
-
-            // 参数 chips + 执行
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-                if (cap == 0) {
-                    listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
-                        Chip(label + "增强", photoMode == pm) { photoMode = pm }
-                    }
-                    Text("倍率引擎定死", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.align(Alignment.CenterVertically))
-                } else {
-                    AI_RATIOS.forEachIndexed { i, (label, _) ->
-                        Chip(label, ratioIdx == i) { ratioIdx = i }
-                    }
-                    Text("居中扩展", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.align(Alignment.CenterVertically))
-                }
-            }
-            TextButton(
-                text = if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
-                onClick = {
-                    when {
-                        engine.running -> {}
-                        sel.isEmpty() -> Toast.makeText(context, "先勾选图片", Toast.LENGTH_SHORT).show()
-                        else -> engine.submit(
-                            context,
-                            (gridItems).filter { it.absolutePath in sel },
-                            enhance = cap == 0,
-                            photoMode = photoMode,
-                            ratioIdx = ratioIdx,
-                            outDirOf = { src -> if (src in pickedSet(picked)) pickedOutDir() else src.parentFile ?: src.absoluteFile.parentFile },
-                        ).also { sel = emptySet() }
-                    }
-                },
-                enabled = !engine.running && sel.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().padding(bottom = bottomInnerPadding + 12.dp),
-            )
         }
+
+        // ---- 参数 chips + 执行：常驻底部（不随队列出现与否消失）----
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+            if (cap == 0) {
+                listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
+                    Chip(label + "增强", photoMode == pm) { photoMode = pm }
+                }
+                Text("倍率引擎定死", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.align(Alignment.CenterVertically))
+            } else {
+                AI_RATIOS.forEachIndexed { i, (label, _) ->
+                    Chip(label, ratioIdx == i) { ratioIdx = i }
+                }
+                Text("居中扩展", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.align(Alignment.CenterVertically))
+            }
+        }
+        TextButton(
+            text = if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
+            onClick = {
+                when {
+                    engine.running -> {}
+                    sel.isEmpty() -> Toast.makeText(context, "先勾选图片", Toast.LENGTH_SHORT).show()
+                    else -> engine.submit(
+                        context,
+                        (gridItems).filter { it.absolutePath in sel },
+                        enhance = cap == 0,
+                        photoMode = photoMode,
+                        ratioIdx = ratioIdx,
+                        outDirOf = { src -> if (src in pickedSet(picked)) pickedOutDir() else src.parentFile ?: src.absoluteFile.parentFile },
+                    ).also { sel = emptySet() }
+                }
+            },
+            enabled = !engine.running && sel.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth().padding(bottom = bottomInnerPadding + 12.dp),
+        )
     }
 
     // 来源切换对话框
