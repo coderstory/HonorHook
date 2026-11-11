@@ -261,24 +261,25 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                     }
                 }
                 TextButton(
-            text = if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
-            onClick = {
-                when {
-                    engine.running -> {}
-                    sel.isEmpty() -> Toast.makeText(context, "先勾选图片", Toast.LENGTH_SHORT).show()
-                    else -> engine.submit(
-                        context,
-                        (gridItems).filter { it.absolutePath in sel },
-                        enhance = cap == 0,
-                        photoMode = photoMode,
-                        ratioIdx = ratioIdx,
-                        outDirOf = { src -> if (src in pickedSet(picked)) pickedOutDir() else src.parentFile ?: src.absoluteFile.parentFile },
-                    ).also { sel = emptySet() }
-                }
-            },
-            enabled = !engine.running && sel.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().padding(bottom = bottomInnerPadding + 12.dp),
-            )
+                    text = if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
+                    onClick = {
+                        when {
+                            engine.running -> {}
+                            sel.isEmpty() -> Toast.makeText(context, "先勾选图片", Toast.LENGTH_SHORT).show()
+                            else -> engine.submit(
+                                context,
+                                (gridItems).filter { it.absolutePath in sel },
+                                enhance = cap == 0,
+                                photoMode = photoMode,
+                                ratioIdx = ratioIdx,
+                                outDirOf = { src -> if (src in pickedSet(picked)) pickedOutDir() else src.parentFile ?: src.absoluteFile.parentFile },
+                            ).also { sel = emptySet() }
+                        }
+                    },
+                    enabled = !engine.running && sel.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = bottomInnerPadding + 12.dp),
+                )
+            }
         }
     }
 
