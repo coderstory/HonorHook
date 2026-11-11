@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -47,6 +48,7 @@ import top.honorhook.ui.xhsbatch.XhsBatchState
 import top.honorhook.ui.xhsbatch.XhsBatchTaskRecord
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
+import androidx.compose.ui.graphics.asImageBitmap
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.window.WindowDialog
@@ -594,11 +596,77 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
         androidx.compose.runtime.SideEffect {
             XhsLoginLog.w("overlay composed")
         }
+        // 二维码捞取：captcha 页桌面排版在手机视口装不下（QR top=-95px），与其 hack 页面布局，
+        // 不如把 .qrcode-img 的 dataURL 捞出来原生展示；WebView 保留 0 高继续跑 JS（扫码轮询在页面里）
+        var qrSrc by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+        var qrBitmap by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+        var qrExpired by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        val qrWebView = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<android.webkit.WebView?>(null) }
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            while (true) {
+                val w = qrWebView.value
+                if (w != null) {
+                    w.evaluateJavascript(
+                        """
+                        (function(){
+                          var i=document.querySelector('.qrcode-img');
+                          var exp=document.body && document.body.innerText.indexOf('已过期')>=0;
+                          return JSON.stringify({src:i?i.src:null, exp:!!exp});
+                        })()
+                        """.trimIndent(),
+                    ) { v ->
+                        try {
+                            val arr = org.json.JSONObject(v)
+                            qrExpired = arr.optBoolean("exp", false)
+                            val src = if (arr.isNull("src")) null else arr.optString("src")
+                            if (src != null && src.startsWith("data:image") && src != qrSrc) {
+                                qrSrc = src
+                                // dataURL 解码很小（~175px 图），直接在回调线程解即可
+                                val b64 = src.substringAfter("base64,")
+                                val bs = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                val bmp = android.graphics.BitmapFactory.decodeByteArray(bs, 0, bs.size)
+                                if (bmp != null) qrBitmap = bmp.asImageBitmap()
+                            }
+                        } catch (_: Exception) { }
+                    }
+                }
+                kotlinx.coroutines.delay(1500)
+            }
+        }
+        if (qrBitmap != null) {
+            Column(
+                Modifier.fillMaxWidth().padding(top = 24.dp),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            ) {
+                androidx.compose.foundation.Image(
+                    bitmap = qrBitmap!!,
+                    contentDescription = "登录二维码",
+                    modifier = Modifier.size(260.dp).background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(12.dp)),
+                )
+                Text(
+                    if (qrExpired) "二维码已过期，点下方刷新" else "用小红书 App 扫码登录；完成后点右上关闭",
+                    fontSize = 13.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                TextButton(
+                    text = "刷新二维码",
+                    onClick = {
+                        qrWebView.value?.evaluateJavascript(
+                            "try{var q=document.querySelector('.qrcode-img');(q.parentElement||q).click();'ok'}catch(e){String(e)}",
+                        ) { }
+                        qrExpired = false
+                    },
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
         androidx.compose.ui.viewinterop.AndroidView(
-            modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+            modifier = if (qrBitmap != null) Modifier.height(0.dp) else Modifier.fillMaxSize().padding(top = 8.dp),
             factory = { ctx ->
                 XhsLoginLog.w("factory: WebView created")
                 android.webkit.WebView(ctx).apply {
+                    qrWebView.value = this
                     // 软件渲染层：硬件合成下 H5 视频层 + 荣耀 VRR 变帧率会让 WebView 表面
                     // 在「完整渲染↔纯白」间闪烁（2026-11-10 连拍实帧）；登录页一次性场景可接受
                     setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
@@ -650,31 +718,17 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
 
                         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                             XhsLoginLog.w("finished: $url")
-                            // XHS 页面 viewport 带 user-scalable=no，WebSettings 的 zoom 开关压不过它；
-                            // 页面加载完用 JS 改写 viewport 放开手势缩放（过验证码/看小字用）
-                            // QR 异步渲染，finish 时还没元素：finish 即刻 + 4s 后各打一枪
-                            val probeJs = """
+                            // XHS 页 viewport 带 user-scalable=no，WebSettings 压不过它；JS 放开手势缩放
+                            view?.evaluateJavascript(
+                                """
                                 (function(){
                                   var m=document.querySelector('meta[name=viewport]');
                                   if(m){m.setAttribute('content','width=device-width, initial-scale=1, minimum-scale=0.3, maximum-scale=5, user-scalable=yes');}
                                   window.scrollTo(0,0);
-                                  // captcha 页按桌面高度排版，.qrcode-img 会被定位到视口上方（实测 top=-95.7px）：
-                                  // 把它的容器整体推回视口内
-                                  var q=document.querySelector('.qrcode-img');
-                                  if(q){var r0=q.getBoundingClientRect(); if(r0.top<0){var c0=document.querySelector('.qrcode-container')||q; c0.style.position='relative'; c0.style.top=(-r0.top+24)+'px';}}
-                                  var els=[].slice.call(document.querySelectorAll('img,canvas')).slice(0,6).map(function(e){
-                                    var r=e.getBoundingClientRect();
-                                    var p=e, chain=[];
-                                    while(p && chain.length<4){ chain.push(p.tagName+'.'+(p.className||'').toString().slice(0,40)+' h='+(p.clientHeight||0)); p=p.parentElement; }
-                                    return e.tagName+' src='+((e.src||'').slice(0,60))+' rect='+JSON.stringify(r)+' chain='+chain.join(' | ');
-                                  });
-                                  return 'QRPROBE '+window.innerWidth+'x'+window.innerHeight+' scrollY='+window.scrollY+' dpr='+window.devicePixelRatio+' :: '+els.join(' ## ');
                                 })()
-                                """.trimIndent()
-                            view?.evaluateJavascript(probeJs) { v -> XhsLoginLog.w("qr probe: " + v) }
-                            view?.postDelayed({
-                                view.evaluateJavascript(probeJs) { v -> XhsLoginLog.w("qr probe4s: " + v) }
-                            }, 4000L)
+                                """.trimIndent(),
+                                null,
+                            )
                         }
 
                         override fun doUpdateVisitedHistory(view: android.webkit.WebView?, url: String?, isReload: Boolean) {
