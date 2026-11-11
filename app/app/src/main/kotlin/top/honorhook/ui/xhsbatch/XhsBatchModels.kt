@@ -63,8 +63,8 @@ interface XhsBatchTaskStore {
 /** 风控节奏常量表（技术方案 §5：收紧风控时一刀调这里）。 */
 object XhsBatchPacing {
     /** 逐篇解析页间隔（含抖动）区间 ms。 */
-    var NOTE_DELAY_MIN_MS = 2000L   // var=测试缝：单测把真实秒级 delay 压到 ms 级（JVM delay 走 IO 是真实时间）
-    var NOTE_DELAY_MAX_MS = 4000L
+    var NOTE_DELAY_MIN_MS = 1000L   // var=测试缝：单测把真实秒级 delay 压到 ms 级（JVM delay 走 IO 是真实时间）
+    var NOTE_DELAY_MAX_MS = 10000L
 
     /** 逐媒体文件间隔（含抖动）区间 ms。CDN 直链低风险：200-500（2026-11-11 从 500-1500 收紧提速）。 */
     var MEDIA_DELAY_MIN_MS = 200L

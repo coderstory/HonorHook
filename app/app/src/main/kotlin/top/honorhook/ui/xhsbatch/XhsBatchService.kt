@@ -91,7 +91,9 @@ class XhsBatchService : Service() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "小红书批量下载", NotificationManager.IMPORTANCE_LOW),
+                // IMPORTANCE_DEFAULT：LOW 档在荣耀 ROM 上被折叠进「静默通知」且实测一条都不展示
+                //（numEnqueuedByApp=462 numPostedByApp=0，2026-11-11 dumpsys 实锤），提档保常驻通知可见
+                NotificationChannel(CHANNEL_ID, "小红书批量下载", NotificationManager.IMPORTANCE_DEFAULT),
             )
         }
         startForeground(NOTIFY_ID, buildNotification("小红书批量下载", "任务进行中", null))

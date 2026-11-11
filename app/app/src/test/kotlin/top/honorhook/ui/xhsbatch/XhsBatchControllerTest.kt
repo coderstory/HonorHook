@@ -578,4 +578,20 @@ class XhsBatchControllerTest {
         assertEquals(5, userDir(root).listFiles()!!.size)
         assertEquals(XhsBatchState.Done, store.records.values.last { it.userId == "1504334302" }.state)
     }
+
+    /** 篇间隔契约：1~10 秒（2026-11-11 用户指定），jitter 不得越界（防风控节奏）。 */
+    @Test
+    fun noteDelayPacingStaysWithinBounds() {
+        // makeController 会把节奏常量压到 5/10ms（测试缝），这里先声明/还原被测值
+        val (omin, omax) = XhsBatchPacing.NOTE_DELAY_MIN_MS to XhsBatchPacing.NOTE_DELAY_MAX_MS
+        XhsBatchPacing.NOTE_DELAY_MIN_MS = 1000L; XhsBatchPacing.NOTE_DELAY_MAX_MS = 10000L
+        try {
+            repeat(200) {
+                val v = XhsBatchPacing.jitter(XhsBatchPacing.NOTE_DELAY_MIN_MS, XhsBatchPacing.NOTE_DELAY_MAX_MS, Random(it))
+                assertTrue("jitter=$v out of bounds", v in 1000L..10000L)
+            }
+        } finally {
+            XhsBatchPacing.NOTE_DELAY_MIN_MS = omin; XhsBatchPacing.NOTE_DELAY_MAX_MS = omax
+        }
+    }
 }

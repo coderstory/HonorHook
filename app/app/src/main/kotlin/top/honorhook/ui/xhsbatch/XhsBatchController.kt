@@ -343,6 +343,11 @@ class XhsBatchController(
             if (!retrySubsetMode) {
                 _progress.value = _progress.value.copy(notesFound = notes.size, state = XhsBatchState.Running)
             }
+            // 已处理基线拉齐：断点前的篇都已处理（下载或去重跳过）。旧版漏计跳过篇时落盘的
+            // 计数会永久落后实际位置（2026-11-11 真机：已处理 8 vs 正在处理第 15 篇）。
+            if (_progress.value.notesProcessed < resumeIndex) {
+                _progress.value = _progress.value.copy(notesProcessed = resumeIndex)
+            }
             persist(XhsBatchState.Running)
 
             val cookie = feedClient.currentCookie()
