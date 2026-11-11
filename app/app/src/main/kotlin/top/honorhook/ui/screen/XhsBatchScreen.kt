@@ -657,6 +657,7 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                                 (function(){
                                   var m=document.querySelector('meta[name=viewport]');
                                   if(m){m.setAttribute('content','width=device-width, initial-scale=1, minimum-scale=0.3, maximum-scale=5, user-scalable=yes');}
+                                  window.scrollTo(0,0);
                                 })()
                                 """.trimIndent(),
                                 null,
