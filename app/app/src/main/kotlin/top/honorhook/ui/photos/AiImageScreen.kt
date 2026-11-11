@@ -396,30 +396,76 @@ private fun SourceDialog(
     val subdirs = remember(dir) {
         dir.listFiles { f -> f.isDirectory }?.filter { !it.isHidden }?.sortedBy { it.name.lowercase() } ?: emptyList()
     }
-    WindowDialog(show = true, title = "图片来源", summary = dir.absolutePath, onDismissRequest = onDismiss) {
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+    val atRoot = dir == Environment.getExternalStorageDirectory()
+    WindowDialog(show = true, title = "选择图片来源", summary = null, onDismissRequest = onDismiss) {
+        // 面包屑式当前路径 + 上一级（根目录时只显示路径）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            if (dir != Environment.getExternalStorageDirectory()) {
-                item {
-                    Text("上一级", fontSize = 13.sp, color = colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth().clickable { dir = dir.parentFile ?: dir }.padding(vertical = 8.dp))
+            if (!atRoot) {
+                Text("↩", fontSize = 18.sp, color = colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { dir = dir.parentFile ?: dir }
+                        .padding(horizontal = 10.dp, vertical = 6.dp))
+            }
+            Text(
+                dir.absolutePath.removePrefix("/storage/emulated/0").ifEmpty { "/" },
+                fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        // 目录列表（卡片底、圆角、文件夹图标行）
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                if (subdirs.isEmpty()) {
+                    item {
+                        Text("空目录", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                    }
+                }
+                itemsIndexed(subdirs) { _, d ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { dir = d }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                    ) {
+                        Text("📁", fontSize = 14.sp)
+                        Text(d.name, fontSize = 13.sp, color = colorScheme.onSurface,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 8.dp))
+                    }
                 }
             }
-            itemsIndexed(subdirs) { _, d ->
-                Text(
-                    d.name, fontSize = 13.sp, color = colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth().clickable { dir = d }.padding(vertical = 8.dp),
-                )
-            }
-            if (subdirs.isEmpty() && dir == Environment.getExternalStorageDirectory()) {
-                item { Text("（无子目录）", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary) }
-            }
         }
-        TextButton(text = "选择此目录", onClick = { onPick(dir.absolutePath) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-        TextButton(text = "回到小红书目录（默认）", onClick = { onPick(null) }, modifier = Modifier.fillMaxWidth())
-        TextButton(text = "从相册挑一张", onClick = onPickAlbum, modifier = Modifier.fillMaxWidth())
-        TextButton(text = "取消", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
+        // 主操作
+        TextButton(text = "选择此目录", onClick = { onPick(dir.absolutePath) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
+        // 次操作收成一行小字，不抢视觉
+        Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+            Text("小红书目录（默认）", fontSize = 12.sp, color = colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onPick(null) }
+                    .padding(horizontal = 8.dp, vertical = 6.dp))
+            Text("从相册挑一张", fontSize = 12.sp, color = colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onPickAlbum() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp))
+            Text("取消", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onDismiss() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp))
+        }
     }
 }
