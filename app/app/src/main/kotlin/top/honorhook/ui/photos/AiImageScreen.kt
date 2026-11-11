@@ -27,6 +27,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -134,15 +138,33 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
         Row(verticalAlignment = Alignment.CenterVertically) {
             top.honorhook.ui.screen.MiuixBackButton(onClick = onBack)
             Text("AI 图像工具", fontWeight = FontWeight.Medium, fontSize = 17.sp, modifier = Modifier.weight(1f))
-            Text(
-                if (useCustomDir) "📁 自定义 ▾" else "📁 小红书 ▾",
-                fontSize = 12.sp,
-                color = colorScheme.onSurfaceVariantSummary,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(50))
+                    .background(colorScheme.surfaceVariant)
                     .clickable { showSource = true }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+                    .padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.FolderOpen,
+                    contentDescription = null,
+                    tint = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    if (useCustomDir) "自定义" else "小红书",
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+                Icon(
+                    Icons.Rounded.ArrowDropDown,
+                    contentDescription = null,
+                    tint = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
             IconButton(onClick = { scan() }) {
                 Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
             }
@@ -253,12 +275,12 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                     .padding(start = 10.dp, end = 10.dp, bottom = bottomInnerPadding + 10.dp)
                     .background(colorScheme.surface.copy(alpha = 0.82f), RoundedCornerShape(14.dp)),
             ) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // 单一分段 tab：超清=通用/人像；扩图=比例档
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(colorScheme.surfaceVariant, RoundedCornerShape(9.dp)),
+                            .background(colorScheme.surfaceVariant, RoundedCornerShape(10.dp)),
                     ) {
                         val segments = if (cap == 0) listOf("通用增强" to false, "人像增强" to true)
                         else AI_RATIOS.map { (label, _) -> label to Unit }
@@ -267,17 +289,18 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                             Text(
                                 label,
                                 fontSize = 12.sp,
+                                fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                                 color = if (active) colorScheme.onPrimary else colorScheme.onSurface,
                                 textAlign = TextAlign.Center,
                                 maxLines = 1,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(if (active) colorScheme.primary else Color.Transparent)
                                     .clickable {
                                         if (cap == 0) photoMode = label == "人像增强" else ratioIdx = i
                                     }
-                                    .padding(vertical = 7.dp),
+                                    .padding(vertical = 8.dp),
                             )
                         }
                     }
@@ -435,24 +458,29 @@ private fun SourceDialog(
         dir.listFiles { f -> f.isDirectory }?.filter { !it.isHidden }?.sortedBy { it.name.lowercase() } ?: emptyList()
     }
     val atRoot = dir == Environment.getExternalStorageDirectory()
-    WindowDialog(show = true, title = "选择图片来源", summary = null, onDismissRequest = onDismiss) {
+    WindowDialog(show = true, title = "选择来源", summary = null, onDismissRequest = onDismiss) {
         // 面包屑式当前路径 + 上一级（根目录时只显示路径）
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (!atRoot) {
-                Text("↩", fontSize = 18.sp, color = colorScheme.primary,
+                Icon(
+                    Icons.Rounded.ArrowUpward,
+                    contentDescription = "上一级",
+                    tint = colorScheme.primary,
                     modifier = Modifier
+                        .size(20.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable { dir = dir.parentFile ?: dir }
-                        .padding(horizontal = 10.dp, vertical = 6.dp))
+                        .padding(4.dp),
+                )
             }
             Text(
                 dir.absolutePath.removePrefix("/storage/emulated/0").ifEmpty { "/" },
                 fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary,
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
         }
         // 目录列表（卡片底、圆角、文件夹图标行）
@@ -477,7 +505,12 @@ private fun SourceDialog(
                             .clickable { dir = d }
                             .padding(horizontal = 14.dp, vertical = 9.dp),
                     ) {
-                        Text("📁", fontSize = 14.sp)
+                        Icon(
+                            Icons.Rounded.Folder,
+                            contentDescription = null,
+                            tint = colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
                         Text(d.name, fontSize = 13.sp, color = colorScheme.onSurface,
                             maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 8.dp))
@@ -485,8 +518,18 @@ private fun SourceDialog(
                 }
             }
         }
-        // 主操作
-        TextButton(text = "选择此目录", onClick = { onPick(dir.absolutePath) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp))
+        // 主操作：主题色小按钮（与主界面「开始处理」同款式）
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .background(colorScheme.primary, RoundedCornerShape(10.dp))
+                .clickable { onPick(dir.absolutePath) }
+                .padding(vertical = 9.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("选择此目录", fontSize = 13.sp, color = colorScheme.onPrimary)
+        }
         // 次操作收成一行小字，不抢视觉
         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
             Text("小红书目录（默认）", fontSize = 12.sp, color = colorScheme.primary,
