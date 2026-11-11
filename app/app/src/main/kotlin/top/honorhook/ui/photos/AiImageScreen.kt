@@ -260,25 +260,38 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                             modifier = Modifier.align(Alignment.CenterVertically))
                     }
                 }
-                TextButton(
-                    text = if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
-                    onClick = {
-                        when {
-                            engine.running -> {}
-                            sel.isEmpty() -> Toast.makeText(context, "先勾选图片", Toast.LENGTH_SHORT).show()
-                            else -> engine.submit(
-                                context,
-                                (gridItems).filter { it.absolutePath in sel },
-                                enhance = cap == 0,
-                                photoMode = photoMode,
-                                ratioIdx = ratioIdx,
-                                outDirOf = { src -> if (src in pickedSet(picked)) pickedOutDir() else src.parentFile ?: src.absoluteFile.parentFile },
-                            ).also { sel = emptySet() }
+                // 主题色小按钮（miuix TextButton 固定大号，2026-11-11 用户要求改小+适配主题色）
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (!engine.running && sel.isNotEmpty()) colorScheme.primary
+                            else colorScheme.primary.copy(alpha = 0.38f),
+                            RoundedCornerShape(10.dp),
+                        )
+                        .clickable {
+                            when {
+                                engine.running -> {}
+                                sel.isEmpty() -> Toast.makeText(context, "先勾选图片", Toast.LENGTH_SHORT).show()
+                                else -> engine.submit(
+                                    context,
+                                    (gridItems).filter { it.absolutePath in sel },
+                                    enhance = cap == 0,
+                                    photoMode = photoMode,
+                                    ratioIdx = ratioIdx,
+                                    outDirOf = { src -> if (src in pickedSet(picked)) pickedOutDir() else src.parentFile ?: src.absoluteFile.parentFile },
+                                ).also { sel = emptySet() }
+                            }
                         }
-                    },
-                    enabled = !engine.running && sel.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
+                        fontSize = 13.sp,
+                        color = colorScheme.onPrimary,
+                    )
+                }
             }
         }
     }
