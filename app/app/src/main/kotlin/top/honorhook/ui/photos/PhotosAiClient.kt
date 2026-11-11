@@ -40,6 +40,10 @@ object PhotosAiClient {
 
     private var receiverRegistered = false
 
+    /** 本 App 进程内是否有任务成功过（2026-11-11 用户反馈：每次处理都弹图库抢前台；成功过说明图库进程活着且通道可用，不再拉起）。 */
+    @Volatile
+    private var everSucceeded = false
+
     private fun ensureReceiver(ctx: Context) {
         if (receiverRegistered) return
         synchronized(this) {
@@ -54,6 +58,7 @@ object PhotosAiClient {
                         msg = intent.getStringExtra("msg") ?: "",
                     )
                     intent.getStringExtra("reqId")?.let { id ->
+                        if (r.ok) everSucceeded = true
                         pending.remove(id)?.complete(r)
                     }
                 }
@@ -75,6 +80,8 @@ object PhotosAiClient {
      * + 注册广播留 3s 余量（hook 侧 500ms×60 次轮询）。
      */
     suspend fun ensureGalleryAlive(ctx: Context): Boolean = withContext(Dispatchers.IO) {
+        // 有成功过 = 图库进程活着且通道可用，直接发任务，不拉起 Activity（否则抢用户前台）
+        if (everSucceeded) return@withContext true
         runCatching {
             ctx.packageManager.getLaunchIntentForPackage(GALLERY_PKG)?.let {
                 it.addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION)

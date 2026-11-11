@@ -59,6 +59,9 @@ object PhotosAiHook : TargetHook {
     private const val ACTION_TASK = "top.honorhook.photos.AI_TASK"
     private const val ACTION_RESULT = "top.honorhook.photos.AI_RESULT"
 
+    /** 模块 UI 侧包名（applicationId，2026-11-11 实锤：曾误写 top.honorhook=包名前缀，结果广播永远送不到→UI 永超时）。 */
+    private const val MODULE_PKG = "io.github.coderstory.honorhook"
+
     /** SDK 类名（visionkit 公开 API，未混淆，跨图库版本稳定）。 */
     private const val CLS_IMAGE_ENHANCER = "com.hihonor.mcs.intelligence.visionkit.api.ImageEnhancer"
     private const val CLS_IMAGE_EXTENDER = "com.hihonor.mcs.intelligence.visionkit.api.ImageExtender"
@@ -328,7 +331,7 @@ object PhotosAiHook : TargetHook {
                 .putExtra("code", code)
                 .putExtra("out", out)
                 .putExtra("msg", msg)
-                .setPackage("top.honorhook"))
+                .setPackage(MODULE_PKG))
         }
     }
 }
