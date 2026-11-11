@@ -616,6 +616,7 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                         """.trimIndent(),
                     ) { v ->
                         try {
+                            XhsLoginLog.w("qr poll: " + v.take(300))
                             val arr = org.json.JSONObject(v)
                             qrExpired = arr.optBoolean("exp", false)
                             val src = if (arr.isNull("src")) null else arr.optString("src")
@@ -625,6 +626,7 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                                 val b64 = src.substringAfter("base64,")
                                 val bs = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
                                 val bmp = android.graphics.BitmapFactory.decodeByteArray(bs, 0, bs.size)
+                                XhsLoginLog.w("qr decoded ok " + bmp.width + "x" + bmp.height)
                                 if (bmp != null) qrBitmap = bmp.asImageBitmap()
                             }
                         } catch (_: Exception) { }
