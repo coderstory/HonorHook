@@ -610,6 +610,10 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                     settings.useWideViewPort = true
+                    // 手势缩放：登录页过验证码/看清小字用（默认关，这里显式开，不显示缩放按钮）
+                    settings.setSupportZoom(true)
+                    settings.builtInZoomControls = true
+                    settings.displayZoomControls = false
                     settings.loadWithOverviewMode = true
                     // 钉死字号：useWideViewPort 下 WebView 的 font boosting 会把文字放大数倍
                     //（真机实测整页巨型字），textZoom=100 关掉

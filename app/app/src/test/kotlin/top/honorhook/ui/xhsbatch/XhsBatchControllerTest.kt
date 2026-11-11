@@ -66,9 +66,10 @@ class XhsBatchControllerTest {
         val byUrl: MutableMap<String, ResolvedNote> = mutableMapOf(),
         private val alwaysThrow: Boolean = false,
         private val resolveHook: suspend (Int) -> Unit = {},
+        badIds: MutableSet<String> = mutableSetOf(),
     ) : XhsBatchController.NoteResolver {
         var resolveCalls = 0
-        val badNoteIds = mutableSetOf<String>()
+        val badNoteIds = badIds
         override suspend fun resolve(url: String, cookie: String): XhsBatchController.ResolveOutcome {
             resolveCalls++
             resolveHook(resolveCalls)
@@ -232,8 +233,8 @@ class XhsBatchControllerTest {
         c.start("1504334302")
         while (c.progress.value.state != XhsBatchState.Failed) delay(100)
         assertEquals(XhsBatchState.Failed, c.progress.value.state)
-        // 退避序列 30s/60s/120s：3 次尝试全打在同篇（等待发生在尝试之间），第 2 篇不再碰（停批）
-        assertEquals(3, resolver.resolveCalls)
+        // 首试+1 退避重试（原 3 连发已砍，风控场景是伤害源）：同篇尝试后停批
+        assertEquals(2, resolver.resolveCalls)
         assertTrue(dl.downloads.isEmpty())
         assertTrue(c.progress.value.currentAction.contains("退避耗尽"))
     }
@@ -447,6 +448,59 @@ class XhsBatchControllerTest {
         assertEquals(3, store.records.values.last { it.userId == "1504334302" }.nextIndex) // 取消不丢游标
     }
 
+    /** 恢复场景过期 token（2026-11-11 真机实锤：过期 xsec_token 详情页=40KB 验证页 → 整批 BadNote）：
+     *  首篇 BadNote 应触发每批一次的 token 刷新（重抓列表），刷新后全部恢复，无一篇计失败。 */
+    @Test
+    fun `resume with expired token bad notes refreshes tokens once and recovers`() = runTest {
+        val store = FakeStore()
+        val ids = listOf("n1", "n2", "n3")
+        val dl = FakeDownloader()
+        val bad = mutableSetOf("n1")
+        val resolver = FakeResolver(badIds = bad, resolveHook = { call -> if (call >= 2) bad.clear() })
+        val notesByUrl = ids.associate { detailUrl(it) to note(it) }
+        notesByUrl.forEach { (u, n) -> resolver.byUrl[u] = n }
+        val feed = FakeFeed(ids.map { feed(it) })
+        val (c, _) = makeController(store, feed, dl, resolver, notesByUrl = notesByUrl)
+        store.upsert(
+            XhsBatchTaskRecord(
+                taskId = "t1", userId = "1504334302", createdAt = 1L, updatedAt = 1L,
+                state = XhsBatchState.Interrupted,
+                notesFound = 3, notesProcessed = 0, notesFailed = 0,
+                imagesDone = 0, videosDone = 0, totalBytes = 0L,
+                dirPath = "",
+                notes = ids.map { "$it|token-$it" }, nextIndex = 0,
+            ),
+        )
+        c.start("1504334302")
+        var guard = 0
+        while (c.progress.value.state != XhsBatchState.Done) { delay(100); check(++guard < 200000) { "never finished: ${c.progress.value}" } }
+        // 判据：刷新恰好一次（fetchCalls==1）；三篇全下；无失败
+        assertEquals(1, feed.fetchCalls)
+        assertEquals(listOf("n1-0.jpg", "n2-0.jpg", "n3-0.jpg"), dl.downloads)
+        assertEquals(0, c.progress.value.notesFailed)
+        assertEquals(3, c.progress.value.notesProcessed)
+    }
+
+    /** 风控熔断：连续 3 篇验证页 → 立即 Failed 停批（2026-11-11 账号被风控的教训），不打第 4 篇。 */
+    @Test
+    fun `three consecutive bad notes trip the risk breaker and stop the batch`() = runTest {
+        val store = FakeStore()
+        val ids = listOf("n1", "n2", "n3", "n4", "n5")
+        val dl = FakeDownloader()
+        val resolver = FakeResolver(badIds = mutableSetOf("n1", "n2", "n3", "n4", "n5"))
+        val notesByUrl = ids.associate { detailUrl(it) to note(it) }
+        notesByUrl.forEach { (u, n) -> resolver.byUrl[u] = n }
+        val feed = FakeFeed(ids.map { feed(it) })
+        val (c, _) = makeController(store, feed, dl, resolver, notesByUrl = notesByUrl)
+        c.start("1504334302")
+        var guard = 0
+        while (c.progress.value.state != XhsBatchState.Failed) { delay(100); check(++guard < 200000) { "never failed: ${c.progress.value}" } }
+        assertEquals(3, resolver.resolveCalls) // 第 4 篇没打（熔断）
+        assertEquals(3, c.progress.value.notesFailed)
+        assertEquals(0, dl.downloads.size)
+        assertTrue(c.progress.value.currentAction.contains("疑似风控"))
+    }
+
     // ---- 2026-11-11 验收场景补齐：大量数据 + 进程被杀后恢复 ----
 
     /** 大量数据：40 篇全量跑完，串行顺序与计数一致（有大量数据的场景）。 */
@@ -460,7 +514,7 @@ class XhsBatchControllerTest {
         val (c, _) = makeController(store, FakeFeed(ids.map { feed(it) }), dl, resolver, notesByUrl = notesByUrl)
         c.start("1504334302")
         var guard = 0
-        while (c.progress.value.state != XhsBatchState.Done) { delay(100); check(++guard < 200000) { "large batch never finished: ${c.progress.value}" } }
+        while (c.progress.value.state != XhsBatchState.Done) { delay(100); Thread.sleep(20); check(++guard < 20000) { "large batch never finished: ${c.progress.value}" } }
         assertEquals(40, c.progress.value.notesFound)
         assertEquals(40, c.progress.value.notesProcessed)
         assertEquals(40, c.progress.value.imagesDone)
@@ -514,7 +568,7 @@ class XhsBatchControllerTest {
         )
         c2.start("1504334302")
         var guard = 0
-        while (c2.progress.value.state != XhsBatchState.Done) { delay(100); check(++guard < 200000) { "resume never finished: ${c2.progress.value}" } }
+        while (c2.progress.value.state != XhsBatchState.Done) { delay(100); Thread.sleep(20); check(++guard < 20000) { "resume never finished: ${c2.progress.value}" } }
         // 真恢复判据：不重抓列表；只下载剩余 3 篇；旧文件去重（n1/n2 不重下）
         assertEquals(0, feed2.fetchCalls)
         assertEquals(listOf("n3-0.jpg", "n4-0.jpg", "n5-0.jpg"), dl2.downloads)

@@ -64,10 +64,12 @@ class XhsBatchController(
         override suspend fun resolve(url: String, cookie: String): ResolveOutcome {
             XhsFetchLog.w("resolve begin ${url.take(120)}")
             var htmlLen = 0
+            var htmlBody: String? = null
             return try {
                 val note = DefaultXhsContentRepository(fetchHtml = { u ->
                     fetchHtmlDirect(u, cookie)?.also {
                         htmlLen = it.length
+                        htmlBody = it
                         XhsFetchLog.w("resolve html ${it.length}B")
                     } ?: run { XhsFetchLog.w("resolve html null"); null }
                 }).resolve(url)
@@ -77,7 +79,7 @@ class XhsBatchController(
                 XhsFetchLog.w("resolve fail: $t")
                 // 分类：拿到了完整页面还解析失败 = 坏笔记（验证页/删帖/解析器不识别）；
                 // 没拿到/壳页 = 网络/限流 → 退避
-                if (htmlLen >= HTML_BAD_NOTE_MIN_BYTES) ResolveOutcome.BadNote(null)
+                if (htmlLen >= HTML_BAD_NOTE_MIN_BYTES) ResolveOutcome.BadNote(htmlBody)
                 else ResolveOutcome.Throttled
             }
         }
@@ -344,6 +346,10 @@ class XhsBatchController(
             persist(XhsBatchState.Running)
 
             val cookie = feedClient.currentCookie()
+            // 风控熔断（2026-11-11 真机实锤：连续验证页=风控信号，继续打会升级成会话级封禁）
+            var consecutiveBad = 0
+            // 单批篇数上限（防风控）：跑满即 Done，稍后「继续」从游标续
+            val runStartProcessed = _progress.value.notesProcessed
             for ((index, note) in notes.withIndex()) {
                 if (currentCoroutineContext().isActive.not()) return
                 if (index < resumeIndex) continue
@@ -355,16 +361,28 @@ class XhsBatchController(
                 when (val outcome = obtainResolved(note, cookie)) {
                     NoteOutcome.Cancelled -> return
                     NoteOutcome.Skip -> {
-                        // 坏笔记：已计失败 + 留痕，直接下一篇（不退避不停批）
+                        // 坏笔记：已计失败 + 留痕；连续多张验证页 = 疑似风控，立即熔断
+                        consecutiveBad++
+                        if (consecutiveBad >= XhsBatchPacing.RISK_BREAKER_BAD_NOTES) {
+                            finish(XhsBatchState.Failed, "连续 ${consecutiveBad} 篇详情页都是验证页，疑似风控，已停批保护账号（已下载文件保留）")
+                            return
+                        }
                         delay(XhsBatchPacing.jitter(XhsBatchPacing.NOTE_DELAY_MIN_MS, XhsBatchPacing.NOTE_DELAY_MAX_MS, random))
                         continue
                     }
                     NoteOutcome.StopBatch -> return // finish(Failed) 已由 obtainResolved 落账
                     is NoteOutcome.Resolved -> {
+                        consecutiveBad = 0
                         val (allOk, didWork) = resolveAndDownload(outcome.note, dir)
                         if (didWork) {
                             _progress.value = _progress.value.copy(notesProcessed = _progress.value.notesProcessed + 1)
                             if (!allOk) _progress.value = _progress.value.copy(notesFailed = _progress.value.notesFailed + 1)
+                        }
+                        if (retrySubsetMode.not() &&
+                            _progress.value.notesProcessed - runStartProcessed >= XhsBatchPacing.MAX_NOTES_PER_RUN
+                        ) {
+                            finish(XhsBatchState.Done, "本批已跑 ${XhsBatchPacing.MAX_NOTES_PER_RUN} 篇（防风控单批上限），稍后点「继续」接着跑")
+                            return
                         }
                         persist(_progress.value.state, index + 1)
                         delay(XhsBatchPacing.jitter(XhsBatchPacing.NOTE_DELAY_MIN_MS, XhsBatchPacing.NOTE_DELAY_MAX_MS, random))
@@ -389,6 +407,15 @@ class XhsBatchController(
             ResolveStep.Cancelled -> return NoteOutcome.Cancelled
             is ResolveStep.Done -> return NoteOutcome.Resolved(r.note)
             ResolveStep.BadNote -> {
+                // 2026-11-11 真机实锤：过期 xsec_token 的详情页 = 40KB 验证页 → 整批 BadNote。
+                // 与 Throttled 同权：恢复场景先刷 token 再判坏（每批一次）。
+                if (resumedFromStore && !tokenRefreshed) {
+                    when (val r2 = refreshTokensAndRetry(note, cookie)) {
+                        is ResolveStep.Done -> return NoteOutcome.Resolved(r2.note)
+                        ResolveStep.Cancelled -> return NoteOutcome.Cancelled
+                        else -> Unit
+                    }
+                }
                 markNoteFailed(note.noteId)
                 return NoteOutcome.Skip
             }
@@ -396,14 +423,7 @@ class XhsBatchController(
         }
         // Q3 裁决：token 有时效，恢复场景 403 高发 → 重抓列表刷新 token 重试一次（每批一次，逐篇重抓是风暴）
         if (resumedFromStore && !tokenRefreshed) {
-            tokenRefreshed = true
-            XhsFetchLog.w("resume token refresh: ${note.noteId}")
-            activeNotes = feedClient.fetchNotes(appContext, activeUserId ?: "") { found ->
-                _progress.value = _progress.value.copy(notesFound = found)
-            }
-            val refreshed = activeNotes.firstOrNull { it.noteId == note.noteId } ?: note
-            _progress.value = _progress.value.copy(state = XhsBatchState.Running, currentAction = "token 已刷新，重试本篇")
-            when (val r2 = resolveWithBackoff(refreshed, cookie)) {
+            when (val r2 = refreshTokensAndRetry(note, cookie)) {
                 is ResolveStep.Done -> return NoteOutcome.Resolved(r2.note)
                 ResolveStep.Cancelled -> return NoteOutcome.Cancelled
                 else -> Unit
@@ -411,6 +431,21 @@ class XhsBatchController(
         }
         finish(XhsBatchState.Failed, "连续失败，退避耗尽，已停止（已下载文件保留）")
         return NoteOutcome.StopBatch
+    }
+
+    /** token 刷新（每批一次）：重抓列表换新 xsec_token 后重试本篇。 */
+    private suspend fun refreshTokensAndRetry(
+        note: XhsUserFeedClient.FeedNote,
+        cookie: String,
+    ): ResolveStep {
+        tokenRefreshed = true
+        XhsFetchLog.w("resume token refresh: ${note.noteId}")
+        activeNotes = feedClient.fetchNotes(appContext, activeUserId ?: "") { found ->
+            _progress.value = _progress.value.copy(notesFound = found)
+        }
+        val refreshed = activeNotes.firstOrNull { it.noteId == note.noteId } ?: note
+        _progress.value = _progress.value.copy(state = XhsBatchState.Running, currentAction = "token 已刷新，重试本篇")
+        return resolveWithBackoff(refreshed, cookie)
     }
 
     /** 单篇总出口（runBatch 消费）。 */
@@ -430,7 +465,8 @@ class XhsBatchController(
      * 纯解析层：不停批（停批决策在 obtainResolved）。
      */
     private suspend fun resolveWithBackoff(note: XhsUserFeedClient.FeedNote, cookie: String): ResolveStep {
-        for (attempt in XhsBatchPacing.BACKOFF_MS.indices) {
+        // 只重试 1 次（曾 3 连发 30/60/120s，风控场景等于继续打伤害源——2026-11-11 用户批的修正）
+        for (attempt in 0..1) { // 首试 + 1 次退避重试（原来 3 连发，风控场景是伤害源）
             if (currentCoroutineContext().isActive.not()) return ResolveStep.Cancelled
             when (val outcome = runCatching { noteResolver.resolve(detailUrlOf(note), cookie) }
                 .onFailure { XhsFetchLog.w("resolver threw: $it") }
