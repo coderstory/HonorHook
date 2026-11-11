@@ -39,12 +39,13 @@ fun HonorHookTheme(content: @Composable () -> Unit) {
 
     // 颜色不再可配（2026-11-08 用户删掉「跟随壁纸取色 / 关键色 / 配色风格 / 色规范」）：
     // 整套色板只从插画主色这一个种子生成，主题页只剩「明暗模式」+ 背景皮肤。
+    // 2026-11-11 用户实测「主题色只对 splash 生效」：miuix `currentColors` 对
+    // `ColorSchemeMode.System` 走 platformDynamicColors（壁纸取色，keyColor 被忽略——
+    // 反编译 miux-ui jar 的 ThemeController.currentColors 字符串序列实锤：System 分支调
+    // DynamicColors_androidKt.platformDynamicColors，colorsFromSeed 只在 Light/Dark 分支）。
+    // 我们已经在上面算好 darkTheme（含跟随系统），直接传 Light/Dark，保证 keyColor 永远生效。
     val controller = ThemeController(
-        colorSchemeMode = when (colorMode) {
-            ColorMode.SYSTEM -> ColorSchemeMode.System
-            ColorMode.LIGHT -> ColorSchemeMode.Light
-            ColorMode.DARK -> ColorSchemeMode.Dark
-        },
+        colorSchemeMode = if (darkTheme) ColorSchemeMode.Dark else ColorSchemeMode.Light,
         keyColor = Color(AppSettings.artworkKeyColor),
         isDark = darkTheme,
     )
