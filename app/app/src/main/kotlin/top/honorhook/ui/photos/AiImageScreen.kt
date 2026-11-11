@@ -250,8 +250,6 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                 listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
                     Chip(label + "增强", photoMode == pm) { photoMode = pm }
                 }
-                Text("倍率引擎定死", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.align(Alignment.CenterVertically))
             } else {
                 AI_RATIOS.forEachIndexed { i, (label, _) ->
                     Chip(label, ratioIdx == i) { ratioIdx = i }
