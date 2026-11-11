@@ -244,21 +244,23 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
             }
         }
 
-        // ---- 参数 chips + 执行：常驻底部（不随队列出现与否消失）----
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-            if (cap == 0) {
-                listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
-                    Chip(label + "增强", photoMode == pm) { photoMode = pm }
+        // ---- 参数 chips + 执行：常驻底部，封进一张卡片（2026-11-11 用户要求）----
+        Card(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (cap == 0) {
+                        listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
+                            Chip(label + "增强", photoMode == pm) { photoMode = pm }
+                        }
+                    } else {
+                        AI_RATIOS.forEachIndexed { i, (label, _) ->
+                            Chip(label, ratioIdx == i) { ratioIdx = i }
+                        }
+                        Text("居中扩展", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.align(Alignment.CenterVertically))
+                    }
                 }
-            } else {
-                AI_RATIOS.forEachIndexed { i, (label, _) ->
-                    Chip(label, ratioIdx == i) { ratioIdx = i }
-                }
-                Text("居中扩展", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.align(Alignment.CenterVertically))
-            }
-        }
-        TextButton(
+                TextButton(
             text = if (engine.running) "处理中…" else "开始处理（已选 ${sel.size} 张）",
             onClick = {
                 when {
@@ -276,7 +278,8 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
             },
             enabled = !engine.running && sel.isNotEmpty(),
             modifier = Modifier.fillMaxWidth().padding(bottom = bottomInnerPadding + 12.dp),
-        )
+            )
+        }
     }
 
     // 来源切换对话框
