@@ -52,6 +52,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import top.honorhook.BuildConfig
+import top.honorhook.ui.AppSettings
 import top.honorhook.ui.component.isInDarkTheme
 import top.yukonga.miuix.kmp.basic.Text
 
@@ -82,27 +83,35 @@ private data class SplashPalette(
     val shadowAlpha: Float,
 )
 
-// 2026-11-08（artwork-theme）：配色跟插画改到靛紫 + 淡紫高光，与卡片包边 / 主题主色同一族。
-// 原来是花园时代的绿（#39FF88 / #12B76A），换背景后启动第一帧就与主界面打架。
-private val DarkPalette = SplashPalette(
-    accent = Color(0xFFA9A6FF),
-    bgTop = Color(0xFF120E22),
-    bgBottom = Color(0xFF0A0817),
-    bodyTop = Color(0xFF1E1A33),
-    bodyBottom = Color(0xFF120E22),
-    title = Color(0xFFEFEDFF),
-    subtitle = Color(0xFFA9A3C9),
+// 2026-11-11（用户「splash的颜色要适配主题」）：不再硬编码靛紫，两套配色都从主题关键色
+// `AppSettings.artworkKeyColor`（= 主界面 keyColor，见 Theme.kt:48）按比例混色派生，
+// 主题色变了 splash 自动跟随；布局与动画不受影响。
+private fun mix(a: Color, b: Color, t: Float): Color = Color(
+    (a.red + (b.red - a.red) * t),
+    (a.green + (b.green - a.green) * t),
+    (a.blue + (b.blue - a.blue) * t),
+    1f,
+)
+
+private fun darkPalette(kc: Color) = SplashPalette(
+    accent = mix(kc, Color.White, 0.45f),
+    bgTop = mix(kc, Color.Black, 0.91f),
+    bgBottom = mix(kc, Color.Black, 0.96f),
+    bodyTop = mix(kc, Color.Black, 0.80f),
+    bodyBottom = mix(kc, Color.Black, 0.91f),
+    title = mix(mix(kc, Color.White, 0.45f), Color.White, 0.6f),
+    subtitle = mix(kc, Color.White, 0.62f),
     shadowAlpha = 0.30f,
 )
 
-private val LightPalette = SplashPalette(
-    accent = Color(0xFF5B62D4),
-    bgTop = Color(0xFFFBFAFF),
-    bgBottom = Color(0xFFEDE9FB),
-    bodyTop = Color(0xFFFFFFFF),
-    bodyBottom = Color(0xFFE7E1F7),
-    title = Color(0xFF14112A),
-    subtitle = Color(0xFF5E587A),
+private fun lightPalette(kc: Color) = SplashPalette(
+    accent = kc,
+    bgTop = mix(kc, Color.White, 0.97f),
+    bgBottom = mix(kc, Color.White, 0.82f),
+    bodyTop = Color.White,
+    bodyBottom = mix(kc, Color.White, 0.86f),
+    title = mix(kc, Color.Black, 0.90f),
+    subtitle = mix(kc, Color.Black, 0.62f),
     shadowAlpha = 0.16f,
 )
 
@@ -130,7 +139,8 @@ fun HonorSplash(onFinish: () -> Unit, onLeaving: () -> Unit = {}) {
     // 跟随 App 颜色模式：浅色主题给白底墨绿描边，深色主题保留近黑 + 荧光绿。
     // 系统启动画面那一段由 values(-night)/colors.xml 的 splash_bg 决定，两边配色必须同步改。
     val dark = isInDarkTheme()
-    val p = if (dark) DarkPalette else LightPalette
+    val kc = Color(AppSettings.artworkKeyColor)
+    val p = if (dark) darkPalette(kc) else lightPalette(kc)
 
     // 系统栏图标跟着 splash 底色走（浅底要深色图标、深底要浅色图标）。
     // Theme.kt 的 LaunchedEffect 只在 darkTheme 变化时才重设，splash 退出时不会自己纠正，故这里保存 / 还原。
