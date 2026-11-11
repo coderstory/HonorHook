@@ -373,11 +373,11 @@ class XhsBatchController(
                     NoteOutcome.StopBatch -> return // finish(Failed) 已由 obtainResolved 落账
                     is NoteOutcome.Resolved -> {
                         consecutiveBad = 0
-                        val (allOk, didWork) = resolveAndDownload(outcome.note, dir)
-                        if (didWork) {
-                            _progress.value = _progress.value.copy(notesProcessed = _progress.value.notesProcessed + 1)
-                            if (!allOk) _progress.value = _progress.value.copy(notesFailed = _progress.value.notesFailed + 1)
-                        }
+                        val (allOk, _) = resolveAndDownload(outcome.note, dir)
+                        // 已处理按篇计（含全跳过的续跑篇）：否则续跑全命中文件去重时计数永远 0，
+                        // UI 看起来像卡死（2026-11-11 用户实锤）。图/视频/MB 仍只计新下载。
+                        _progress.value = _progress.value.copy(notesProcessed = _progress.value.notesProcessed + 1)
+                        if (!allOk) _progress.value = _progress.value.copy(notesFailed = _progress.value.notesFailed + 1)
                         if (retrySubsetMode.not() &&
                             _progress.value.notesProcessed - runStartProcessed >= XhsBatchPacing.MAX_NOTES_PER_RUN
                         ) {
