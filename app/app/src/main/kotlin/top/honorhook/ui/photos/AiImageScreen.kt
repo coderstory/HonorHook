@@ -1,5 +1,6 @@
 package top.honorhook.ui.photos
 
+import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -382,7 +384,7 @@ private fun QueueRow(it: AiImageEngine.Item, onRetry: () -> Unit) {
     }
 }
 
-/** 来源切换：小红书默认 / 自定义目录（路径输入，记忆）/ 相册挑一张。 */
+/** 来源切换：小红书默认 / 自定义目录（内置文件夹选择器，App 有全文件权限直接列目录）/ 相册挑一张。 */
 @Composable
 private fun SourceDialog(
     currentCustom: String,
@@ -390,16 +392,32 @@ private fun SourceDialog(
     onPickAlbum: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var input by remember { mutableStateOf(currentCustom) }
-    WindowDialog(show = true, title = "图片来源", summary = "默认扫 Pictures/小红书；自定义目录按绝对路径", onDismissRequest = onDismiss) {
-        androidx.compose.material3.OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = colorScheme.onSurface),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        TextButton(text = "用自定义目录", onClick = { onPick(input.trim().ifEmpty { null }) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    var dir by remember { mutableStateOf(File(currentCustom).takeIf { it.isDirectory } ?: Environment.getExternalStorageDirectory()) }
+    val subdirs = remember(dir) {
+        dir.listFiles { f -> f.isDirectory }?.filter { !it.isHidden }?.sortedBy { it.name.lowercase() } ?: emptyList()
+    }
+    WindowDialog(show = true, title = "图片来源", summary = dir.absolutePath, onDismissRequest = onDismiss) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (dir != Environment.getExternalStorageDirectory()) {
+                item {
+                    Text("上一级", fontSize = 13.sp, color = colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth().clickable { dir = dir.parentFile ?: dir }.padding(vertical = 8.dp))
+                }
+            }
+            itemsIndexed(subdirs) { _, d ->
+                Text(
+                    d.name, fontSize = 13.sp, color = colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth().clickable { dir = d }.padding(vertical = 8.dp),
+                )
+            }
+            if (subdirs.isEmpty() && dir == Environment.getExternalStorageDirectory()) {
+                item { Text("（无子目录）", fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary) }
+            }
+        }
+        TextButton(text = "选择此目录", onClick = { onPick(dir.absolutePath) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
         TextButton(text = "回到小红书目录（默认）", onClick = { onPick(null) }, modifier = Modifier.fillMaxWidth())
         TextButton(text = "从相册挑一张", onClick = onPickAlbum, modifier = Modifier.fillMaxWidth())
         TextButton(text = "取消", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
