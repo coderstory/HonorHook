@@ -652,22 +652,25 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                             XhsLoginLog.w("finished: $url")
                             // XHS 页面 viewport 带 user-scalable=no，WebSettings 的 zoom 开关压不过它；
                             // 页面加载完用 JS 改写 viewport 放开手势缩放（过验证码/看小字用）
-                            view?.evaluateJavascript(
-                                """
+                            // QR 异步渲染，finish 时还没元素：finish 即刻 + 4s 后各打一枪
+                            val probeJs = """
                                 (function(){
                                   var m=document.querySelector('meta[name=viewport]');
                                   if(m){m.setAttribute('content','width=device-width, initial-scale=1, minimum-scale=0.3, maximum-scale=5, user-scalable=yes');}
                                   window.scrollTo(0,0);
-                                  var imgs=[].slice.call(document.querySelectorAll('img,canvas')).slice(0,6).map(function(e){
+                                  var els=[].slice.call(document.querySelectorAll('img,canvas')).slice(0,6).map(function(e){
                                     var r=e.getBoundingClientRect();
                                     var p=e, chain=[];
                                     while(p && chain.length<4){ chain.push(p.tagName+'.'+(p.className||'').toString().slice(0,40)+' h='+(p.clientHeight||0)); p=p.parentElement; }
-                                    return e.tagName+' rect='+JSON.stringify(r)+' chain='+chain.join(' | ');
+                                    return e.tagName+' src='+((e.src||'').slice(0,60))+' rect='+JSON.stringify(r)+' chain='+chain.join(' | ');
                                   });
-                                  return 'QRPROBE '+window.innerWidth+'x'+window.innerHeight+' scrollY='+window.scrollY+' :: '+imgs.join(' ## ');
+                                  return 'QRPROBE '+window.innerWidth+'x'+window.innerHeight+' scrollY='+window.scrollY+' dpr='+window.devicePixelRatio+' :: '+els.join(' ## ');
                                 })()
-                                """.trimIndent(),
-                            ) { v -> XhsLoginLog.w("qr probe: " + v) }
+                                """.trimIndent()
+                            view?.evaluateJavascript(probeJs) { v -> XhsLoginLog.w("qr probe: " + v) }
+                            view?.postDelayed({
+                                view.evaluateJavascript(probeJs) { v -> XhsLoginLog.w("qr probe4s: " + v) }
+                            }, 4000L)
                         }
 
                         override fun doUpdateVisitedHistory(view: android.webkit.WebView?, url: String?, isReload: Boolean) {
