@@ -617,7 +617,9 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                     ) { v ->
                         try {
                             XhsLoginLog.w("qr poll: " + v.take(300))
-                            val arr = org.json.JSONObject(v)
+                            // evaluateJavascript 对 JS 字符串返回值会再包一层 JSON 引号，需先剥壳
+                            val unquoted = org.json.JSONTokener(v).nextValue().toString()
+                            val arr = org.json.JSONObject(unquoted)
                             qrExpired = arr.optBoolean("exp", false)
                             val src = if (arr.isNull("src")) null else arr.optString("src")
                             if (src != null && src.startsWith("data:image") && src != qrSrc) {
