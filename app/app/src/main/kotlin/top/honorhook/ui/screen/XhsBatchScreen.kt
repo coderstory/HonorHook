@@ -658,10 +658,16 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                                   var m=document.querySelector('meta[name=viewport]');
                                   if(m){m.setAttribute('content','width=device-width, initial-scale=1, minimum-scale=0.3, maximum-scale=5, user-scalable=yes');}
                                   window.scrollTo(0,0);
+                                  var imgs=[].slice.call(document.querySelectorAll('img,canvas')).slice(0,6).map(function(e){
+                                    var r=e.getBoundingClientRect();
+                                    var p=e, chain=[];
+                                    while(p && chain.length<4){ chain.push(p.tagName+'.'+(p.className||'').toString().slice(0,40)+' h='+(p.clientHeight||0)); p=p.parentElement; }
+                                    return e.tagName+' rect='+JSON.stringify(r)+' chain='+chain.join(' | ');
+                                  });
+                                  return 'QRPROBE '+window.innerWidth+'x'+window.innerHeight+' scrollY='+window.scrollY+' :: '+imgs.join(' ## ');
                                 })()
                                 """.trimIndent(),
-                                null,
-                            )
+                            ) { v -> XhsLoginLog.w("qr probe: " + v) }
                         }
 
                         override fun doUpdateVisitedHistory(view: android.webkit.WebView?, url: String?, isReload: Boolean) {
