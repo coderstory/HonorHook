@@ -621,15 +621,17 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                             qrExpired = arr.optBoolean("exp", false)
                             val src = if (arr.isNull("src")) null else arr.optString("src")
                             if (src != null && src.startsWith("data:image") && src != qrSrc) {
-                                qrSrc = src
                                 // dataURL 解码很小（~175px 图），直接在回调线程解即可
                                 val b64 = src.substringAfter("base64,")
                                 val bs = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
                                 val bmp = android.graphics.BitmapFactory.decodeByteArray(bs, 0, bs.size)
-                                XhsLoginLog.w("qr decoded ok " + bmp.width + "x" + bmp.height)
-                                if (bmp != null) qrBitmap = bmp.asImageBitmap()
+                                XhsLoginLog.w("qr decode len=" + b64.length + " bmp=" + (bmp != null))
+                                if (bmp != null) {
+                                    qrSrc = src
+                                    qrBitmap = bmp.asImageBitmap()
+                                }
                             }
-                        } catch (_: Exception) { }
+                        } catch (e: Exception) { XhsLoginLog.w("qr err: " + e) }
                     }
                 }
                 kotlinx.coroutines.delay(1500)
