@@ -146,6 +146,28 @@ fun XhsBatchScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: (
                     )
                 }
             }
+            // ---- 通知禁用引导（dumpsys 实锤 numBlocked=646：荣耀对新装 App 默认关通知，
+            // FGS 常驻通知一条都出不来；设置页无命令行开关，只能用户手点）----
+            item {
+                if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                    Text(
+                        "⚠ 通知已被系统关闭：点击去设置开启，否则看不到下载常驻通知",
+                        fontSize = 12.sp,
+                        color = androidx.compose.ui.graphics.Color(0xFFF57C00),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName),
+                                    )
+                                }
+                            }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
+                }
+            }
             // ---- 账户状态卡（登录入口收拢到这里，不再占头部图标位）----
             item {
                 if (loggedIn == null) {
