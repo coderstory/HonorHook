@@ -651,6 +651,11 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
                         (function(){
                           var i=document.querySelector('.qrcode-img');
                           var exp=document.body && document.body.innerText.indexOf('已过期')>=0;
+                          // 验证页元素常被定位到视口上方（QR top=-95px 实锤），把它滚回可视区
+                          try{
+                            var c=document.querySelector('.captcha-container,.captcha-verify-container,[class*=captcha]');
+                            if(c&&c.scrollIntoView)c.scrollIntoView({block:'center'});
+                          }catch(e){}
                           return JSON.stringify({src:i?i.src:null, exp:!!exp});
                         })()
                         """.trimIndent(),
