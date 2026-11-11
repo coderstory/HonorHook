@@ -166,7 +166,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
         val gridItems = remember(files, picked) { files + picked }
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            modifier = Modifier.fillMaxWidth().weight(0.58f).padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth().weight(0.42f).padding(top = 8.dp),
             contentPadding = PaddingValues(bottom = 6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -216,7 +216,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
         }
 
         // ---- 下：队列面板（~42%）----
-        Column(Modifier.fillMaxWidth().weight(0.42f)) {
+        Column(Modifier.fillMaxWidth().weight(0.58f)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                 Text(
                     if (engine.running) "处理中（${engine.items.count { it.state == AiImageEngine.State.RUN || it.state == AiImageEngine.State.WAIT }} 项待完）"
