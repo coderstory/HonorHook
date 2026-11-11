@@ -650,6 +650,17 @@ private fun XhsLoginOverlay(topInset: Dp = 0.dp, onClose: () -> Unit) {
 
                         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                             XhsLoginLog.w("finished: $url")
+                            // XHS 页面 viewport 带 user-scalable=no，WebSettings 的 zoom 开关压不过它；
+                            // 页面加载完用 JS 改写 viewport 放开手势缩放（过验证码/看小字用）
+                            view?.evaluateJavascript(
+                                """
+                                (function(){
+                                  var m=document.querySelector('meta[name=viewport]');
+                                  if(m){m.setAttribute('content','width=device-width, initial-scale=1, minimum-scale=0.3, maximum-scale=5, user-scalable=yes');}
+                                })()
+                                """.trimIndent(),
+                                null,
+                            )
                         }
 
                         override fun doUpdateVisitedHistory(view: android.webkit.WebView?, url: String?, isReload: Boolean) {
