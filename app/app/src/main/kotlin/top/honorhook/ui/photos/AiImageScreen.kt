@@ -164,12 +164,13 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
             }
         }
 
-        // ---- 上：缩略图网格（~58%）----
+        // ---- 上：缩略图网格（全屏）+ 底部悬浮半透明面板（2026-11-11 用户要求）----
         val gridItems = remember(files, picked) { files + picked }
+        Box(Modifier.fillMaxWidth().weight(1f)) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            modifier = Modifier.fillMaxWidth().weight(if (engine.items.isEmpty()) 1f else 0.42f).padding(top = 8.dp),
-            contentPadding = PaddingValues(bottom = 6.dp),
+            modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+            contentPadding = PaddingValues(bottom = 240.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -217,9 +218,10 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
             }
         }
 
-        // ---- 下：队列面板（点「开始处理」产生条目后才出现，之前网格占满整屏——2026-11-11 用户 UX 纠正）----
-        if (engine.items.isNotEmpty()) Column(Modifier.fillMaxWidth().weight(0.58f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+        // ---- 下：悬浮面板（队列 + 参数卡）叠在网格上，半透明 ----
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            if (engine.items.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp, start = 14.dp, end = 14.dp)) {
                 Text(
                     if (engine.running) "处理中（${engine.items.count { it.state == AiImageEngine.State.RUN || it.state == AiImageEngine.State.WAIT }} 项待完）"
                     else "处理队列（${engine.items.size}）",
@@ -235,32 +237,51 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                 }
             }
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 itemsIndexed(engine.items) { idx, it ->
                     QueueRow(it) { engine.retry(context, idx) }
                 }
             }
-        }
+            }
 
-        // ---- 参数 chips + 执行：常驻底部，封进一张卡片（2026-11-11 用户要求）----
-        Card(modifier = Modifier.fillMaxWidth().padding(top = 4.dp).padding(bottom = bottomInnerPadding + 12.dp)) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (cap == 0) {
-                        listOf("通用" to false, "人像" to true).forEach { (label, pm) ->
-                            Chip(label + "增强", photoMode == pm) { photoMode = pm }
+            // 参数 chips + 执行：半透明悬浮卡（参数合并为一个分段 tab）
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 10.dp, bottom = bottomInnerPadding + 10.dp)
+                    .background(colorScheme.surface.copy(alpha = 0.82f), RoundedCornerShape(14.dp)),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                    // 单一分段 tab：超清=通用/人像；扩图=比例档
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(colorScheme.surfaceVariant, RoundedCornerShape(9.dp)),
+                    ) {
+                        val segments = if (cap == 0) listOf("通用增强" to false, "人像增强" to true)
+                        else AI_RATIOS.map { (label, _) -> label to Unit }
+                        segments.forEachIndexed { i, (label, _) ->
+                            val active = if (cap == 0) photoMode == (label == "人像增强") else ratioIdx == i
+                            Text(
+                                label,
+                                fontSize = 12.sp,
+                                color = if (active) colorScheme.onPrimary else colorScheme.onSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (active) colorScheme.primary else Color.Transparent)
+                                    .clickable {
+                                        if (cap == 0) photoMode = label == "人像增强" else ratioIdx = i
+                                    }
+                                    .padding(vertical = 7.dp),
+                            )
                         }
-                    } else {
-                        AI_RATIOS.forEachIndexed { i, (label, _) ->
-                            Chip(label, ratioIdx == i) { ratioIdx = i }
-                        }
-                        Text("居中扩展", fontSize = 10.sp, color = colorScheme.onSurfaceVariantSummary,
-                            modifier = Modifier.align(Alignment.CenterVertically))
                     }
-                }
-                // 主题色小按钮（miuix TextButton 固定大号，2026-11-11 用户要求改小+适配主题色）
+                    // 主题色小按钮（miuix TextButton 固定大号，2026-11-11 用户要求改小+适配主题色）
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -292,7 +313,9 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                         color = colorScheme.onPrimary,
                     )
                 }
+                }
             }
+        }
         }
     }
 
