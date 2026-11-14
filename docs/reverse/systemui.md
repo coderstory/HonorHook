@@ -486,3 +486,20 @@ tools/dev.sh modlog SystemUiHook   # LSPosed 日志判据
   chip 是状态图标非通知，保留属预期）。
 - 未验证：充电（系统管家）与 USB 调试条目的实际消失效果、充电普通态 id、USB 调试渠道 id、
   手电筒低电量（须 `dumpsys battery set level 4` 模拟）。
+
+## 十一、堆叠（stack）管线与 U6 互搏——2026-11-11 审计（117 版 MT MCP 实证）
+
+OTA 11.0.0.117 引入动态堆叠管线，是「系统 SIM 与插件 SIM 间歇重叠 / WiFi 间歇消失」的根因：
+
+- `SignalStackPolicy`（pipeline/mobile/data/repository，未混淆）：
+  - `stacked_mobile_icon_switch`（Global，0/OFF=1/AUTO=2/ALWAYS）→ stackMode；设备实值 0 ⇒ 常驻堆叠关。
+  - `shouldShowStacked(capsuleActive, spaceInsufficient)` = **灵动胶囊激活 && 信号空间不足** 才 true
+    ⇒ 状态栏拥挤/胶囊出现时系统自行临时切堆叠态，结束切回——非必现症状的源头。
+  - `hn_statusbar_signal_show_num` 是 SystemUI **写出去**的 simCount 镜像（`SignalStackPolicy$simCount$2` putInt），
+    `signal_stack_data_version` 只是能力位（`ObserverStackedMobileIconVersion`），均非根因。
+- `HwSystemIcons.updateSignalStack()`（每次图标布局变化）→ `notifySignalStackChange(Z)` →
+  **直接 setVisibility** 原生 mMobileCombo / mStackedMobileIcons——在 U6 两次 maintain 之间把
+  GONE 翻回 VISIBLE ⇒ 重叠；切换期视图重组时 U6 形态兜底把 wifi 与 mobile 同组整组 GONE ⇒ WiFi 消失。
+- 修复（DualSignalFeature）：① walkAndFix 形态候选排除含 wifi/ethernet 子节点的组；
+  ② moveBeforeWifi 插入位夹 0（wi==0 时 addView(-1) 崩溃面）；③ 新增 2 挂载点恒 false：
+  `SignalStackPolicy.shouldShowStacked(Z,Z)Z` / `isStackEnabled()Z`（U6 判据 3/3 → 5/5）。

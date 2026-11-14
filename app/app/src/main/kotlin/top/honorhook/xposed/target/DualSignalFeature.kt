@@ -78,6 +78,13 @@ object DualSignalFeature {
     private const val CLS_SIGNAL_UNIT_UCT = "com.android.systemui.statusbar.SignalUnitUCTView"
     private const val METHOD_ATTACH = "onAttachedToWindow"
 
+    // 117 版 OTA 新增的堆叠（stack）策略类，jadx/MT 实证未混淆：shouldShowStacked(Z,Z)Z 与
+    // isStackEnabled()Z 是所有堆叠切换的唯一收口（HwSystemIcons.updateSignalStack →
+    // notifySignalStackChange → 直接 setVisibility 原生组，与 U6 的 GONE 维护互搏 ⇒ 系统 SIM
+    // 与本插件 SIM 间歇重叠）。恒返 false = 系统永不进入堆叠态，原生双排/重叠一并消失。
+    private const val CLS_SIGNAL_STACK_POLICY =
+        "com.android.systemui.statusbar.pipeline.mobile.data.repository.SignalStackPolicy"
+
     // ---- DualSignal 插件冲突防护 ----
 
     /** DualSignal 插件包名（其 hook 先注入时插件容器已存在，据此退避）。 */
@@ -194,7 +201,37 @@ object DualSignalFeature {
             ),
         )
         session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
+
+        // 堆叠掐断点：两个布尔收口方法恒返 false（libxposed 回调返回值即宿主返回值）。
+        val stackKill = listOf(
+            MountEngine.SimpleTask(
+                className = CLS_SIGNAL_STACK_POLICY,
+                methodName = "shouldShowStacked",
+                paramCount = 2,
+                returnType = "boolean",
+                id = "systemui:dualSignal.StackPolicy.shouldShowStacked",
+                description = "U6 双排信号·掐断动态堆叠切换（胶囊激活+空间不足时系统自行切堆叠态）",
+            ),
+            MountEngine.SimpleTask(
+                className = CLS_SIGNAL_STACK_POLICY,
+                methodName = "isStackEnabled",
+                paramCount = 0,
+                returnType = "boolean",
+                id = "systemui:dualSignal.StackPolicy.isStackEnabled",
+                description = "U6 双排信号·掐断堆叠总开关（stackMode≠OFF 即真的兜底路径）",
+            ),
+        )
+        session.attemptMount(stackKill, module, loader) { task -> mountStackKill(session, task, module, loader) }
     }
+
+    /** 堆叠收口恒 false：首次命中打 judge 留痕；返回 java.lang.Boolean（libxposed 要求包装类型）。 */
+    private fun mountStackKill(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            if (chain.proceed() == java.lang.Boolean.TRUE) {
+                session.judge(module, task, JUDGE_PREFIX, "堆叠切换已掐断（原 ${chain.thisObject?.javaClass?.simpleName} 欲进堆叠态）")
+            }
+            java.lang.Boolean.FALSE
+        }
 
     private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         session.mount(task, module, loader) { chain ->
@@ -246,7 +283,11 @@ object DualSignalFeature {
         var n = 0
         if (v is LinearLayout) {
             val byId = idMobileCombo != 0 && v.id == idMobileCombo
-            val byCount = v.orientation == LinearLayout.HORIZONTAL && countMobileChildren(v) >= 1
+            // 形态兜底须排除混有 wifi/ethernet 的组：117 版宿主在 stack 切换期（SignalStackPolicy
+            // shouldShowStacked 动态翻转）会瞬时把 wifi 与 mobile 装进同一水平容器，整组 GONE 会
+            // 把 WiFi 一起带走——「WiFi 有时消失」的根因，只对按形态命中生效，按 id 命中不动。
+            val byCount = v.orientation == LinearLayout.HORIZONTAL &&
+                countMobileChildren(v) >= 1 && !hasWifiOrEthernetChild(v)
             if (byId || byCount) {
                 // 只计真接管（退避/外壳非 FrameLayout 不计——judge 行「已接管 N 处」必须是真话）
                 if (fixGroup(v, task, module)) n++
@@ -266,6 +307,17 @@ object DualSignalFeature {
             if (isMobileUnit(ll.getChildAt(i))) c++
         }
         return c
+    }
+
+    /** 形态候选的否决条件：组内混有 wifi 类名子节点或 ethernet_combo（整组 GONE 会带走 WiFi）。 */
+    private fun hasWifiOrEthernetChild(ll: LinearLayout): Boolean {
+        for (i in 0 until ll.childCount) {
+            val c = ll.getChildAt(i) ?: continue
+            if (c.javaClass.name.contains("Wifi") || c.javaClass.name.contains("WiFi")) return true
+            val id = c.id
+            if (idEthernetCombo != 0 && id == idEthernetCombo) return true
+        }
+        return false
     }
 
     /** 原插件 isMobileUnit：类名判 SignalUnit / id 判 mobile_combo 系，排除 Wifi。 */
@@ -566,7 +618,9 @@ object DualSignalFeature {
         // 3.3.4 触发条件 hi != wi-1（原 3.3 为 hi > wi）：host 已在 wifi 前一位时不做无谓 remove/add
         if (hi >= 0 && wi >= 0 && hi != wi - 1) {
             row.removeView(host)
-            row.addView(host, wi - 1)
+            // wifi 在第 0 位时 wi-1 = -1 会 IndexOutOfBoundsException（静态审计发现的唯一崩溃面），
+            // 语义仍是「排到 wifi 前」→ 夹 0
+            row.addView(host, maxOf(wi - 1, 0))
         }
     }
 

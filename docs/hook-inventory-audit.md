@@ -98,6 +98,10 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 
 ### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；最新 2026-11-07 重采，2026-11-02 段落保留为历史）
 
+> **U6 应 M 变更（2026-11-11，未重采）**：DualSignalFeature 新增 2 挂载点（`SignalStackPolicy.shouldShowStacked` /
+> `isStackEnabled` 恒 false，掐断 117 版动态堆叠与 U6 互搏，见 `docs/reverse/systemui.md` §十一）⇒
+> **U6 应 M = 5**（历史快照里的 3/3 均为变更前口径），待装机后 `dev.sh hook-status SystemUi` 复采。
+>
 > **最近一次重采：2026-11-07 23:21**（模块 v1.2.8，`bash tools/dev.sh hook-status` 一条命令取，日志 `modules_2026-11-07T21:14:09.531743.log`）：**全绿**——ThemeStoreHook **52/52**（theme 20.1.67.303，新表 `ThemeStoreMap_20_1_67_303`）、MmsHook 2/2（插件 10.0.44.309，T3 双轨 b(4参)/c(5参) 命中 c）、xhs X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.53.3）、AppMarket 7/7（16.1.10.302）、Sysmr 3/3（473，仅 WARN）、Ime 12/12、launcher 5/5、ouc 11/11、settings 2/2、systemui 4/4·U6 3/3·U7 3/3、天气 ads 2/2·tracking 3/3（18.1.7.314）。行为层：小红书保存全链、短信「打开应用」按钮隐藏均由用户真机确认（2026-11-07）。
 >
 > **查自己机器还差哪些版本 → `bash tools/dev.sh versions`**（实装 versionName vs `FeatureCatalog`，未适配则非 0 退出）。
