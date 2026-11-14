@@ -26,7 +26,6 @@
          用户在系统设置里手动授权（rules v2 §0）。声明之外还需运行时引导，见 FileOrganizerScreen。 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
-    <!-- 小红书批量下载前台服务（2026-11-11）：退后台继续下载的保活壳，见 ui/xhsbatch/XhsBatchService.kt -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- 小红书批量下载后台保活：电池优化白名单弹窗（荣耀 PowerKeeper 杀后台实锤） -->
@@ -63,12 +62,6 @@
         <meta-data
             android:name="xposedminversion"
             android:value="82" />
-
-        <!-- 小红书批量下载保活（dataSync 类型，API 34 要求显式声明 foregroundServiceType） -->
-        <service
-            android:name=".ui.xhsbatch.XhsBatchService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
 
         <!-- 下载的更新 APK 经 FileProvider 交给系统安装器（cacheDir/update/） -->
         <provider

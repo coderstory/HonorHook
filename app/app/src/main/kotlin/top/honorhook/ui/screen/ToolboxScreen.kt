@@ -180,9 +180,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
         containerColor = Color.Transparent,
         topBar = {
-            // FILES / XHS_BATCH / AI_IMAGE 页无顶栏（自带标题行 + 页内返回键，2026-11-11 修顶栏与页内标题重复）；
+            // FILES / AI_IMAGE 页无顶栏（自带标题行 + 页内返回键，2026-11-11 修顶栏与页内标题重复）；
             // 状态栏避让走 contentWindowInsets.Top
-            if (view != HubView.FILES && view != HubView.XHS_BATCH && view != HubView.AI_IMAGE) TopAppBar(
+            if (view != HubView.FILES && view != HubView.AI_IMAGE) TopAppBar(
                 color = Color.Transparent, // 顶部磨砂带由 ArtworkBackdrop 提供，这里必须让出底色
                 title = if (view == HubView.HOME) "工具箱" else view.title,
                 navigationIcon = { if (view != HubView.HOME) MiuixBackButton { view = HubView.HOME } },
@@ -202,12 +202,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             // FILES 页无顶栏：Miuix Scaffold 不渲染 TopAppBar 时 innerPadding 仍按顶栏高度预留 → 改用纯状态栏高度
             FileOrganizerScreen(bottomInnerPadding = bottomInnerPadding,
                 topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding())
-        } else if (view == HubView.XHS_BATCH) {
-            // 小红书批量下载（2026-11-10）：自带 LazyColumn 与标题行的整页，接住返回键回工作台；
-            // 无顶栏（同 FILES）：Miuix Scaffold 仍按顶栏高度预留 innerPadding → 用纯状态栏高度
-            XhsBatchScreen(bottomInnerPadding = bottomInnerPadding,
-                topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding(),
-                onBack = { view = HubView.HOME })
         } else if (view == HubView.AI_IMAGE) {
             // AI 图像工具（2026-11-10）：AI 超清/扩图，能力来自 PhotosAiClient（图库注入通道），见 ui/photos/AiImageScreen.kt
             AiImageScreen(bottomInnerPadding = bottomInnerPadding,
@@ -271,8 +265,6 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 HubView.FREEZE -> {}
                 // MFA 页走独立整页分支（见 when 外层）
                 HubView.MFA -> {}
-                // 小红书批量下载页走独立整页分支（见 when 外层）
-                HubView.XHS_BATCH -> {}
                 HubView.AI_IMAGE -> {}
             }
 
@@ -439,7 +431,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), FREEZE("应用冻结"), MFA("MFA 验证器"),
-    FILES("文件整理"), XHS_BATCH("小红书批量下载"), AI_IMAGE("AI 图像工具"),
+    FILES("文件整理"), AI_IMAGE("AI 图像工具"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -687,14 +679,6 @@ private fun HubTiles(
                 // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
                 Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 4) { onOpen(HubView.FILES) }
             }
-            Box(Modifier.weight(1f)) {
-                // 小红书批量下载（2026-11-10）：任务列表 + 串行下载，见 ui/screen/XhsBatchScreen.kt 与 docs/tech-design-xhs-user-batch-download.md
-                val accentXhs = Color(0xFFFA2C3C) // 小红书品牌红
-                Tile(genshinOr(Icons.Rounded.Download, GenshinIcons.Primogem), "小红书批量下载", "按用户串行下载图片视频", accentXhs, order = 5) { onOpen(HubView.XHS_BATCH) }
-            }
-        }
-        // AI 图像工具（2026-11-10）：第 4 行单格（超清/扩图二选一，Pictures/小红书 选图）
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
                 val accentAi = Color(0xFF9C6BFF)
                 Tile(genshinOr(Icons.Rounded.AutoAwesome, GenshinIcons.Primogem), "AI 图像工具", "AI 超清 · AI 扩图", accentAi, order = 6) { onOpen(HubView.AI_IMAGE) }
