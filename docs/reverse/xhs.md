@@ -477,3 +477,10 @@ LinkedHashSet 去重保序），透传 offerHdDownload → 询问卡文案升为
 （按钮「全部下载」）/ 静默路 Toast 同步；startHdDownload 在视频落盘后调
 XhsBatchSave.downloadImagesForVideoNote（internal 新入口，复用 downloadAll 管线零改动）。
 视频失败不影响图片继续下（两段互不阻塞）。纯视频笔记 imageUrls 空 = 行为不变。
+
+**二次回归（2026-11-14，slides_simulate 快闪视频）**：type=video 的 N 图合成视频，上游
+XhsNoteParser 把全部 slide 标 cover（`isCover = isVideoNote && streams.isEmpty()`）⇒ 上述
+「去 cover」口径把正文图全滤 ⇒ 只剩视频。修法：两路收集口径收口到共享函数
+`xhsContentImageUrls`（XhsBatchSave.kt 文件顶层，JVM 可测）——cover 仅在「存在非 cover 图
+或全列表唯一图（纯视频笔记封面帧）」时滤（`coverAreSlides = imgs.size > 1 && imgs.all { it.cover }`）。
+详见 findings-2026-11-14-slides-cover-regression.md；契约钉 XhsContentImageUrlsTest。

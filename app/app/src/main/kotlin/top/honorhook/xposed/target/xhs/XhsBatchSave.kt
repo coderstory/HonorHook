@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
+import com.neoruaa.xhsdn.core.model.ResolvedNote
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
@@ -20,6 +21,31 @@ import top.honorhook.xposed.data.RemoteConfig
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+
+/**
+ * 笔记正文图直链集（两路共用口径：图片分支收集 + 视频链混合收集 offerHdDownloadFromNote）：
+ * ① images 滤评论图（commentId）；cover 只在「存在非 cover 图，或全列表唯一图（纯视频笔记封面帧）」
+ *    时滤——slides_simulate 快闪视频例外（2026-11-14 用户报障「带图+视频只会下载视频」）：type=video
+ *    的 N 图合成视频，上游 XhsNoteParser `isCover = isVideoNote && streams.isEmpty()` 把全部 slide
+ *    标 cover ⇒ 旧口径 filterNot{cover} 全滤 ⇒ 只剩视频；全 cover 且多图 = 正文 slide，全保留。
+ * ② livePhotos 只展开静帧原图（2026-10-19 实况图集根因修：该笔记 5 项媒体全为 LivePhoto（parser
+ *    正确产出），旧适配层只消费 images/videos，livePhotos 两头不沾 ⇒ urls 空 ⇒「无可用图片」死寂；
+ *    下载器实测 livePhoto 关时只下静态帧原图——不双下 mp4+帧）
+ * ③ videos 不在此消费（视频流归 X4 HD 询问分支，调用方各按其轨处理）
+ * ④ 评论图并入（2026-11-03 用户需求，XhsCommentHarvest 被动采集）：该笔记打开过评论区的图，并入
+ *    同落 CDN 原始字节（sns-webpic 显示链经 toBare/raw 与笔记图同管线）；没打开过 = 空 = 行为不变
+ * 合并保序去重（LinkedHashSet）。文件顶层而非 object 内：XhsBatchSave 构造带 Handler/Activity 追踪，
+ * JVM 单测不可初始化——口径契约（XhsContentImageUrlsTest）须可直接钉住。
+ */
+internal fun xhsContentImageUrls(note: ResolvedNote?, noteId: String): List<String> {
+    val imgs = note?.images.orEmpty()
+    val coverAreSlides = imgs.size > 1 && imgs.all { it.cover }
+    return LinkedHashSet(
+        imgs.filterNot { (it.cover && !coverAreSlides) || it.commentId != null }.map { it.originalUrl } +
+            note?.livePhotos.orEmpty().map { it.image.originalUrl } +
+            XhsCommentHarvest.urlsOf(noteId)
+    ).toList()
+}
 
 /**
  * X5 批量保存（引擎 XhsHook·X5）：保存按钮 hook → 分享链接 → 上游下载器管线（2026-10-19 定案）。
@@ -601,27 +627,13 @@ object XhsBatchSave {
             Thread({
                 val urls = runCatching {
                     val note = kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
-                    // 两类合并去重保序（2026-10-19 实况图集根因修：真机 19:46 日志「解析成功 图0 视频0
-                    // live6 候选0」+ 上游 parser 读码——该笔记 5 项媒体全为 ResolvedMedia.LivePhoto
-                    // （parser 正确产出，每项 image: Image + video: Video 双轨），旧适配层只消费
-                    // note.images/note.videos，livePhotos 两头不沾 ⇒ urls 空 ⇒「无可用图片」死寂）：
-                    // ① images.originalUrl（上游 NoteOutput.eligible 语义映射：封面/评论图排除，
-                    //   originalUrl = 下载器确认的原图直链，imageList urlDefault 同源）
-                    // ② livePhotos 每项只展开 image.originalUrl（下载器实测 livePhoto 关时只下静态帧
-                    //   原图，模块对齐此行为——不双下 mp4+帧）
+                    // 收集口径统一走 [xhsContentImageUrls]（①②④ 释义与 2026-11-14 slides cover 例外见其 KDoc）
                     // ③ videos 维持不消费（视频流归 X4 HD 询问分支）
-                    val imageUrls = note?.images
-                        ?.filterNot { it.cover || it.commentId != null }
-                        ?.map { it.originalUrl }
-                        .orEmpty()
-                    val liveFrameUrls = note?.livePhotos.orEmpty().map { it.image.originalUrl }
-                    // ④ 评论图（2026-11-03 用户需求，被动采集 XhsCommentHarvest）：该笔记打开过评论区的图，
-                    //   并入批量同落 CDN 原始字节（sns-webpic 显示链经 toBare/raw 与笔记图同管线）；没打开过 = 空 = 行为不变
                     val commentUrls = XhsCommentHarvest.urlsOf(noteId)
                     if (commentUrls.isNotEmpty()) {
                         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 评论图并入 ${commentUrls.size} 张 noteId=$noteId")
                     }
-                    LinkedHashSet(imageUrls + liveFrameUrls + commentUrls).toList()
+                    xhsContentImageUrls(note, noteId)
                 }.getOrNull().orEmpty()
                 if (urls.isEmpty()) {
                     module.log(Log.WARN, MountEngine.TAG,

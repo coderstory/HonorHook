@@ -989,16 +989,11 @@ object XhsVideoSave {
                 )
             }
         } ?: emptyList()
-        // 混合笔记图片收集（2026-11-04 用户报障「视频+图片只检测到视频」根因修）：视频链此前只消费
-        // note.videos，同笔记 images/livePhotos 被丢弃 ⇒ 图片全丢。口径与图片分支同源（XhsBatchSave
-        // mountClick ①②④）：images 去 cover/评论图取 originalUrl + livePhotos 只展开静帧原图 +
-        // 评论图并入（XhsCommentHarvest 被动采集，没打开过评论区 = 空 = 行为不变）。空集 = 纯视频
-        // 笔记，透传空表零行为变化。
-        val imageUrls = LinkedHashSet(
-            (note?.images.orEmpty().filterNot { it.cover || it.commentId != null }.map { it.originalUrl }) +
-                note?.livePhotos.orEmpty().map { it.image.originalUrl } +
-                XhsCommentHarvest.urlsOf(noteId)
-        ).toList()
+        // 混合笔记图片收集（2026-11-04 用户报障「视频+图片只检测到视频」根因修；2026-11-14 二次报障
+        // 「slides 笔记只会下载视频」= cover 口径升级）：口径与图片分支同源，统一走顶层
+        // xhsContentImageUrls（①②④ 释义与 slides_simulate 全 cover slide 例外的根因见其 KDoc）。
+        // 空集 = 纯视频笔记，透传空表零行为变化。
+        val imageUrls = xhsContentImageUrls(note, noteId)
         if (imageUrls.isNotEmpty()) {
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 混合笔记图片并入 ${imageUrls.size} 张 noteId=$noteId")
         }
