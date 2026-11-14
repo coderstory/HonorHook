@@ -65,7 +65,9 @@ object SysmgrHook : TargetHook {
             returnType = "android.os.Bundle",
             value = null,
             description = "checkUninstalledApk 服务端恒返未检出（外部预检——安装器 bz1 等——全链不再扫描）",
-            dexStrings = listOf("checkUninstalledApk called by sub user, skip the scan and return ok"),
+            // 2026-11-12 真机 smali 实证：真串是 checkUninstallApk（无 d）——原串拼错致 DexKit 兜底从未生效，
+            // 3/3 全靠未混淆类名+方法名直连；修正后兜底才有兜底能力
+            dexStrings = listOf("checkUninstallApk called by sub user, skip the scan and return ok"),
             dexParamTypes = listOf("android.os.Bundle"),
         ),
         HookPoint(

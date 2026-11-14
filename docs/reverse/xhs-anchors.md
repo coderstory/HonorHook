@@ -28,21 +28,27 @@
 
 ## 版本坐标快照（覆盖套，见 `XhsPoints.kt`）
 
-| 点 | 9.50.0（基线） | 9.51.0 | 9.52.1 | **9.53.3**（2026-11-07 实装） |
-|---|---|---|---|---|
-| saveClick | ji9.b | yi9.b | xq9.b | **gr9.b** |
-| x2b | nd8.j | ce8.j | bm8.j | **jm8.j** |
-| noteSaveEntry | ab9.r1 | pb9.o1 | nj9.o1 | **vj9.q1** |
-| aigcEditLaunch | — | rg4.b | cq4.b | **gq4.b** |
-| downloaderEntry | b75.h | g75.h | pg5.h | **tg5.h** |
-| albumCopy.videoStore | xec.w 系 | dz8.t | d79.s | **l79.s** |
-| videoClick / h0 / e0 | — / xec.w / xec.w | null | null | **null**（仍无家） |
+| 点 | 9.50.0（基线） | 9.51.0 | 9.52.1 | 9.53.3 | **9.54.0**（2026-11-11 实装） |
+|---|---|---|---|---|---|
+| saveClick | ji9.b | yi9.b | xq9.b | gr9.b | **ss9.b** |
+| x2b | nd8.j | ce8.j | bm8.j | jm8.j | **on8.j** |
+| noteSaveEntry | ab9.r1 | pb9.o1 | nj9.o1 | vj9.q1 | **gl9.q1** |
+| aigcEditLaunch | — | rg4.b | cq4.b | gq4.b | **xq4.b** |
+| downloaderEntry | b75.h | g75.h | pg5.h | tg5.h | **mh5.h** |
+| albumCopy.videoStore | xec.w 系 | dz8.t | d79.s | l79.s | **u89.s** |
+| videoClick / h0 / e0 | — / xec.w / xec.w | null | null | null | **null**（仍无家） |
 
 9.53.3 实测手法：全程走 MT MCP（`tools/mtmcp.py strings <pkg> <锚>` → 唯一宿主类），
 再用 outline 核对方法名 + 参数数；`noteSaveEntry` 的锚串落在内部类 `vj9.q1$a`，真身取外层 `vj9.q1#b`（9 参）。
 ⚠ 2026-11-10：`NoteFeed.u0()` 本版改返 GroupShare，noteId getter = `J0()`（NoteFeed.java:1143，classes5.dex）
 ——模块 noteId 直取一律走 `XhsSavePivot.noteIdOf`（24hex 门扫描），勿按名找（findings-2026-11-10-noteid-u0-drift）。
 同名类被 R8 重用是常态（9.51 的 b75.h 就是同名 SuspendLambda）⇒ 一律以串锚唯一宿主为准，不得按类名存在性判存活。
+
+9.54.0 补充（findings-2026-11-11-xhs-9540）：
+- x2b 同类出现**同锚异方法**：on8.j 既有 b(Context,Z)Bitmap（真身）又有 a(Bitmap×4,Z,Z)（白底合成，
+  AI 水标是参数 r20，挂 a 返 null 会整图变 null）⇒ 挂点前必须 outline 全类核对方法表。
+- **JSON 注解类会 R8 挪包**：`kd.c` → `md.c`（X2c 运行时定位唯一死因；ImageBean 本体无恙）⇒
+  XhsWatermark 改候选制 `["md.c","kd.c"]`。锚点表「已知结构」节的 `@kd.c(...)` 锚行同理在新版读作 `@md.c(...)`。
 
 ## 已知非挂载但关键的宿主结构（业务图谱见 xhs.md §九）
 
@@ -55,6 +61,10 @@
 | 视频流端点 | `VideoFeedNetService.java:25` `@f("/api/sns/v4/note/videofeed")`（宿主 rec.xiaohongshu.com） | 同上 |
 
 ## 适配流程（浓缩版，全流程见 skill `xhs-recon`）
+
+**自动化（2026-11-11 起）**：`bash tools/dev.sh xhs-adapt` —— 按本表锚串逐点搜索 + outline 核签名，
+输出 XhsPoints 覆盖行草稿（锚点机器可读投影在 `tools/xhs_adapt.py` ANCHORS，**新增挂载点两处同步**）。
+exit 1 = 有冲突需人工；落表前必审 diff——锚命中 ≠ 点正确（9.54 x2b 同锚异方法反例）。
 
 1. 读本表 → 2. 按 xhs.md §八头部定向反编译命令出产物 → 3. 逐锚 grep →
    4. 命中=核对签名零漂；miss=按锚行语义找新包名 → 5. 更新本表两处（表+验证版本列）

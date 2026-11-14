@@ -44,7 +44,9 @@ object SettingsHook : TargetHook {
             pending += MountEngine.SimpleTask(
                 className = CLS_APP_DETAILS,
                 methodName = "Q3",
-                paramCount = 0,
+                // 2026-11-12 实证：方法体签名从 Q3()V 漂成 Q3(Ljava/lang/Object;)V（多 1 个合成参数），
+                // paramCount=0 导致 installed 1/2；宿主 14.0.0.210 未变，只漂了形状
+                paramCount = 1,
                 returnType = "void",
                 id = ID_DISABLE_BTN,
                 description = "S1 应用详情页「停用」按钮恒可点（Q3 决策汇聚点 after 强制启用+挂监听）",

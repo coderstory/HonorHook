@@ -114,6 +114,29 @@ object XhsPoints {
             "albumCopy.e0" to null,
             "albumCopy.videoStore" to "l79.s",
         ),
+        // 9.54.0（2026-11-11 真机升级判据 X2 1/3、X5 3/7；MT MCP 串锚/outline 逐点实证，工作区 mhp4i3ay）：
+        // - saveClick：串锚 "onDownloadClick, noteId=" 唯一宿主 → ss9.b，invoke(Object)→Object 不变
+        // - x2b：串锚 disableAiWaterMark + andr_image_save_white_bg_optimized → on8.j，
+        //   b(Context,Z)Bitmap 仍在（同类新增 a(Bitmap×4,Z,Z) 是合成方法，勿挂错）
+        // - noteSaveEntry：串锚 "save video failed:" 落内部类 gl9.q1$a，真身外层 gl9.q1#b，
+        //   9 参 (Z,Activity,z0,NoteFeed,I,Z,ViewGroup,Function1,Function0)V 不变
+        // - aigcEditLaunch：串锚 tag_video_edit_download_loading → xq4.b（capa.video_edit 系；
+        //   tf3.b 为 global_edit 副本不取，同 9.53 cf3.b 口径），invoke(Object)→Object 不变
+        // - downloaderEntry：串锚 addDownloadTask → mh5.h，static e 13 参形状不变
+        // - albumCopy.videoStore：串锚 "saveVideo start copy file." → u89.s，
+        //   static a(self,String,String,Uri,Z) 5 参 void 不变
+        // - videoClick / albumCopy.h0 / albumCopy.e0：仍无家 → null（原因同 9.51~9.53，勿回落基线）
+        "9.54.0" to mapOf(
+            "saveClick" to "ss9.b",
+            "videoClick" to null,
+            "x2b" to "on8.j",
+            "noteSaveEntry" to "gl9.q1",
+            "aigcEditLaunch" to "xq4.b",
+            "downloaderEntry" to "mh5.h",
+            "albumCopy.h0" to null,
+            "albumCopy.e0" to null,
+            "albumCopy.videoStore" to "u89.s",
+        ),
     )
 
     /**

@@ -291,7 +291,7 @@ object FeatureCatalog {
                 Feature(KEY_SYSMGR_ANTIVIRUS, R.string.feature_sysmgr_antivirus_title, R.string.feature_sysmgr_antivirus_desc),
             ),
             baselineVersion = "17.0.0.414",  // jadx 反编译产物实证（sysmgrsvc-jadx，2026-10-13）
-            extraVersions = setOf("17.0.0.455", "17.0.0.457", "17.0.0.473", "17.0.0.583"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3；473 = 11-07 实装 3/3；583 = 11-11 实装 3/3（均无独立版本表，同套挂载点）
+            extraVersions = setOf("17.0.0.455", "17.0.0.457", "17.0.0.473", "17.0.0.583", "17.0.0.584"),  // 455 = 10-20 真机 3/3；457 = 10-27 OTA 后 3/3；473 = 11-07 实装 3/3；583 = 11-11 实装 3/3；584 = 11-12 实装 3/3（均无独立版本表，同套挂载点）
         ),
         Target(
             "com.xingin.xhs", R.string.target_name_xhs,
@@ -301,7 +301,7 @@ object FeatureCatalog {
                 Feature(KEY_XHS_SILENT_DOWNLOAD, R.string.feature_xhs_silent_download_title, R.string.feature_xhs_silent_download_desc),
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
-            extraVersions = setOf("9.49.1", "9.51.0", "9.52.1", "9.53.3"),  // 9.51 = 10-23；9.52.1 = 11-02（XhsPoints 9.52 套）；9.53.3 = 11-07 实装（6 点在位，videoClick/h0/e0 仍无家）
+            extraVersions = setOf("9.49.1", "9.51.0", "9.52.1", "9.53.3", "9.54.0"),  // 9.51 = 10-23；9.52.1 = 11-02（XhsPoints 9.52 套）；9.53.3 = 11-07 实装（6 点在位，videoClick/h0/e0 仍无家）；9.54.0 = 11-12 适配（X2c 注解候选制 + 6 点新坐标，装机复采前 X2/X5 判据未达）
         ),
         Target(
             "com.hihonor.photos", R.string.target_name_photos,

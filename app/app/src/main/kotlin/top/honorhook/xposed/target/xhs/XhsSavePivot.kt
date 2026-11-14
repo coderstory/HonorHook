@@ -254,8 +254,9 @@ object XhsSavePivot {
         // sget zac/d;->Companion 后 e(Class)→ShareService，2026-11-02）。9.53.3 = dcc.d（pbc/z smali
         // 实证 `sget-object v0, Ldcc/d;->Companion:Ldcc/d$a;` → `e(Ljava/lang/Class;)Ljava/lang/Object;`
         // → ShareService.getShortUrl；同族锚串 getShortUrlObservableIfNeed success/failure 落在
-        // pbc/x·pbc/y，不含定位器调用点）。按序试探，新增版本往前追加即可
-        val candidates = sequenceOf("dcc.d", "zac.d", "z3c.d", "i3c.d")
+        // pbc/x·pbc/y，不含定位器调用点）。9.54.0 = bec.d（ndc/z smali 实证同形态；锚族落 ndc/x·y·z）。
+        // 按序试探，新增版本往前追加即可
+        val candidates = sequenceOf("bec.d", "dcc.d", "zac.d", "z3c.d", "i3c.d")
         val companion = candidates.firstNotNullOfOrNull { name ->
             runCatching {
                 Class.forName(name, true, loader)

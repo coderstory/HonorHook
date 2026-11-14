@@ -43,8 +43,12 @@ object XhsWatermark {
     /** X2c 载体类（未混淆；方法号漂移实证，不做静态挂载点）。 */
     private const val CLS_IMAGE_BEAN = "com.xingin.entities.ImageBean"
 
-    /** kd.c JSON 注解（RUNTIME retention，value() + alternate()，jadx classes12 实证）。 */
-    private const val CLS_KD_C = "kd.c"
+    /**
+     * JSON 字段注解（RUNTIME retention，value() + alternate()）。
+     * 9.50~9.53 = kd.c；9.54 实证 R8 挪包 → md.c（MT 伪代码 ImageBean @c("disable_ai") + import md.c）。
+     * 候选制：运行时逐个 loadClass，先命中先用——注解类未混淆但包随 R8 漂移，勿钉死单一名字。
+     */
+    private val CLS_KD_C_CANDIDATES = listOf("md.c", "kd.c")
     private const val ANN_DISABLE_AI = "disable_ai"
 
     private const val ID_MSC_DISABLE_WM = "xhs:noWatermark.mediaSaveConfig.c"
@@ -190,7 +194,9 @@ object XhsWatermark {
      */
     private fun discoverDisableAiGetter(loader: ClassLoader): String? = runCatching {
         val cls = loader.loadClass(CLS_IMAGE_BEAN)
-        val annCls = loader.loadClass(CLS_KD_C)
+        val annCls = CLS_KD_C_CANDIDATES.firstNotNullOfOrNull { c ->
+            runCatching { loader.loadClass(c) }.getOrNull()
+        } ?: return null
         val field = cls.declaredFields.firstOrNull { f ->
             f.annotations.any { ann ->
                 val jAnn = ann as java.lang.annotation.Annotation

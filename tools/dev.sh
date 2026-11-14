@@ -329,6 +329,8 @@ HonorHook 开发工具
   grep-logd <正则>  按正则过滤全 buffer（-b all）
   modlog [tag] [行数]   LSPosed 框架日志中匹配 tag 的最后 N 行（默认 HonorHook / 60）
   modlog-grep <pattern> [行数]   模式查最新 lspd 模块日志（当天日志可能在旧日期文件里——ls -t 取正在写的）
+  anchor-adapt <pkg别名>   通用版本适配自动化：锚点搜索+签名核对 → 坐标草稿（tools/anchor_adapt.py；别名 xhs/appmarket/installer/sysmgr/theme）
+  xhs-adapt [apk路径]      小红书适配别名 = anchor-adapt xhs
   xhs-judge               小红书保存链路判据三件套（模块日志 + MediaStore 近5min + 落盘目录）
   lspd-log         LSPosed 框架日志目录与最近内容（模块未被加载时先看这里）
   crash            抓取崩溃堆栈（一次性 dump，不阻塞）
@@ -1001,6 +1003,19 @@ PYX
     [ -n "$F" ] || die "未取到 lspd 模块日志文件（设备未连 / su 不可用）"
     info "最新日志文件: $F"
     dev_root "grep -h -- '$PAT' '$F' 2>/dev/null" 2>&1 | tr -d '\r' | tail -"$N" || true
+    ;;
+
+  xhs-adapt)
+    # 历史别名（2026-11-11 泛化前入口）：小红书 = anchor-adapt xhs
+    exec "$0" anchor-adapt xhs "${2:-}"
+    ;;
+
+  anchor-adapt)
+    # 通用版本适配自动化（2026-11-11）：串锚唯一宿主 + outline 核签名 → 坐标草稿。
+    # 只有结论落表要人审——锚命中 ≠ 点正确（x2b 同锚异方法反例，见 tools/anchor_adapt.py 头注）
+    PY="$(pick_python)" || die "未找到可用 python3（见 pick_python）"
+    TARGET="${2:?用法: dev.sh anchor-adapt <pkg别名> [apk路径]}"
+    cd "$SCRIPT_DIR" && exec "$PY" anchor_adapt.py "$TARGET" "${3:-}"
     ;;
 
   xhs-judge)
