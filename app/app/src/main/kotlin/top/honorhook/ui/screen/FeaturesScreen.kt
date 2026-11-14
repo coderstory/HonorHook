@@ -558,7 +558,7 @@ private fun AppHeaderCard(
                 if (target.iconKey == null) {
                     // 每行带色：版本适配行单独染色（颜色即语义），其余行维持弱化灰。
                     val meta: List<Pair<String, Color>> = listOfNotNull(
-                        versionText?.let { "版本 $it" to colorScheme.onSurfaceVariantSummary },
+                        versionText?.let { listOf("版本 $it" to colorScheme.onSurfaceVariantSummary) },
                         // 版本适配行：仅按宿主版本卡的目标透出（supportedText null = 不显示）。
                         // 绿色判据 = 装机 versionName ∈ target.supportedVersions（含历史精确套）；红色 = 不在集合内。
                         // 红字保留「仍会尝试」的依据：MountEngine.checkHostVersionOnce 版本不一致只打 WARN，
@@ -569,14 +569,21 @@ private fun AppHeaderCard(
                         // 「适配的是哪一套」的地方——与上一行「版本 Y」（本机版本）不等也说得清。
                         // 绿不加状态标签：绝大多数宿主即基线，恒真标签无信息量，且右侧已有「已启用/待启用」标签。
                         // 红也不再另给右上「版本未适配」tag（同上 P3）：同屏两处红表达同一事实，红字信息量更大。
+                        // 措辞「未验证」而非「未适配」（2026-11-14 用户拍板）：红色 = 版本不在支持集合，
+                        // 模块侧只是没有该版本的表、照常盲挂——「未适配」读起来像功能不可用，
+                        // 「未验证」才如实：只承诺没在这版宿主上验证过，不承诺挂不上。
+                        // 「最新支持 X」另起一行（2026-11-14 用户拍板）：与状态行分排；仍红色——两行同属版本适配语义。
                         supportedText?.let {
                             if (versionMismatch) {
-                                "未适配（最新支持 $it，仍会尝试）" to VersionTagRed
+                                listOf(
+                                    "未验证（仍会尝试）" to VersionTagRed,
+                                    "最新支持 $it" to VersionTagRed,
+                                )
                             } else {
-                                "已适配" to VersionTagGreen
+                                listOf("已适配" to VersionTagGreen)
                             }
                         },
-                    )
+                    ).flatten()
                     meta.forEach { (line, color) ->
                         Text(
                             text = line,

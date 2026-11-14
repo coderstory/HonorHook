@@ -448,6 +448,7 @@ private fun AboutPage(
                     AboutCard("Re:荣耀", "版本 ${appVersionLabel()}")
                     AboutCard("作者", "©${java.time.Year.now().value} CoderStory")
                     AboutCard("第三方库", "LSPosed API · Compose · Miuix · DexKit · XHS 下载器")
+                    AboutCard("QQ 群", "1105719820")
                 }
                 Spacer(
                     Modifier.height(
