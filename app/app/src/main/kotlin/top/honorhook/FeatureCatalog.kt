@@ -259,7 +259,7 @@ object FeatureCatalog {
                 Feature(KEY_TRACK_BLOCK, R.string.feature_tracking_block_title, R.string.feature_tracking_block_desc),
             ),
             baselineVersion = "18.1.6.312",  // dumpsys 实证 2026-10-19（设备 AAK-AN00）；Tracking Ex 点在本版 SDK 无实现类属预期（a.d() return null），判据仍看 installed N/M
-            extraVersions = setOf("18.1.7.314"),  // 2026-11-07 实装：5/6 ALIVE，Ex.Builder 已删（HonorTrackingHook 运行时探测回落 getInstanceEx，设计内）
+            extraVersions = setOf("18.1.7.314", "18.1.7.321"),  // 314：2026-11-07 实装：5/6 ALIVE，Ex.Builder 已删（HonorTrackingHook 运行时探测回落 getInstanceEx，设计内）；321：2026-11-17 实装，真机判据 Ads installed 2/2 + Tracking 3/3 全绿（选点零漂移，纯版本登记）
             iconKey = "shield",
         ),
         Target(
