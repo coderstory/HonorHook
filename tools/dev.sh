@@ -359,6 +359,7 @@ HonorHook 开发工具
   size             debug/release APK 体积与最大成分
   dexstat          release classes.dex 按顶层包统计类数
   test             运行 JVM 单元测试（表驱动决策回归）
+  test-one <全名...>       定向 JVM 单测（--tests 逐个透传；on-device /storage noexec，须走 bash 起 gradlew）
   verify           一键：编译 → 安装 → 启动 → 抓判据日志
   clean            清理 Gradle 构建产物
   env              打印工具链解析结果（java/adb/apktool/jadx/aapt2/python 都在哪，先跑这个）
@@ -535,6 +536,19 @@ EOF
     require "$GRADLEW"
     info "运行 JVM 单元测试（:app:testDebugUnitTest）"
     (cd "$ROOT/app" && bash "$GRADLEW" :app:testDebugUnitTest --console=plain)
+    ;;
+
+  test-one)
+    # 定向单测：与 test 同一环境守卫；on-device /storage noexec ⇒ 不能直接执行 gradlew
+    # （exec ./app/gradlew 实测 exit 126），必须 bash 起脚本，模式经 --tests 数组透传
+    [ -x "$JAVA_HOME/bin/java" ] || die "JDK 不可用（${JAVA_HOME}）：先跑 bash tools/dev.sh env-bootstrap"
+    require "$GRADLEW"
+    [ $# -ge 2 ] || die "用法: tools/dev.sh test-one <测试全名...>（如 top.honorhook.xposed.data.DecisionTablesTest）"
+    shift
+    targs=()
+    for t in "$@"; do targs+=(--tests "$t"); done
+    info "定向 JVM 单测（:app:testDebugUnitTest ${targs[*]}）"
+    (cd "$ROOT/app" && bash "$GRADLEW" :app:testDebugUnitTest "${targs[@]}" --console=plain)
     ;;
 
   install)
