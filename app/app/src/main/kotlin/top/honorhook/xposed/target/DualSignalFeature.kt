@@ -27,7 +27,9 @@ import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
+import java.lang.reflect.Field
 
 /**
  * U6 状态栏双排信号（渲染方案移植自 com.mod.dualsignal 3.3.4，用户要求整合，私用）。
@@ -84,6 +86,26 @@ object DualSignalFeature {
     // 与本插件 SIM 间歇重叠）。恒返 false = 系统永不进入堆叠态，原生双排/重叠一并消失。
     private const val CLS_SIGNAL_STACK_POLICY =
         "com.android.systemui.statusbar.pipeline.mobile.data.repository.SignalStackPolicy"
+
+    // 堆叠掐断的二阶效应收口（2026-11-14 真机实证，117 版 smali 8022-8065）：堆叠不可用后，系统对
+    // 「胶囊激活+信号空间不足」改走 HwSystemIcons 的胶囊避让——updateWifiLeftViewAlphaByCapsule 判
+    // WiFi 溢出 → setWifiIconAlpha 把 mWifiCombo alpha 渐隐到 0 ⇒ 用户视角「出现胶囊 WiFi 消失」。
+    // 该类未混淆（public final，Honor 自有类，与 SignalStackPolicy 同一稳定性级别）。
+    private const val CLS_HW_SYSTEM_ICONS = "com.android.systemui.statusbar.HwSystemIcons"
+
+    // Honor 版 SignalClusterView（未混淆，2026-11-15 真机栈实证）：applyHonor(ZZ)V 在 noSims/
+    // 飞行模式状态回调（SignalClusterView.apply → apply$1）里把 mMobileSignalGroup（上游 AOSP
+    // findViewById(R.id.mobile_combo)，即 U6 接管的组）翻回 VISIBLE = 胶囊收缩期约 1s SIM 叠影
+    // 的写手之一（间谍栈多次同源 applyHonor:48，setNoSims/setIsAirplaneMode/setEthernetIndicators 全触发）。
+    private const val CLS_HW_SIGNAL_CLUSTER_VIEW = "com.android.systemui.statusbar.HwSignalClusterView"
+
+    // 堆叠动画状态机（未混淆）。resetState(Z)V 是胶囊收缩期翻组的第二个真写手（2026-11-15 10:49
+    // 真机栈实证：resetState:161 ← HnPhoneStatusBarAnimController.resetScaleStateWithoutAnim ←
+    // HwStatusbarContents$2.run / BaseCapsuleStatusBarHelper.changeCapsuleVisibility→setKeyguardState）。
+    // 上一轮静态排查曾把它判成死路（awk 方法归属失败导致漏了 :2828 调用方），运行期取证已纠正。
+    // 方法体 = 纯堆叠视觉状态复位（setVisibility/alpha/scale/监听器通知），全部属于 U6 已禁用的
+    // 堆叠机制；调用方封闭（AnimController:2828 + $1 死监听器 + PullAnim 的同名字符串只是日志 tag）。
+    private const val CLS_SIGNAL_STACK_ANIM_HELPER = "com.android.systemui.statusbar.phone.SignalStackAnimHelper"
 
     // ---- DualSignal 插件冲突防护 ----
 
@@ -165,6 +187,41 @@ object DualSignalFeature {
     /** DualSignal 插件包存在性探测（每进程一次，只做留痕，不做门）。 */
     private val pkgProbed = AtomicBoolean(false)
 
+    /** WiFi 避让 no-op 的 judge 留痕门（该方法高频触发，只记首次命中）。 */
+    private val wifiAlphaKeepLogged = AtomicBoolean(false)
+
+    /** SIM 翻转收口的 judge 留痕门（布局重排高频触发，只记首次命中）。 */
+    private val stackNotifyLogged = AtomicBoolean(false)
+
+    /** applyHonor 收口的 judge 留痕门（状态回调频繁触发，只记首次命中）。 */
+    private val applyHonorLogged = AtomicBoolean(false)
+
+    /** resetState 收口的 judge 留痕门。 */
+    private val resetStateLogged = AtomicBoolean(false)
+
+    /** mStackedMobileIcons 反射 Field 缓存（键=宿主 Class，进程内稳定；WeakHashMap 防跨进程悬挂）。 */
+    private val stackedIconsFieldCache = WeakHashMap<Class<*>, Field>()
+
+    /** 原生组被翻回可见的计数（审计：非 0 = 仍有写手翻组，数值=翻回频率，applyHonor 收口后应恒 0 增长）。 */
+    private val groupFlipCount = AtomicLong(0)
+
+    /** 被 U6 接管的原生组（弱持有）：applyHonor 收口的回藏对象集（U6 接管后任何时刻都应保持 GONE）。 */
+    private val trackedGroups: MutableSet<LinearLayout> =
+        java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
+    /**
+     * 可见性间谍（四轮取证，改只读哨兵）：挂 `android.view.View.setVisibility(I)V` 全量钩子，
+     * 仅当 thisObject ∈ trackedGroups 时记日志——**不再拦截**（放行一切，不遮蔽真实验证），
+     * 用于盯 resetState 收口后是否还有第三写手。上限 50 次采样防风暴。
+     */
+    private val spyInstalled = AtomicBoolean(false)
+
+    /** 间谍日志上限。 */
+    private val spyLogCount = AtomicLong(0)
+
+    /** 未接管 mobile_combo 实例的采样上限（重建视图检测，20 次足够）。 */
+    private val spyUntrackedLog = AtomicLong(0)
+
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL)) {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_DUAL_SIGNAL, "SystemUiHook·U6")
@@ -222,7 +279,197 @@ object DualSignalFeature {
             ),
         )
         session.attemptMount(stackKill, module, loader) { task -> mountStackKill(session, task, module, loader) }
+
+        // 堆叠掐断的二阶效应收口（2026-11-14 真机实证）：stackKill 后「胶囊激活+空间不足」的原生
+        // 省宽兜底只剩 HwSystemIcons 胶囊避让——updateWifiLeftViewAlphaByCapsule 判 WiFi 溢出 →
+        // setWifiIconAlpha 把 mWifiCombo alpha 渐隐 0 ⇒ 用户视角「出现胶囊 WiFi 图标消失」。
+        // 不 proceed = 避让对 WiFi 不再发生（alpha 恒原值；恢复路径一并失效，但从未藏过也就无需恢复）。
+        // 副作用面已核（117 版 smali 全树）：该方法仅 setCapsuleArea(~6575)/状态栏类型切换(~7676)
+        // 两处调用；setWifiIconAlpha 的另一入口（$2 动画结束监听）依赖避免动画先行启动，而动画只由
+        // setWifiIconAlpha 自身启动 ⇒ 链路不成立，无滞留标志泄漏；其它图标避让
+        // （updateOperationViewAlphaByCapsule）与本挂载无关，行为不变。
+        val wifiAlphaKeep = listOf(
+            MountEngine.SimpleTask(
+                className = CLS_HW_SYSTEM_ICONS,
+                methodName = "updateWifiLeftViewAlphaByCapsule",
+                paramCount = 0,
+                returnType = "void",
+                id = "systemui:dualSignal.HwSystemIcons.updateWifiLeftViewAlphaByCapsule",
+                description = "U6 双排信号·掐断胶囊避让对 WiFi 的渐隐（堆叠已断后系统省宽的兜底路径，不 proceed = WiFi 恒显）",
+            ),
+        )
+        session.attemptMount(wifiAlphaKeep, module, loader) { task -> mountWifiAlphaKeep(session, task, module, loader) }
+
+        // SIM 叠影收口（2026-11-14 真机实证）：notifySignalStackChange 的 false 分支（smali :cond_3）无条件
+        // mMobileCombo.setVisibility(VISIBLE)——正是把 U6 藏掉的原生 SIM 组翻回来的那只手。updateSignalStack
+        // 经 checkSignalBySpace（胶囊出现/图标区重排集中触发）/onAttachedToWindow 每轮都走它，原生 SIM 组与
+        // U6 自绘容器同锚 FrameLayout 叠绘 = 「SIM 图标上叠加另一个图标一段时间」，直到 U6 下一轮 maintain
+        // （全局布局节流/2s 拍）重新 GONE。不 proceed = 翻转不发生（WiFi 收口同款 before 语义）；回调内补
+        // mStackedMobileIcons=GONE（原生 false 分支的本职工作，替它做掉，免该视图初始可见性裸奔）。
+        // 调用方全树：updateSignalStack / HnStatusBarPullAnimImpl 下拉动画重同步 / SignalStackAnimHelper
+        // $StackedStateListener（堆叠动画监听，本机 stacked_mobile_icon_switch=0 已死）——翻的都是这对视图。
+        val stackNotifyKill = listOf(
+            MountEngine.SimpleTask(
+                className = CLS_HW_SYSTEM_ICONS,
+                methodName = "notifySignalStackChange",
+                paramCount = 1,
+                returnType = "void",
+                id = "systemui:dualSignal.HwSystemIcons.notifySignalStackChange",
+                description = "U6 双排信号·掐断原生 SIM 组可见性翻转（false 分支无条件翻回 VISIBLE，与 U6 的 GONE 维护互搏）",
+            ),
+        )
+        session.attemptMount(stackNotifyKill, module, loader) { task -> mountStackNotifyKill(session, task, module, loader) }
+
+        // SIM 叠影终局收口（2026-11-15 真机栈实证）：胶囊收缩期翻组的真写手是
+        // HwSignalClusterView.applyHonor(ZZ)V——noSims/飞行模式状态回调经 SignalClusterView.apply()
+        // 进来，内部把 mMobileSignalGroup（=上游 findViewById(R.id.mobile_combo)，U6 接管的组）
+        // setVisibility 翻回 VISIBLE（间谍栈 5 次全部 applyHonor:48，含 setNoSims/setIsAirplaneMode
+        // 两条路）。after 语义：放行原生逻辑（noSims 布局/spacer/堆叠图标/cust 指示器照常工作），
+        // 随即把 trackedGroups 全部重新 GONE——同帧回藏，无 maintain 拍子（2s）留下的叠影窗口。
+        // 挂载时机早于 fixGroup 填充 trackedGroups：回调迭代的是当时快照，弱持有，天然兼容。
+        val applyHonorKeep = listOf(
+            MountEngine.SimpleTask(
+                className = CLS_HW_SIGNAL_CLUSTER_VIEW,
+                methodName = "applyHonor",
+                paramCount = 2,
+                returnType = "void",
+                id = "systemui:dualSignal.HwSignalClusterView.applyHonor",
+                description = "U6 双排信号·applyHonor 后回藏被接管的原生组（胶囊收缩期翻组写手，after 语义保原生其余逻辑）",
+            ),
+        )
+        session.attemptMount(applyHonorKeep, module, loader) { task -> mountApplyHonorKeep(session, task, module, loader) }
+
+        // SIM 叠影第二写手收口（2026-11-15 10:49 真机栈实证）：胶囊收缩/锁屏切换期
+        // BaseCapsuleStatusBarHelper.changeCapsuleVisibility → resetScaleStateWithoutAnim →
+        // SignalStackAnimHelper.resetState(Z)V（:161 setVisibility）把 U6 藏掉的原生 SIM 组翻回
+        // VISIBLE——上轮静态排查误判死路（awk 归属失败），运行期取证纠正。no-op（不 proceed）=
+        // 堆叠状态复位整体跳过：方法体全是 U6 已禁用的堆叠视觉状态（setVisibility/alpha/scale/
+        // StackedStateListener 通知），无其它职责。调用方封闭见 CLS_SIGNAL_STACK_ANIM_HELPER 注释。
+        val resetStateKill = listOf(
+            MountEngine.SimpleTask(
+                className = CLS_SIGNAL_STACK_ANIM_HELPER,
+                methodName = "resetState",
+                paramCount = 1,
+                returnType = "void",
+                id = "systemui:dualSignal.SignalStackAnimHelper.resetState",
+                description = "U6 双排信号·掐断堆叠状态复位翻组（胶囊收缩/锁屏切换路径，no-op）",
+            ),
+        )
+        session.attemptMount(resetStateKill, module, loader) { task -> mountResetStateKill(session, task, module, loader) }
     }
+
+    /** resetState 收口 no-op：不 proceed（void），堆叠状态复位不发生；首次命中打 judge 留痕。 */
+    private fun mountResetStateKill(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { _ ->
+            if (resetStateLogged.compareAndSet(false, true)) {
+                session.judge(module, task, JUDGE_PREFIX, "堆叠状态复位已掐断（resetState 不放行，胶囊收缩期翻组路径二）")
+            }
+            null
+        }
+
+    /** SIM 翻转收口 no-op：不 proceed，原生翻组不发生；补置堆叠视图 GONE（原生 false 分支的本职）。 */
+    private fun mountStackNotifyKill(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            runCatching {
+                val self = chain.thisObject ?: return@runCatching
+                val field = stackedIconsFieldCache[self.javaClass]
+                    ?: self.javaClass.getDeclaredField("mStackedMobileIcons").apply {
+                        isAccessible = true
+                        stackedIconsFieldCache[self.javaClass] = this
+                    }
+                (field.get(self) as? View)?.let { v ->
+                    if (v.visibility != View.GONE) v.visibility = View.GONE
+                }
+            }
+            if (stackNotifyLogged.compareAndSet(false, true)) {
+                session.judge(module, task, JUDGE_PREFIX, "原生 SIM 组翻转已掐断（notifySignalStackChange 不放行）")
+            }
+            null // void 方法：before 语义不 proceed
+        }
+
+    /** 胶囊避让藏 WiFi 收口 no-op：不 proceed（void）= 渐隐永不发生；该方法高频触发，仅首次命中打 judge 留痕。 */
+    private fun mountWifiAlphaKeep(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { _ ->
+            if (wifiAlphaKeepLogged.compareAndSet(false, true)) {
+                session.judge(module, task, JUDGE_PREFIX, "胶囊避让藏 WiFi 已掐断（updateWifiLeftViewAlphaByCapsule 不放行）")
+            }
+            null // void 方法：before 语义不 proceed，无返回值语义可伪造
+        }
+
+    /**
+     * applyHonor 收口（after 语义）：proceed 放行原生（noSims/spacer/堆叠图标/cust 逻辑不受影响），
+     * 然后把 trackedGroups 里仍非 GONE 的组立即回藏。写手身份已由间谍定案（见 CLS_HW_SIGNAL_CLUSTER_VIEW
+     * 注释），间谍钩子已撤——此处只做同帧回藏，消除 maintain 拍子（2s）造成的叠影空窗。
+     */
+    private fun mountApplyHonorKeep(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            chain.proceed()
+            for (g in trackedGroups) {
+                if (g.visibility != View.GONE) {
+                    val n = groupFlipCount.incrementAndGet()
+                    module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 维持: applyHonor 翻组已同帧回藏（第 $n 次）")
+                    g.visibility = View.GONE
+                }
+            }
+            if (applyHonorLogged.compareAndSet(false, true)) {
+                session.judge(module, task, JUDGE_PREFIX, "applyHonor 翻组收口已挂（after 回藏 trackedGroups）")
+            }
+            null // void 方法，无返回值语义
+        }
+
+    /** 间谍装钩（fixGroup 首次接管时调用一次）；loader 由 attach 挂载留存。 */
+    @Volatile private var spyLoader: ClassLoader? = null
+
+    private fun ensureVisibilitySpy(session: MountSession, module: XposedModule) {
+        if (!spyInstalled.compareAndSet(false, true)) return
+        val loader = spyLoader ?: return
+        val spy = listOf(
+            MountEngine.SimpleTask(
+                className = "android.view.View",
+                methodName = "setVisibility",
+                paramCount = 1,
+                returnType = "void",
+                id = "systemui:dualSignal.spy.View.setVisibility",
+                description = "U6 双排信号·四轮取证：可见性间谍（拦第二写手 + 栈采样），定位后摘除",
+            ),
+        )
+        session.attemptMount(spy, module, loader) { task -> mountVisibilitySpy(session, task, module, loader) }
+    }
+
+    private fun mountVisibilitySpy(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            val self = chain.thisObject
+            if (self is View && trackedGroups.contains(self)) {
+                val vis = chain.args?.getOrNull(0) as? Int
+                if (vis != null && vis != View.GONE) {
+                    if (spyLogCount.incrementAndGet() <= 50L) {
+                        val stack = Thread.currentThread().stackTrace
+                            .filter {
+                                !it.className.contains("LSPosed") && !it.className.contains("HookBridge") &&
+                                    !it.className.contains("libxposed") && !it.className.contains("DualSignalFeature")
+                            }
+                            .take(14)
+                            .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 间谍: 组(id=${runCatching { if (self.id != View.NO_ID) self.resources.getResourceEntryName(self.id) else "no-id" }.getOrDefault("?")}@${Integer.toHexString(System.identityHashCode(self))}) 被 setVisibility(vis=$vis) 翻动，栈: $stack")
+                    }
+                    chain.proceed() // 只读哨兵：放行一切，不遮蔽验证
+                } else {
+                    chain.proceed()
+                }
+            } else if (self is View && idMobileCombo != 0 && self.id == idMobileCombo && self.visibility != View.GONE) {
+                // 未接管的 mobile_combo 实例（系统重建视图/第二窗口绕过 walkAndFix）——同样记栈，上限 20
+                if (spyUntrackedLog.incrementAndGet() <= 20L) {
+                    val stack = Thread.currentThread().stackTrace
+                        .filter { !it.className.contains("LSPosed") && !it.className.contains("HookBridge") }
+                        .take(14)
+                        .joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                    module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 间谍: 未接管 mobile_combo@${Integer.toHexString(System.identityHashCode(self))} setVisibility(vis=${chain.args?.getOrNull(0)})，栈: $stack")
+                }
+                chain.proceed()
+            } else {
+                chain.proceed()
+            }
+        }
 
     /** 堆叠收口恒 false：首次命中打 judge 留痕；返回 java.lang.Boolean（libxposed 要求包装类型）。 */
     private fun mountStackKill(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
@@ -235,6 +482,7 @@ object DualSignalFeature {
 
     private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
         session.mount(task, module, loader) { chain ->
+            spyLoader = loader
             // after 语义：先放行宿主原 attach 逻辑，再调度注入（void 方法 → 回调显式返回 null，§7.4）
             chain.proceed()
             val self = chain.thisObject as? View
@@ -269,7 +517,7 @@ object DualSignalFeature {
     private fun safeRestyle(session: MountSession, root: View, task: MountEngine.SimpleTask, module: XposedModule) {
         try {
             resolveResourceIdsOnce(root.context)
-            val fixed = walkAndFix(root, task, module)
+            val fixed = walkAndFix(session, root, task, module)
             if (fixed > 0) {
                 session.judge(module, task, JUDGE_PREFIX, "双排容器已接管 $fixed 处")
             }
@@ -279,7 +527,7 @@ object DualSignalFeature {
     }
 
     /** 遍历找候选组：mobile_combo（按 id）或「水平 LinearLayout 且 ≥1 个 mobile 子单元」（按形态）。 */
-    private fun walkAndFix(v: View, task: MountEngine.SimpleTask, module: XposedModule): Int {
+    private fun walkAndFix(session: MountSession, v: View, task: MountEngine.SimpleTask, module: XposedModule): Int {
         var n = 0
         if (v is LinearLayout) {
             val byId = idMobileCombo != 0 && v.id == idMobileCombo
@@ -290,12 +538,12 @@ object DualSignalFeature {
                 countMobileChildren(v) >= 1 && !hasWifiOrEthernetChild(v)
             if (byId || byCount) {
                 // 只计真接管（退避/外壳非 FrameLayout 不计——judge 行「已接管 N 处」必须是真话）
-                if (fixGroup(v, task, module)) n++
+                if (fixGroup(session, v, task, module)) n++
             }
         }
         if (v is ViewGroup) {
             for (i in 0 until v.childCount) {
-                v.getChildAt(i)?.let { n += walkAndFix(it, task, module) }
+                v.getChildAt(i)?.let { n += walkAndFix(session, it, task, module) }
             }
         }
         return n
@@ -335,7 +583,7 @@ object DualSignalFeature {
      * 接管单组：host = mobile_combo 的 FrameLayout 外壳。隐藏原生组，注入自绘容器，
      * 并挂三路维护（全局布局节流 / 2s 自续刷新 / Choreographer 取色）——全部原插件机制。
      */
-    private fun fixGroup(group: LinearLayout, task: MountEngine.SimpleTask, module: XposedModule): Boolean {
+    private fun fixGroup(session: MountSession, group: LinearLayout, task: MountEngine.SimpleTask, module: XposedModule): Boolean {
         val host = group.parent as? FrameLayout ?: return false   // 原插件硬约束：组外壳必须是 FrameLayout
         if (backedOff[host] == true) return false
         // 冲突防护（先到先得）：插件的容器已在 → 本 host 永久退避，原生组交给插件处理
@@ -344,6 +592,8 @@ object DualSignalFeature {
             return false
         }
         if (group.visibility != View.GONE) group.visibility = View.GONE
+        trackedGroups.add(group)
+        ensureVisibilitySpy(session, module)
 
         val firstTime = !maintained.containsKey(host)
         if (firstTime) maintained[host] = true
@@ -396,7 +646,11 @@ object DualSignalFeature {
             backOff(module, host)
             return
         }
-        if (group.visibility != View.GONE) group.visibility = View.GONE
+        if (group.visibility != View.GONE) {
+            val n = groupFlipCount.incrementAndGet()
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 维持: 原生组被翻回可见，重新 GONE（第 $n 次）")
+            group.visibility = View.GONE
+        }
 
         var container = findContainer(host)
         if (container == null) {

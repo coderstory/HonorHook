@@ -98,9 +98,24 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 
 ### 判据快照（**逐 hook 应 M / 最近实测 N 的单一事实源**；最新 2026-11-07 重采，2026-11-02 段落保留为历史）
 
-> **U6 应 M 变更（2026-11-11，未重采）**：DualSignalFeature 新增 2 挂载点（`SignalStackPolicy.shouldShowStacked` /
-> `isStackEnabled` 恒 false，掐断 117 版动态堆叠与 U6 互搏，见 `docs/reverse/systemui.md` §十一）⇒
-> **U6 应 M = 5**（历史快照里的 3/3 均为变更前口径），待装机后 `dev.sh hook-status SystemUi` 复采。
+> **U6 应 M 变更（2026-11-14 重采）**：DualSignalFeature 累计新增 4 挂载点——2026-11-11 加 2（`SignalStackPolicy.shouldShowStacked` /
+> **U6 应 M 变更（2026-11-15 重采）**：DualSignalFeature 第 5 组挂载 `HwSignalClusterView.applyHonor(ZZ)V`
+> after 语义（proceed 放行原生后把 trackedGroups 同帧回 GONE）——真机间谍栈定位的胶囊收缩期 SIM 叠影
+> 真写手（noSims/飞行模式状态回调翻回 mMobileSignalGroup=mobile_combo，栈 5 次全部 applyHonor:48；
+> 见 `docs/reverse/systemui.md` §十一）⇒ **U6 应 M = 8**。2026-11-15 10:09 实测 `installed 8/3`，
+> judge「applyHonor 翻组收口已挂」命中，启动期同帧回藏 20 次。
+>
+> `isStackEnabled` 恒 false，掐断 117 版动态堆叠与 U6 互搏）+ 2026-11-14 加 2（`HwSystemIcons.updateWifiLeftViewAlphaByCapsule`
+> **U6 应 M 变更（2026-11-15 三修）**：第 6 组挂载 `SignalStackAnimHelper.resetState(Z)V` no-op——
+> 胶囊收缩/锁屏切换期翻组第二写手（栈实证 resetState:161 ← resetScaleStateWithoutAnim ←
+> changeCapsuleVisibility；上轮静态死路结论系 awk 归属失败误判，运行期取证纠正；见
+> `docs/reverse/systemui.md` §十一）⇒ **U6 应 M = 9**（另取证间谍 View.setVisibility 1 点临时在装，
+> 定位后摘）。2026-11-15 10:52 实测 `installed 10/3`（含间谍），resetState judge 命中。
+>
+> no-op，掐断堆叠掐断后胶囊避让藏 WiFi 的兜底；`HwSystemIcons.notifySignalStackChange` no-op，掐断 false 分支
+> 无条件翻回原生 SIM 组 VISIBLE 造成的胶囊期 SIM 叠影；见 `docs/reverse/systemui.md` §十一）⇒ **U6 应 M = 7**。
+> 2026-11-14 20:27 实测 `installed 6/3`（第 4 组挂载后待复采 7/3）：N 全 OK，judge 均已命中；分母 3 是
+> attemptMount 多批次下汇总 M 只认首轮 pending 表的历史口径（begin 只在 retryRounds==0 首批执行），非缺挂。
 >
 > **最近一次重采：2026-11-07 23:21**（模块 v1.2.8，`bash tools/dev.sh hook-status` 一条命令取，日志 `modules_2026-11-07T21:14:09.531743.log`）：**全绿**——ThemeStoreHook **52/52**（theme 20.1.67.303，新表 `ThemeStoreMap_20_1_67_303`）、MmsHook 2/2（插件 10.0.44.309，T3 双轨 b(4参)/c(5参) 命中 c）、xhs X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.53.3）、AppMarket 7/7（16.1.10.302）、Sysmr 3/3（473，仅 WARN）、Ime 12/12、launcher 5/5、ouc 11/11、settings 2/2、systemui 4/4·U6 3/3·U7 3/3、天气 ads 2/2·tracking 3/3（18.1.7.314）。行为层：小红书保存全链、短信「打开应用」按钮隐藏均由用户真机确认（2026-11-07）。
 >

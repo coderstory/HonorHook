@@ -503,3 +503,52 @@ OTA 11.0.0.117 引入动态堆叠管线，是「系统 SIM 与插件 SIM 间歇�
 - 修复（DualSignalFeature）：① walkAndFix 形态候选排除含 wifi/ethernet 子节点的组；
   ② moveBeforeWifi 插入位夹 0（wi==0 时 addView(-1) 崩溃面）；③ 新增 2 挂载点恒 false：
   `SignalStackPolicy.shouldShowStacked(Z,Z)Z` / `isStackEnabled()Z`（U6 判据 3/3 → 5/5）。
+- 堆叠掐断的二阶效应（2026-11-14 真机实证 + smali 复核，117 版）：stackKill 后
+  「胶囊激活+信号空间不足」的原生省宽兜底只剩胶囊避让——`HwSystemIcons.updateWifiLeftViewAlphaByCapsule()V`
+  → `judgeOverflowInCapsule(Z)Z`（仅竖屏+mIsCapsuleShown 才判溢出）命中 → `mIsWifiHideByCapsule=true`
+  → `setWifiIconAlpha()V` 把 mWifiCombo alpha 渐隐 0（HnStatusBarIconAvoidAnimUtil 动画，mIsWifiNeedAnim 门）
+  ⇒ 用户视角「出现灵动胶囊时 WiFi 图标消失」。修复：新增第 3 组挂载 no-op
+  `HwSystemIcons.updateWifiLeftViewAlphaByCapsule()V`（不 proceed，U6 门控内，判据 5 → 6）。
+  副作用面（smali 全树）：该方法仅 setCapsuleArea(~6575)/状态栏类型切换(~7676) 两处调用；
+  setWifiIconAlpha 另一入口（$2 动画结束监听）依赖避免动画先行启动，而动画只由 setWifiIconAlpha
+  自身启动 ⇒ no-op 后链路不成立、无滞留标志泄漏；其它图标避让 updateOperationViewAlphaByCapsule 不受影响。
+  待真机判据：胶囊出现时 WiFi 仍在 + modlog judge「胶囊避让藏 WiFi 已掐断」。
+- SIM 叠影（2026-11-14 二轮真机反馈：「胶囊出现时 SIM 图标上叠加另一个图标一段时间」）：notifySignalStackChange
+  的 false 分支（:cond_3）**无条件** mMobileCombo.setVisibility(VISIBLE)——stackKill 后 updateSignalStack
+  每轮（checkSignalBySpace 胶囊重排集中触发 / onAttachedToWindow）都走它，把 U6 藏掉的原生 SIM 组翻回来，
+  与 U6 自绘容器同锚 FrameLayout 叠绘，直到 U6 下一轮 maintain（布局节流/2s 拍）重新 GONE ⇒「一段时间」。
+  修复：新增挂载 no-op `HwSystemIcons.notifySignalStackChange(Z)V`（不 proceed，回调内补
+  mStackedMobileIcons=GONE 替原生 false 分支的本职；判据 6 → 7）。调用方全树：updateSignalStack /
+  HnStatusBarPullAnimImpl 下拉重同步 / SignalStackAnimHelper$StackedStateListener（堆叠动画监听，
+  本机 stacked_mobile_icon_switch=0 已死，shouldDoStackAnim 需 stackMode==AUTO 不成立）。
+  排查记录：先怀疑 playSignalStackAnim/shouldDoStackAnim（未钉的第三策略方法），设备实值 OFF 排除；
+  updateWifiLeftViewAlphaByCapsule 全文核实纯 alpha/标志位、无位移，WiFi 收口不是叠影来源。
+- SIM 叠影终局（2026-11-15 三轮：notify 收口后用户实测收缩期仍见约 1s 叠影 ⇒ 另有活写手；
+  静态全树清点到头，转入运行期取证）。手段：临时挂 `android.view.View.setVisibility(I)V` 间谍
+  （仅 trackedGroups 实例动作，非 GONE 翻转记调用栈并拦下，上限 5 次）。真机栈 5 次全部同源：
+  `HwSignalClusterView.applyHonor:48 <- SignalClusterView.apply$1:135 <- setNoSims:24 /
+  setIsAirplaneMode:55 <- CallbackHandler.handleMessage`——写手 = **HwSignalClusterView.applyHonor(ZZ)V**
+  （smali 179-310）：noSims/飞行模式状态回调经 apply() 进来，内部把 mMobileSignalGroup（=上游 AOSP
+  findViewById(R.id.mobile_combo)，正是 U6 接管的组）翻回 VISIBLE；胶囊收缩期网络状态重评估集中触发。
+  同轮排除：维持计数 8 次命中（22:35 起）证明活写手存在；侦察探针（GlobalLayout 后扫根树）从未命中
+  ——排在 maintain 之后时序已晚、组已被重藏（已删）。修复：新增第 5 组挂载
+- SIM 叠影第二写手与更正（2026-11-15 10:49 全量间谍栈实证）：applyHonor 收口后用户复现仍见叠影，
+  maintain 计数照涨（25-27 次=10:42 复现窗）而 applyHonor 回藏零命中 ⇒ 写手不止一只。间谍改全量采样
+  （上限 200/栈深 20）后当场抓获：**SignalStackAnimHelper.resetState(Z)V**（:161 setVisibility，
+  DropDeraist=R8 改名组运行时类）← HnPhoneStatusBarAnimController.resetScaleStateWithoutAnim(ZZ)V
+  （:456/:593 两处调用）← HwStatusbarContents$2.run（内容重组）/ BaseCapsuleStatusBarHelper.
+  changeCapsuleVisibility→setKeyguardState（**胶囊收缩/锁屏切换主路径**）。上轮静态排查曾把 resetState
+  判成死路——awk 方法归属失败漏了 AnimController:2828 调用方，教训：**静态死路结论必须有可靠的方法
+  归属工具支撑，否则留给运行期取证**。方法体=纯堆叠视觉状态复位（setVisibility/alpha/scale/
+  StackedStateListener 通知），全属 U6 已禁用的堆叠机制；调用方封闭（AnimController:2828 + $1 死
+  监听器；HnStatusBarPullAnimImpl:14649 的 "resetState" 字符串只是日志 tag 非反射）。修复：第 6 组
+  挂载 no-op `SignalStackAnimHelper.resetState(Z)V`（不 proceed；判据 8 → 9，另有取证间谍 1 点临时
+  在装）。改间谍为只读哨兵（放行一切不遮蔽验证）后复核：resetState 栈消失，applyHonor 同帧回藏照常
+  命中（10:52:47 启动窗 18-20 次），无第三写手——写手集合封闭：applyHonor（状态回调全家桶）+
+  resetState（胶囊/锁屏切换）。
+  HwSignalClusterView.applyHonor(ZZ)V **after 语义**（proceed 放行原生——noSims 布局/spacer/
+  mStackedMobileIcon/cust dualCardNetworkBooster·showGigaIndicator 照常工作——随后把 trackedGroups
+  全部同帧回 GONE；判据 7 -> 8）。同帧回藏消除 maintain 拍子（2s）留下的叠影空窗；间谍钩子已撤
+  （全量 View.setVisibility 过桥开销大），maintain 的「维持」计数保留作审计。真机判据（10:09 重注入）：
+  installed 8/3，judge「applyHonor 翻组收口已挂」，启动布局期「applyHonor 翻组已同帧回藏」20 次命中
+  ——写手翻组频率远超此前推判，收口必要性强。
