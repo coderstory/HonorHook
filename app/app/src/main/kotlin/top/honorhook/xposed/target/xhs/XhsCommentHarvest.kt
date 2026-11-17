@@ -12,7 +12,8 @@ import java.util.regex.Pattern
  * 在那里顺带正则抽取图片链零新增 hook 点。没打开过评论区 = 无缓存 = 批量只下笔记图（诚实降级）。
  *
  * URL 形态：评论 JSON `pictures[].url` = `sns-webpic-qc.xhscdn.com/{token}!裁剪后缀` 显示链，
- * 与笔记图同 token 方案——下游统一经 [XhsImageUrl.toBare]（AUTO 主链）/ raw 回落，落 CDN 原始字节。
+ * 与笔记图同 token 方案——下游统一裸链原字节（2026-11-17 HEIC 魔数才换 [XhsImageUrl.toOriginal]
+ * q/100 JPEG 转码链：iPhone 直传 HEIC 原始档荣耀硬解拒解码）/ raw 回落。
  *
  * 归属：请求 URL query `note_id`（评论接口必带，宿主 videofeed 同口径）；query 缺失时按
  * noteId 就近 lookback（harvestNoteShare 同款区域回扫）。存储上限照 [XhsVideoSave.noteShares]

@@ -33,7 +33,8 @@ import java.net.URL
  *    下载器实测 livePhoto 关时只下静态帧原图——不双下 mp4+帧）
  * ③ videos 不在此消费（视频流归 X4 HD 询问分支，调用方各按其轨处理）
  * ④ 评论图并入（2026-11-03 用户需求，XhsCommentHarvest 被动采集）：该笔记打开过评论区的图，并入
- *    同落 CDN 原始字节（sns-webpic 显示链经 toBare/raw 与笔记图同管线）；没打开过 = 空 = 行为不变
+ *    同管线落盘（sns-webpic 显示链与笔记图同 token 方案，主链裸链原字节、HEIC 魔数才换 q/100
+ *    JPEG 转码链，2026-11-17）；没打开过 = 空 = 行为不变
  * 合并保序去重（LinkedHashSet）。文件顶层而非 object 内：XhsBatchSave 构造带 Handler/Activity 追踪，
  * JVM 单测不可初始化——口径契约（XhsContentImageUrlsTest）须可直接钉住。
  */
@@ -1110,13 +1111,18 @@ object XhsBatchSave {
                     if (imageCancelRequested) break   // 取消：剩余张不动，已下载完成的不处理
                     // 每张开始前清引用——取消删的是本张半成品，上张成品（fetchOne 写完已自清）不受波及
                     currentImageUri = null
-                    // 主链 = 裸链（token，无 query）；2026-10-15 基准切换逐语义移植 XHS_Downloader_Android
-                    // domain/download/NoteOutput.kt:34-45（AUTO：preferred = sns-img-bd 裸链 → 回落 raw 原样，
-                    // fetch() 按列表顺序逐个试）。toBare 不适用（null）时退回 raw 本身；裸链失败（非 200 /
-                    // 错误页 Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
+                    // 主链 = 裸链（token，无 query）原始档，零转码零损失；2026-10-15 基准切换逐语义移植
+                    // XHS_Downloader_Android domain/download/NoteOutput.kt:34-45（AUTO：preferred =
+                    // sns-img-bd 裸链 → 回落 raw 原样，fetch() 按列表顺序逐个试）。
+                    // HEIC 例外（2026-11-17）：XHS 11-16 起原样存储 iPhone 直传 HEIC（原始档 Exif 带
+                    // ios_image_direct + DeviceModel iPhone13,2），裸链字节 = 荣耀硬解拒解码的 HEVC 码流
+                    // （图库「无法显示」，字节级补丁实验 A/B/C/T/U 全败实锤不可修）——仅此一种魔数由
+                    // downloadOne 换 q/100 JPEG 服务端转码链重取（jpg 转码链，与 X3 同源），其余格式
+                    // 原字节直落。toBare 不适用（null）时退回 raw 本身；裸链失败（非 200 / 错误页
+                    // Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
                     val url = XhsImageUrl.toBare(raw) ?: raw
                     // 文件名扩展名仅占位：落盘 MIME/扩展名由 fetchOne 首块魔数定（提案 3，认内容不认 URL）
-                    val saved = runCatching { downloadOne(activity, module, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", raw) }
+                    val saved = runCatching { downloadOne(activity, module, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", XhsImageUrl.toOriginal(raw), raw) }
                         .getOrDefault(0L)
                     if (imageCancelRequested) {
                         // 取消落在本张写入期间：本张作废（计入失败侧，不 ok）。onClick 即删可能因流占用
@@ -1232,17 +1238,31 @@ object XhsBatchSave {
         (FETCH_BACKOFF_BASE_MS shl (attempt - 1).coerceAtMost(5)).coerceAtMost(FETCH_BACKOFF_CAP_MS)
 
     /**
-     * 直下单张：先抓 [url]；若命中「HTTP 非 200」或「错误页 Content-Type」两类失败，则改用
-     * [rawFallback]（采集原串，含 query）重下一次——**仅一次，不递归**。其余失败（超限/写盘异常）不重试。
+     * 直下单张候选链：裸链原始档（[url]）→ 魔数 HEIC 时换 [jpegFallback]（q/100 JPEG 服务端转码，
+     * 2026-11-17 条件转码：仅荣耀硬解解不开的 iPhone 直传 HEIC 换，其余格式不动保原字节）→
+     * 「HTTP 非 200 / 错误页 Content-Type」用 [rawFallback]（采集原串，含 query）重下一次——
+     * **每级仅一次，不递归**。其余失败（超限/写盘异常）不重试。
      * （2026-10-15 基准切换：回落目标由裸链改 raw 原样，NoteOutput.kt:34-45 列表序语义；旧的
      * markQualityFailed 粘性降级随 q/100 主链一并删除。单 URL 内的瞬时失败重试阶梯在 [fetchOne]
      * 内部——基准 ResumableTransfer.kt:42-58 = 逐候选 × maxRetries 双层，候选间各走一轮阶梯。）
      * 返回值 = 落盘字节数（>0 = 成功；0 = 失败），供完成卡合计体积。
      */
-    private fun downloadOne(activity: Activity, module: XposedModule, url: String, fileName: String, rawFallback: String? = null): Long {
+    private fun downloadOne(activity: Activity, module: XposedModule, url: String, fileName: String, jpegFallback: String? = null, rawFallback: String? = null): Long {
         val bytes = LongArray(1)
         when (fetchOne(activity, module, url, fileName, bytes)) {
             Fetch.OK -> return bytes[0]
+            Fetch.HEIC -> if (jpegFallback != null && jpegFallback != url) {
+                // 转码链也失败 → raw 原始档保底：宁存打不开的 HEIC 原件（可装软件解码看图器翻旧档），
+                // 不丢档；raw 与 url/jpeg 同串时不再重复下载
+                val retry = LongArray(1)
+                when (fetchOne(activity, module, jpegFallback, fileName, retry)) {
+                    Fetch.OK -> return retry[0]
+                    else -> if (rawFallback != null && rawFallback != url && rawFallback != jpegFallback) {
+                        val last = LongArray(1)
+                        if (fetchOne(activity, module, rawFallback, fileName, last) == Fetch.OK) return last[0]
+                    }
+                }
+            }
             Fetch.RETRY_FALLBACK -> if (rawFallback != null && rawFallback != url) {
                 val retry = LongArray(1)
                 if (fetchOne(activity, module, rawFallback, fileName, retry) == Fetch.OK) return retry[0]
@@ -1252,8 +1272,8 @@ object XhsBatchSave {
         return 0L
     }
 
-    /** 单地址抓取结果：OK = 已落盘；RETRY_FALLBACK = 非 200（瞬时码耗尽）/ 错误页 / 魔数非图片，可回落 raw 原样重试一次；FAIL = 终局失败。 */
-    private enum class Fetch { OK, RETRY_FALLBACK, FAIL }
+    /** 单地址抓取结果：OK = 已落盘；HEIC = 魔数 HEIC（打不开的那批，待换 JPEG 转码链）；RETRY_FALLBACK = 非 200（瞬时码耗尽）/ 错误页 / 魔数非图片，可回落 raw 原样重试一次；FAIL = 终局失败。 */
+    private enum class Fetch { OK, HEIC, RETRY_FALLBACK, FAIL }
 
     /**
      * 单地址抓取（302 跟随）+ MediaStore 落盘到 Pictures/小红书。
@@ -1338,6 +1358,11 @@ object XhsBatchSave {
                         val kind = XhsMediaFileType.detect(if (headFill == head.size) head else head.copyOf(headFill))
                         if (kind == null || kind !in XhsMediaFileType.IMAGE_KINDS) {
                             return Fetch.RETRY_FALLBACK
+                        }
+                        // HEIC 条件转码分岔（2026-11-17）：insert 尚未发生，零残留——上报调用方换
+                        // JPEG 转码链（downloadOne Fetch.HEIC 分支）；其余图片格式原字节直落
+                        if (kind == "heic") {
+                            return Fetch.HEIC
                         }
                         // 落盘 MIME/扩展名以 magic 为准（基准认内容不认 URL/Content-Type；extOf 初值仅占位）
                         val values = ContentValues().apply {

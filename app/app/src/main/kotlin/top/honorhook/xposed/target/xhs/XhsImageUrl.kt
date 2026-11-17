@@ -24,6 +24,11 @@ import java.net.URI
  * （见 XhsBatchSave.downloadAll/downloadOne）；本 object 的 q/100 直链仅供 X3 继续用（[toOriginal]），
  * 旧 markQualityFailed 粘性降级随 X5 调用点一并删除。
  *
+ * **2026-11-17 HEIC 条件转码**：XHS 服务端开始原样存储 iPhone 直传 HEIC（原始档 Exif 带
+ * `ios_image_direct` 标记），裸链 = CDN 原始字节 = 荣耀硬解拒解码的 HEVC 码流（图库「无法显示」，
+ * 字节级补丁 A/B/C/T/U 全败实锤不可修）。**主链仍裸链保原图零转码**；仅当魔数探出 HEIC
+ * （XhsBatchSave.Fetch.HEIC）才换 [toOriginal] q/100 JPEG 链重取——无损优先，打不开才转。
+ *
  * **X3 为什么保留 `?imageView2/2/format/jpg/q/100`**：只保 token、剥光 query 时 CDN 回的是**同尺寸
  * 但高压缩重编码**，画质损失大（2026-10-14 真机 curl 实测，两张 token 五组字节对照——裸链 1.7MB
  * 量级 vs q/100 11MB 量级 vs 客户端自存——见 docs/reverse/xhs.md §三 X3 规则 3 与 X5「换 host +
@@ -47,10 +52,9 @@ object XhsImageUrl {
     }
 
     /**
-     * 原图直链改写（token + [QUALITY_QUERY]）；不适用返回 null。
-     * **仅供 X3**（改宿主 Fresco 解码源）：X5 批量直下 2026-10-15 起已改抄
-     * XHS_Downloader_Android domain/download/NoteOutput.kt:34-45 的 AUTO 语义——裸链优先
-     * （[toBare]）、失败回落 raw 原样，不再走 q/100。
+     * q/100 JPEG 转码直链（token + [QUALITY_QUERY]）；不适用返回 null。
+     * X3（改宿主 Fresco 解码源）恒用；X5 批量直下作 **HEIC 条件转码备链**（2026-11-17）：裸链
+     * 原始档魔数 HEIC 才换本链重取，其余格式不动保原字节（根因详情见 XhsBatchSave 调用点注释）。
      */
     fun toOriginal(raw: String?): String? {
         if (raw == null) return null
@@ -62,8 +66,8 @@ object XhsImageUrl {
     }
 
     /**
-     * 裸链改写（token，**无任何 query**）——X5 下载主链（NoteOutput.kt:34-45 AUTO preferred）/排障；
-     * 不适用返回 null。与 [toOriginal] 共用同一套 token 规则。
+     * 裸链改写（token，**无任何 query**）——X5 下载主链（NoteOutput.kt:34-45 AUTO preferred，
+     * 保原图零转码）/排障；不适用返回 null。与 [toOriginal] 共用同一套 token 规则。
      */
     fun toBare(raw: String?): String? {
         if (raw == null) return null
