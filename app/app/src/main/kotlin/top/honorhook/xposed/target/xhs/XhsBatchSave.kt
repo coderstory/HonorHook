@@ -695,31 +695,48 @@ object XhsBatchSave {
     private fun dismissHostPanel(lambda: Any?, module: XposedModule) {
         mainHandler.post {
             runCatching {
-                val loader = hostLoader ?: return@post
-                val lazyCls = runCatching { Class.forName("kotlin.Lazy", false, loader) }.getOrNull() ?: return@post
-                var node: Any? = lambda
+                // 2026-11-19 实证（modlog「面板关闭中止: kotlin.Lazy 不可见」）：宿主 R8 收缩后
+                // Class.forName("kotlin.Lazy", false, hostLoader) 拿不到类，旧判据静默 return@post，
+                // 整个 BFS 从未跑过 = 面板从来关不掉。改为不依赖 kotlin.Lazy 类：按字段类型名含 "Lazy"
+                // 鸭子式解包（误判无害——getValue 反射失败得 null，继续走 BFS）。
+                // ponytail: 名字含 Lazy 的非 Lazy 类会被多试一次 getValue，开销可忽略
+                // 逐层全字段 BFS（2026-11-19 实证修复）：旧实现每层只下钻「第一个非 java 字段」——
+                // 9.53.3+ 真身 ss9.b 只捕获 controller（ss9.c），面板在 controller 的 Lazy 字段 i 里，
+                // 而 controller 字段一多（noteFeed 等）首字段不是它，旧走法静默找不到 Dialog、面板留屏。
+                val queue = ArrayDeque<Any?>()
+                queue.add(lambda)
                 var depth = 0
-                while (node != null && depth < 3) {
-                    val fields = runCatching { node.javaClass.declaredFields }.getOrNull()
-                    var next: Any? = null
-                    var scanned = 0
-                    if (fields != null) for (f in fields) {
-                        if (++scanned > 64) break
-                        val v = runCatching { f.isAccessible = true; f.get(node) }.getOrNull() ?: continue
-                        val unwrapped = if (lazyCls.isInstance(v)) {
-                            // Lazy 未初始化时 getValue() 会就地建实例（不显示）——dismiss 对未显示的
-                            // Dialog 是 no-op，最坏只是白建一个实例；建不出来由外层 runCatching 兜住
-                            runCatching { v.javaClass.methods.firstOrNull { it.name == "getValue" }?.invoke(v) }.getOrNull()
-                        } else v
-                        if (unwrapped != null && dismissIfPanel(unwrapped)) {
-                            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 已关宿主长按面板（${unwrapped.javaClass.name}）")
-                            return@post
+                val visited = HashSet<Int>()
+                // 诊断 trace（2026-11-19 面板不消失排查）：miss 时整条走线进 modlog，定位后可删
+                val trace = StringBuilder()
+                while (queue.isNotEmpty() && depth < 3) {
+                    val layer = queue.toList()
+                    queue.clear()
+                    for (node in layer) {
+                        if (node == null || !visited.add(System.identityHashCode(node))) continue
+                        val fields = runCatching { node.javaClass.declaredFields }.getOrNull() ?: continue
+                        var scanned = 0
+                        for (f in fields) {
+                            if (++scanned > 64) break
+                            val v = runCatching { f.isAccessible = true; f.get(node) }.getOrNull() ?: continue
+                            val unwrapped = if (v.javaClass.name.contains("Lazy")) {
+                                // Lazy 未初始化时 getValue() 会就地建实例（不显示）——dismiss 对未显示的
+                                // Dialog 是 no-op，最坏只是白建一个实例；建不出来由外层 runCatching 兜住
+                                runCatching { v.javaClass.methods.firstOrNull { it.name == "getValue" }?.invoke(v) }.getOrNull()
+                            } else v
+                            trace.append("\n  L").append(depth).append(' ')
+                                .append(node.javaClass.name).append('#').append(f.name)
+                                .append(" -> ").append(unwrapped?.javaClass?.name)
+                            if (unwrapped != null && dismissIfPanel(unwrapped)) {
+                                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 已关宿主长按面板（${unwrapped.javaClass.name}）")
+                                return@post
+                            }
+                            if (unwrapped != null && !unwrapped.javaClass.name.startsWith("java.")) queue.add(unwrapped)
                         }
-                        if (next == null && unwrapped != null && !unwrapped.javaClass.name.startsWith("java.")) next = unwrapped
                     }
-                    node = next
                     depth++
                 }
+                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 面板未找到（thisObject=${lambda?.javaClass?.name}）walk:$trace")
             }.onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 面板关闭失败: ${it.message}") }
         }
     }
