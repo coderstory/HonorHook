@@ -487,6 +487,18 @@ F3/F4 试用永久化 hook 闭环。
 
 ---
 
+## 现象五：应用成功后「锁屏快捷方式」引导弹窗（是否替换手电筒入口）
+
+> 2026-11-18。应用主题成功后弹出："将锁屏左下角的'手电筒'入口替换为'主题'快捷入口，装扮换肤更方便，是否替换？"（下次再说 / 立即替换）。
+
+- 触发方：`theme/ApplyThemeDialogActivity`（应用成功确认页）调用 `theme/guide/LockScreenGuideManager.showGuideDialog(Context, ThemeInfo, LockScreenGuideManager$b)Z`——**唯一调用方**（MT MCP smaliq 全文反查，宿主 20.1.67.303）。
+- 类与方法**未混淆**，跨版本稳定；返回 boolean = 是否展示了引导（false 即不弹）。前置判定 `isNeedShowGuide / isMatchGuildeCondition / get_lock_screen_guide 云控`（默认 false，服务端下发 true 时仍弹）不必逐个拦，**拦展示咽喉一处即可**。
+- 挂载点：`theme:LockScreenGuide.showGuideDialog`（CONST 常返 false，归 `theme.ad_off` 广告净化开关；ThemeStoreMap_20_1_63_305.kt）。
+- 判据：应用主题成功 → 确认页直接收尾无弹窗；`installed N/M` +1。
+
+
+---
+
 ## D · 云控开关全表（AgreeRepo ~30 项 + 散读 key）
 
 # 主题商店云控开关全表

@@ -12,6 +12,7 @@ import top.honorhook.xposed.core.MountEngine.DexHint
  * 设计依据归档于 `docs/theme-store.md`；删除历史见 `docs/hook-inventory-audit.md` §五。
  */
 import top.honorhook.xposed.data.HookPoint
+import top.honorhook.xposed.data.toDexHint
 /** 全模块统一日志 TAG（与 MountEngine.TAG 同值；包级常量供同包文件免导入使用）。 */
 internal const val TAG = "HonorHook"
 
@@ -38,6 +39,13 @@ internal const val CLS_WALLPAPER_PREVIEW_LOW = "$PKG.wallpaper.OnlineWallpaperPr
 // ARouter 带 Parcelable DIALOG_PARAMS）；F2 目标即 Activity 自身（onCreate L861 protected，extends FragmentActivity）
 internal const val CLS_RETENTION_DIALOG_ACTIVITY = "$PKG.overallretentiondialog.ui.OverallRetentionDialogActivity"
 internal const val CLS_RETENTION_DIALOG_MANAGER = "$PKG.overallretentiondialog.ui.OverallRetentionDialogActivity\$OverallRetentionDialogManager"
+
+// 2026-11-18 「锁屏快捷方式」引导弹窗（应用主题成功后询问把锁屏手电筒换成主题入口）：
+// 展示咽喉 = theme/guide/LockScreenGuideManager.showGuideDialog(Context,ThemeInfo,$b)Z（类/方法未混淆，
+// MT MCP dex outline 实证）；唯一调用方 ApplyThemeDialogActivity（smaliq 全文反查）；返回 false = 未展示。
+// 云控 get_lock_screen_guide 默认 false 但服务端下发 true 时仍弹（docs/reverse/theme-store.md §现象五），
+// 故拦咽喉不拦云控。
+internal const val CLS_LOCK_SCREEN_GUIDE_MANAGER = "$PKG.theme.guide.LockScreenGuideManager"
 
 /** 2088-08-08 00:00:00 东八区毫秒时间戳——会员到期时间的落地值（Long.MAX 会让日期格式化/剩余天数判定出现异常值）。 */
 internal const val TS_2088_08_08_MILLIS = 3_742_732_800_000L
@@ -136,10 +144,6 @@ internal fun HookPoint.toMountTask(): MountTask = MountTask(
     forceArgIndex = forceArgIndex,
     dex = toDexHint(),
 )
-
-private fun HookPoint.toDexHint(): DexHint? =
-    if (dexStrings == null && dexParamTypes == null && dexClassStrings == null && dexClassFieldTypes == null) null
-    else DexHint(dexStrings, dexParamTypes, dexClassStrings, dexClassFieldTypes)
 
 // ---------------- 跨文件运行时工具（路由判定 / 反射缓存 / 判据日志） ----------------
 
