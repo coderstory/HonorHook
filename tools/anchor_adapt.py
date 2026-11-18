@@ -322,7 +322,8 @@ def main():
     if reg is None:
         sys.stderr.write(f"未知目标 {key!r}；可用：{', '.join(sorted(ALIAS))}\n")
         sys.exit(2)
-    apk = sys.argv[2] if len(sys.argv) > 2 else reg["default_apk"]
+    # dev.sh 统一以 "${N:-}" 转发可选 apk 路径——空串 = 未提供，不能用 len(argv) 判断（2026-11-18 appmarket 实证）
+    apk = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].strip() else reg["default_apk"]
     results, conflicts = {}, []
     for pid, spec in reg["points"].items():
         sys.stderr.write(f"[anchor-adapt] {pid}: 搜「{spec['anchor']}」…\n")

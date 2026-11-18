@@ -25,6 +25,7 @@ class VersionSupportTest {
         TableFacts(ThemeStoreHook.packageName, ThemeStoreHook.pinnedTableVersions(), ThemeStoreHook.hasDefaultTable()),
         TableFacts(InstallerHook.packageName, InstallerHook.installerTableVersions(), InstallerHook.installerHasDefaultTable()),
         TableFacts(LauncherHook.packageName, LauncherHook.pinnedTableVersions(), LauncherHook.hasDefaultTable()),
+        TableFacts(AppMarketHook.packageName, AppMarketHook.pinnedTableVersions(), AppMarketHook.hasDefaultTable()),
     )
 
     /**

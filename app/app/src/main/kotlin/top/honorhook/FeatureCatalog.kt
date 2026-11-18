@@ -283,7 +283,8 @@ object FeatureCatalog {
                 Feature(KEY_MARKET_PURIFY, R.string.feature_market_purify_title, R.string.feature_market_purify_desc),
             ),
             baselineVersion = "16.1.9.302",  // aapt2 实证（2026-10-25 真机拉取，docs/reverse/appmarket.md）
-            extraVersions = setOf("16.1.10.302"),  // 2026-11-07 实装：7/7 ALIVE（tools/adapt_mt.py，MT MCP 逐点）
+            extraVersions = setOf("16.1.10.302", "16.1.11.302"),  // 2026-11-07 实装：7/7 ALIVE（tools/adapt_mt.py，MT MCP 逐点）；10.302 沿用基线套、11.302 两点混淆名漂移走 versionTables 精确套
+            versionsSharingBaseline = setOf("16.1.10.302"),
         ),
         Target(
             "com.hihonor.systemmanager", R.string.target_name_sysmgr,

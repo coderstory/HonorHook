@@ -3,10 +3,12 @@ package top.honorhook.xposed.target
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.HostVersion
 import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
+import top.honorhook.xposed.data.toDexHint
 
 /**
  * 荣耀应用市场 `com.hihonor.appmarket`（16.1.9.302，aapt2 实证 2026-10-25 真机拉取）净化。
@@ -88,21 +90,55 @@ object AppMarketHook : TargetHook {
         description = description,
         group = group,
         feature = feature,
+        // 2026-11-17 补（审计 P1-7）：此前漏传 dex——notifyMultiIcon/QueueStyle/createNotify 三点的
+        // dexStrings R8 漂移兜底从未生效（表里配了锚点、运行期拿不到），OTA 后三点会直接 0/3
+        dex = toDexHint(),
     )
+
+    /**
+     * 版本选表（仿 ThemeStoreHook，2026-11-19 首次需要）：16.1.11.302 两点混淆名漂移（MT MCP outline 实证）——
+     * - 运营弹窗渲染入口：静态 `OperationDialog.k0(FragmentActivity,OperationVO,Runnable)V` 不复存在，
+     *   调用方 MainFrameFragment$reShowOperationDialog$2 改走实例 `n0(FragmentActivity,OperationVO,Runnable)V`（同 3 参形状）
+     * - 工具页弹窗展示：`ToolPageActivityPopDialog.g0()V 私有 final` → `j0()V 私有 final`（形态一致）
+     * 其余 5 点类/方法/锚串原样（anchor-adapt appmarket 2026-11-19 通知族三点坐标全中）。
+     */
+    private val versionTables: List<HostVersion.Table<HookPoint>> = buildList {
+        FeatureCatalog.extraVersionsOf(packageName).forEach { version ->
+            if (version == "16.1.11.302") {
+                add(HostVersion.Table(setOf(version)) {
+                    MARKET_POINTS.map { p ->
+                        when (p.id) {
+                            "market:dlg.OperationDialog.k0" -> p.copy(methodName = "n0")
+                            "market:dlg.ToolPagePop.g0" -> p.copy(methodName = "j0")
+                            else -> p
+                        }
+                    }
+                })
+            }
+        }
+        add(HostVersion.Table(versions = emptySet()) { MARKET_POINTS })
+    }
+
+    /** 测试缝（VersionSupportTest 对账）：精确套版本集合与默认套存在性。 */
+    internal fun pinnedTableVersions(): Set<String> = versionTables.filter { it.versions.isNotEmpty() }.flatMap { it.versions }.toSet()
+    internal fun hasDefaultTable(): Boolean = versionTables.any { it.versions.isEmpty() }
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val loader = param.defaultClassLoader
         val apkPath = param.applicationInfo.sourceDir
 
+        val actual = HostVersion.resolveHostVersion(apkPath, packageName)
+        val pick = HostVersion.pick(versionTables, actual)
+
         val pending = mutableListOf<MountEngine.SimpleTask>()
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_MARKET_PURIFY)) {
-            MARKET_POINTS.forEach { point -> pending += point.toTask() }
+            pick.tasks.forEach { point -> pending += point.toTask() }
         } else {
             logDisabled(module, FeatureCatalog.KEY_MARKET_PURIFY, "AppMarketHook")
         }
         if (pending.isEmpty()) return
 
-        val session = MountEngine.open("AppMarketHook", packageName, apkPath, FeatureCatalog.baselineVersionOf(packageName), RemoteConfig)
+        val session = MountEngine.open("AppMarketHook", packageName, apkPath, pick.matchedVersion ?: FeatureCatalog.baselineVersionOf(packageName), RemoteConfig)
         session.attemptMount(pending, module, loader) { task -> mountOne(session, module, loader, task) }
     }
 

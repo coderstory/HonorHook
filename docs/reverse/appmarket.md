@@ -23,6 +23,20 @@
 - B/C/D 是 R8 单字母名（OTA 必漂移），每点带 `dexStrings`（各方法独占日志串）走 DexKit 宽松轨兜底
 - 弹窗三点 k0/g0/h 为 show 入口短路（void 不执行 = 不展示）；Runnable 参数是点击行为，不 show 不消费，无泄漏面
 
+## §16.1.11.302 版本适配（2026-11-19，MT MCP outline 实证）
+
+OTA 后 `installed 5/7`，失败两点均为 R8 重命名（通知族三点 dexStrings 兜底坐标全中，未漂移）：
+
+- **运营弹窗渲染入口**：静态 `OperationDialog.k0(FragmentActivity,OperationVO,Runnable)V` 不复存在
+  （k0 被重用为无关的 private final k0()V）。调用链实查：MainFrameFragment$reShowOperationDialog$2 →
+  `OperationDialog.n0(Landroidx/fragment/app/FragmentActivity;Lcom/hihonor/appmarket/operation/ui/OperationVO;Ljava/lang/Runnable;)V`
+  （public 实例，同 3 参形状）。
+- **工具页弹窗展示**：`ToolPageActivityPopDialog.g0()V 私有 final` → `j0()V 私有 final`（形态一致）。
+
+落地：AppMarketHook 首次引入版本选表（仿 ThemeStoreHook）——`versionTables` 内 16.1.11.302 精确套
+`copy(methodName="n0"/"j0")`，默认套 MARKET_POINTS 兜底；FeatureCatalog extraVersions 加 16.1.11.302、
+16.1.10.302 登记 versionsSharingBaseline（同一默认套）。VersionSupportTest 对账已纳入 AppMarketHook。
+
 ## §缓期清单（签名不可靠，不硬挂）
 
 1. **SplashManager / CachedSplashScreenService（开屏族 P1）**：`Lcom/hihonor/appmarket/main/splash/SplashManager;`
