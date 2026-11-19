@@ -59,43 +59,17 @@ object TamerTabStripper : TargetHook {
             return
         }
 
+        // 2026-11-19 页签收敛复盘（docs/retro-2026-11-19-tamer-tab.md）：16.1.11 的页签渲染有
+        // 两条独立链——①$a.d 四平行列表装配路 ②T0 LiveData 路，都终结于逐项添加 sink（A/K）。
+        // pending 表曾挂 d/i/vmB/vmF/j 五点：挂载报 OK 但回调零执行（MountEngine 对 $a 类方法的
+        // 派发坑，tab.d/tab.t0 双实证），且 BO getter 证实 vm 路不在渲染链上。收敛后只保留：
+        // g（tamer 原点，仍会触发，顺带绑定 BO）、直挂 t0direct/ddirect（数据层）、sinkA/sinkK
+        // （渲染出口兜底，内容锚点按标题拦，跨版本最稳）。
         val pending = listOf(
-            MountEngine.SimpleTask(
-                id = "market-tamer:tab.d", className = ANCHOR, methodName = "d", paramCount = 6,
-                returnType = "void", description = "底部页签四平行列表同步裁剪（MainFrameFragmentTemp\$a#d）",
-            ),
             MountEngine.SimpleTask(
                 id = "market-tamer:tab.g", className = ANCHOR, methodName = "g", paramCount = 2,
                 returnType = "void", description = "底部页签 List 直接删（MainFrameFragmentTemp\$a#g）",
             ),
-            MountEngine.SimpleTask(
-                // 16.1.11.302：i(I,String,Z)V（adapt-report.md §12）；回调按 args[0] Int 收敛
-                id = "market-tamer:tab.i", className = ANCHOR, methodName = "i", paramCount = 3,
-                returnType = "void", description = "默认页签下标按裁剪后数量收敛（MainFrameFragmentTemp\$a#i）",
-            ),
-            // 2026-11-19 实测：d/g/i/BO getter 都不是页签条渲染源——底部页签 LiveData（MainFrameViewModel.h，
-            // List<BottomNavItemVO>）的唯一写入路径是 MainFrameViewModel#B(List<PageInfoBto>)（smali 实证：
-            // $a.d→E1→B→h；loadNavItemIcons 协程捕获同一 $pageList）。B/F 均未混淆，跨版本稳。
-            MountEngine.SimpleTask(
-                id = "market-tamer:tab.vmB", className = "com.hihonor.appmarket.main.frame.viewmodel.MainFrameViewModel",
-                methodName = "B", paramCount = 1, returnType = "void",
-                description = "底部页签数据装配入口 B(List<PageInfoBto>) 原地滤除",
-            ),
-            MountEngine.SimpleTask(
-                id = "market-tamer:tab.vmF", className = "com.hihonor.appmarket.main.frame.viewmodel.MainFrameViewModel",
-                methodName = "F", paramCount = 1, returnType = "void",
-                description = "底部页签动态刷新入口 F(List<PageInfoBto>) 原地滤除",
-            ),
-            // 2026-11-19 12:14 会话实证：冷启缓存路径下 d/g/vmB 全不触发，真装配回调是 $a#j(List)——
-            // 方法体内日志串 "handleMainFrameData: onRenderStart"，分发给 J2/yu1.o/NewMainViewModel.n().setValue
-            MountEngine.SimpleTask(
-                id = "market-tamer:tab.j", className = ANCHOR,
-                methodName = "j", paramCount = 1, returnType = "void",
-                description = "页签装配回调 j(List<PageInfoBto>) 原地滤除",
-            ),
-            // 2026-11-19 15:24 会话实证（agkprobe 栈）：可见页签条数据源是
-            // T0(MainFrameFragmentTemp, List<PageInfoBto>)→daa（static；T0→yu1.l/n→AgHwBottomNav.K
-            // 逐项添加，收到 5 项全量）——g/BO getter/vmB/j 全拦不到它。before 原地滤 args[1]。
         )
         val session = MountEngine.open(
             "TamerTabStripper", packageName, param.applicationInfo.sourceDir,
@@ -122,35 +96,6 @@ object TamerTabStripper : TargetHook {
                             }
                             if (removed > 0) keptCount.set(pages.size)
                             if (removed > 0) session.judge(module, t, "market-tamer", "菜单删 $removed 项")
-                            chain.proceed()
-                        }
-                        "market-tamer:tab.vmB", "market-tamer:tab.vmF", "market-tamer:tab.j" -> {
-                            // 原地滤除 args[0]：loadNavItemIcons 捕获同一 List 引用，必须改原实例
-                            val pages = chain.args?.getOrNull(0) as? MutableList<Any?>
-                                ?: return@runCatching chain.proceed()
-                            val it = pages.iterator()
-                            var removed = 0
-                            while (it.hasNext()) {
-                                if (isBlockedPage(it.next())) {
-                                    it.remove()
-                                    removed++
-                                }
-                            }
-                            if (removed > 0) {
-                                keptCount.set(pages.size)
-                                session.judge(module, t, "market-tamer", "页签装配删 $removed 项（余 ${pages.size}）")
-                            }
-                            chain.proceed()
-                        }
-                        else -> { // tab.i
-                            val idx = chain.args?.getOrNull(0) as? Int ?: return@runCatching chain.proceed()
-                            val kept = keptCount.get()
-                            if (kept > 0 && idx >= kept) {
-                                val args = chain.args.toTypedArray()
-                                args[0] = kept - 1
-                                session.judge(module, t, "market-tamer", "默认页签 $idx→${kept - 1}")
-                                return@runCatching chain.proceedWith(chain.thisObject, args)
-                            }
                             chain.proceed()
                         }
                     }
