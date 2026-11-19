@@ -10,21 +10,22 @@ import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
 
 /**
- * 开屏广告拦截（tamer 1.4.11 SplashAdBlocker 移植，2026-11-19）。
- * 12 点全为混淆名（R8 单字母），宿主 OTA 必漂移——NOT_RESOLVED 随类加载重试、
- * 失败只体现在 installed N/M，不炸宿主。16.1.11.302 存活性见 scratch/tamer/adapt-report.md。
+ * 开屏广告拦截（tamer 1.4.11 SplashAdBlocker 移植，2026-11-19；同日收口重构）。
+ *
+ * 原版 5 个混淆名散点（v3.a#d/splash.a#H/utils.a#h/cached.a#c/d）全部弃用——16.1.11.302
+ * 上 4 个点惰性不挂载（installed 1/5）。收口点改为响应模型SplashData 的两个
+ * 未混淆 Kotlin getter（smali 实证 network.response.SplashData）：
+ * - getMediaList() → 空 ArrayList：v3 strategy c/d 与 cached
+ *   CachedSplashScreenService$tryFetchSplashDataConfig$2 三处都遍历它构造
+ *   AdSplashData（SplashReportUtils.b(SplashBase)），列表空 = 应用自然走「无广告」分支
+ * - getMedia() → null：单媒体 fallback，Kotlin 可空字段
+ * 类名/方法名/签名均未混淆，跨版本稳定性远高于原散点。
  */
 object TamerSplashHooks : TargetHook {
 
     override val packageName = "com.hihonor.appmarket"
 
-    private const val PKG = "com.hihonor.appmarket"
-
-    private fun task(id: String, cls: String, method: String, argc: Int, desc: String) =
-        MountEngine.SimpleTask(
-            id = id, className = cls, methodName = method, paramCount = argc, returnType = "void",
-            description = desc,
-        )
+    private const val MODEL = "com.hihonor.appmarket.network.response.SplashData"
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_MARKET_PURIFY_SPLASH)) {
@@ -32,14 +33,17 @@ object TamerSplashHooks : TargetHook {
             return
         }
         val pending = listOf(
-            // 16.1.11.302 实测（scratch/tamer/adapt-report.md §3）：CachedSplashScreenService 主类
-            // 反编译产物缺失标 UNKNOWN（cached.a#c/d 已覆盖缓存路径，放弃）；v3.a#d(3) 并入 d(5)；
-            // fg7/kg7/utils.a#o 类/方法已删。
-            task("market-tamer:splash.v3a.d5", "$PKG.main.splash.v3.a", "d", 5, "网络开屏协程 5 参→null"),
-            task("market-tamer:splash.a.H", "$PKG.main.splash.a", "H", 1, "开屏展示入口→null"),
-            task("market-tamer:splash.utils.h", "$PKG.main.splash.utils.a", "h", 3, "开屏工具（h）→null"),
-            task("market-tamer:splash.cached.a.c", "$PKG.main.splash.cached.a", "c", 2, "缓存开屏（a#c）→null"),
-            task("market-tamer:splash.cached.a.d", "$PKG.main.splash.cached.a", "d", 2, "缓存开屏（a#d）→null"),
+            MountEngine.SimpleTask(
+                id = "market-tamer:splash.mediaList", className = MODEL,
+                methodName = "getMediaList", paramCount = 0, returnType = "java.util.ArrayList",
+                description = "开屏素材列表→空（数据源收口）",
+            ),
+            MountEngine.SimpleTask(
+                id = "market-tamer:splash.media", className = MODEL,
+                methodName = "getMedia", paramCount = 0,
+                returnType = "com.hihonor.appmarket.network.response.SplashBase",
+                description = "开屏单媒体 fallback→null",
+            ),
         )
         val session = MountEngine.open(
             "TamerSplashHooks", packageName, param.applicationInfo.sourceDir,
@@ -47,8 +51,11 @@ object TamerSplashHooks : TargetHook {
         )
         session.attemptMount(pending, module, param.defaultClassLoader) { t ->
             session.mount(t, module, param.defaultClassLoader) {
-                session.judge(module, t, "market-tamer", "开屏已拦")
-                null
+                session.judge(module, t, "market-tamer", "开屏数据源已掐")
+                when (t.id) {
+                    "market-tamer:splash.mediaList" -> ArrayList<Any?>()
+                    else -> null
+                }
             }
         }
     }
