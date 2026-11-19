@@ -27,12 +27,13 @@ Copyright (C) 2026 coderstory (https://github.com/coderstory/HonorHook)
     修改情况：**未作任何修改**（原样引用，保留上游版权声明与许可条款）。
               上游其余 105 个文件（含 Compose UI）不参与编译。
 
-  荣耀市场净化（com.tamer.honormarket 1.4.11）
-    来源：    设备侧已安装 APK（未发现公开源码仓库）
-    许可：    APK 未附带许可证声明
-    取用方式：反编译（jadx）分析其 hook 逻辑后，于本项目 libxposed 框架内以 Kotlin
-              重新实现（app/app/src/main/kotlin/top/honorhook/xposed/target/appmarket/），
-              未包含其代码原文；逆向记录见 docs/reverse/appmarket.md
+  荣耀市场净化（HonorMarketTamer / com.tamer.honormarket 1.4.11）
+    来源：    https://github.com/mengwuzhuanshou/HonorMarketTamer
+    许可：    MIT（上游 README 声明本模块由 AI 生成并迭代维护）
+    取用方式：移植时上游已停更；经反编译其发布 APK（jadx）分析 hook 逻辑后，
+              于本项目 libxposed 框架内以 Kotlin 重新实现
+              （app/app/src/main/kotlin/top/honorhook/xposed/target/appmarket/），
+              未逐字复制其代码；逆向与适配记录见 docs/reverse/appmarket.md
 
 --------------------------------------------------------------------------------
 对应源码（AGPL-3.0 §6 / §13）
