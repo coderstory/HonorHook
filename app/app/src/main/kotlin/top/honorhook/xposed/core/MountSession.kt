@@ -225,7 +225,8 @@ class MountSession internal constructor(
         // DexKit 兜底命中的是"特征相同、名字不同"的方法（严格轨/宽松轨都可能）：宿主升级后这是常态，
         // 但挂载点漂移必须在模块日志里留痕——判据行只给 N/M，看不出具体哪个点被换成了什么。
         // 按 task.id 节流（复审缺陷⑦）：漂移是每 task 一次的定性事实，重试轮各打一行只会刷屏。
-        if (method.declaringClass.name != task.className || method.name != task.methodName) {
+        // 名字比较走 nameOf（构造器的 Executable.name 是类简单名，须归一成 "<init>" 再比对）。
+        if (method.declaringClass.name != task.className || DexKitHelper.nameOf(method) != task.methodName) {
             val n = driftWarnCount.merge(task.id, 1) { a, b -> a + b } ?: 1
             if (n <= MountEngine.DRIFT_WARN_PER_TASK) {
                 module.log(

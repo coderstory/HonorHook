@@ -78,6 +78,47 @@ object FeatureCatalog {
     const val KEY_TRACK_BLOCK = "tracking.block"
     const val KEY_OTA_BLOCK = "ota.block"
     const val KEY_MARKET_PURIFY = "market.purify"
+    // —— 应用市场净化·细分开关（2026-11-19 自 com.tamer.honormarket 1.4.11 整体移植，
+    //    key 命名沿用 market.purify.* 前缀；默认值随 tamer TamerConfig.defaultValueOf：
+    //    主开关 market.purify 沿用本仓既有卡，细分卡在其之下叠加）——
+    const val KEY_MARKET_PURIFY_SPLASH = "market.purify.splash"
+    const val KEY_MARKET_PURIFY_OP_DIALOG = "market.purify.op_dialog"
+    const val KEY_MARKET_PURIFY_OP_FLOAT = "market.purify.op_float"
+    const val KEY_MARKET_PURIFY_WIDGET_TIP = "market.purify.widget_tip"
+    const val KEY_MARKET_PURIFY_PERS_AD = "market.purify.pers_ad"
+    const val KEY_MARKET_PURIFY_TOOLPAGE_ENTRY = "market.purify.toolpage_entry"
+    const val KEY_MARKET_PURIFY_PUSH = "market.purify.push"
+    const val KEY_MARKET_PURIFY_WAKE = "market.purify.wake"
+    const val KEY_MARKET_PURIFY_SILENT_UPD = "market.purify.silent_update"
+    const val KEY_MARKET_PURIFY_UPDATE_NOTIFY = "market.purify.update_notify"
+    const val KEY_MARKET_PURIFY_ALL_NOTIFY = "market.purify.all_notify"
+    const val KEY_MARKET_PURIFY_TAB_GAME = "market.purify.tab_game"
+    const val KEY_MARKET_PURIFY_TAB_QIANGXIAN = "market.purify.tab_qiangxian"
+    const val KEY_MARKET_PURIFY_TAB_APPS = "market.purify.tab_apps"
+    const val KEY_MARKET_PURIFY_TAB_CATEGORY = "market.purify.tab_category"
+    const val KEY_MARKET_PURIFY_TAB_MINE = "market.purify.tab_mine"
+    const val KEY_MARKET_PURIFY_HOME_ROLLWORD = "market.purify.home_rollword"
+    const val KEY_MARKET_PURIFY_MINE_SIGNIN = "market.purify.mine_signin"
+    const val KEY_MARKET_PURIFY_MINE_SAFETY = "market.purify.mine_safety"
+    const val KEY_MARKET_PURIFY_MINE_CLEAN = "market.purify.mine_clean"
+    const val KEY_MARKET_PURIFY_MINE_SERVICES = "market.purify.mine_services"
+    const val KEY_MARKET_PURIFY_MINE_SLIDE = "market.purify.mine_slide"
+    const val KEY_MARKET_PURIFY_MINE_FEED = "market.purify.mine_feed"
+    const val KEY_MARKET_PURIFY_SEARCH_FEED = "market.purify.search_feed"
+    const val KEY_MARKET_PURIFY_UPDATE_FEED = "market.purify.update_feed"
+    const val KEY_MARKET_PURIFY_DETAIL_REC = "market.purify.detail_rec"
+    const val KEY_MARKET_PURIFY_SEARCH_AD_BOOTH = "market.purify.search_ad_booth"
+    const val KEY_MARKET_PURIFY_SEARCH_MUST = "market.purify.search_must"
+    const val KEY_MARKET_PURIFY_QUICK_GAME = "market.purify.quick_game"
+    const val KEY_MARKET_PURIFY_RANK_PAGE = "market.purify.rank_page"
+    const val KEY_MARKET_PURIFY_CHILDREN = "market.purify.children"
+    const val KEY_MARKET_PURIFY_CLEAN = "market.purify.clean_boost"
+    const val KEY_MARKET_PURIFY_SAFETY = "market.purify.safety_check"
+    const val KEY_MARKET_PURIFY_APP_MANAGE = "market.purify.app_manage"
+    const val KEY_MARKET_PURIFY_MSG_CENTER = "market.purify.msg_center"
+    const val KEY_MARKET_PURIFY_HEALTH_GATE = "market.purify.health_gate"
+    const val KEY_SYSTEMUI_FP_VIBRATE = "systemui.fp_vibrate"
+    const val KEY_SEARCH_PURIFY = "search.purify"
 
     data class Feature(
         val key: String,
@@ -216,6 +257,8 @@ object FeatureCatalog {
                 Feature(KEY_SYSTEMUI_HIDE_ADB_NOTIF, R.string.feature_systemui_hide_adb_notif_title, R.string.feature_systemui_hide_adb_notif_desc),
                 Feature(KEY_SYSTEMUI_HIDE_GEEK_NOTIF, R.string.feature_systemui_hide_geek_notif_title, R.string.feature_systemui_hide_geek_notif_desc),
                 Feature(KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT, R.string.feature_systemui_flashlight_ignore_low_batt_title, R.string.feature_systemui_flashlight_ignore_low_batt_desc),
+                // 指纹解锁震动（tamer 1.4.11 移植，2026-11-19）
+                Feature(KEY_SYSTEMUI_FP_VIBRATE, R.string.feature_systemui_fp_vibrate_title, R.string.feature_systemui_fp_vibrate_desc),
             ),
             baselineVersion = "17.0.0.1",    // dumpsys 实证 2026-10-10（原 SystemUiHook 私有常量上提）
         ),
@@ -281,10 +324,54 @@ object FeatureCatalog {
             "com.hihonor.appmarket", R.string.target_name_appmarket,
             listOf(
                 Feature(KEY_MARKET_PURIFY, R.string.feature_market_purify_title, R.string.feature_market_purify_desc),
+                // tamer 移植细分开关（默认值随 tamer TamerConfig.defaultValueOf，2026-11-19）
+                Feature(KEY_MARKET_PURIFY_SPLASH, R.string.feature_market_purify_splash_title, R.string.feature_market_purify_splash_desc),
+                Feature(KEY_MARKET_PURIFY_OP_DIALOG, R.string.feature_market_purify_op_dialog_title, R.string.feature_market_purify_op_dialog_desc),
+                Feature(KEY_MARKET_PURIFY_OP_FLOAT, R.string.feature_market_purify_op_float_title, R.string.feature_market_purify_op_float_desc),
+                Feature(KEY_MARKET_PURIFY_WIDGET_TIP, R.string.feature_market_purify_widget_tip_title, R.string.feature_market_purify_widget_tip_desc),
+                Feature(KEY_MARKET_PURIFY_PERS_AD, R.string.feature_market_purify_pers_ad_title, R.string.feature_market_purify_pers_ad_desc),
+                Feature(KEY_MARKET_PURIFY_TOOLPAGE_ENTRY, R.string.feature_market_purify_toolpage_entry_title, R.string.feature_market_purify_toolpage_entry_desc),
+                Feature(KEY_MARKET_PURIFY_PUSH, R.string.feature_market_purify_push_title, R.string.feature_market_purify_push_desc),
+                Feature(KEY_MARKET_PURIFY_WAKE, R.string.feature_market_purify_wake_title, R.string.feature_market_purify_wake_desc),
+                Feature(KEY_MARKET_PURIFY_SILENT_UPD, R.string.feature_market_purify_silent_upd_title, R.string.feature_market_purify_silent_upd_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_UPDATE_NOTIFY, R.string.feature_market_purify_update_notify_title, R.string.feature_market_purify_update_notify_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_ALL_NOTIFY, R.string.feature_market_purify_all_notify_title, R.string.feature_market_purify_all_notify_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_TAB_GAME, R.string.feature_market_purify_tab_game_title, R.string.feature_market_purify_tab_game_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_TAB_QIANGXIAN, R.string.feature_market_purify_tab_qiangxian_title, R.string.feature_market_purify_tab_qiangxian_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_TAB_APPS, R.string.feature_market_purify_tab_apps_title, R.string.feature_market_purify_tab_apps_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_TAB_CATEGORY, R.string.feature_market_purify_tab_category_title, R.string.feature_market_purify_tab_category_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_TAB_MINE, R.string.feature_market_purify_tab_mine_title, R.string.feature_market_purify_tab_mine_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_HOME_ROLLWORD, R.string.feature_market_purify_home_rollword_title, R.string.feature_market_purify_home_rollword_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MINE_SIGNIN, R.string.feature_market_purify_mine_signin_title, R.string.feature_market_purify_mine_signin_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MINE_SAFETY, R.string.feature_market_purify_mine_safety_title, R.string.feature_market_purify_mine_safety_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MINE_CLEAN, R.string.feature_market_purify_mine_clean_title, R.string.feature_market_purify_mine_clean_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MINE_SERVICES, R.string.feature_market_purify_mine_services_title, R.string.feature_market_purify_mine_services_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MINE_SLIDE, R.string.feature_market_purify_mine_slide_title, R.string.feature_market_purify_mine_slide_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MINE_FEED, R.string.feature_market_purify_mine_feed_title, R.string.feature_market_purify_mine_feed_desc),
+                Feature(KEY_MARKET_PURIFY_SEARCH_FEED, R.string.feature_market_purify_search_feed_title, R.string.feature_market_purify_search_feed_desc),
+                Feature(KEY_MARKET_PURIFY_UPDATE_FEED, R.string.feature_market_purify_update_feed_title, R.string.feature_market_purify_update_feed_desc),
+                Feature(KEY_MARKET_PURIFY_DETAIL_REC, R.string.feature_market_purify_detail_rec_title, R.string.feature_market_purify_detail_rec_desc),
+                Feature(KEY_MARKET_PURIFY_SEARCH_AD_BOOTH, R.string.feature_market_purify_search_ad_booth_title, R.string.feature_market_purify_search_ad_booth_desc),
+                Feature(KEY_MARKET_PURIFY_SEARCH_MUST, R.string.feature_market_purify_search_must_title, R.string.feature_market_purify_search_must_desc),
+                Feature(KEY_MARKET_PURIFY_QUICK_GAME, R.string.feature_market_purify_quick_game_title, R.string.feature_market_purify_quick_game_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_RANK_PAGE, R.string.feature_market_purify_rank_page_title, R.string.feature_market_purify_rank_page_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_CHILDREN, R.string.feature_market_purify_children_title, R.string.feature_market_purify_children_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_CLEAN, R.string.feature_market_purify_clean_title, R.string.feature_market_purify_clean_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_SAFETY, R.string.feature_market_purify_safety_title, R.string.feature_market_purify_safety_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_APP_MANAGE, R.string.feature_market_purify_app_manage_title, R.string.feature_market_purify_app_manage_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_MSG_CENTER, R.string.feature_market_purify_msg_center_title, R.string.feature_market_purify_msg_center_desc, defaultEnabled = false),
+                Feature(KEY_MARKET_PURIFY_HEALTH_GATE, R.string.feature_market_purify_health_gate_title, R.string.feature_market_purify_health_gate_desc, defaultEnabled = false),
             ),
             baselineVersion = "16.1.9.302",  // aapt2 实证（2026-10-25 真机拉取，docs/reverse/appmarket.md）
             extraVersions = setOf("16.1.10.302", "16.1.11.302"),  // 2026-11-07 实装：7/7 ALIVE（tools/adapt_mt.py，MT MCP 逐点）；10.302 沿用基线套、11.302 两点混淆名漂移走 versionTables 精确套
             versionsSharingBaseline = setOf("16.1.10.302"),
+        ),
+        Target(
+            "com.hihonor.search", R.string.target_name_search,
+            listOf(
+                Feature(KEY_SEARCH_PURIFY, R.string.feature_search_purify_title, R.string.feature_search_purify_desc),
+            ),
+            baselineVersion = "10.0.38.300",  // aapt2 实证（2026-11-18 真机 OTA 后拉取，cp5→qp5，docs/reverse/search.md §38.300）
         ),
         Target(
             "com.hihonor.systemmanager", R.string.target_name_sysmgr,

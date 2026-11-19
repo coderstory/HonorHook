@@ -484,3 +484,19 @@ XhsNoteParser 把全部 slide 标 cover（`isCover = isVideoNote && streams.isEm
 `xhsContentImageUrls`（XhsBatchSave.kt 文件顶层，JVM 可测）——cover 仅在「存在非 cover 图
 或全列表唯一图（纯视频笔记封面帧）」时滤（`coverAreSlides = imgs.size > 1 && imgs.all { it.cover }`）。
 详见 findings-2026-11-14-slides-cover-regression.md；契约钉 XhsContentImageUrlsTest。
+
+### 长按面板不消失（2026-11-19 实证修复）
+
+**报障**：点保存能下载，但宿主长按面板留在屏上（9.53.3+）。
+
+**根因**：模块关面板走 `dismissHostPanel`——从 lambda（thisObject）按类型下钻
+`kotlin.Lazy` → Dialog → dismiss。旧实现**每层只下钻「第一个非 java 字段」**。
+9.53.3+ 真身 lambda（DexKit 串锚 "onDownloadClick, noteId=" 命中，9.54.0 实装为
+`ss9.b`；9.52.1= xq9.b 同名已被 R8 重用为无关数据类）只捕获一个 controller 字段
+`d`，面板对话框在 controller（9.54.0 = `ss9.c`）的 `kotlin.Lazy` 字段 `i` 里
+（smali: `iget-object v0, v3, Lss9/c;->i:Lkotlin/Lazy; → getValue → check-cast
+LCBBottomSheetDialog → AppCompatDialog;->dismiss()`）。controller 字段一多
+（noteFeed 等），首字段不是 Lazy，旧走法静默找不到 Dialog ⇒ 面板留屏、无失败日志。
+
+**修法**：dismissHostPanel 下钻改逐层全字段 BFS（depth<3、每字段≤64、visited 去重），
+任一层命中 Dialog 即 dismiss——不再赌字段顺序。

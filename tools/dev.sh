@@ -369,6 +369,7 @@ HonorHook 开发工具
   aapt2 <参数...>          aapt2 透传（自动选 build-tools 里最高版本）
   apkinfo <apk>            aapt2 dump badging 摘要（包名/版本/权限）
   pull-apk <包名>          从设备拉取指定包的 APK（含 split）到 system-files/<包名>/
+  pull-apk-local <包名>    本机直取 APK（su cp 经 /data/local/tmp 中转；无 adb 连接时用）
   wp-probe          拉取当前桌面壁纸视频 → 本地 ffprobe 量化（码率/fps/时长；W16 画质验证闭环）
   mt-mcp <list|call|raw>   MT 管理器 MCP 直连（tools/mt_mcp.py；call <tool> [json-args]）
   exec <命令...>           带本项目工具链环境（PATH/JAVA_HOME/ANDROID_HOME）执行任意命令
@@ -1143,7 +1144,9 @@ PYX
     # shellcheck disable=SC2086
     # 内存/线程策略由平台适配层给（PLATFORM_JADX_*）：on-device 锁 2G 单线程（曾 97% 被 LMK 杀），
     # 桌面机不限；--no-debug-info 全平台减内存。显式 JAVA_OPTS/JADX_ARGS 仍可覆盖。
-    JAVA_OPTS="${JAVA_OPTS:-${PLATFORM_JADX_JAVA_OPTS:-}}" "$JADX" --show-bad-code --no-debug-info ${JADX_ARGS:-${PLATFORM_JADX_ARGS:-}} -d "$out" "$apk"
+    # on-device /storage noexec ⇒ 启动器必须经 bash 调（tools/ONDEVICE_TOOLCHAIN.md §坑 87；
+    # 桌面机启动器同为 bash 脚本，bash 调用跨平台等价）。
+    JAVA_OPTS="${JAVA_OPTS:-${PLATFORM_JADX_JAVA_OPTS:-}}" bash "$JADX" --show-bad-code --no-debug-info ${JADX_ARGS:-${PLATFORM_JADX_ARGS:-}} -d "$out" "$apk"
     ;;
 
   aapt2)
@@ -1181,6 +1184,27 @@ PYX
     rm -f .buildtmp/pull-apk-paths.txt
     echo "— apkinfo 摘要（base）:"
     [ -f "$outdir/base.apk" ] && "$AAPT2" dump badging "$outdir/base.apk" 2>/dev/null | head -6 || true
+    echo "输出目录: $outdir"
+    ;;
+
+  pull-apk-local)
+    # 本机直取 APK（on-device 无 adb 连接时）：su 读 pm path → cp 到 /data/local/tmp 放权 → 移入
+    # system-files/<包名>/。与 pull-apk 同落点，区别只在传输通道（dev_root vs adb pull）。
+    [ -n "${2:-}" ] || die "用法: tools/dev.sh pull-apk-local <包名>"
+    [[ "$2" =~ ^[A-Za-z0-9_.]+$ ]] || die "包名非法: $2"
+    dev_root "pm path $2 2>/dev/null" | tr -d '\r' | sed 's/^package://' | grep -v '^$' > .buildtmp/pull-apk-paths.txt
+    [ -s .buildtmp/pull-apk-paths.txt ] || die "设备上未找到包: $2"
+    outdir="$ROOT/system-files/$2"
+    mkdir -p "$outdir"
+    while IFS= read -r apk_path; do
+      name="$(basename "$apk_path")"
+      echo "copy: $apk_path"
+      dev_root "cp $apk_path /data/local/tmp/$name && chmod 644 /data/local/tmp/$name" >/dev/null \
+        || die "su 复制失败: $apk_path"
+      cp "/data/local/tmp/$name" "$outdir/$name" || die "复制失败: /data/local/tmp/$name"
+      dev_root "rm -f /data/local/tmp/$name" >/dev/null
+    done < .buildtmp/pull-apk-paths.txt
+    rm -f .buildtmp/pull-apk-paths.txt
     echo "输出目录: $outdir"
     ;;
 

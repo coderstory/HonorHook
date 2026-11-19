@@ -5,6 +5,8 @@ import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.ClassMatcher
 import org.luckypray.dexkit.query.matchers.MethodMatcher
+import java.lang.reflect.Constructor
+import java.lang.reflect.Executable
 import java.lang.reflect.Method
 
 /** DexKit 特征查找工具（方法体字符串/参数类型/类字段类型四维锚点）。 */
@@ -88,7 +90,7 @@ object DexKitHelper {
     }
 
     /** DexKit 单次查询结果。[methods] 为已解析/已过滤/已去重的候选；[unresolvedCount] = 命中了但反射实例化失败而被丢弃的条数——非零说明候选集**不完整**，调用方不得据此做"唯一/并列"判定。 */
-    internal data class FindResult(val methods: List<Method>, val unresolvedCount: Int)
+    internal data class FindResult(val methods: List<Executable>, val unresolvedCount: Int)
 
     /**
      * 按查询计划查找方法并做可挂载性过滤（abstract/native 不可 hook；static **允许**）。
@@ -135,15 +137,18 @@ object DexKitHelper {
         val hits = bridge.findMethod(findMethod)
         val seen = HashSet<String>()
         // isHookable 过滤与签名去重是**确定性**排除（该条永远挂不上/重复同一条），不算候选集不完整；
-        // 只有 getMethodInstance 失败（类型没加载齐/冷类未就绪）会留下"看不见的候选"，必须计数上报。
+        // 只有 getMethodInstance/getConstructorInstance 失败（类型没加载齐/冷类未就绪）会留下"看不见的候选"，必须计数上报。
         var unresolved = 0
         val methods = hits.mapNotNull { hit ->
-            val method = runCatching { hit.getMethodInstance(loader) }
-                .getOrElse { t ->
-                    unresolved++
-                    Log.w(TAG, "DexKit 命中反射解析失败（跳过该条，候选集不完整）", t)
-                    return@mapNotNull null
-                }
+            // 构造器必须走 getConstructorInstance（返回 Constructor）——getMethodInstance 对 <init> 命中
+            // 抛 NoSuchMethodException，构造器候选会被静默丢光（search qp5 挂载点曾因此三轨全灭，2026-11-18）。
+            val method: Executable = runCatching {
+                if (hit.isConstructor) hit.getConstructorInstance(loader) else hit.getMethodInstance(loader)
+            }.getOrElse { t ->
+                unresolved++
+                Log.w(TAG, "DexKit 命中反射解析失败（跳过该条，候选集不完整）", t)
+                return@mapNotNull null
+            }
             if (!DexHitSelector.isHookable(method)) return@mapNotNull null
             // 签名串去重（照 Rain v00.d）
             if (!seen.add(signatureOf(method))) {
@@ -159,15 +164,26 @@ object DexKitHelper {
      * 直连反射结果与 DexKit 结果合并时用同一 key 取并集。
      * static 前缀：宽松轨已挂集合与「挂载点漂移命中」日志都靠它区分实例/静态实现——
      * 旧实例点被挂到 static 上时 `thisObject` 为 null，依赖 thisObject 的拦截器会静默空转，日志是唯一现场。
+     * 构造器（[Constructor]）：名字归一为 `<init>`（[Executable.name] 是类简单名）、返回类型记 `void`。
      */
-    fun signatureOf(method: Method): String = buildString {
-        if (java.lang.reflect.Modifier.isStatic(method.modifiers)) append("static ")
-        append(method.declaringClass.name)
-        append('#').append(method.name).append('(')
-        method.parameterTypes.forEachIndexed { index, parameterType ->
+    fun signatureOf(member: Executable): String = buildString {
+        if (java.lang.reflect.Modifier.isStatic(member.modifiers)) append("static ")
+        append(member.declaringClass.name)
+        append('#').append(nameOf(member)).append('(')
+        member.parameterTypes.forEachIndexed { index, parameterType ->
             if (index > 0) append(',')
             append(parameterType.name)
         }
-        append("):").append(method.returnType.name)
+        append("):").append(returnTypeNameOf(member))
     }
+
+    /** 返回类型名（dex 口径）：构造器没有 return 属性，恒记 `void`。 */
+    fun returnTypeNameOf(member: Executable): String =
+        if (member is Constructor<*>) "void" else (member as Method).returnType.name
+
+    /**
+     * 挂载点口径的方法名：构造器归一为 `<init>`——[Executable.name] 对 [Constructor]
+     * 返回的是类简单名，直接与数据表的 `methodName="<init>"` 比对会恒不等（漂移判定/打分都会误判）。
+     */
+    fun nameOf(member: Executable): String = if (member is Constructor<*>) "<init>" else member.name
 }

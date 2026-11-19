@@ -73,7 +73,7 @@ object FileOrganizer {
         val manifest: File,
         val ops: MutableList<Op>,
         val moved: Int, val deleted: Int, val freedBytes: Long, val failed: Int,
-        val skippedConflict: Int, val stale: List<String>,
+        val stale: List<String>,
     )
 
     private val ROOT = File("/storage/emulated/0")
@@ -126,31 +126,10 @@ object FileOrganizer {
     // L2：CoolMarket 前缀是 YYYYMMDD-（8 位），取前 6 位为月份（审计 M-2：旧 `^\d{6}-` 对 8 位不匹配）
     private val L2 = Regex("""^(\d{8})-""")
     // SimpleDateFormat 非线程安全（审计自审#4），object 单例里改为每次调用新建
-    private fun monthOf(f: File): Pair<String, MonthSource>? {
-        val b = f.name
-        L1.find(b)?.let { m ->
-            val ym = m.groupValues[1]
-            if (validYm(ym)) return ym to MonthSource.L1_NAME
-        }
-        L2.find(b)?.let { m ->
-            val ym = m.groupValues[1].take(6)
-            if (validYm(ym)) return ym to MonthSource.L2_PREFIX
-        }
-        return SimpleDateFormat("yyyyMM", Locale.US).format(Date(f.lastModified())) to MonthSource.L3_MTIME
-    }
 
     private fun validYm(ym: String): Boolean {
         val mm = ym.substring(4).toIntOrNull() ?: return false
         return ym.substring(0, 4).toIntOrNull() in 2000..2100 && mm in 1..12
-    }
-
-    // {YYYYMM} {YYYY} {MM} {EXT}；ym 来自 monthOf（L1/L2 用文件名日期，非 mtime）
-    private fun renderPattern(pattern: String, ym: String, f: File): String {
-        var s = pattern
-        if (s.contains("{YYYYMM}")) s = s.replace("{YYYYMM}", ym)
-        if (s.contains("{YYYY}")) s = s.replace("{YYYY}", ym.take(4))
-        if (s.contains("{MM}")) s = s.replace("{MM}", ym.takeLast(2))
-        return s.replace("{EXT}", f.extension)
     }
 
     // ---------- 扫描 → Plan ----------
@@ -323,30 +302,6 @@ object FileOrganizer {
         return Plan(ops, stale)
     }
 
-    /** 冲突处理（rules v2 §4.3）。occupied: 内存模拟，dry-run 也能检出碰撞 */
-    private fun uniqueDst(
-        dstDir: File, name: String, policy: ConflictPolicy,
-        occupied: MutableSet<String>, ops: MutableList<Op>, stale: MutableList<String>, ruleName: String,
-    ): String? {
-        val key = "$dstDir/$name"
-        val existsOnDisk = File(key).exists() || key in occupied
-        if (!existsOnDisk) { occupied.add(key); return key }
-        when (policy) {
-            ConflictPolicy.SKIP -> { stale.add("[$ruleName] 同名跳过: $name"); return null }
-            ConflictPolicy.OVERWRITE_BACKUP -> { return key } // 直接覆盖（无回收站后无备份层）
-            ConflictPolicy.SUFFIX -> {
-                val base = name.substringBeforeLast('.')
-                val ext = name.substringAfterLast('.', "")
-                var i = 1
-                while (true) {
-                    val cand = if (ext.isEmpty()) "$dstDir/${base}_$i" else "$dstDir/${base}_$i.$ext"
-                    if (File(cand).exists() || cand in occupied) { i++; continue }
-                    occupied.add(cand); return cand
-                }
-            }
-        }
-    }
-
     @Volatile private var currentRunId: String? = null
     @Volatile private var cancelRequested = false
     private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -437,7 +392,7 @@ object FileOrganizer {
             writeManifest(manifest, runId, ops) // ② 收尾必刷
             refreshMedia(context, touched)
             currentRunId = null
-            return RunResult(runId, manifest, ops, moved, deleted, freed, failed, 0,
+            return RunResult(runId, manifest, ops, moved, deleted, freed, failed,
                 plan.stale + if (cancelled) listOf("⚠ 用户取消：剩余 ${ops.count { it.note == "已取消" }} 项未执行") else emptyList())
         } finally {
             busy.set(false)
@@ -547,22 +502,6 @@ object FileOrganizer {
         mf.writeText(j.toString(2))
         refreshMedia(context, touched)
         return ok to fail
-    }
-
-    fun listRuns(context: Context): List<String> =
-        File(context.filesDir, "toolbox/file-organizer")
-            .listFiles { _, n -> n.endsWith(".json") }?.map { it.name.removeSuffix(".json") }?.sortedDescending() ?: emptyList()
-
-    fun readManifest(context: Context, runId: String): List<Op> {
-        val mf = File(context.filesDir, "toolbox/file-organizer/$runId.json")
-        if (!mf.exists()) return emptyList()
-        val arr = JSONObject(mf.readText()).getJSONArray("ops")
-        return (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            Op(o.getString("opId"), o.getString("ruleId"), OpType.valueOf(o.getString("type")),
-                o.getString("src"), o.getString("dst"), OpStatus.valueOf(o.getString("status")),
-                o.optLong("size", 0), o.optLong("mtime", 0), o.optString("note"))
-        }
     }
 
     private fun refreshMedia(context: Context, paths: List<String>) {

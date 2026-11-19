@@ -1,5 +1,7 @@
 package top.honorhook.xposed.core
 
+import java.lang.reflect.Constructor
+import java.lang.reflect.Executable
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
@@ -35,19 +37,20 @@ internal object DexHitSelector {
      * 旧实现照抄 Rain 的 helper，把 `Modifier.isStatic` 也当过滤条件——那是 Rain 自身场景的取舍，
      * 对本模块是纯损失：14.0.38.301 的 installer 有 8 个实现改成了 static，即使 DexKit 命中也全被丢掉。
      */
-    fun isHookable(method: Method): Boolean {
+    fun isHookable(method: Executable): Boolean {
         val mod = method.modifiers
         return !Modifier.isAbstract(mod) && !Modifier.isNative(mod)
     }
 
     /** 可挂载且返回类型吻合的候选 = 宽松轨的"可行集"；空 = 该层查询对本点无任何可用命中。 */
-    internal fun viable(expect: Expectation, candidates: List<Method>): List<Method> =
+    internal fun viable(expect: Expectation, candidates: List<Executable>): List<Executable> =
         candidates.filter { isHookable(it) }
             // 返回类型归一：表里写 `int`、宿主声明是 `java.lang.Integer` 时不该整批丢掉（复审缺陷⑤）。
             // 参数侧早就走 canonicalTypeName（见 score / matchesParameters），返回类型侧此前漏了 ⇒ 整批候选被丢弃。
             .filter {
+                // 构造器没有 return 属性（dex 口径恒 void）——与 Expectation.returnType="void" 恒匹配。
                 expect.returnType == null ||
-                    canonicalTypeName(it.returnType.name) == canonicalTypeName(expect.returnType)
+                    canonicalTypeName(DexKitHelper.returnTypeNameOf(it)) == canonicalTypeName(expect.returnType)
             }
             // instanceOnly：static 实现挂上去 thisObject 恒 null ⇒ 依赖它的拦截器空转（复审缺陷③）。
             .filter { !expect.instanceOnly || !Modifier.isStatic(it.modifiers) }
@@ -65,11 +68,11 @@ internal object DexHitSelector {
      * @param complete 候选集是否完整（DexKit 反射解析失败的条数 > 0 ⇒ 不完整 ⇒ 不做"唯一"判定）
      */
     fun pickStrict(
-        candidates: List<Method>,
+        candidates: List<Executable>,
         expect: Expectation,
         hasAnchor: Boolean,
         complete: Boolean = true,
-    ): Method? {
+    ): Executable? {
         if (candidates.isEmpty()) return null
         candidates.firstOrNull { it.declaringClass.name == expect.className }?.let { return it }
         if (!hasAnchor) return null
@@ -81,7 +84,7 @@ internal object DexHitSelector {
      * 期望实例方法、但候选全是 static：挂上去 `thisObject` 恒 null，依赖它的拦截器会静默空转。
      * 命中面：宽松轨这类层本该被 [viable] 滤掉；此函数用于**留痕**（告知为何该层没出命中）。
      */
-    fun staticMismatch(expect: Expectation, candidates: List<Method>): Boolean =
+    fun staticMismatch(expect: Expectation, candidates: List<Executable>): Boolean =
         expect.instanceOnly && candidates.isNotEmpty() && candidates.all { Modifier.isStatic(it.modifiers) }
 
     /**
@@ -91,11 +94,12 @@ internal object DexHitSelector {
      * 打分：声明类名命中（1000）> 方法名命中（100）> 参数类型逐位命中（每位 10）> 参数个数命中（5）。
      * 最高分并列 ⇒ 返回 null（歧义不猜）。
      */
-    fun selectLoose(expect: Expectation, candidates: List<Method>): Method? {
+    fun selectLoose(expect: Expectation, candidates: List<Executable>): Executable? {
         var viable = viable(expect, candidates)
         if (viable.isEmpty()) return null
         // 桥接/合成方法与真实方法同签名：优先看真实方法（与直连轨同一偏好；有多余解才可能翻脸）。
-        val real = viable.filter { !it.isSynthetic && !it.isBridge }
+        // isBridge 是 Method 独有属性；构造器只看 isSynthetic（数据类 synthetic ctor 属正常候选）。
+        val real = viable.filter { !it.isSynthetic && (it !is Method || !it.isBridge) }
         if (real.isNotEmpty()) viable = real
         val scored = viable.map { it to score(expect, it) }
         val best = scored.maxOf { it.second }
@@ -103,10 +107,10 @@ internal object DexHitSelector {
         return if (top.size == 1) top[0].first else null
     }
 
-    private fun score(expect: Expectation, method: Method): Int {
+    private fun score(expect: Expectation, method: Executable): Int {
         var score = 0
         if (method.declaringClass.name == expect.className) score += 1000
-        if (method.name == expect.methodName) score += 100
+        if (DexKitHelper.nameOf(method) == expect.methodName) score += 100
         val expected = expect.paramTypes
         if (!expected.isNullOrEmpty()) {
             val actual = method.parameterTypes
@@ -139,9 +143,9 @@ internal object DexHitSelector {
  * 宽松轨编排结果：命中 / 歧义（跳过）/ 与已挂方法重复（**合并**：同一方法只挂一次）/ 全部查询落空。
  */
 internal sealed interface LooseOutcome {
-    data class Hit(val method: Method, val spec: QuerySpec) : LooseOutcome
-    data class Ambiguous(val spec: QuerySpec, val candidates: List<Method>) : LooseOutcome
-    data class Duplicate(val method: Method) : LooseOutcome
+    data class Hit(val method: Executable, val spec: QuerySpec) : LooseOutcome
+    data class Ambiguous(val spec: QuerySpec, val candidates: List<Executable>) : LooseOutcome
+    data class Duplicate(val method: Executable) : LooseOutcome
     object Miss : LooseOutcome
 }
 
@@ -156,8 +160,8 @@ internal sealed interface LooseOutcome {
 internal fun resolveLoose(
     specs: List<QuerySpec>,
     expect: DexHitSelector.Expectation,
-    fetch: (QuerySpec) -> List<Method>,
-    isDuplicate: (Method) -> Boolean,
+    fetch: (QuerySpec) -> List<Executable>,
+    isDuplicate: (Executable) -> Boolean,
 ): LooseOutcome {
     for (spec in specs) {
         val candidates = fetch(spec)

@@ -31,9 +31,11 @@ else
   ADB="$(command -v adb || echo adb)"     # Termux android-tools / 发行版 adb
 fi
 
-if [ -x "$ROOT/tools/jadx/bin/jadx" ]; then
+# /storage noexec 且 FUSE 无 x 位（2026-11-18 实测全文件 -rw-rw----）⇒ 用 -f 判存在，
+# 调用方一律经 `bash "$JADX"`（见 dev.sh jadx 分支）。
+if [ -f "$ROOT/tools/jadx/bin/jadx" ]; then
   JADX="$ROOT/tools/jadx/bin/jadx"                 # Linux bundle
-elif [ -x "${PREFIX:-/data/user/0/com.dsharnessmobile.shell/files/usr}/opt/jadx/bin/jadx" ]; then
+elif [ -f "${PREFIX:-/data/user/0/com.dsharnessmobile.shell/files/usr}/opt/jadx/bin/jadx" ]; then
   JADX="${PREFIX:-/data/user/0/com.dsharnessmobile.shell/files/usr}/opt/jadx/bin/jadx"   # Termux/DSH: 装在 $PREFIX/opt
 fi
 # AAPT2 留空：dev.sh 公共段先扫 build-tools，再回落 `command -v aapt2`（Termux aapt 包）

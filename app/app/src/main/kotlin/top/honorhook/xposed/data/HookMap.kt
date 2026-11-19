@@ -1,5 +1,7 @@
 package top.honorhook.xposed.data
 
+import top.honorhook.xposed.core.MountEngine.DexHint
+
 /**
  * 挂载点的**数据形态**（抽象层）。
  *
@@ -34,3 +36,20 @@ data class HookPoint(
     /** 惰性值声明式表达：`类全名.枚举字段名`（依赖类加载，运行期反射取）。 */
     val enumRef: String? = null,
 )
+
+/**
+ * 表行 DexKit 四维锚点 → 引擎 DexHint（各 target 适配器的**唯一**共享实现）。
+ *
+ * 为什么收口到 data 层：2026-11-09 审计 P1-7 实锤 6 个适配器各自手写这段拷贝，
+ * 其中 AppMarket/Ouc 漏传（AppMarket 三个 notify 点的 R8 漂移兜底从未生效）、
+ * Launcher 只传一维——同一逻辑 6 份副本必然漂移。四维全空返回 null
+ * （不能返回空壳 DexHint：引擎会误入 DexKit 轨空查）。
+ */
+internal fun HookPoint.toDexHint(): DexHint? =
+    if (dexStrings == null && dexParamTypes == null && dexClassStrings == null && dexClassFieldTypes == null) null
+    else DexHint(
+        strings = dexStrings,
+        paramTypes = dexParamTypes,
+        classStrings = dexClassStrings,
+        classFieldTypes = dexClassFieldTypes,
+    )

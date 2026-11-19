@@ -31,9 +31,7 @@ object OtaSentinel {
     data class Report(
         val violatedSix: List<String>,
         val sentinelChanged: List<String>,
-    ) {
-        val shouldWarn: Boolean get() = violatedSix.isNotEmpty() || sentinelChanged.isNotEmpty()
-    }
+    )
 
     fun check(context: Context): Report {
         val violated = SIX_KEYS.mapNotNull { (t, k) ->

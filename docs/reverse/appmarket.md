@@ -64,3 +64,86 @@ OTA 后 `installed 5/7`，失败两点均为 R8 重命名（通知族三点 dexS
 - MT MCP：appmarket 无保存工作区（研究期 amwork/{classes,methods}.json 工件未入库，旧机遗留）；
   MT 文件策略拒绝 /data/app 与新建 /sdcard 路径——补点核签建议用 jadx 或重建工作区
   （需在 MT UI 内手工打开一次以生成 workspace）。
+
+## §机型/设备门控审计（2026-11-19，全量 smali 实证）
+
+证据来源：16.1.11.302 base.apk apktool 全量反编译（scratch/am-smali/，root 拷贝自
+/data/app/~~ncdstmfRVjSZ7eyf8D-_jw==/…/base.apk），grep 全 smali 命名空间复核。
+
+### ① 机型/设备判定中枢
+
+- **`ev9` / `fv9`（SystemPropertyUtil.kt，双 dex 重复副本，classes4）**：唯一系统 prop 读取工具。
+  `a()`=ro.build.version.release、`b()`=ro.product.model、`c()`=ro.build.version.magic、
+  `d(prop,def)`=反射 `com.hihonor.android.os.SystemPropertiesEx`（fallback `android.os.SystemProperties`），
+  失败回落默认值并打 `RemoteConfigManager` 日志。
+- **调用点全部是遥测上报**（smaliq xref，全库仅两处调用方）：
+  `com/hihonor/hm/remoteconfig/track/RemoteConfigTrackEvent` 与
+  `com/hihonor/hm/msgcenter/tracking/MsgCenterTrackEvent` —— model/magic 版本只用于打点，不用于本地分支。
+- **每次 API 请求的机型画像在 header 层**：`com/hihonor/appmarket/network/intercept/HeaderIntercept`
+  逐请求带 `model`(直接 sget Build.MODEL)、`sysVersion`、`magicSysVersion`、`androidVersion`、
+  `udid`、`apkVer`、`flavor` 等；`network/SenderDataProvider.createTerminalInfo/getTerminalInfo`
+  组装 `baselib.TerminalInfo`（deviceType 经 `l35.c()`）+ `getTargetedParamMap` + `cloudAbResultMap`。
+- **OS 版本判定**：`cc3.a()` 解析 ro.build.version.magic 为 int（串 "MAGICUI"/"MAGICOS"/"MagicOS"），
+  调用方仅 `com/hihonor/android/support/ui/BaseActivity` 与 `module/onlineservice/OnlineServiceActivity`；
+  `qgb` 反射 `com.hihonor.android.os.Build$VERSION.MAGIC_SDK_INT`（cloudservice SDK 兼容层）。
+  属 OS 版本兼容，不是按机型白名单。
+- **唯一的"设备"本地分支是形态因子**：`l35.c()I` = `FoldScreenManagerCompat.isFoldable()`→2 /
+  折叠态→1 / 其它 0，全库几十处调用全是 UI 布局适配（详情页/更新列表/半屏弹层），非机型门控。
+- **反证**：全 6 dex 字符串/常量搜 `AAK`、`HNAAK`、`marketname` 零命中；appmarket 命名空间内
+  `const-string "HN…"` 机型码零命中。无本地机型白/黑名单。
+
+### ② 受控功能清单
+
+- **云端下发（客户端不可控）**：机型定向推荐/运营弹窗/开屏素材/AB 实验 —— 判定输入 =
+  每请求 header（model/sysVersion/magicSysVersion/udid）+ TerminalInfo 上报 +
+  `com.hihonor.hm.remoteconfig` 云配置。服务端按 header 画像返回，客户端改不了已下发内容。
+- **本地 prop 判断**：仅 ① 所列遥测打点 + OS 版本兼容（cc3/qgb）+ 形态因子布局（l35.c）。
+  **未发现任何"本地 prop 判定 → 功能开关/弹窗/推荐差异"的路径**。
+
+### ③ hook 候选（均未验证，按证据强度排序）
+
+1. **改机型画像 header（中）**：进程内改写 Build.MODEL 值（静态 final，需反射写）+ hook `ev9.b`/`fv9.b`
+   同步返回值 → HeaderIntercept/TerminalInfo 全链画像变化，服务端可能按新机型下发定向内容。
+   前提未证实：服务端是否信任 header（大概率同时校验 udid/签名，纯改 model 可能只影响推荐不影响资格类功能）。
+2. **magic 版本虚高（中低）**：hook `ev9.c`/`fv9.c` 与 `cc3.a()` 返回更高 MagicOS 版本 →
+   BaseActivity/OnlineService 的 OS 版本兼容分支可能放开新特性；收益与具体版本阈值相关，需抓目标功能再核。
+3. **TerminalInfo/getTargetedParamMap（推测）**：改 `SenderDataProvider.getTargetedParamMap` /
+   `cloudAbResultMap` 注入可诱导云配置实验分组；结构跨版本易变，R8 名不稳定，兜底锚点弱，不建议首选。
+- **边界结论**：纯服务端机型定向（商店首页推荐、按机型适配的版本分发）客户端 hook 无法解锁——
+  内容在响应里，不经过本地判定。本地无机型门控 ⇒「强改 prop 解锁机型专属功能」这条路在本 app 不成立。
+
+## tamer 1.4.11 移植（2026-11-19）
+
+「荣耀市场净化」（com.tamer.honormarket 1.4.11，scratch/tamer/tamer.apk，jadx 产物
+scratch/tamer/out/sources/com/tamer/honormarket/）的全部 hook 与开关已并入本模块：
+
+- 开关：FeatureCatalog `market.purify.*` 37 个细分 key（默认值随 tamer：splash/op_dialog/
+  op_float/widget_tip/pers_ad/toolpage_entry/push/wake/mine_feed/search_feed/update_feed/
+  detail_rec/search_ad_booth/search_must 默认开，其余默认关）+ systemui 的
+  `systemui.fp_vibrate`（指纹解锁震动，原 fingerprint_vibrate）。
+- 实现：`xposed/target/appmarket/` 12 个文件（TamerActivityBlocker/WakeHooks/PushHooks/
+  DialogHooks/SplashHooks/SearchAdHooks/UiMiscHooks/TabStripper/MineSectionBlocker/
+  FeedHooks/HealthGateHook/TamerUtil），TargetRegistry 逐一注册；健康传感器锁屏门控
+  （TamerHealthGateHook）注册到 com.hihonor.health，指纹震动挂 SystemUiHook。
+- 与既有 7 点的避让：OperationDialog 3 参族（主开关已挂 n0/j0，16.1.11 名）与
+  AlarmCheckReceiver#onReceive（主开关已占）不重复挂，其余 tamer 点全量移植。
+- 新版本证据：设备市场 16.1.11.302（scratch/tamer/market-16.1.11.302.apk，apktool 全量
+  baksmali 在 system-files/market-1611-apktool-apktool/）。tamer 面向更旧版本，其混淆点
+  （fg7/kg7/tp5/rk4/v56、splash 族、BootController#J 等）在 16.1.11.302 的存活情况由
+  adapt-report（scratch/tamer/adapt-report.md）核对，DEAD 点已在实现中按 NOT_RESOLVED
+  兜底（缺失类/方法随类加载重试、打日志跳过，不硬挂）。
+
+## tamer 移植补遗：页签隐藏链路（2026-11-19 深夜收官）
+
+16.1.11.302 底部页签有**两条独立装配链**，tamer 原逻辑（g/BO getter）只能拦到埋点路，UI 不受影响：
+
+1. **T0 LiveData 路**：`LiveData.considerNotify → $c.onChanged → fq3 → MainFrameFragmentTemp.T0(static, List<BottomNavItemVO>) → yu1.l/n → AgHwBottomNavigationView.K(String,Drawable,IZ)` 逐项添加。
+2. **$a.d 装配路**：`vv6.d → vv6.e → MainFrameFragmentTemp$a.d(ui4,List,ArrayList,ArrayList,int[],ArrayList) → E1 → HwBottomNavigationView.A(Drawable,String)` 逐项添加（四平行列表同下标）。
+
+**MountEngine 系统性坑**：对 `$a` 类方法（tab.d、tab.t0）挂载显示成功但 intercept 从不执行（23:25 会话实证：addviewprobe 15 条命中而分支日志零输出）——运行期直挂（`module.hook(m).intercept{}`）则正常。凡挂 ANCHOR 内部方法的任务都要走直挂兜底。
+
+**BottomNavItemVO 反射坑**：R8 后 `javaClass.methods` 查不到 getText（mFound=false），必须 `getDeclaredField("text")` 直读；字段名稳（SerializedName 语义未变）。
+
+最终七层拦截（TamerTabStripper）：g/vmB/vmF/j/BO getter（数据源）+ t0direct + ddirect（两链直挂）+ sinkA/sinkK（A/K 出口按标题拦，兜一切漏网）。真机实证页签 5→3。
+
+**市场进程冷启动会把 Settings.System accelerometer_rotation 写成 1**（实测值 0 → 冷启动 → 1）——rotblock 直挂 Settings$System.putInt 族拦 ACCELEROMETER_ROTATION 非 0 写入。

@@ -7,6 +7,7 @@ import top.honorhook.xposed.core.MountEngine
 import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
+import top.honorhook.xposed.data.toDexHint
 
 /**
  * 荣耀在线升级客户端 `com.hihonor.ouc`（HnOUC.apk 18.0.3.206，aapt2 实证）：禁止系统更新
@@ -64,6 +65,8 @@ object OucHook : TargetHook {
         description = description,
         group = group,
         feature = feature,
+        // DexKit 兜底四维统一走共享 toDexHint（审计 P1-7：此处原漏传，表里将来配锚点不再静默丢）
+        dex = toDexHint(),
     )
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {

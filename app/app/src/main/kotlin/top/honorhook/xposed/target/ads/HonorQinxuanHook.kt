@@ -12,7 +12,6 @@ import top.honorhook.xposed.target.logDisabled
 
 /** 判据日志前缀 + 常量。 */
 private const val JUDGE_PREFIX = "qinxuan-hook"
-private const val RX_OBSERVABLE = "io.reactivex.rxjava3.core.Observable"
 private const val CLS_SPLASH_AD_ACTIVITY = "com.hihonor.library.advertisement.view.SplashAdvertisementActivity"
 private const val TASK_SPLASH_FINISH = "qinxuan:health.splashAd.finish"
 private const val CLS_OPERATIONS_MANAGER = "com.hihonor.module.home.logic.operations.OperationsManager"
@@ -227,46 +226,5 @@ class HonorQinxuanHook(override val packageName: String) : TargetHook {
         session.mount(task, module, loader) { chain ->
             session.judge(module, task, JUDGE_PREFIX)
             null
-        }
-
-    /**
-     * 亲选营销总入口拦截：不 proceed，返回反射构造的 `Observable.empty()`。
-     * 反射失败（rx 不在默认 loader）放行原逻辑保底，不炸宿主。
-     */
-    private fun mountOne(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        session.mount(task, module, loader) { chain ->
-            val empty = runCatching {
-                loader.loadClass(RX_OBSERVABLE).getMethod("empty").invoke(null)
-            }.getOrNull()
-            if (empty == null) {
-                module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX Observable.empty 反射失败，放行原生（不 crash）")
-                return@mount chain.proceed()
-            }
-            session.judge(module, task, JUDGE_PREFIX)
-            empty
-        }
-
-    /**
-     * 运营卡取证探针（after 语义，只读）：proceed 拿转换结果 List<FeatureCardModel>，
-     * 逐项打 name/cardId/type。零行为改动。
-     */
-    private fun mountCardProbe(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
-        session.mount(task, module, loader) { chain ->
-            val result = chain.proceed()
-            runCatching {
-                (result as? List<*>)?.takeIf { it.isNotEmpty() }?.let { list ->
-                    val dump = list.mapNotNull { item ->
-                        item?.javaClass?.let { cls ->
-                            fun g(n: String): Any? = runCatching {
-                                cls.getDeclaredField(n).apply { isAccessible = true }.get(item)
-                            }.getOrNull()
-                            "${g("name")}/cardId=${g("cardId")}/type=${g("type")}"
-                        }
-                    }
-                    module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 运营卡清单: $dump")
-                }
-            }
-            session.judge(module, task, JUDGE_PREFIX)
-            result
         }
 }

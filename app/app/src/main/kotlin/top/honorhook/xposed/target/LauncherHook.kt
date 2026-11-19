@@ -13,6 +13,7 @@ import top.honorhook.xposed.core.MountScheduler
 import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
+import top.honorhook.xposed.data.toDexHint
 import java.util.concurrent.CountDownLatch
 
 /**
@@ -531,8 +532,9 @@ object LauncherHook : TargetHook {
         value = value,
         id = id,
         description = description,
-        // 同名重载消歧（如 Launcher.closeFolder 的 (Folder)V 与 (Z)V 同为 1 参 void）靠参数类型锚点。
-        dex = dexParamTypes?.let { MountEngine.DexHint(paramTypes = it) },
+        // 同名重载消歧（如 Launcher.closeFolder 的 (Folder)V 与 (Z)V 同为 1 参 void）靠参数类型锚点；
+        // 四维全量透传走共享 toDexHint（审计 P1-7：原只传 paramTypes，另三维配了会静默丢）
+        dex = toDexHint(),
         feature = feature,
         group = group,
     )

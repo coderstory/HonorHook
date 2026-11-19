@@ -4,10 +4,10 @@ import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
-import top.honorhook.xposed.core.MountEngine.DexHint
 import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.RemoteConfig
+import top.honorhook.xposed.data.toDexHint
 
 /**
  * 荣耀系统管家服务 `com.hihonor.systemmanager`（17.0.0.414）：病毒检测/查杀/弹窗三路全禁。
@@ -85,7 +85,7 @@ object SysmgrHook : TargetHook {
         ),
     )
 
-    /** 表行 → 运行时任务（DexHint 四维按非空聚合，InstallerHook.toInstallerTask 同款写法）。 */
+    /** 表行 → 运行时任务（声明式字段直拷；DexKit 四维走共享 toDexHint）。 */
     internal fun HookPoint.toTask(): MountEngine.SimpleTask = MountEngine.SimpleTask(
         id = id,
         className = className,
@@ -95,14 +95,7 @@ object SysmgrHook : TargetHook {
         description = description,
         group = group,
         feature = feature,
-        dex = DexHint(
-            strings = dexStrings,
-            paramTypes = dexParamTypes,
-            classStrings = dexClassStrings,
-            classFieldTypes = dexClassFieldTypes,
-        ).takeIf {
-            dexStrings != null || dexParamTypes != null || dexClassStrings != null || dexClassFieldTypes != null
-        },
+        dex = toDexHint(),
     )
 
     override fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {

@@ -1,6 +1,17 @@
 package top.honorhook.xposed.target
 
 import top.honorhook.xposed.target.AppMarketHook
+import top.honorhook.xposed.target.appmarket.TamerActivityBlocker
+import top.honorhook.xposed.target.appmarket.TamerDialogHooks
+import top.honorhook.xposed.target.appmarket.TamerFeedHooks
+import top.honorhook.xposed.target.appmarket.TamerHealthGateHook
+import top.honorhook.xposed.target.appmarket.TamerMineSectionBlocker
+import top.honorhook.xposed.target.appmarket.TamerPushHooks
+import top.honorhook.xposed.target.appmarket.TamerSearchAdHooks
+import top.honorhook.xposed.target.appmarket.TamerSplashHooks
+import top.honorhook.xposed.target.appmarket.TamerTabStripper
+import top.honorhook.xposed.target.appmarket.TamerUiMiscHooks
+import top.honorhook.xposed.target.appmarket.TamerWakeHooks
 import top.honorhook.xposed.target.ads.HonorAdsHook
 import top.honorhook.xposed.target.ads.HonorOpsAdHook
 import top.honorhook.xposed.target.ads.HonorQinxuanHook
@@ -44,6 +55,21 @@ object TargetRegistry {
         register(OucHook)
         // 应用市场净化（53 号，首期 AlarmCheckReceiver 单点；缓期点见 docs/reverse/appmarket.md）
         register(AppMarketHook)
+        // 应用市场净化·tamer 1.4.11 移植细分族（2026-11-19，38 开关见 FeatureCatalog market.purify.*）：
+        register(TamerActivityBlocker)
+        register(TamerWakeHooks)
+        register(TamerPushHooks)
+        register(TamerDialogHooks)
+        register(TamerSplashHooks)
+        register(TamerSearchAdHooks)
+        register(TamerUiMiscHooks)
+        register(TamerTabStripper)
+        register(TamerMineSectionBlocker)
+        register(TamerFeedHooks)
+        // 健康传感器锁屏门控（开关 UI 挂市场 target 下，hook 实际落 health 进程）
+        register(TamerHealthGateHook("com.hihonor.health"))
+        // 智慧搜索（桌面下拉搜索结果页净化，2026-11-18）：cp5 数据包构造点剔除推荐卡
+        register(SearchHook)
         register(UpgradeGuideHook)
         // 荣耀短信（第 7 目标，T1 骨架：只观测不干预）。
         register(MmsHook)

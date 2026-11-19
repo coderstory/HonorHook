@@ -262,6 +262,21 @@ object SystemUiHook : TargetHook {
             logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_FLASHLIGHT_IGNORE_LOW_BATT, "SystemUiHook")
         }
 
+        // U9 指纹解锁震动（tamer 1.4.11 FingerprintVibration 移植，2026-11-19）：
+        // KeyguardUpdateMonitor#onFingerprintAuthenticated(II) after 补 20ms 短震（AOSP 类名跨版本稳）
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_FP_VIBRATE)) {
+            pending += MountEngine.SimpleTask(
+                className = "com.android.keyguard.KeyguardUpdateMonitor",
+                methodName = "onFingerprintAuthenticated",
+                paramCount = 2,
+                returnType = "void",
+                id = ID_FP_VIBRATE,
+                description = "U9 指纹解锁震动（onFingerprintAuthenticated(II) after 补 20ms 短震）",
+            )
+        } else {
+            logDisabled(module, FeatureCatalog.KEY_SYSTEMUI_FP_VIBRATE, "SystemUiHook")
+        }
+
         // U8 极客中心状态栏图标（槽位短路，geek key 门控；见 CLS_SBCI 注释）
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_SYSTEMUI_HIDE_GEEK_NOTIF)) {
             pending += MountEngine.SimpleTask(
@@ -299,6 +314,7 @@ object SystemUiHook : TargetHook {
     private const val ID_SHADE_HIDE = "systemui:hwNotificationFeatureImpl.isDisableShownInShade"
     private const val ID_FLASHLIGHT_LOW_BATT = "systemui:hwPhoneStatusBar.canOpenFlashLight"
     private const val ID_GEEK_SLOT_SET_ICON = "systemui:sbci.setIcon"
+    private const val ID_FP_VIBRATE = "systemui:keyguardUpdateMonitor.fpVibrate"
 
     /** slotId 字段读不到的一次性告警标志（只报一次，避免每次订阅变化都刷屏）。 */
     private val unreadableWarned = AtomicBoolean(false)
@@ -321,8 +337,73 @@ object SystemUiHook : TargetHook {
             ID_SHADE_HIDE -> mountHideInNotificationCenter(session, task, module, loader)
             ID_FLASHLIGHT_LOW_BATT -> mountFlashlightLowBatt(session, task, module, loader)
             ID_GEEK_SLOT_SET_ICON -> mountGeekSlotShortCircuit(session, task, module, loader)
+            ID_FP_VIBRATE -> mountFpVibrate(session, task, module, loader)
             else -> mountHideSim2(session, task, module, loader)
         }
+
+    /**
+     * U9 指纹解锁震动（照 tamer FingerprintVibration）：after 语义 = 先放行原方法再震动。
+     * 震动全走反射（vibrator_manager → getDefaultVibrator → VibrationEffect.createOneShot，
+     * 失败回落 legacy vibrator.vibrate(long[])），任何异常吞掉——不能影响解锁流程。
+     */
+    private fun mountFpVibrate(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =
+        session.mount(task, module, loader) { chain ->
+            val result = chain.proceed()
+            runCatching {
+                val monitor = chain.thisObject
+                val context = readField(monitor, "mContext") ?: return@runCatching
+                if (!vibrate20ms(context)) {
+                    // vibrator_manager 通道失败 → legacy vibrator 反射兜底（tamer 同款双通道）
+                    val legacy = invokeMethod(context, "getSystemService", "vibrator") ?: return@runCatching
+                    if (invokeMethod(legacy, "hasVibrator") == true) {
+                        invokeMethod(legacy, "vibrate", longArrayOf(0, 20), intArrayOf(-1))
+                    }
+                }
+                session.judge(module, task, JUDGE_PREFIX, "已震动")
+            }.onFailure { t ->
+                module.log(Log.WARN, MountEngine.TAG, "systemui-hook 指纹震动失败（已吞）: ${t.message}")
+            }
+            result
+        }
+
+    /** vibrator_manager → getDefaultVibrator → createOneShot(20ms)；成功返回 true。 */
+    private fun vibrate20ms(context: Any): Boolean {
+        val manager = invokeMethod(context, "getSystemService", "vibrator_manager") ?: return false
+        val vibrator = invokeMethod(manager, "getDefaultVibrator") ?: return false
+        if (invokeMethod(vibrator, "hasVibrator") != true) return false
+        val effectClass = Class.forName("android.os.VibrationEffect")
+        val effect = effectClass.getMethod("createOneShot", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .invoke(null, 20L, -1)
+        invokeMethod(vibrator, "vibrate", effect)
+        return true
+    }
+
+    /** 反射小工具（参数按运行时类型匹配公开方法；找不到返回 null / 失败抛出由调用方吞）。 */
+    private fun invokeMethod(target: Any, name: String, vararg args: Any?): Any? {
+        val methods = target.javaClass.methods.filter { it.name == name && it.parameterCount == args.size }
+        for (m in methods) {
+            val fits = m.parameterTypes.indices.all { i ->
+                val a = args[i] ?: return@all true
+                val boxed = m.parameterTypes[i].takeIf { it.isPrimitive }?.let {
+                    when (it) {
+                        java.lang.Boolean.TYPE -> java.lang.Boolean::class.java
+                        java.lang.Integer.TYPE -> java.lang.Integer::class.java
+                        java.lang.Long.TYPE -> java.lang.Long::class.java
+                        else -> it
+                    }
+                } ?: m.parameterTypes[i]
+                boxed.isInstance(a)
+            }
+            if (fits) return m.invoke(target, *args)
+        }
+        return null
+    }
+
+    private fun readField(target: Any, name: String): Any? =
+        runCatching { target.javaClass.getField(name) }
+            .recoverCatching { target.javaClass.getDeclaredField(name).apply { isAccessible = true } }
+            .map { it.get(target) }
+            .getOrNull()
 
     /** U1 副卡隐藏：updateSubs 入参剔除 slotId==1（数据层，宿主重建时自然用改过的数据）。 */
     private fun mountHideSim2(session: MountSession, task: MountEngine.SimpleTask, module: XposedModule, loader: ClassLoader): MountEngine.Result =

@@ -76,3 +76,6 @@ scratch/
 tools/mt-adapt-*.txt
 tools/jadx-mvn/
 /build/
+
+# wayfinder 本地后端存储
+.scratch/

@@ -3,6 +3,8 @@ package top.honorhook.xposed.data
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import top.honorhook.FeatureCatalog
+import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.target.AppMarketHook
 import top.honorhook.xposed.target.INSTALLER_POINTS_14_0_22_326
 import top.honorhook.xposed.target.INSTALLER_POINTS_14_0_38_301
 import top.honorhook.xposed.target.InstallerHook
@@ -11,6 +13,8 @@ import top.honorhook.xposed.target.LauncherHook
 import top.honorhook.xposed.target.OucHook
 import top.honorhook.xposed.target.SysmgrHook
 import top.honorhook.xposed.target.themestore.THEME_POINTS_20_1_63_305
+import top.honorhook.xposed.target.themestore.UriOwner
+import top.honorhook.xposed.target.themestore.toMountTask
 import top.honorhook.xposed.target.themestore.MountKind as ThemeMountKind
 import top.honorhook.xposed.target.InstallerHook.MountKind as InstallerMountKind
 
@@ -157,11 +161,25 @@ class HookPointTablesTest {
             "launcher" to LAUNCHER_POINTS_18_0_0_234,
             "sysmgr" to SysmgrHook.SYSMGR_POINTS,
             "ouc" to OucHook.OUC_POINTS,
+            "market" to AppMarketHook.MARKET_POINTS,
         ).forEach { (name, table) ->
             val ids = table.map { it.id }
             val dup = ids.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
             assertTrue("$name 挂载点 id 重复: $dup", dup.isEmpty())
         }
+    }
+
+    @Test
+    fun `market table kinds features and groups are valid`() {
+        // market 与 sysmgr/ouc 同款：intercept 按 returnType 分派，表 kind 仅行自描述，当前只允许 CONST
+        AppMarketHook.MARKET_POINTS.forEach { p ->
+            assertTrue(
+                "${p.id} kind=\"${p.kind}\" 不在允许集 $descriptiveOnlyKinds",
+                p.kind in descriptiveOnlyKinds,
+            )
+        }
+        assertValidFeatures(AppMarketHook.MARKET_POINTS.map { it.id to it.feature })
+        assertValidGroups(AppMarketHook.MARKET_POINTS.map { it.id to it.group })
     }
 
     // ---------------- ④ 表 → 任务：字段透传不丢 ----------------
@@ -229,7 +247,7 @@ class HookPointTablesTest {
         "sysmgr:CheckUninstallApkCaller.scanClean",
     )
 
-    /** 全部挂载表（护栏覆盖面：theme / installer×2 / launcher / sysmgr / ouc）。 */
+    /** 全部挂载表（护栏覆盖面：theme / installer×2 / launcher / sysmgr / ouc / market）。 */
     private fun allTables(): List<Pair<String, List<HookPoint>>> = listOf(
         "theme" to THEME_POINTS_20_1_63_305,
         "installer" to INSTALLER_POINTS_14_0_22_326,
@@ -237,6 +255,7 @@ class HookPointTablesTest {
         "launcher" to LAUNCHER_POINTS_18_0_0_234,
         "sysmgr" to SysmgrHook.SYSMGR_POINTS,
         "ouc" to OucHook.OUC_POINTS,
+        "market" to AppMarketHook.MARKET_POINTS,
     )
 
     @Test
@@ -317,5 +336,79 @@ class HookPointTablesTest {
                 )
             }
         }
+    }
+
+    // ---------------- ⑧ 适配器字段覆盖（2026-11-09 审计 P1-7 回归钉） ----------------
+
+    /**
+     * 六个适配器曾各自手写 HookPoint→Task 的字段拷贝：AppMarket/Ouc 漏传 dex、Launcher 只传四维之一——
+     * 真表行大多不配锚点，「忘了拷」在表驱动断言里测不出来。这里用**全字段非默认**的合成行过每个
+     * 适配器，钉死所有声明式字段落位；新增适配器必须在此登记。
+     */
+    private fun adapterSample(id: String) = HookPoint(
+        id = id, kind = "CONST", className = "t.C", methodName = "m", paramCount = 3, returnType = "int",
+        value = 7, description = "desc", dexStrings = listOf("s"), dexParamTypes = listOf("p"),
+        dexClassStrings = listOf("cs"), dexClassFieldTypes = listOf("cf"), forceArgIndex = 2,
+        group = "A1", uriEmptyRoute = true, uriOwner = "GET_DOWNLOAD_INFO", enumRef = "a.b.C.X",
+    )
+
+    /** MountEngine.Task 协议字段 + dex 四维逐项核对（全部适配器共用）。 */
+    private fun assertProtocolCarried(p: HookPoint, task: MountEngine.Task, where: String) {
+        assertTrue("$where ${p.id} id 透传丢失", task.id == p.id)
+        assertTrue("$where ${p.id} className 透传丢失", task.className == p.className)
+        assertTrue("$where ${p.id} methodName 透传丢失", task.methodName == p.methodName)
+        assertTrue("$where ${p.id} paramCount 透传丢失", task.paramCount == p.paramCount)
+        assertTrue("$where ${p.id} returnType 透传丢失", task.returnType == p.returnType)
+        assertTrue("$where ${p.id} description 透传丢失", task.description == p.description)
+        assertTrue("$where ${p.id} group 透传丢失", task.group == p.group)
+        val dex = checkNotNull(task.dex) { "$where ${p.id} dex 整体缺失（适配器忘了接共享 toDexHint？P1-7 回归）" }
+        assertTrue("$where ${p.id} dex.strings 丢失", dex.strings == p.dexStrings)
+        assertTrue("$where ${p.id} dex.paramTypes 丢失", dex.paramTypes == p.dexParamTypes)
+        assertTrue("$where ${p.id} dex.classStrings 丢失", dex.classStrings == p.dexClassStrings)
+        assertTrue("$where ${p.id} dex.classFieldTypes 丢失", dex.classFieldTypes == p.dexClassFieldTypes)
+    }
+
+    @Test
+    fun `adapters carry every declared field`() {
+        // SimpleTask 三目标：value/forceArgIndex 不落 Task 是有意设计（mountOne 按 returnType 硬分派，
+        // 表级 value 仅行自描述），只断言协议字段 + dex 四维
+        listOf(
+            "ouc" to OucHook,
+            "sysmgr" to SysmgrHook,
+            "market" to AppMarketHook,
+        ).forEach { (where, hook) ->
+            val p = adapterSample("t:$where")
+            val task = when (hook) {
+                OucHook -> with(OucHook) { p.toTask() }
+                SysmgrHook -> with(SysmgrHook) { p.toTask() }
+                else -> with(AppMarketHook) { p.toTask() }
+            }
+            assertProtocolCarried(p, task, where)
+        }
+
+        // launcher：私有字段 kind/value 另核
+        val lp = adapterSample("t:launcher")
+        val ltask = with(LauncherHook) { lp.toMountTask() }
+        assertProtocolCarried(lp, ltask, "launcher")
+        assertTrue("launcher ${lp.id} kind 透传丢失", ltask.kind.name == lp.kind)
+        assertTrue("launcher ${lp.id} value 透传丢失", ltask.value == lp.value)
+
+        // installer：同上
+        val ipt = adapterSample("t:installer")
+        val itask = with(InstallerHook) { ipt.toInstallerTask() }
+        assertProtocolCarried(ipt, itask, "installer")
+        assertTrue("installer ${ipt.id} kind 透传丢失", itask.kind.name == ipt.kind)
+        assertTrue("installer ${ipt.id} value 透传丢失", itask.value == ipt.value)
+
+        // theme：字段最全（kind/value/forceArgIndex/uriEmptyRoute/uriOwner/enumRef→resolveValue）
+        val tp = adapterSample("t:theme")
+        val ttask = tp.toMountTask()
+        assertProtocolCarried(tp, ttask, "theme")
+        assertTrue("theme ${tp.id} kind 透传丢失", ttask.kind.name == tp.kind)
+        assertTrue("theme ${tp.id} value 透传丢失", ttask.value == tp.value)
+        assertTrue("theme ${tp.id} forceArgIndex 透传丢失", ttask.forceArgIndex == tp.forceArgIndex)
+        assertTrue("theme ${tp.id} uriEmptyRoute 透传丢失", ttask.uriEmptyRoute == tp.uriEmptyRoute)
+        assertTrue("theme ${tp.id} uriOwner 透传丢失", ttask.uriOwner == UriOwner.valueOf(tp.uriOwner))
+        assertTrue("theme ${tp.id} enumRef→resolveValue 丢失", ttask.resolveValue != null)
     }
 }

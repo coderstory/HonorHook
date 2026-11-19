@@ -12,6 +12,7 @@ import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.HookPoint
 import top.honorhook.xposed.data.InstallerConfigTable
 import top.honorhook.xposed.data.RemoteConfig
+import top.honorhook.xposed.data.toDexHint
 
 /**
  * 包管理器目标（基线 14.0.37.301；另有 14.0.22.326 / 14.0.38.301 两张精确表，结构见对应 Map 文件）。
@@ -153,8 +154,8 @@ object InstallerHook : TargetHook {
         return pending
     }
 
-    /** 数据表挂载点 → 本目标挂载任务（kind 字符串映射；DexHint 四维按非空聚合）。 */
-    private fun HookPoint.toInstallerTask(): MountTask = MountTask(
+    /** 数据表挂载点 → 本目标挂载任务（kind 字符串映射；DexKit 四维走共享 toDexHint）。internal = 适配器字段覆盖测试用。 */
+    internal fun HookPoint.toInstallerTask(): MountTask = MountTask(
         kind = MountKind.valueOf(kind),
         className = className,
         methodName = methodName,
@@ -165,14 +166,7 @@ object InstallerHook : TargetHook {
         description = description,
         group = group,
         feature = feature,
-        dex = DexHint(
-            strings = dexStrings,
-            paramTypes = dexParamTypes,
-            classStrings = dexClassStrings,
-            classFieldTypes = dexClassFieldTypes,
-        ).takeIf {
-            dexStrings != null || dexParamTypes != null || dexClassStrings != null || dexClassFieldTypes != null
-        },
+        dex = toDexHint(),
     )
 
     // ---------------- R4 不请求广告 + R1 不展示安装页广告 ----------------
@@ -388,7 +382,8 @@ object InstallerHook : TargetHook {
     // internal = DecisionTablesTest 校验挂载表 kind 合法性用（评审 #18）
     internal enum class MountKind { CONST, BLOCK, CHECK_BYPASS, CHECK_BYPASS_RET, CHECK_BYPASS_JOB, FINGERPRINT_BYPASS }
 
-    private class MountTask(
+    // internal = 适配器字段覆盖测试访问属性用（函数 toInstallerTask 同因 internal）
+    internal class MountTask(
         val kind: MountKind,
         override val className: String,
         override val methodName: String,

@@ -267,12 +267,6 @@ object XhsVideoSave {
         savePending.values.any { now - it.second < 5 * 60_000L }
     }
 
-    /** 模块接管中 = 60s 内解析成功过（resolveCache 有活条目）。false = 解析失败/拉黑 → 下载/落盘闸全放行宿主保底。 */
-    fun takeoverActive(): Boolean = synchronized(resolveCache) {
-        val now = System.currentTimeMillis()
-        resolveCache.values.any { now - it.first < 60_000L }
-    }
-
     private fun resolveCached(noteId: String, module: XposedModule): ResolvedNote? {
         val cached = synchronized(resolveCache) {
             resolveCache[noteId]?.takeIf { System.currentTimeMillis() - it.first < 60_000L }?.second

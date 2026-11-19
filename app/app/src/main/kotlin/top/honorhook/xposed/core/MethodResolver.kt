@@ -1,6 +1,8 @@
 package top.honorhook.xposed.core
 
 import android.util.Log
+import java.lang.reflect.Constructor
+import java.lang.reflect.Executable
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
@@ -17,12 +19,12 @@ object MethodResolver {
      * 键位实际回收不掉——即命中缓存在进程内是终生的（同 APK 进程内可接受；宿主 APK 不会中途更换）。
      * miss 桶 / 宽松命中桶的 value 是 String，不存在该问题（评审 NIT：注释需如实）。
      */
-    private val hitBuckets = java.util.WeakHashMap<ClassLoader, ConcurrentHashMap<String, Method>>()
+    private val hitBuckets = java.util.WeakHashMap<ClassLoader, ConcurrentHashMap<String, Executable>>()
 
     /** DexKit 兜底未命中 key 集合（null 结果也缓存；ConcurrentHashMap 禁 null value，未命中单记）——命中直返 null，免重复磁盘扫描。 */
     private val missBuckets = java.util.WeakHashMap<ClassLoader, MutableSet<String>>()
 
-    private fun hitBucket(loader: ClassLoader): ConcurrentHashMap<String, Method> =
+    private fun hitBucket(loader: ClassLoader): ConcurrentHashMap<String, Executable> =
         synchronized(hitBuckets) { hitBuckets.getOrPut(loader) { ConcurrentHashMap() } }
 
     private fun missBucket(loader: ClassLoader): MutableSet<String> = synchronized(missBuckets) {
@@ -81,7 +83,7 @@ object MethodResolver {
             instanceOnly = instanceOnly,
         )
     ) {
-        is ResolveOutcome.Resolved -> outcome.method
+        is ResolveOutcome.Resolved -> outcome.method as? Method
         // 合并：同一方法已由另一挂载点挂上 ⇒ 不重复包装（不返回方法）
         is ResolveOutcome.Merged -> null
         ResolveOutcome.Unresolved -> null
@@ -120,18 +122,28 @@ object MethodResolver {
         instanceOnly: Boolean = false,
     ): ResolveOutcome {
         // 第一轨：直连反射（照 Rain ck0.S 语义：loadClass + 按名匹配，异常/查不到只记日志转兜底；不缓存——重试靠它赌类稍后可加载）
+        // 构造器分支（2026-11-18）：`<init>` 不在 declaredMethods 里（MethodResolver 老实现因此对构造器点 100% 落空），
+        // 走 declaredConstructors；构造器无返回类型，跳过 return 归一判定（dex 口径恒 void）。
         val direct = runCatching {
-            val byName = loader.loadClass(className).declaredMethods.filter { m ->
-                m.name == methodName &&
-                    matchesParameters(m, paramCount, paramTypes) &&
-                    // 返回类型归一（复审缺陷⑤）：表里写 `int`、宿主声明 `java.lang.Integer` 时不该判为不匹配
-                    (returnType == null ||
-                        DexHitSelector.canonicalTypeName(m.returnType.name) ==
-                            DexHitSelector.canonicalTypeName(returnType))
+            val clazz = loader.loadClass(className)
+            val byName: List<Executable> = if (methodName == "<init>") {
+                clazz.declaredConstructors.filter { c ->
+                    matchesParameters(c, paramCount, paramTypes)
+                }
+            } else {
+                clazz.declaredMethods.filter { m ->
+                    m.name == methodName &&
+                        matchesParameters(m, paramCount, paramTypes) &&
+                        // 返回类型归一（复审缺陷⑤）：表里写 `int`、宿主声明 `java.lang.Integer` 时不该判为不匹配
+                        (returnType == null ||
+                            DexHitSelector.canonicalTypeName(m.returnType.name) ==
+                                DexHitSelector.canonicalTypeName(returnType))
+                }
             }
             // 桥接/合成方法与真实方法同签名，会把"唯一命中"判定搅成歧义 ⇒ 优先只看真实方法；
-            // 仅当没有任何真实方法时才回退到合成方法（如协变返回值的桥接实现）。
-            val candidates = byName.filter { !it.isSynthetic && !it.isBridge }.ifEmpty { byName }
+            // 仅当没有任何真实方法时才回退到合成方法（如协变返回值的桥接实现；
+            // 数据类/默认参数的 synthetic 构造器属正常候选，同规则放行）。
+            val candidates = byName.filter { !it.isSynthetic && (it !is Method || !it.isBridge) }.ifEmpty { byName }
             when (candidates.size) {
                 0 -> null
                 1 -> candidates[0]
@@ -141,7 +153,7 @@ object MethodResolver {
                     // 归一（int ≡ java.lang.Integer）放宽后可能出现"精确返回类型"与"包装类型"两个候选：
                     // 归一只用于**放宽**，不用于改选 —— 优先取精确返回类型那个（与归一前的选择一致）。
                     val picked = candidates.firstOrNull {
-                        returnType == null || it.returnType.name == returnType
+                        returnType == null || DexKitHelper.returnTypeNameOf(it) == returnType
                     } ?: candidates[0]
                     Log.w(
                         TAG,
@@ -346,7 +358,7 @@ object MethodResolver {
      * （或反之）时不该判为不匹配 —— 否则该挂载点会从"直连命中"退化成"未解析"，
      * 白吃一轮重试再交给 DexKit（而 DexKit 用的是同一份特征，同样是空转）。
      */
-    private fun matchesParameters(m: Method, paramCount: Int?, paramTypes: List<String>?): Boolean {
+    private fun matchesParameters(m: Executable, paramCount: Int?, paramTypes: List<String>?): Boolean {
         if (!paramTypes.isNullOrEmpty()) {
             val actual = m.parameterTypes
             return actual.size == paramTypes.size &&
@@ -366,7 +378,7 @@ object MethodResolver {
  * - [Unresolved]：未命中（可随类加载重试）。
  */
 internal sealed interface ResolveOutcome {
-    data class Resolved(val method: Method) : ResolveOutcome
+    data class Resolved(val method: Executable) : ResolveOutcome
 
     /**
      * 合并：与另一挂载点落到同一方法。
@@ -374,7 +386,7 @@ internal sealed interface ResolveOutcome {
      * [mergedWith] = 占用该方法的挂载点 id（留痕用）；[mergedFeature] = 占用方的功能开关 key
      * （空 = 常挂点）。功能不同 ⇒ 本点的意图没生效 ⇒ 引擎按 MERGED_CONFLICT 处理（不计入 installed）。
      */
-    data class Merged(val method: Method, val mergedWith: String?, val mergedFeature: String = "") : ResolveOutcome
+    data class Merged(val method: Executable, val mergedWith: String?, val mergedFeature: String = "") : ResolveOutcome
 
     object Unresolved : ResolveOutcome
 }
