@@ -192,14 +192,9 @@ object FeatureStore {
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
                     runCatching {
                         val ctx = appContext ?: return@runCatching
-                        val label = runCatching {
-                            ctx.packageManager.getApplicationLabel(
-                                ctx.packageManager.getApplicationInfo(pkg, 0),
-                            ).toString()
-                        }.getOrDefault(pkg)
                         android.widget.Toast.makeText(
                             ctx,
-                            "开关已下发；未能自动重启「${label}」，重启后生效",
+                            "未授权 root，无法自动重启应用；本次修改需热重启或手动重启目标应用后生效",
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }
