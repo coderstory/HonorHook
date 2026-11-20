@@ -90,6 +90,62 @@ object ThemeStoreHook : TargetHook {
     }
 
     /** DOWNLOAD_TYPE_ROUTE 的 DownloadInfo 实例获取（口径同 isUriBlank 的 UriOwner 分派；drift → null → 放行）。 */
+    /**
+     * 按 origin path 解出解密密钥（hitopId/serviceId），DECRYPT_PREPARE 空参回填的第二级来源。
+     *
+     * 背景（2026-11-20 实证，付费主题「我的下载」被清根因）：宿主重启后打开记录页触发
+     * ThemeHelper.scanAllTheme → checkAllThemes（j.java:478）固定以 (null,null,path) 调
+     * b26.getDecryptTheme → null key 解不出 Download/Honor/Themes 的付费 .hnt → 不进扫描 list →
+     * lambda$handleThemes$4 把该 DB 行当「不在扫描结果」deleteThemeInfo 删行 ⇒ 记录消失。
+     * 回填后解密成功 → 扫描 list.contains 命中 → 行保留且 getUriFromInfo→saveThemeInfo update 自愈。
+     *
+     * 密钥来源优先级：① .hnt 文件头 42 字节 JSON（实测 af436…hnt 头部即
+     * `{"hitopId":"101114332","version":"8.0.10"}`，与下载期 ThemeCheckTool decryptFile 的
+     * hitopId 一致）——DB 行被删后仍可恢复；② 宿主自身 themeInfo 表按 package_path 查
+     * service_id（文件头无 hitopId 的旧格式兜底）。进程级缓存 path→key。
+     */
+    private val serviceIdByPath = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun resolveServiceIdByPath(origin: String, loader: ClassLoader, module: XposedModule): String? {
+        serviceIdByPath[origin]?.let { return it }
+        resolveKeyFromHeader(origin)?.let {
+            serviceIdByPath[origin] = it
+            module.log(android.util.Log.INFO, MountEngine.TAG, "DECRYPT_PREPARE 按文件头回填 serviceId=$it")
+            return it
+        }
+        return runCatching { resolveKeyFromProvider(origin, loader) }.getOrNull()?.also {
+            serviceIdByPath[origin] = it
+            module.log(android.util.Log.INFO, MountEngine.TAG, "DECRYPT_PREPARE 按DB回填 serviceId=$it")
+        }
+    }
+
+    /** ① 读 .hnt 头部（≤256B）提取 "hitopId":"N"。非本格式/读失败返回 null。 */
+    private fun resolveKeyFromHeader(origin: String): String? = runCatching {
+        val f = java.io.File(origin)
+        if (!f.exists()) return null
+        val head = f.inputStream().use { ins ->
+            val b = ByteArray(256)
+            val n = ins.read(b)
+            if (n <= 0) "" else String(b, 0, n, Charsets.US_ASCII)
+        }
+        Regex("\"hitopId\":\"(\\d+)\"").find(head)?.groupValues?.get(1)?.takeIf { it != "0" }
+    }.getOrNull()
+
+    /** ② 宿主自身 themeInfo 表 package_path=? → service_id（ThemeInfo.CONTENT_URI 反射取，回落字面量）。 */
+    private fun resolveKeyFromProvider(origin: String, loader: ClassLoader): String? = runCatching {
+        val app = Class.forName("android.app.ActivityThread")
+            .getMethod("currentApplication").invoke(null) as? android.content.Context
+            ?: return null
+        val uri = runCatching {
+            loader.loadClass("com.hihonor.android.thememanager.common.ThemeInfo")
+                .getField("CONTENT_URI").get(null) as? android.net.Uri
+        }.getOrNull() ?: android.net.Uri.parse("content://com.hihonor.android.thememanager.ContentProvider/themeInfo")
+        app.contentResolver.query(uri, arrayOf("service_id"), "package_path=?", arrayOf(origin), null)?.use { c ->
+            if (!c.moveToFirst() || c.isNull(0)) return null
+            java.lang.String.valueOf(c.getLong(0)).takeIf { it != "0" }
+        }
+    }.getOrNull()
+
     private fun downloadInfoFor(chain: XposedInterface.Chain, task: MountTask): Any? = when (task.uriOwner) {
         UriOwner.THIS -> chain.thisObject
         UriOwner.GET_DOWNLOAD_INFO -> chain.thisObject?.let { owner ->
@@ -260,7 +316,9 @@ object ThemeStoreHook : TargetHook {
                     val originIdx = if (task.paramCount == 4) 2 else 1 // origin path 参数位
                     val svc = args.getOrNull(svcIdx) as? String
                     if (svc.isNullOrBlank() || svc == "null") {
-                        lastRouteServiceId?.let { filled -> args[svcIdx] = filled }
+                        val origin = args.getOrNull(originIdx) as? String
+                        val filled = lastRouteServiceId ?: origin?.let { resolveServiceIdByPath(it, loader, module) }
+                        filled?.let { args[svcIdx] = it }
                     }
                     // 清理坏缓存产物：e26.getDecryName(origin) → 若存在且头两字节非 "PK" 则删除
                     runCatching {
@@ -323,6 +381,37 @@ object ThemeStoreHook : TargetHook {
                     session.judge(module, task, "theme-hook", "PATH_MEND packagePath 修正: $path → ${real.absolutePath}")
                 }
                 chain.proceed()
+            }
+            // 删除门（问题②，2026-11-20）：付费主题进程重启后本地内容密钥缓存（filesDir/<sha256(hitopId)>，
+            // 22:48 真机实证已丢）不可恢复 ⇒ 扫描永远解密失败 ⇒ scanAllTheme 清理链每次刷新都调
+            // ThemeInfo.deleteThemeInfo 真删 DB 行 → 「我的下载」付费记录消失。门条件 = 行 id≠0
+            // （扫盘项 id==0，不受影响）&& serviceId>0 && packagePath 文件存在。文件存在说明用户没删
+            // 这个主题；合法卸载先删文件（uninstallTheme→ThemeManager.deleteThemeFiles），文件已不在
+            // ⇒ 门不拦，正常放行删除。字段 id/packagePath 声明在 ItemInfo（public），serviceId 在
+            // BaseItemInfo（数值型按 Number 读），沿父类链反射取。
+            MountKind.DELETE_GATE -> {
+                val item = chain.thisObject
+                val blocked = runCatching {
+                    if (item == null || chain.getArg(0) == null) return@runCatching false
+                    fun readField(name: String): Any? {
+                        var c: Class<*>? = item.javaClass
+                        while (c != null && c != Any::class.java) {
+                            runCatching { return c.getDeclaredField(name).apply { isAccessible = true }.get(item) }
+                            c = c.superclass
+                        }
+                        return null
+                    }
+                    val id = (readField("id") as? Number)?.toInt() ?: 0
+                    val sid = (readField("serviceId") as? Number)?.toLong() ?: 0L
+                    val path = readField("packagePath") as? String
+                    id != 0 && sid > 0 && !path.isNullOrBlank() && java.io.File(path).exists()
+                }.getOrDefault(false)
+                if (blocked) {
+                    session.judge(module, task, "theme-hook", "DELETE_GATE 拦截扫描删除（行保留）")
+                    null
+                } else {
+                    chain.proceed()
+                }
             }
             // 参数强制（setter 写点 / 下载类型路由点）
             MountKind.FORCE_ARG -> {
