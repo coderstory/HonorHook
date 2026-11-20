@@ -13,7 +13,7 @@ import top.honorhook.xposed.target.appmarket.TamerUtil.className
 /**
  * 悬浮窗/小部件/个性化广告弹窗拦截（tamer 1.4.11 DialogBlocker 移植，2026-11-19）。
  *
- * op_dialog 三点（k0/j0/i0）**不在本 hook**：主开关 AppMarketHook 已占 n0（16.1.11 换名）
+ * op_dialog：主开关占 n0/j0（16.1.11 换名），本 hook 挂空闲的 i0(4)——见 install()
  * 与 j0，同点复挂会 MERGED_CONFLICT；主开关的渲染层拦截已覆盖。
  * widget_tip：BaseUikitDialogFragment#show(2) thisObject 类名门控 AddWidgetDialogFragment
  * （16.1.11.302 上 c0/e0 形状已变，argc 过滤自然失活，不挂）。
@@ -45,6 +45,17 @@ object TamerDialogHooks : TargetHook {
             )
         } else {
             logDisabled(module, FeatureCatalog.KEY_MARKET_PURIFY_OP_FLOAT, "TamerDialogHooks")
+        }
+        // op_dialog 专属点：OperationDialog#i0(4)（16.1.11 形状 (View,OperationDialog,View,View)V，静态）。
+        // k0/n0/j0 已被主开关 AppMarketHook 占用（挂同方法会 MERGED_CONFLICT），i0 空闲——
+        // 2026-11-20 开关核对发现 op_dialog 此前零引用（UI 有卡无效果），补上。
+        if (RemoteConfig.isEnabled(FeatureCatalog.KEY_MARKET_PURIFY_OP_DIALOG)) {
+            pending += task(
+                "market-tamer:opdialog.i0", "$PKG.operation.ui.OperationDialog", "i0", 4,
+                "运营弹窗展示链 i0→null",
+            )
+        } else {
+            logDisabled(module, FeatureCatalog.KEY_MARKET_PURIFY_OP_DIALOG, "TamerDialogHooks")
         }
         if (widgetTipOn) {
             pending += task(

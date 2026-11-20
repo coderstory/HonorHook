@@ -65,7 +65,14 @@ object TamerPushHooks : TargetHook {
         }
 
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_MARKET_PURIFY_ALL_NOTIFY)) {
-            pending += task("market-tamer:allnotify.v", "$PKG.business.notification.controller.NotificationControllerImpl", "v", 4, "通知创建总入口→null")
+            // 16.1.11 实测 v 形状 = (String,int,Notification,boolean)Z（smali L6623），
+            // returnType 必须写 boolean——写 void 会导致选点恒不等 → 挂载失败（2026-11-20 核对实证）。
+            pending += MountEngine.SimpleTask(
+                id = "market-tamer:allnotify.v",
+                className = "$PKG.business.notification.controller.NotificationControllerImpl",
+                methodName = "v", paramCount = 4, returnType = "boolean",
+                description = "通知创建总入口→null",
+            )
         } else {
             logDisabled(module, FeatureCatalog.KEY_MARKET_PURIFY_ALL_NOTIFY, "TamerPushHooks")
         }

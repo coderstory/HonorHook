@@ -51,10 +51,10 @@ object TamerMineSectionBlocker : TargetHook {
             return
         }
 
-        // 服务八宫格卡与骨架转圈同体（qo6/2004）：services 或 feedLoading 任一开即整卡剔除。
-        // 安全检测/清理加速不能整卡剔：16.1.11 里它们与应用更新同卡（ho6/2009），整卡剔会连
-        // 应用更新一起没（2026-11-20 真机实证）——改走 onBind 后按卡内文本定位子块隐藏。
-        val dropServices = services || feedLoading
+        // 服务八宫格卡（qo6/2004）只随 services 开关剔除——不再掺 feedLoading：
+        // feedLoading 的骨架转圈走 sweep 文本兜底（L193 正在加载/加载中），两开关语义必须独立
+        // （2026-11-20 核对：services||feedLoading 导致服务卡默认被剔、关 services 无法恢复）。
+        val dropServices = services
 
         val session = MountEngine.open(
             "TamerMineSectionBlocker", packageName, param.applicationInfo.sourceDir,
