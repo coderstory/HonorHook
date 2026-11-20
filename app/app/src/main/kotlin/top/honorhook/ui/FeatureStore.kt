@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import top.honorhook.FeatureCatalog
+import top.honorhook.ui.scope.ScopeRestarter
 
 /**
  * 功能开关存储（宿主侧）——本地镜像 + 远端下发双写（照 LSPFRIDA ScriptStore 通道模型）。
@@ -146,7 +147,7 @@ object FeatureStore {
             states, prefs,
         ) { t -> writeError = t }
         when (result) {
-            SetEnabledResult.OK -> Unit
+            SetEnabledResult.OK -> syncApply(key)
             SetEnabledResult.NOT_CONNECTED -> {
                 pendingKeys += key
                 featuresExcludingSelf(key, enabled)?.let { pendingKeys += it }
@@ -156,6 +157,24 @@ object FeatureStore {
                 Log.w(TAG, "远端 prefs 下发失败（本地已回滚，hook 侧保持上次远端值）: $key", writeError)
         }
         return result
+    }
+
+    /**
+     * 开关「同步生效」（tamer 同步功能的等价实现，2026-11-20 用户拍板 A 方案）：
+     * 远端下发成功后自动 root 强杀所属目标应用——hook 侧开关只在进程注入时读一次，
+     * 杀掉后用户下次打开即是新配置，不再需要手动强行停止。无 root / 进程没在跑时静默跳过
+     * （手动强杀路径保留为兜底）。后台线程执行，不阻塞开关 UI。
+     */
+    private fun syncApply(key: String) {
+        val pkg = FeatureCatalog.ownerPackageOf(key) ?: return
+        Thread {
+            runCatching {
+                val report = ScopeRestarter.restart(listOf(pkg))
+                if (report.stopped.isNotEmpty()) {
+                    Log.i(TAG, "同步生效：已重启 $pkg（开关 $key 下次启动生效）")
+                }
+            }
+        }.start()
     }
 
     /**

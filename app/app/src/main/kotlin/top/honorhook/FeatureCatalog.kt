@@ -416,6 +416,9 @@ object FeatureCatalog {
         ),
     )
 
+    /** 查表：功能 key → 所属目标包名（开关「同步生效」自动重启用；未登记返回 null）。 */
+    fun ownerPackageOf(key: String): String? = targets.firstOrNull { t -> t.features.any { it.key == key } }?.packageName
+
     /** 查表：宿主挂载基线版本（未登记返回 null = 该目标版本自检静默关闭）。 */
     fun baselineVersionOf(packageName: String): String? = targets.firstOrNull { it.packageName == packageName }?.baselineVersion
 
