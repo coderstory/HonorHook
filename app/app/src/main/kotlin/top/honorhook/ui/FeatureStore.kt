@@ -46,7 +46,11 @@ object FeatureStore {
      */
     private val pendingKeys = mutableSetOf<String>()
 
+    /** applicationContext（init 注入；同步生效 Toast 用）。 */
+    private var appContext: Context? = null
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         FeatureCatalog.targets.forEach { target ->
             target.features.forEach { feature ->
@@ -162,16 +166,43 @@ object FeatureStore {
     /**
      * 开关「同步生效」（tamer 同步功能的等价实现，2026-11-20 用户拍板 A 方案）：
      * 远端下发成功后自动 root 强杀所属目标应用——hook 侧开关只在进程注入时读一次，
-     * 杀掉后用户下次打开即是新配置，不再需要手动强行停止。无 root / 进程没在跑时静默跳过
-     * （手动强杀路径保留为兜底）。后台线程执行，不阻塞开关 UI。
+     * 杀掉后用户下次打开即是新配置，不再需要手动强行停止。
+     *
+     * root 不可用（用户未给 su）或击杀失败时**必须提醒**（2026-11-20 用户要求）：
+     * Toast 告知「重启 <应用名> 后生效」，手动强杀路径保留为兜底。
+     * 应用本来就没在跑时静默跳过（下次启动自然读到新值，无需打扰）。
+     * 后台线程执行，Toast 切主线程，不阻塞开关 UI。
      */
     private fun syncApply(key: String) {
         val pkg = FeatureCatalog.ownerPackageOf(key) ?: return
         Thread {
-            runCatching {
+            val (shouldRemind, reason) = runCatching {
                 val report = ScopeRestarter.restart(listOf(pkg))
-                if (report.stopped.isNotEmpty()) {
-                    Log.i(TAG, "同步生效：已重启 $pkg（开关 $key 下次启动生效）")
+                when {
+                    report.stopped.isNotEmpty() -> {
+                        Log.i(TAG, "同步生效：已重启 $pkg（开关 $key 下次启动生效）")
+                        false to ""
+                    }
+                    // 进程没在跑：下次启动自然生效，不打扰
+                    report.failed.isEmpty() && report.failure == null -> false to ""
+                    else -> true to ""
+                }
+            }.getOrDefault(true to "")
+            if (shouldRemind) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    runCatching {
+                        val ctx = appContext ?: return@runCatching
+                        val label = runCatching {
+                            ctx.packageManager.getApplicationLabel(
+                                ctx.packageManager.getApplicationInfo(pkg, 0),
+                            ).toString()
+                        }.getOrDefault(pkg)
+                        android.widget.Toast.makeText(
+                            ctx,
+                            "开关已下发；未能自动重启「${label}」，重启后生效",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
             }
         }.start()

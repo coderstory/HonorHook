@@ -51,10 +51,10 @@ object TamerMineSectionBlocker : TargetHook {
             return
         }
 
-        // 服务八宫格卡与骨架转圈同体（qo6/2004）：services 或 feedLoading 任一开即剔除
+        // 服务八宫格卡与骨架转圈同体（qo6/2004）：services 或 feedLoading 任一开即整卡剔除。
+        // 安全检测/清理加速不能整卡剔：16.1.11 里它们与应用更新同卡（ho6/2009），整卡剔会连
+        // 应用更新一起没（2026-11-20 真机实证）——改走 onBind 后按卡内文本定位子块隐藏。
         val dropServices = services || feedLoading
-        // 核心工具卡（so6/2007）：旧版含清理加速+安全检测，两开关任一开即剔除
-        val dropCore = clean || safety
 
         val session = MountEngine.open(
             "TamerMineSectionBlocker", packageName, param.applicationInfo.sourceDir,
@@ -63,17 +63,22 @@ object TamerMineSectionBlocker : TargetHook {
         val loader = param.defaultClassLoader
         val pending = mutableListOf<MountEngine.SimpleTask>()
 
-        if (dropServices || dropCore) {
+        if (dropServices || clean || safety) {
             pending += listOf(
                 MountEngine.SimpleTask(
                     id = "market-tamer:mine.init", className = ADAPTER_CLS, methodName = "<init>",
                     paramCount = 5, returnType = "void",
-                    description = "「我的」卡列表装配后按开关剔除（服务八宫格/核心工具卡）",
+                    description = "「我的」卡列表装配后剔除（服务八宫格含骨架转圈）",
                 ),
                 MountEngine.SimpleTask(
                     id = "market-tamer:mine.cloud", className = ADAPTER_CLS, methodName = "p0",
                     paramCount = 1, returnType = "void",
                     description = "云控常用服务到达后补剔（服务八宫格）",
+                ),
+                MountEngine.SimpleTask(
+                    id = "market-tamer:mine.bind", className = ADAPTER_CLS, methodName = "onBindViewHolder",
+                    paramCount = 2, returnType = "void",
+                    description = "卡渲染后按文本隐藏子块（安全检测/清理加速，保留同卡应用更新）",
                 ),
             )
         }
@@ -118,16 +123,25 @@ object TamerMineSectionBlocker : TargetHook {
                             val list = readField(adapter, "f") as? MutableList<Any?>
                             if (list != null) {
                                 val before = list.size
-                                list.removeAll { item ->
-                                    val n = item?.javaClass?.simpleName
-                                    (dropServices && n == "qo6") || (dropCore && n == "so6")
-                                }
+                                list.removeAll { item -> dropServices && item?.javaClass?.simpleName == "qo6" }
                                 if (list.size != before) {
                                     module.log(
                                         android.util.Log.INFO, MountEngine.TAG,
                                         "market-tamer mine 卡剔除 ${before}→${list.size}（${t.id}）",
                                     )
                                 }
+                            }
+                        }
+                        "market-tamer:mine.bind" -> {
+                            chain.proceed()
+                            val holder = chain.args?.getOrNull(0) ?: return@mount null
+                            val view = TamerUtil.readField(holder, "itemView") as? View
+                                ?: return@mount null
+                            val vt = TamerUtil.callMethod(holder, "getItemViewType") as? Int
+                            // 只处理含安全检测/清理加速的卡（2007 旧核心卡 / 2009·2010 新双卡）
+                            if (vt == 2007 || vt == 2009 || vt == 2010) {
+                                hideByText(view, "安全检测", safety)
+                                hideByText(view, "清理加速", clean)
                             }
                         }
                         "market-tamer:mine.signinCfg", "market-tamer:mine.signinSelf" -> {
@@ -159,6 +173,14 @@ object TamerMineSectionBlocker : TargetHook {
     }
 
     // —— 文本兜底 sweep（滑动引导/签到残余） ——
+
+    /** 卡内按标题文本定位子块隐藏（title 所在 TextView 向上找 RecyclerView 前一层容器）。 */
+    private fun hideByText(root: View, title: String, on: Boolean) {
+        if (!on) return
+        val texts = ArrayList<android.widget.TextView>()
+        collectTexts(root, texts)
+        texts.filter { it.text?.toString()?.contains(title) == true }.forEach { hideCardOf(it) }
+    }
 
     private fun sweep(frag: Any?, signin: Boolean, slide: Boolean, feedLoading: Boolean) {
         val root = TamerUtil.callMethod(frag, "getView") as? View ?: return
