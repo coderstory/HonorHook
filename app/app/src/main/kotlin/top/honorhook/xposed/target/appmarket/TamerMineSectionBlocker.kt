@@ -1,31 +1,31 @@
 package top.honorhook.xposed.target.appmarket
 
-import android.os.Handler
-import android.os.Looper
 import android.view.View
-import android.view.ViewGroup
-import android.widget.TextView
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
-import top.honorhook.xposed.core.MountSession
 import top.honorhook.xposed.data.RemoteConfig
 import top.honorhook.xposed.target.TargetHook
 import top.honorhook.xposed.target.logDisabled
-import top.honorhook.xposed.target.appmarket.TamerUtil.callMethod
 import top.honorhook.xposed.target.appmarket.TamerUtil.readField
 
 /**
- * 「我的」页区块隐藏（tamer 1.4.11 MineSectionBlocker 移植，2026-11-19）。
+ * 「我的」页区块隐藏（tamer MineSectionBlocker 移植；2026-11-20 按 16.1.11.302 重适配）。
  *
- * 两路：
- * - adapter 路（clean/safety/services，默认关）：MarketManageTopAdapter onBind/e0 后按
- *   itemViewType（2007 核心工具卡 / 2004 通用服务卡）按资源 id 名 hide；
- * - sweep 路（signin/slide/mine_feed 加载占位）：MarketManageFragment onResume/onHiddenChanged/
- *   onViewCreated 后 postDelayed 600/1500/3000/5000 扫 TextView 文本，向上找 RecyclerView
- *   父级前一层 hide（找 RecyclerView 失败退回直接父级）。
- * 资源 id 经 getIdentifier 动态解析并缓存（R 类被宿主混淆，id 名跨版本稳定）。
+ * 16.1.11 改版事实（scratch/tamer/mine-1611-report.md）：
+ * - Fragment/Adapter 类未变（MarketManageFragment / MarketManageTopAdapter），变的是装配模型：
+ *   卡片在 adapter 构造器里按 isMineNewLayout(y0) 装配，viewType 2003=应用更新(no6)、
+ *   2004=常用服务八宫格+骨架转圈(qo6)、2005=设置帮助(dq6)、2007=核心工具卡(so6，内含安全检测 cq6)、
+ *   2009/2010=新版应用管理双卡(ho6，含 应用更新+安全检测+清理)。
+ * - 签到按钮 = com.hihonor.appmarket.widgets.SignInActivityButton（未混淆），配置下发
+ *   b(MyPageActivityLoginConfigVO) / c()。旧扫文本法失效：文案是资源引用，smali 无 const。
+ *
+ * 挂载点（均为未混淆类，MountEngine 派发正常）：
+ * - adapter.<init>(Fragment,Fragment,Z,Z,wl0) after：按开关从列表字段 f 剔除模型
+ *   （类简单名匹配：qo6=服务+骨架转圈、so6=核心工具卡）。云控到达 p0(Lqo6;)V 后同法补剔。
+ * - SignInActivityButton#b(1参)/#c(0参) after：签到开关开 → 按钮本体 GONE。
+ * - sweep 三入口（旧逻辑保留）：扫「滑一滑」等引导文本（新版可能不存在，容忍空转）。
  */
 object TamerMineSectionBlocker : TargetHook {
 
@@ -34,10 +34,8 @@ object TamerMineSectionBlocker : TargetHook {
     private const val PKG = "com.hihonor.appmarket"
     private const val ADAPTER_CLS = "$PKG.mine.adapter.MarketManageTopAdapter"
     private const val FRAGMENT_CLS = "$PKG.mine.MarketManageFragment"
-    private const val VT_COMMON_SERVICE = 2004
-    private const val VT_CORE_TOOLS = 2007
+    private const val SIGNIN_CLS = "$PKG.widgets.SignInActivityButton"
     private val SWEEP_DELAYS = longArrayOf(600, 1500, 3000, 5000)
-    private val idCache = HashMap<String, Int?>()
 
     private fun on(key: String) = RemoteConfig.isEnabled(key)
 
@@ -53,21 +51,50 @@ object TamerMineSectionBlocker : TargetHook {
             return
         }
 
+        // 服务八宫格卡与骨架转圈同体（qo6/2004）：services 或 feedLoading 任一开即剔除
+        val dropServices = services || feedLoading
+        // 核心工具卡（so6/2007）：旧版含清理加速+安全检测，两开关任一开即剔除
+        val dropCore = clean || safety
+
+        val session = MountEngine.open(
+            "TamerMineSectionBlocker", packageName, param.applicationInfo.sourceDir,
+            FeatureCatalog.baselineVersionOf(packageName), RemoteConfig,
+        )
+        val loader = param.defaultClassLoader
         val pending = mutableListOf<MountEngine.SimpleTask>()
-        if (clean || safety || services) {
+
+        if (dropServices || dropCore) {
             pending += listOf(
                 MountEngine.SimpleTask(
-                    id = "market-tamer:mine.bind", className = ADAPTER_CLS, methodName = "onBindViewHolder",
-                    paramCount = 2, returnType = "void", description = "「我的」顶卡渲染后按 id 隐藏（清理/安检/服务）",
+                    id = "market-tamer:mine.init", className = ADAPTER_CLS, methodName = "<init>",
+                    paramCount = 5, returnType = "void",
+                    description = "「我的」卡列表装配后按开关剔除（服务八宫格/核心工具卡）",
+                ),
+                MountEngine.SimpleTask(
+                    id = "market-tamer:mine.cloud", className = ADAPTER_CLS, methodName = "p0",
+                    paramCount = 1, returnType = "void",
+                    description = "云控常用服务到达后补剔（服务八宫格）",
                 ),
             )
         }
-        if (signin || slide || feedLoading) {
-            // tamer 三入口都挂：onResume / onHiddenChanged(bool) / onViewCreated(V,Bundle)——任意一条可见路径都会触发 sweep
+        if (signin) {
+            pending += listOf(
+                MountEngine.SimpleTask(
+                    id = "market-tamer:mine.signinCfg", className = SIGNIN_CLS, methodName = "b",
+                    paramCount = 1, returnType = "void", description = "签到按钮配置下发后隐藏",
+                ),
+                MountEngine.SimpleTask(
+                    id = "market-tamer:mine.signinSelf", className = SIGNIN_CLS, methodName = "c",
+                    paramCount = 0, returnType = "void", description = "签到按钮自渲染后隐藏",
+                ),
+            )
+        }
+        if (slide || signin || feedLoading) {
+            // 文本兜底 sweep（滑动引导/签到残余/「正在加载」占位）；新版多走按钮路，容忍空转
             pending += listOf(
                 MountEngine.SimpleTask(
                     id = "market-tamer:mine.sweep", className = FRAGMENT_CLS, methodName = "onResume",
-                    paramCount = 0, returnType = "void", description = "「我的」页可见后延时扫文本隐藏（签到/滑动引导/加载占位）",
+                    paramCount = 0, returnType = "void", description = "「我的」页可见后延时扫文本隐藏",
                 ),
                 MountEngine.SimpleTask(
                     id = "market-tamer:mine.sweepHidden", className = FRAGMENT_CLS, methodName = "onHiddenChanged",
@@ -81,27 +108,44 @@ object TamerMineSectionBlocker : TargetHook {
         }
         if (pending.isEmpty()) return
 
-        val session = MountEngine.open(
-            "TamerMineSectionBlocker", packageName, param.applicationInfo.sourceDir,
-            FeatureCatalog.baselineVersionOf(packageName), RemoteConfig,
-        )
-        session.attemptMount(pending, module, param.defaultClassLoader) { t ->
-            session.mount(t, module, param.defaultClassLoader) { chain ->
+        session.attemptMount(pending, module, loader) { t ->
+            session.mount(t, module, loader) { chain ->
                 runCatching {
-                    if (t.id == "market-tamer:mine.bind") {
-                        chain.proceed()
-                        handleBind(chain.args, clean, safety, services)
-                    } else {
-                        // sweep 三入口共用同一套延时逻辑（onHiddenChanged 只在 hidden=false 即变可见时扫）
-                        val visible = t.id != "market-tamer:mine.sweepHidden" || chain.args.getOrNull(0) == false
-                        chain.proceed()
-                        if (visible) {
-                            val frag = chain.thisObject
-                            val handler = Handler(Looper.getMainLooper())
-                            for (d in SWEEP_DELAYS) {
-                                handler.postDelayed({
-                                    runCatching { sweep(frag, signin, slide, feedLoading) }
-                                }, d)
+                    when (t.id) {
+                        "market-tamer:mine.init", "market-tamer:mine.cloud" -> {
+                            chain.proceed()
+                            val adapter = chain.thisObject
+                            val list = readField(adapter, "f") as? MutableList<Any?>
+                            if (list != null) {
+                                val before = list.size
+                                list.removeAll { item ->
+                                    val n = item?.javaClass?.simpleName
+                                    (dropServices && n == "qo6") || (dropCore && n == "so6")
+                                }
+                                if (list.size != before) {
+                                    module.log(
+                                        android.util.Log.INFO, MountEngine.TAG,
+                                        "market-tamer mine 卡剔除 ${before}→${list.size}（${t.id}）",
+                                    )
+                                }
+                            }
+                        }
+                        "market-tamer:mine.signinCfg", "market-tamer:mine.signinSelf" -> {
+                            chain.proceed()
+                            (chain.thisObject as? View)?.takeIf { it.visibility != View.GONE }?.visibility = View.GONE
+                        }
+                        else -> {
+                            // sweep 三入口共用延时逻辑（onHiddenChanged 仅 hidden=false 即变可见时扫）
+                            val visible = t.id != "market-tamer:mine.sweepHidden" || chain.args.getOrNull(0) == false
+                            chain.proceed()
+                            if (visible) {
+                                val frag = chain.thisObject
+                                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                                for (d in SWEEP_DELAYS) {
+                                    handler.postDelayed({
+                                        runCatching { sweep(frag, signin, slide, feedLoading) }
+                                    }, d)
+                                }
                             }
                         }
                     }
@@ -114,41 +158,11 @@ object TamerMineSectionBlocker : TargetHook {
         }
     }
 
-    // —— adapter 路 ——
-
-    private fun handleBind(args: List<Any?>?, clean: Boolean, safety: Boolean, services: Boolean) {
-        val holder = args?.getOrNull(0) ?: return
-        val view = readField(holder, "itemView") as? View ?: return
-        when ((callMethod(holder, "getItemViewType") as? Int)) {
-            VT_CORE_TOOLS -> {
-                if (clean) listOf("clean_up_view", "clean_up_icon", "clean_up_title", "clean_up_subtitle")
-                    .forEach { hideById(view, it) }
-                if (safety) listOf(
-                    "safety_check_view", "safety_check_title", "safety_check_subtitle",
-                    "scan_finish_layout", "scan_finish_sub_layout", "process_view_v2",
-                    "warning_tips_imageview", "default_status",
-                ).forEach { hideById(view, it) }
-            }
-            VT_COMMON_SERVICE -> if (services) hideOnce(view)
-        }
-    }
-
-    private fun hideById(view: View, name: String) {
-        val id = idCache.getOrPut(name) {
-            view.resources.getIdentifier(name, "id", PKG).takeIf { it != 0 }
-        } ?: return
-        (view.findViewById<View>(id))?.takeIf { it.visibility != View.GONE }?.visibility = View.GONE
-    }
-
-    private fun hideOnce(view: View) {
-        if (view.visibility != View.GONE) view.visibility = View.GONE
-    }
-
-    // —— sweep 路 ——
+    // —— 文本兜底 sweep（滑动引导/签到残余） ——
 
     private fun sweep(frag: Any?, signin: Boolean, slide: Boolean, feedLoading: Boolean) {
-        val root = callMethod(frag, "getView") as? View ?: return
-        val texts = ArrayList<TextView>()
+        val root = TamerUtil.callMethod(frag, "getView") as? View ?: return
+        val texts = ArrayList<android.widget.TextView>()
         collectTexts(root, texts)
         for (tv in texts) {
             val s = tv.text?.toString() ?: continue
@@ -159,16 +173,16 @@ object TamerMineSectionBlocker : TargetHook {
         }
     }
 
-    private fun collectTexts(view: View, out: MutableList<TextView>) {
-        if (view is TextView) {
+    private fun collectTexts(view: View, out: MutableList<android.widget.TextView>) {
+        if (view is android.widget.TextView) {
             out.add(view)
-        } else if (view is ViewGroup) {
+        } else if (view is android.view.ViewGroup) {
             for (i in 0 until view.childCount) view.getChildAt(i)?.let { collectTexts(it, out) }
         }
     }
 
     /** 向上找 RecyclerView 父级，取其直接子层 hide；找不到退回直接父级。 */
-    private fun hideCardOf(tv: TextView) {
+    private fun hideCardOf(tv: android.widget.TextView) {
         var cur: View = tv
         var target: View? = null
         repeat(30) {

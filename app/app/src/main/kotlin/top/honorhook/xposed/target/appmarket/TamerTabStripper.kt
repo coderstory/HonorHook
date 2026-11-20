@@ -223,6 +223,48 @@ object TamerTabStripper : TargetHook {
                 module.log(android.util.Log.INFO, MountEngine.TAG,
                     "market-tamer navprobe 注册失败: ${it.message}")
             }
+            // d 直挂（$a.d 六参：菜单/Fragment/图标/统计平行数组的统一交付点）。
+            // 2026-11-20 真机症状：只滤菜单不滤 Fragment 数组 → 点「我的」实际打开「游戏」
+            // （可见下标对上未过滤的 Fragment 下标错位）。必须在此做同索引一致删除，
+            // 让所有下游读到同一份过滤后的数据——tamer v3 同款修法（其源码 v1 教训注释）。
+            runCatching {
+                loader.loadClass(ANCHOR).declaredMethods
+                    .filter { it.name == "d" && it.parameterTypes.size == 6 }
+                    .forEach { m ->
+                        module.hook(m)
+                            .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                            .setId("market-tamer:tab.ddirect")
+                            .intercept { chain ->
+                                val args = chain.args?.toTypedArray()
+                                    ?: return@intercept chain.proceed()
+                                runCatching {
+                                    val pages = args.getOrNull(1) as? List<Any?>
+                                    if (pages != null && pages.size > 1) {
+                                        val drop = pages.map { isBlockedPage(it) || opaqueName(it?.toString()) }
+                                        val removed = drop.count { it }
+                                        if (removed > 0 && removed < pages.size) {
+                                            val keep = pages.indices.filter { !drop[it] }
+                                            args[1] = keep.map { pages[it] }
+                                            (args.getOrNull(2) as? List<*>)?.takeIf { it.size == pages.size }
+                                                ?.let { args[2] = keep.map { i -> it[i] } }
+                                            (args.getOrNull(3) as? List<*>)?.takeIf { it.size == pages.size }
+                                                ?.let { args[3] = keep.map { i -> it[i] } }
+                                            (args.getOrNull(4) as? IntArray)?.takeIf { it.size == pages.size }
+                                                ?.let { arr -> args[4] = IntArray(keep.size) { k -> arr[keep[k]] } }
+                                            (args.getOrNull(5) as? List<*>)?.takeIf { it.size == pages.size }
+                                                ?.let { args[5] = keep.map { i -> it[i] } }
+                                            keptCount.set(keep.size)
+                                            module.log(android.util.Log.INFO, MountEngine.TAG,
+                                                "market-tamer ddirect 页签 ${pages.size}→${keep.size}")
+                                        }
+                                    }
+                                }
+                                chain.proceedWith(chain.thisObject, args)
+                            }
+                    }
+            }.onFailure {
+                module.log(android.util.Log.WARN, MountEngine.TAG, "market-tamer ddirect reg fail: ${it.message}")
+            }
             // 兜底收口：不管哪条链装配，最终逐项添加只有两个 sink——
             // HwBottomNavigationView.A(Drawable,String)（$a.d→E1 路）和
             // AgHwBottomNavigationView.K(String,Drawable,IZ)（T0→yu1.l/n 路，23:20 栈实证）。
