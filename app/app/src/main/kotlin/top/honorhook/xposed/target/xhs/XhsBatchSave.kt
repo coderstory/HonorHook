@@ -883,7 +883,7 @@ object XhsBatchSave {
     private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
         // 去重提示（2026-11-21 用户需求）：命中台账则在卡内提示「仍要下载」是显式选择（不硬拦）
         val already = noteId?.let { nid ->
-            runCatching { XhsDownloadLedger.downloaded(activity.contentResolver, nid) }.getOrNull()
+            runCatching { XhsDownloadLedger.downloaded(activity, nid) }.getOrNull()
                 ?.takeIf { it.first > 0 }
         }
         // T8（P2-2，2026-10-26）：完整 URL 只挂 [MountEngine.DEBUG_LOGGING]。xsec_token 等签名 query 是
@@ -909,7 +909,7 @@ object XhsBatchSave {
      */
     private fun dedupThenDownload(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
         if (noteId != null) {
-            val (count, last) = runCatching { XhsDownloadLedger.downloaded(activity.contentResolver, noteId) }
+            val (count, last) = runCatching { XhsDownloadLedger.downloaded(activity, noteId) }
                 .getOrDefault(0 to 0L)
             if (count > 0) {
                 val at = XhsDownloadLedger.fmtTime(last)
@@ -1217,6 +1217,12 @@ object XhsBatchSave {
                 showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled) }
             }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}")
+            // 去重记账（2026-11-21）：有成功落盘才记（全失败/取消不记，重试不误拦）；
+            // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
+            if (!canceled && ok > 0 && noteId != null) {
+                runCatching { XhsDownloadLedger.record(activity.applicationContext, noteId) }
+                    .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重记账失败: ${it.message}") }
+            }
         }, "HonorHook-xhs-batch").start()
     }
 
