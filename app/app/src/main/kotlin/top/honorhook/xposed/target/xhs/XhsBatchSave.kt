@@ -647,12 +647,12 @@ object XhsBatchSave {
                     return@Thread
                 }
                 if (urls.size == 1) {
-                    showOnTrackedActivity(module, "单图静默直下") { downloadAll(it, urls, module) }
+                    showOnTrackedActivity(module, "单图静默直下") { dedupThenDownload(it, urls, module, noteId) }
                 } else if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
                     // 静默（2026-11-03 用户需求）：多图也跳过「全部下载」询问卡，直接批量开下
-                    showOnTrackedActivity(module, "静默批量直下") { downloadAll(it, urls, module) }
+                    showOnTrackedActivity(module, "静默批量直下") { dedupThenDownload(it, urls, module, noteId) }
                 } else {
-                    showOnTrackedActivity(module, "追加询问") { maybeShowBatchDialog(it, urls, module) }
+                    showOnTrackedActivity(module, "追加询问") { maybeShowBatchDialog(it, urls, module, noteId) }
                 }
             }, "HonorHook-xhs-batch").start()
             // 不 proceed ⇒ 返回值得自己给：宿主 invoke 返的是 kotlin.Unit（点击 lambda）。用**宿主 loader**
@@ -880,7 +880,12 @@ object XhsBatchSave {
     }
 
     /** 追加询问（≥2 张）：图集来自分享链接解析（XhsSavePivot → 上游 ResolvedNote）；确认后外挂直下。分流见 [mountClick]。 */
-    private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule) {
+    private fun maybeShowBatchDialog(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
+        // 去重提示（2026-11-21 用户需求）：命中台账则在卡内提示「仍要下载」是显式选择（不硬拦）
+        val already = noteId?.let { nid ->
+            runCatching { XhsDownloadLedger.downloaded(activity.contentResolver, nid) }.getOrNull()
+                ?.takeIf { it.first > 0 }
+        }
         // T8（P2-2，2026-10-26）：完整 URL 只挂 [MountEngine.DEBUG_LOGGING]。xsec_token 等签名 query 是
         // 笔记访问的完整凭证，模块日志文件可被其他 root 应用读取，常态不得整串落盘；而 2026-10-15
         // 原图链路诊断（PC 端 curl 比对）需完整 token/query——token 脱敏后无法重组可 curl 的 URL，
@@ -888,12 +893,33 @@ object XhsBatchSave {
         // （host + 路径形态 + 末段 token 前 4 位，query 整体丢弃）：仍能定位「是哪条 URL / 哪个 host」。
         val first = urls.first()
         val shown = if (MountEngine.DEBUG_LOGGING) first else maskedUrlForLog(first)
-        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 $shown）")
+        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 追加询问：已采图集 ${urls.size} 张（首张 $shown）已下载=${already?.first ?: 0}")
         runCatching {
-            showStyledDialog(activity, urls.size) { downloadAll(activity, urls, module) }
+            showStyledDialog(activity, urls.size, already) { downloadAll(activity, urls, module, noteId) }
         }.onFailure {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 追加弹窗失败: ${it.message}")
         }
+    }
+
+    /**
+     * 去重门（2026-11-21 用户需求「存文章 id」）：单图/静默/混合图片路径在下载前查台账
+     * （[XhsDownloadLedger]，文件名前缀即台账，MediaStore 前缀查询），命中 = Toast 告知
+     * 「已下载过 N 项（时间）」并跳过——不重复落盘；未命中 / noteId 不可得照旧直下。
+     * 弹卡路径不走这里：重复提示在卡内展示，「仍要下载」由用户显式选择（不硬拦）。
+     */
+    private fun dedupThenDownload(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
+        if (noteId != null) {
+            val (count, last) = runCatching { XhsDownloadLedger.downloaded(activity.contentResolver, noteId) }
+                .getOrDefault(0 to 0L)
+            if (count > 0) {
+                val at = XhsDownloadLedger.fmtTime(last)
+                val what = "已下载过 $count 项" + if (at.isEmpty()) "" else "（$at）" + "，跳过重复下载"
+                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重命中 noteId=$noteId count=$count，跳过")
+                android.widget.Toast.makeText(activity, what, android.widget.Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        downloadAll(activity, urls, module, noteId)
     }
 
     /** URL 常态日志脱敏（T8，仅 [maybeShowBatchDialog] 用）：query 整体丢弃（xsec_token/签名参数在
@@ -912,7 +938,7 @@ object XhsBatchSave {
      * 程序化自绘弹窗（宿主进程内无模块资源，全代码绘制）：圆角卡片 + 小红书红实心主按钮 +
      * 灰描边次按钮 + 深色模式自适应。
      */
-    private fun showStyledDialog(activity: Activity, count: Int, onBatch: () -> Unit) {
+    private fun showStyledDialog(activity: Activity, count: Int, already: Pair<Int, Long>? = null, onBatch: () -> Unit) {
         val night = (activity.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
@@ -941,6 +967,14 @@ object XhsBatchSave {
         card.addView(tv("本篇 $count 张，一起下载原图吗？", 14, subColor).apply {
             setPadding(0, d(8), 0, 0)
         })
+        // 2026-11-21 去重提示（用户需求）：台账命中不硬拦，「仍要下载」是显式选择
+        if (already != null && already.first > 0) {
+            val at = XhsDownloadLedger.fmtTime(already.second)
+            card.addView(tv(
+                "⚠️ 此笔记已下载过 ${already.first} 项" + if (at.isEmpty()) "" else "（$at）" + "，再下会重复",
+                13, accent,
+            ).apply { setPadding(0, d(8), 0, 0) })
+        }
 
         fun pillBtn(label: String, filled: Boolean, onClick: () -> Unit) =
             android.widget.TextView(activity).apply {
@@ -1094,9 +1128,10 @@ object XhsBatchSave {
      * 视频落盘后把同笔记图片直链交回本类既有 downloadAll 管线（进度/取消/落盘/完成卡零改动）。
      * 走追踪 Activity 重试链（showOnTrackedActivity）；空表直接跳过。
      */
-    internal fun downloadImagesForVideoNote(urls: List<String>, module: XposedModule) {
+    internal fun downloadImagesForVideoNote(urls: List<String>, module: XposedModule, noteId: String? = null) {
         if (urls.isEmpty()) return
-        showOnTrackedActivity(module, "混合笔记图片直下") { downloadAll(it, urls, module) }
+        // 2026-11-21 去重：混合图片与普通图片同门（dedupThenDownload），重复发起不再重复落盘
+        showOnTrackedActivity(module, "混合笔记图片直下") { dedupThenDownload(it, urls, module, noteId) }
     }
 
     /**
@@ -1106,8 +1141,10 @@ object XhsBatchSave {
      * 每张开始前查 [imageCancelRequested]（true 则停，剩余张不动、已下载完成的不处理），取消落在本张
      * 写入期间 = 本张作废（onClick 即删 + 收尾补删半成品）；结束（完成/取消/异常）finally 必收卡
      * （幂等）后弹既有完成卡（取消时文案带「已取消」）。
+     * 2026-11-21 去重：noteId 非空时文件名带 `xhs_<noteId>_` 前缀（[XhsDownloadLedger]），查重
+     * 入口在调用方（dedupThenDownload / 弹卡 already 提示），本函数只负责按前缀命名落盘。
      */
-    private fun downloadAll(activity: Activity, urls: List<String>, module: XposedModule) {
+    private fun downloadAll(activity: Activity, urls: List<String>, module: XposedModule, noteId: String? = null) {
         imageCancelRequested = false
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下开始 ${urls.size} 张")
         mainHandler.post {
@@ -1139,7 +1176,14 @@ object XhsBatchSave {
                     // Content-Type）由 downloadOne 用 raw 原样回落一次（见 downloadOne）。
                     val url = XhsImageUrl.toBare(raw) ?: raw
                     // 文件名扩展名仅占位：落盘 MIME/扩展名由 fetchOne 首块魔数定（提案 3，认内容不认 URL）
-                    val saved = runCatching { downloadOne(activity, module, url, "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}", XhsImageUrl.toOriginal(raw), raw) }
+                    // 2026-11-21 去重：noteId 非空 = `xhs_<noteId>_<ts>_<i>.<ext>`（XhsDownloadLedger 台账前缀，
+                    // MediaStore 前缀查询判重）；null 兜底旧名（无 noteId 的历史调用面，不判重）。
+                    val fileName = if (noteId != null) {
+                        XhsDownloadLedger.imageFileName(noteId, System.currentTimeMillis(), i, extOf(url))
+                    } else {
+                        "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}"
+                    }
+                    val saved = runCatching { downloadOne(activity, module, url, fileName, XhsImageUrl.toOriginal(raw), raw) }
                         .getOrDefault(0L)
                     if (imageCancelRequested) {
                         // 取消落在本张写入期间：本张作废（计入失败侧，不 ok）。onClick 即删可能因流占用

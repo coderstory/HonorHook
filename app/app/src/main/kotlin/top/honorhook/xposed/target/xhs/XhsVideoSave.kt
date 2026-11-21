@@ -1077,7 +1077,7 @@ object XhsVideoSave {
             // 混合笔记图片（2026-11-04 一键全下）：视频落盘后交图片管线（downloadAll 自带进度/取消/
             // 完成卡，与视频管线互不阻塞——视频失败图片照下）。复用 XhsBatchSave 追踪 Activity 链。
             if (imageUrls.isNotEmpty()) {
-                runCatching { XhsBatchSave.downloadImagesForVideoNote(imageUrls, module) }
+                runCatching { XhsBatchSave.downloadImagesForVideoNote(imageUrls, module, noteId) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 混合图片直下发起失败 noteId=$noteId: ${it.message}") }
             }
             hdActive = false
