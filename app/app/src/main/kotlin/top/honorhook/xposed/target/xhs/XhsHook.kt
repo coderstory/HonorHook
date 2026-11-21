@@ -64,6 +64,8 @@ object XhsHook : TargetHook {
             XhsWatermark.install(module, param)
             XhsVideoSave.install(module, param)
             XhsBatchSave.install(module, param)
+            // 批量采集主页悬浮入口（2026-11-21）：零 hook 点，只注册生命周期回调，同开关组
+            XhsAutoEntry.install(module, param)
         } else {
             logDisabled(module, FeatureCatalog.KEY_XHS_TAKEOVER_SAVE, "XhsHook")
         }

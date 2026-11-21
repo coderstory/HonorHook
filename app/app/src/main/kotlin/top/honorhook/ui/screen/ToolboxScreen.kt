@@ -207,6 +207,10 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             AiImageScreen(bottomInnerPadding = bottomInnerPadding,
                 topInset = WindowInsets.systemBars.asPaddingValues().calculateTopPadding(),
                 onBack = { view = HubView.HOME })
+        } else if (view == HubView.XHS_AUTO) {
+            // 批量采集（2026-11-21）：无障碍编排小红书主页自动保存，入口 = 宿主页悬浮按钮（XhsAutoEntry）
+            XhsAutoScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME },
+                topInset = innerPadding.calculateTopPadding())
         } else if (view == HubView.FREEZE) {
             FreezePane(
                 rootOk = rootOk,
@@ -266,6 +270,7 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 // MFA 页走独立整页分支（见 when 外层）
                 HubView.MFA -> {}
                 HubView.AI_IMAGE -> {}
+                HubView.XHS_AUTO -> {}
             }
 
             item {
@@ -431,7 +436,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), FREEZE("应用冻结"), MFA("MFA 验证器"),
-    FILES("文件整理"), AI_IMAGE("AI 图像工具"),
+    FILES("文件整理"), AI_IMAGE("AI 图像工具"), XHS_AUTO("批量采集"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -683,6 +688,15 @@ private fun HubTiles(
                 val accentAi = Color(0xFF9C6BFF)
                 Tile(genshinOr(Icons.Rounded.AutoAwesome, GenshinIcons.Primogem), "AI 图像工具", "AI 超清 · AI 扩图", accentAi, order = 6) { onOpen(HubView.AI_IMAGE) }
             }
+        }
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.weight(1f)) {
+                val accentAuto = Color(0xFFFF2E4D)
+                // 批量采集（2026-11-21）：入口真身在小红书主页悬浮按钮，这里只做状态/设置页
+                Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "批量采集", "主页自动保存原图", accentAuto, order = 8) { onOpen(HubView.XHS_AUTO) }
+            }
+            // 奇数 tile 撑对：第二格留空
+            Box(Modifier.weight(1f)) {}
         }
     }
 }

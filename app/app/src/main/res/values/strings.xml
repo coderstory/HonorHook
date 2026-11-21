@@ -218,4 +218,5 @@
     <string name="target_name_photos">图库</string>
     <string name="feature_photos_ai_title">AI 超清 / AI 扩图后台直调</string>
     <string name="feature_photos_ai_desc">在图库进程内直接调用系统视觉引擎的 AI 超清和 AI 扩图能力：外部发一条任务广播传入图片路径即可后台出图（扩图可选四边扩展比例），不打开编辑器、不模拟点击；与编辑器手点功能共用同一套引擎与权益配额</string>
+    <string name="xhs_auto_service_desc">批量采集：自动打开作者主页的笔记并触发保存，把小红书里的原图批量下载下来。仅在你点「采集」按钮时运行。</string>
 </resources>

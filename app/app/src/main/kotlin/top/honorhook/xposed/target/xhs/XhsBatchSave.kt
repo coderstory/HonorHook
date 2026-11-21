@@ -1025,6 +1025,10 @@ object XhsBatchSave {
      *  也符合「取消」语义（用户拍板）。 */
     @Volatile private var currentImageUri: android.net.Uri? = null
 
+    /** 画质过滤标记（2026-11-21）：fetchOne 命中低画质删行后置位，downloadAll 读走即清——
+     *  区分「下载失败」与「按规则过滤」，后者不计失败、进完成卡「过滤 N 张」文案。 */
+    @Volatile private var lastFilteredReason: String? = null
+
     /** 进度卡引用（对齐 XhsVideoSave.progressDialog 模式：持到字段，downloadAll 结束必关、dismiss 幂等）。 */
     @Volatile private var imageProgressDialog: android.app.Dialog? = null
     @Volatile private var imageProgressText: android.widget.TextView? = null
@@ -1160,6 +1164,7 @@ object XhsBatchSave {
         Thread({
             var ok = 0
             var bytes = 0L
+            var filtered = 0   // 画质过滤张数（2026-11-21）：短边≤720 删行跳过，不计失败
             try {
                 for ((i, raw) in urls.withIndex()) {
                     if (imageCancelRequested) break   // 取消：剩余张不动，已下载完成的不处理
@@ -1183,7 +1188,7 @@ object XhsBatchSave {
                     } else {
                         "xhs_${System.currentTimeMillis()}_$i.${extOf(url)}"
                     }
-                    val saved = runCatching { downloadOne(activity, module, url, fileName, XhsImageUrl.toOriginal(raw), raw) }
+                    val saved = runCatching { lastFilteredReason = null; downloadOne(activity, module, url, fileName, XhsImageUrl.toOriginal(raw), raw) }
                         .getOrDefault(0L)
                     if (imageCancelRequested) {
                         // 取消落在本张写入期间：本张作废（计入失败侧，不 ok）。onClick 即删可能因流占用
@@ -1194,6 +1199,11 @@ object XhsBatchSave {
                         break
                     }
                     if (saved > 0) { ok++; bytes += saved }
+                    else if (lastFilteredReason != null) {
+                        filtered++
+                        lastFilteredReason = null
+                        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张已过滤（低画质，不落盘）")
+                    }
                     else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
                     updateImageProgress(i + 1, urls.size)
                 }
@@ -1209,14 +1219,18 @@ object XhsBatchSave {
             // 完成态提示（替换旧 Toast「已保存 N/N」，用户定案 2026-10-14）；走追踪 Activity（修 BadToken）
             // 静默（2026-11-03，xhs.silent_download）：完成态 Toast（张数+总体积），不弹完成卡
             if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
-                val what = if (canceled) "已取消 $ok/${urls.size} · ${fmtSize(bytes)}" else "下载完毕 $ok/${urls.size} · ${fmtSize(bytes)}"
+                val what = buildString {
+                    append(if (canceled) "已取消 $ok/${urls.size}" else "下载完毕 $ok/${urls.size}")
+                    append(" · ${fmtSize(bytes)}")
+                    if (filtered > 0) append(" · 过滤低画质 $filtered 张")
+                }
                 showOnTrackedActivity(module, "完成 Toast") { act ->
                     android.widget.Toast.makeText(act, what, android.widget.Toast.LENGTH_LONG).show()
                 }
             } else {
-                showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled) }
+                showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled, filtered) }
             }
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}")
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}${if (filtered > 0) " 过滤$filtered" else ""}")
             // 去重记账（2026-11-21）：有成功落盘才记（全失败/取消不记，重试不误拦）；
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
             if (!canceled && ok > 0 && noteId != null) {
@@ -1240,8 +1254,8 @@ object XhsBatchSave {
      * 被取消的当前张按取消语义计入失败侧（不 ok，不进「N 张失败」文案）。
      * 复用本文件自绘风格（同 [showVideoSavedDialog]）；必须主线程调用。
      */
-    private fun showBatchSavedDialog(activity: Activity, ok: Int, total: Int, bytes: Long, canceled: Boolean = false) {
-        val failed = total - ok
+    private fun showBatchSavedDialog(activity: Activity, ok: Int, total: Int, bytes: Long, canceled: Boolean = false, filtered: Int = 0) {
+        val failed = total - ok - filtered
         val night = (activity.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
@@ -1267,6 +1281,8 @@ object XhsBatchSave {
         card.addView(android.widget.TextView(activity).apply {
             text = when {
                 canceled -> "${fmtSize(bytes)}，已取消"
+                filtered > 0 && failed > 0 -> "${fmtSize(bytes)}，过滤低画质 $filtered 张，$failed 张失败"
+                filtered > 0 -> "${fmtSize(bytes)}，过滤低画质 $filtered 张"
                 failed > 0 -> "${fmtSize(bytes)}，$failed 张失败"
                 else -> fmtSize(bytes)
             }
@@ -1480,6 +1496,21 @@ object XhsBatchSave {
                                 activity.contentResolver.delete(outUri, null, null)
                                 currentImageUri = null
                                 return Fetch.FAIL
+                            }
+                            // 画质过滤（2026-11-21 用户需求「720p 及以下不要」）：完整性校验通过后按
+                            // 图像头解码尺寸，短边 ≤720 删行跳过——inJustDecodeBounds 只解析文件头；
+                            // 解码失败不拦（宁存不误删）。走 Fetch.OK + bytesOut=0 + 过滤标记，
+                            // downloadAll 据标记计「过滤」不计失败。
+                            if (XhsQualityFilter.imageTooSmall(activity.contentResolver, outUri)) {
+                                runCatching { activity.contentResolver.delete(outUri, null, null) }
+                                currentImageUri = null
+                                lastFilteredReason = "短边≤${XhsQualityFilter.MIN_IMAGE_SHORT_SIDE}"
+                                // 必须清零：上面 bytesOut[0] = total 已置位，不清零调用方会按
+                                // saved>0 计成成功、过滤永远不涨（2026-11-21 审计 #1）
+                                bytesOut[0] = 0
+                                module.log(Log.INFO, MountEngine.TAG,
+                                    "$JUDGE_PREFIX 画质过滤：短边≤${XhsQualityFilter.MIN_IMAGE_SHORT_SIDE}，删行跳过")
+                                return Fetch.OK
                             }
                         } catch (io: java.io.IOException) {
                             module.log(Log.WARN, MountEngine.TAG,

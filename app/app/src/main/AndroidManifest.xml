@@ -74,6 +74,20 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- 批量采集无障碍编排服务（2026-11-21）：读控件树 + 注入手势驱动「点卡片→长按→保存」循环；
+             exported 必须开（系统绑定无障碍服务的标准形态），action 字符串是系统契约不可改 -->
+        <service
+            android:name=".ui.auto.XhsAutoService"
+            android:exported="true"
+            android:label="批量采集"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/xhs_auto_service_config" />
+        </service>
         <!-- 宿主设置界面：三 Tab（首页/功能/设置），Miuix Compose 实现 -->
         <activity
             android:name=".ui.webscan.WebScanActivity"

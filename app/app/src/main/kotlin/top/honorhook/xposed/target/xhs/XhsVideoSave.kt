@@ -1267,6 +1267,13 @@ object XhsVideoSave {
                             // 首写才定 Content-Type/文件名并 insert（续传沿用同一 uri，不能再插一条）
                             if (ourUri == null) {
                                 total = conn.contentLengthLong
+                                // 体积过滤（2026-11-21 用户需求「小于 5mb 的也不要」）：insert 前 Content-Length
+                                // 已知即早退（ourUri 为 null，无需回滚）；长度未知交写完终检兜底
+                                if (XhsQualityFilter.videoTooSmall(total)) {
+                                    module.log(Log.INFO, MountEngine.TAG,
+                                        "$JUDGE_PREFIX 体积过滤：视频 ${total / 1024}KB <5MB，不落盘")
+                                    return
+                                }
                                 // 提案 4 空间预检（基准 ResumableTransfer.kt:137-139 NO_SPACE）：首次拿到
                                 // total 后、insert 前；可用空间 < 需求 + 1MB ⇒ 放弃（不 insert；ourUri 仍为
                                 // null，无需回滚、不删宿主文件）。206 续传路径 ourUri 非空，不重查。
@@ -1403,6 +1410,14 @@ object XhsVideoSave {
             // 校验 2：写入字节数与 Content-Length 比对（length>0 时）
             if (total > 0 && written != total) {
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX HD直下 字节数不符（写 $written / 期望 $total），回滚")
+                rollbackHd(ctx, ourUri)
+                return
+            }
+            // 体积过滤终检（2026-11-21）：Content-Length 未知时落盘字节数兜底——<5MB 回滚删半成品，
+            // 不走成功路径（不弹完成卡）；>5MB 或 0（异常）不拦
+            if (XhsQualityFilter.videoTooSmall(written)) {
+                module.log(Log.INFO, MountEngine.TAG,
+                    "$JUDGE_PREFIX 体积过滤：视频 ${written / 1024}KB <5MB，回滚")
                 rollbackHd(ctx, ourUri)
                 return
             }
