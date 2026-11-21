@@ -99,6 +99,9 @@ object XhsBatchSave {
     @Volatile private var lastActivity: Activity? = null
     private val activityTracked = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** 供 [XhsBatchDriver] 取落盘载体（MediaStore 插入与后台静默轨复用同一追踪源）。 */
+    internal fun activityOrNull(): Activity? = lastActivity
+
     /**
      * install 期注册追踪：`mainHandler.post` 轮询 `ActivityThread.currentApplication` 拿 Application，
      * 注册 `registerActivityLifecycleCallbacks`（onResume 记 / onPause 清）。
@@ -1147,11 +1150,20 @@ object XhsBatchSave {
      * （幂等）后弹既有完成卡（取消时文案带「已取消」）。
      * 2026-11-21 去重：noteId 非空时文件名带 `xhs_<noteId>_` 前缀（[XhsDownloadLedger]），查重
      * 入口在调用方（dedupThenDownload / 弹卡 already 提示），本函数只负责按前缀命名落盘。
+     * 2026-11-21 批量采集：[quiet] = 后台静默轨（不弹进度卡/完成卡/Toast，进度由
+     * [XhsBatchDriver] 汇总上报），[done] 在整轮（含记账）结束后 countDown，供驱动同步等待。
      */
-    private fun downloadAll(activity: Activity, urls: List<String>, module: XposedModule, noteId: String? = null) {
+    private fun downloadAll(
+        activity: Activity,
+        urls: List<String>,
+        module: XposedModule,
+        noteId: String? = null,
+        quiet: Boolean = false,
+        done: java.util.concurrent.CountDownLatch? = null,
+    ) {
         imageCancelRequested = false
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下开始 ${urls.size} 张")
-        mainHandler.post {
+        if (!quiet) mainHandler.post {
             runCatching {
                 // 后台静默下载（2026-11-03 用户需求，xhs.silent_download）：开 = 不弹批量进度卡，
                 // Toast 轻提示保留作后台线索；取消旗标无人置位（恒 false）→ 循环自然跑完，完成卡照弹。
@@ -1205,7 +1217,7 @@ object XhsBatchSave {
                         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张已过滤（低画质，不落盘）")
                     }
                     else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
-                    updateImageProgress(i + 1, urls.size)
+                    if (!quiet) updateImageProgress(i + 1, urls.size)
                 }
             } finally {
                 // 收尾必关（完成/取消/异常都到这）：清当前张引用 + 幂等 dismiss
@@ -1218,6 +1230,7 @@ object XhsBatchSave {
             }
             // 完成态提示（替换旧 Toast「已保存 N/N」，用户定案 2026-10-14）；走追踪 Activity（修 BadToken）
             // 静默（2026-11-03，xhs.silent_download）：完成态 Toast（张数+总体积），不弹完成卡
+            if (!quiet) {
             if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
                 val what = buildString {
                     append(if (canceled) "已取消 $ok/${urls.size}" else "下载完毕 $ok/${urls.size}")
@@ -1230,6 +1243,7 @@ object XhsBatchSave {
             } else {
                 showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled, filtered) }
             }
+            }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}${if (filtered > 0) " 过滤$filtered" else ""}")
             // 去重记账（2026-11-21）：有成功落盘才记（全失败/取消不记，重试不误拦）；
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
@@ -1238,6 +1252,18 @@ object XhsBatchSave {
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重记账失败: ${it.message}") }
             }
         }, "HonorHook-xhs-batch").start()
+    }
+
+    /**
+     * 批量采集（[XhsBatchDriver]）用的同步入口：走 [downloadAll] 静默轨并等整轮结束。
+     * 返回值 = 本轮是否真的落了盘（去重台账为主判据，与用户侧「已下载过」同一口径）。
+     */
+    internal fun downloadNoteSync(activity: Activity, urls: List<String>, module: XposedModule, noteId: String): Boolean {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        downloadAll(activity, urls, module, noteId, quiet = true, done = latch)
+        latch.await(5, java.util.concurrent.TimeUnit.MINUTES)
+        return runCatching { XhsDownloadLedger.downloaded(activity.applicationContext, noteId).first > 0 }
+            .getOrDefault(false)
     }
 
     /** 体积显示（单点实现）：1024 进制一位小数 MB（截断）。 */

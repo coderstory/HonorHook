@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.honorhook.ui.auto.XhsAutoService
-import top.honorhook.xposed.target.xhs.XhsAutoEntry
+import top.honorhook.AutoActions
 import top.honorhook.ui.component.Card
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -41,8 +41,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 
 /**
  * 批量采集页（2026-11-21）：状态/停止/节奏设置 + 无障碍开启引导。
- * 触发入口 = 小红书作者主页悬浮「采集」按钮（XhsAutoEntry 注入，广播启停服务）；
- * 本页不直接启动（引擎在服务绑定后才有上下文），只做观测与半途停止（用户拍板）。
+ * 触发入口 = 小红书作者主页悬浮「采集」按钮（XhsAutoEntry 注入，宿主进程内起驱动 + 广播开滚）；
+ * 本页不直接启动（驱动在宿主进程里，UI 进程无法直接调），只做观测、无障碍引导与半途停止。
  */
 @Composable
 fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 0.dp) {
@@ -67,7 +67,7 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
             item {
                 Card {
                     Column(Modifier.padding(16.dp), Arrangement.spacedBy(8.dp)) {
-                        Text("用法：打开小红书进入作者主页 → 点右侧红色「采集」按钮开始；再点一次或在本页停止。过滤规则：图片短边≤720 不落盘，视频 <5MB 不落盘（走现有原图直下与去重管线）。", fontSize = 13.sp, color = colorScheme.onSecondaryContainer)
+                        Text("用法：打开小红书进入作者主页 → 点右侧红色「采集」按钮。服务会自动往下滚，每滚一屏就把该批笔记的原图直接下载（不打开详情页、不点保存），滚到底或再点一次「取消」即结束。过滤：图片短边≤720、视频 <5MB 不落盘；已下载过的自动跳过。", fontSize = 13.sp, color = colorScheme.onSecondaryContainer)
                         Text(
                             if (enabled == 1) "无障碍服务：已开启 ✅" else "无障碍服务：未开启 ❌（点下方按钮去系统设置开启「Re:荣耀 / 批量采集」）",
                             fontSize = 13.sp, color = if (enabled == 1) colorScheme.primary else colorScheme.onSecondaryContainer,
@@ -88,12 +88,13 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
                 Card {
                     Column(Modifier.padding(16.dp), Arrangement.spacedBy(8.dp)) {
                         Text("状态：${if (st.running.value) "运行中" else "待机"} · ${st.phase.value}", fontSize = 15.sp)
-                        Text("本轮已处理 ${st.done.value} 篇 · 跳过 ${st.skippedLowQ.value} 项", fontSize = 13.sp, color = colorScheme.onSecondaryContainer)
+                        Text("成功 ${st.ok.value} 篇 · 跳过 ${st.skipped.value} 篇 · 失败 ${st.failed.value} 篇", fontSize = 13.sp, color = colorScheme.onSecondaryContainer)
                         if (st.running.value) {
-                            // 停止 = 同一 toggle 广播（UI 进程拿不到服务实例，走广播与悬浮按钮同路）
+                            // 停止 = 广播到宿主进程的驱动接收器（驱动在 com.xingin.xhs 里，UI 进程调不到）
                             Button(onClick = {
-                                context.sendBroadcast(Intent(XhsAutoEntry.ACTION_XHS_AUTO_TOGGLE)
-                                    .setPackage(context.packageName))
+                                context.sendBroadcast(Intent(AutoActions.STOP).setPackage(AutoActions.HOST_PACKAGE))
+                                st.running.value = false
+                                st.phase.value = "已停止"
                             }, modifier = Modifier.fillMaxWidth()) {
                                 Text("停止采集")
                             }

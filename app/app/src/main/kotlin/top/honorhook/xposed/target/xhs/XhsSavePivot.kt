@@ -184,7 +184,8 @@ object XhsSavePivot {
      */
     fun availableShareLink(noteId: String, module: XposedModule): String? {
         if (noteId in parsedEmptyNotes) return null
-        return XhsVideoSave.shareLinkOf(noteId)
+        // 优先 app 自己拼的整条 share link；列表响应只带裸 token 时合成一条（XhsVideoSave.synthShareLinkOf）
+        return XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId)
     }
 
     /**
@@ -194,7 +195,7 @@ object XhsSavePivot {
      * XhsBatchSave 弹，下次点击 [availableShareLink] 返 null 放行宿主。
      */
     suspend fun resolveByShareLink(noteId: String, module: XposedModule): ResolvedNote? = withContext(Dispatchers.IO) {
-        val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: run {
+        val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId) ?: run {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 无 share link noteId=$noteId，解析跳过")
             parsedEmptyNotes.add(noteId)
             return@withContext null
