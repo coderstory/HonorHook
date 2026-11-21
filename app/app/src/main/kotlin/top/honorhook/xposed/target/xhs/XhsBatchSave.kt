@@ -909,12 +909,12 @@ object XhsBatchSave {
      */
     private fun dedupThenDownload(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
         if (noteId != null) {
-            val (count, last) = runCatching { XhsDownloadLedger.downloaded(activity, noteId) }
-                .getOrDefault(0 to 0L)
+            val (count, last, source) = runCatching { XhsDownloadLedger.downloaded(activity, noteId) }
+                .getOrDefault(Triple(0, 0L, ""))
             if (count > 0) {
                 val at = XhsDownloadLedger.fmtTime(last)
                 val what = "已下载过 $count 项" + if (at.isEmpty()) "" else "（$at）" + "，跳过重复下载"
-                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重命中 noteId=$noteId count=$count，跳过")
+                module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重命中 noteId=$noteId count=$count source=$source，跳过")
                 android.widget.Toast.makeText(activity, what, android.widget.Toast.LENGTH_LONG).show()
                 return
             }
@@ -938,7 +938,7 @@ object XhsBatchSave {
      * 程序化自绘弹窗（宿主进程内无模块资源，全代码绘制）：圆角卡片 + 小红书红实心主按钮 +
      * 灰描边次按钮 + 深色模式自适应。
      */
-    private fun showStyledDialog(activity: Activity, count: Int, already: Pair<Int, Long>? = null, onBatch: () -> Unit) {
+    private fun showStyledDialog(activity: Activity, count: Int, already: Triple<Int, Long, String>? = null, onBatch: () -> Unit) {
         val night = (activity.resources.configuration.uiMode and
             android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES

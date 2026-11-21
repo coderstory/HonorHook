@@ -82,13 +82,18 @@ internal object XhsDownloadLedger {
 
     /**
      * 综合判定（调用方唯一入口）：主台账文件命中 或 MediaStore 前缀命中 = 已下载过。
-     * 返回 (count, lastAddedSec)：count = max(两路张数，命中至少 1)；last = 两路取大。
+     * 返回 (count, lastAddedSec, source)：count = max(两路张数，命中至少 1)；last = 两路取大；
+     * source = 命中渠道台账/相册/both（诊断用，调用方进日志/提示文案）。
      */
-    internal fun downloaded(context: android.content.Context, noteId: String): Pair<Int, Long> {
+    internal fun downloaded(context: android.content.Context, noteId: String): Triple<Int, Long, String> {
         val ledTs = ledgerDownloaded(context, noteId)
         val (msCount, msLast) = mediaStoreDownloaded(context.contentResolver, noteId)
-        val count = maxOf(msCount, if (ledTs > 0) 1 else 0)
-        return count to maxOf(msLast, ledTs)
+        val source = when {
+            ledTs > 0 && msCount > 0 -> "both"
+            ledTs > 0 -> "ledger"
+            else -> "mediastore"
+        }
+        return Triple(maxOf(msCount, if (ledTs > 0) 1 else 0), maxOf(msLast, ledTs), source)
     }
 
     /** 「MM-dd HH:mm」展示（DATE_ADDED 秒）；解析失败兜底空串（调用方据此省略时间括号）。 */
