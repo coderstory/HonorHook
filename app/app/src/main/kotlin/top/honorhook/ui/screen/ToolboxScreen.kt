@@ -716,7 +716,9 @@ private fun AdsGroupCard(
                 color = colorScheme.onSurfaceVariantSummary,
             )
             Button(
-                onClick = { onRequest(entries.map { ToolAction.Switch(it.table, it.key, "0") }) },
+                // table=null：三表定位、命中的表全写（2026-11-21 真机实证：6 个键在 system 表
+                // 还有一份 "1"，只写 SECURE 会让 UI 读 SYSTEM 旧值永远显示「开」）
+                onClick = { onRequest(entries.map { ToolAction.Switch(null, it.key, "0") }) },
                 enabled = enabled && !running && onCount > 0,
                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
             ) {
