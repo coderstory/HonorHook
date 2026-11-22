@@ -43,7 +43,8 @@ object XhsAutoEntry {
 
     /** 过程消息面板（同一个 View 持续刷新，替代逐条 Toast）；只在采集期间显示。 */
     @Volatile private var attachedPanel: View? = null
-    @Volatile private var panelText: TextView? = null
+    /** 消息容器：每行一个 TextView，按成败上色（用户 2026-11-22：嗅探失败的要用红色系）。 */
+    @Volatile private var panelLog: android.widget.LinearLayout? = null
     @Volatile private var panelHeader: TextView? = null
     @Volatile private var panelDecor: ViewGroup? = null
     /** 用时每秒都在变，顶栏靠一个 1 秒心跳刷新（其余数字由驱动事件驱动）。 */
@@ -345,15 +346,12 @@ object XhsAutoEntry {
             addView(header, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(close)
         }
-        val tv = TextView(activity).apply {
-            textSize = 13f
-            setTextColor(0xEEFFFFFF.toInt())
-            setLineSpacing((3 * dp), 1f)
-            text = lastLines.joinToString("\n")
+        val linesBox = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
         }
         val scroll = android.widget.ScrollView(activity).apply {
             isVerticalScrollBarEnabled = false
-            addView(tv, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(linesBox, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
             isClickable = false
             isFocusable = false
         }
@@ -387,7 +385,7 @@ object XhsAutoEntry {
             )
         }
         attachedPanel = box
-        panelText = tv
+        panelLog = linesBox
         panelHeader = header
         panelDecor = decor
         renderLines(lastLines)
@@ -413,12 +411,30 @@ object XhsAutoEntry {
         ticker = null
     }
 
+    /** 行级配色：嗅探/落盘失败红、跳过黄、成功绿、其余白。 */
+    private fun lineColor(line: String): Int = when {
+        listOf("失败", "异常", "解析不出", "未挂", "超时", "错误").any { line.contains(it) } -> 0xFFFF6B6B.toInt()
+        listOf("跳过", "已下载过").any { line.contains(it) } -> 0xFFFFC857.toInt()
+        listOf("已保存", "成功", "落盘结束").any { line.contains(it) } -> 0xFF6EE7A8.toInt()
+        else -> 0xEEFFFFFF.toInt()
+    }
+
     private fun renderLines(lines: List<String>) {
         lastLines = lines
         runCatching { panelHeader?.text = XhsBatchDriver.header() }
-        val tv = panelText ?: return
+        val box = panelLog ?: return
         runCatching {
-            tv.text = lines.joinToString("\n")
+            val act = attachedActivity ?: return@runCatching
+            val dp = act.resources.displayMetrics.density
+            box.removeAllViews()
+            lines.forEach { line ->
+                box.addView(TextView(act).apply {
+                    textSize = 13f
+                    setTextColor(lineColor(line))
+                    setLineSpacing((3 * dp), 1f)
+                    text = line
+                })
+            }
             (attachedPanel as? ViewGroup)?.post {
                 runCatching {
                     val sv = (attachedPanel as? ViewGroup)?.getChildAt(2) as? android.widget.ScrollView
@@ -432,7 +448,7 @@ object XhsAutoEntry {
         stopTicker()
         runCatching { panelDecor?.let { d -> attachedPanel?.let { d.removeView(it) } } }
         attachedPanel = null
-        panelText = null
+        panelLog = null
         panelHeader = null
         panelDecor = null
     }
