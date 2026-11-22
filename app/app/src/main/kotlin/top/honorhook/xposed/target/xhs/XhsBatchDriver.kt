@@ -369,7 +369,13 @@ object XhsBatchDriver {
                 val (scanned, cardList) = onMainOrTimeout {
                     // key = 描述 + 屏内 top：不同笔记可能描述完全相同（同标题系列/无标题），
                     // 只按描述去重会把第二篇永远判成「已处理」（2026-11-22 审计 P2）
-                    findCards(act).map { v -> v to (v.contentDescription?.toString().orEmpty() + "#" + v.top()) }
+                    // 身份不能用「描述 + top」：滚过一屏同一篇 top 会变 ⇒ 已处理的当新篇重做（重复检测同一篇），
+                    // 反过来也会把新篇当已处理（漏篇）。描述里已含标题/作者，本身就能区分；
+                    // 只有描述太短（占位文案）时才补 top 兜底，避免所有卡撞成同一个 key。
+                    findCards(act).map { v ->
+                        val d = v.contentDescription?.toString().orEmpty()
+                        v to (if (d.length >= 8) d else d + "#" + v.top())
+                    }
                 }
                 if (!scanned) {
                     // 主线程卡住：视图树这一刻不可信，等它缓过来，绝不据此按返回（审计 #8）
