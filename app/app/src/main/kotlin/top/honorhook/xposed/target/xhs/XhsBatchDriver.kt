@@ -439,7 +439,14 @@ object XhsBatchDriver {
                 if (seen.size > SEEN_LIMIT) seen.clear()
 
                 cards.forEach { discoveredKeys.add(it.second) }
-                val pending = cards.filter { it.second !in seen }
+                // 只处理**真正在屏幕里**的卡片：列表下方的卡片 isShown=true 但 top 已经超过屏高
+                // （真机日志 `bounds=Rect(17, 3323 - 628, 3392)`，屏高 2800），performClick 打在屏外
+                // 等于什么都没点 → 详情页还停在上篇 → 读到上篇 noteId → 「没打开过的篇被判已下载」。
+                // 屏外的留着不处理，滚一屏后它们自然进入视口。
+                val viewH = runCatching { act.window?.decorView?.height ?: 0 }.getOrDefault(0)
+                val limit = if (viewH > 0) viewH - 120 else Int.MAX_VALUE
+                val onScreen = cards.filter { it.first.top() < limit }
+                val pending = onScreen.filter { it.second !in seen }
                 val keysPreview = cards.take(3).joinToString("|") { it.second.take(14) }
                 vlog(ctx, "扫描[${act.javaClass.simpleName}] 卡=${cards.size} 未处理=${pending.size} 已见=${seen.size} " +
                     "首top=${cards.first().first.top()} 键=$keysPreview")
