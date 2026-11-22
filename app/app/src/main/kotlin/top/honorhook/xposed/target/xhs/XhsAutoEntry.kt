@@ -35,6 +35,13 @@ object XhsAutoEntry {
     @Volatile private var attachedButton: TextView? = null
     @Volatile private var attachedDecor: ViewGroup? = null
 
+    /** 当前挂着的全局布局观察者（哪棵 decor、哪个 listener、上次检查时间）。 */
+    @Volatile private var watchedDecor: ViewGroup? = null
+    /** 当前那次注入轮询的 Runnable（销毁时精确取消，不误伤别的定时器）。 */
+    @Volatile private var retryRunnable: Runnable? = null
+    @Volatile private var watchedListener: android.view.ViewTreeObserver.OnGlobalLayoutListener? = null
+    @Volatile private var lastCheckAt = 0L
+
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
         val tracked = java.util.concurrent.atomic.AtomicBoolean(false)
         val main = android.os.Handler(android.os.Looper.getMainLooper())
@@ -56,10 +63,20 @@ object XhsAutoEntry {
                 runCatching {
                     app.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
                         override fun onActivityResumed(a: Activity) {
-                            // 延迟一拍：主页瀑布流首帧还没渲染完（800ms 实测量级，误判晚一拍无碍）
-                            main.postDelayed({ runCatching { syncButton(a, module) } }, 800)
+                            // 主页瀑布流首帧晚于 onResume（真机实测几百 ms~数秒），且可能
+                            // 靠网络分页才出现 —— 单靠轮询要么慢要么超时收手（用户 2026-11-22
+                            // 反馈「按钮展示不灵光」）。改成「布局观察者为主 + 轮询兜底」。
+                            watchDecor(a, module, main)
+                            retrySync(a, module, main, attempts = 30, intervalMs = 500)
                         }
-                        override fun onActivityPaused(a: Activity) {}
+
+                        override fun onActivityPaused(a: Activity) {
+                            if (watchedDecor === a.window?.decorView || (watchedDecor?.context as? Activity) === a) {
+                                unwatch()
+                            }
+                            // 只删本页的轮询，不用 removeCallbacksAndMessages(null) 全清（审计 #18）
+                            retryRunnable?.let { main.removeCallbacks(it) }
+                        }
                         override fun onActivityCreated(a: Activity, b: android.os.Bundle?) {}
                         override fun onActivityStarted(a: Activity) {}
                         override fun onActivityStopped(a: Activity) {}
@@ -67,8 +84,12 @@ object XhsAutoEntry {
                         override fun onActivityDestroyed(a: Activity) {
                             // 宿主 Activity 销毁必须摘按钮并取消未跑的延迟挂载，否则静态引用
                             // 拖住整棵 decor 视图树（2026-11-21 审计 #5）
-                            if (attachedDecor === a.window?.decorView) {
-                                main.removeCallbacksAndMessages(null)
+                            // decorView 可能已被替换/置空，身份比较之外再按 context 判一次（审计 #17）
+                            if (watchedDecor === a.window?.decorView || (watchedDecor?.context as? Activity) === a) {
+                                unwatch()
+                            }
+                            if (attachedDecor === a.window?.decorView || (attachedDecor?.context as? Activity) === a) {
+                                retryRunnable?.let { main.removeCallbacks(it) }
                                 detach()
                             }
                         }
@@ -81,26 +102,123 @@ object XhsAutoEntry {
         })
     }
 
-    /** 模块 UI 页的「停止」按钮走广播到宿主（按钮与驱动同进程，UI 跨不过来）。 */
+    /**
+     * 盯住当前 Activity 的布局：每次布局完成都试一次注入（250ms 节流）。
+     * 这样「瀑布流晚到 / 换 tab 后才有卡片 / 从详情页返回」都能自动补上按钮，
+     * 不依赖某个固定时刻的轮询是否还活着。监听器在 pause/destroy 时摘掉。
+     */
+    private fun watchDecor(activity: Activity, module: XposedModule, main: android.os.Handler) {
+        val decor = activity.window?.decorView as? ViewGroup ?: return
+        if (watchedDecor === decor && watchedListener != null) return
+        unwatch()
+        val listener = android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            if (activity.isFinishing) return@OnGlobalLayoutListener
+            val now = System.currentTimeMillis()
+            if (now - lastCheckAt < 250L) return@OnGlobalLayoutListener
+            lastCheckAt = now
+            runCatching { syncButton(activity, module) }
+        }
+        runCatching {
+            decor.viewTreeObserver.addOnGlobalLayoutListener(listener)
+            watchedDecor = decor
+            watchedListener = listener
+        }
+    }
+
+    private fun unwatch() {
+        runCatching {
+            val d = watchedDecor
+            val l = watchedListener
+            if (d != null && l != null && d.viewTreeObserver.isAlive) {
+                d.viewTreeObserver.removeOnGlobalLayoutListener(l)
+            }
+        }
+        watchedDecor = null
+        watchedListener = null
+    }
+
+    /** 每 400ms 试一次注入，最多 [attempts] 次（≈6s）：主页渲染慢也能等到，非主页则安静放弃。 */
+    private fun retrySync(activity: Activity, module: XposedModule, main: android.os.Handler, attempts: Int, intervalMs: Long) {
+        val r = object : Runnable {
+            private var left = attempts
+            override fun run() {
+                if (left-- <= 0) return
+                // 页已退出/被替换就不必再试
+                if (activity.isFinishing || attachedDecor === activity.window?.decorView && attachedButton != null) return
+                val hit = runCatching {
+                    syncButton(activity, module)
+                    attachedButton != null
+                }.getOrDefault(false)
+                if (!hit) main.postDelayed(this, intervalMs)
+            }
+        }
+        retryRunnable = r
+        main.postDelayed(r, intervalMs)
+    }
+
+    /**
+     * 模块 UI 页的控制广播（按钮与驱动同进程，UI 跨不过来）：
+     * STOP = 停止；CONFIG = 下发每篇之间的随机节奏范围（分秒）；QUERY = 面板问一次运行态。
+     *
+     * 暴露面说明（2026-11-22 审计 #19，暂按现有设计接受）：RECEIVER_EXPORTED 意味着设备上任一
+     * 应用都能发 STOP/CONFIG（打断采集、改慢节奏）。跨应用没有可靠的白名单手段（伪造 sender 包名
+     * 挡不住），危害仅限「启停与节奏」，不含数据外泄——真机环境单一，先接受并在此登记。
+     */
     private fun registerStopReceiver(app: android.app.Application, module: XposedModule, main: android.os.Handler) {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) {
-                if (i.action != AutoActions.STOP) return
-                XhsBatchDriver.stop(module, app)
-                main.post { applyLabel() }
+                when (i.action) {
+                    AutoActions.STOP -> {
+                        XhsBatchDriver.stop(module, app)
+                        main.post { applyLabel() }
+                    }
+                    AutoActions.QUERY -> {
+                        // 模块侧进程与驱动不同进程：面板每次进页都问一次真实状态（审计 #13）
+                        XhsBatchDriver.publishState()
+                    }
+                    AutoActions.CONFIG -> {
+                        XhsBatchDriver.setPace(
+                            i.getIntExtra(AutoActions.EXTRA_PACE_MIN_DS, 20),
+                            i.getIntExtra(AutoActions.EXTRA_PACE_MAX_DS, 40),
+                        )
+                    }
+                }
             }
         }
         androidx.core.content.ContextCompat.registerReceiver(
             app, receiver,
-            android.content.IntentFilter(AutoActions.STOP),
+            android.content.IntentFilter().apply {
+                addAction(AutoActions.STOP)
+                addAction(AutoActions.QUERY)
+                addAction(AutoActions.CONFIG)
+            },
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
         )
     }
 
-    /** 主页 ⇒ 确保按钮在；非主页 ⇒ 摘除。任何异常吞掉，绝不炸宿主。 */
+    /** 主页判据：decorView 内存在 desc 以「笔记,」开头的视图（瀑布流卡片）。深度优先，找到即返回。 */
+    private fun isProfilePage(root: View, depth: Int = 0): Boolean {
+        // 挂在 OnGlobalLayout 上每 250ms 走一遍整棵树：必须限深 + 只认可见节点，
+        // 否则首页瀑布流这种超深树会持续吃掉主线程（审计 #15）
+        if (depth > 30) return false
+        if (root.isShown && root.contentDescription?.startsWith(CARD_DESC_PREFIX) == true) return true
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val c = root.getChildAt(i) ?: continue
+                if (isProfilePage(c, depth + 1)) return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * 主页 ⇒ 确保按钮在；非主页 ⇒ 摘除。
+     * **运行中例外（2026-11-22 用户要求「取消按钮需要一直显示」）**：采集会自己翻进详情页，
+     * 那几页也要留按钮，否则跑到一半没地方取消。
+     */
     private fun syncButton(activity: Activity, module: XposedModule) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
-        if (!isProfilePage(decor)) {
+        if (!isProfilePage(decor) && !XhsBatchDriver.isRunning()) {
             detach()
             return
         }
@@ -112,7 +230,7 @@ object XhsAutoEntry {
         val ctx = activity
         val dp = ctx.resources.displayMetrics.density
         val btn = TextView(ctx).apply {
-            text = if (XhsBatchDriver.isRunning()) "取消" else "采集"
+            text = if (XhsBatchDriver.isRunning()) "取消\n${XhsBatchDriver.processedCount()}" else "采集"
             textSize = 13f
             setTextColor(Color.WHITE)
             gravity = android.view.Gravity.CENTER
@@ -130,15 +248,24 @@ object XhsAutoEntry {
         decor.addView(btn)
         attachedButton = btn
         attachedDecor = decor
-        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主页悬浮按钮已注入")
+        module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 悬浮按钮已注入")
     }
 
-    /** 按钮文案/配色跟随运行态：运行中「取消」（灰底），待机「采集」（红底）。 */
+    /**
+     * 按钮文案/配色跟随运行态：运行中「取消」（灰底，带已处理篇数——静默下载没有其它进度提示，
+     * 用户 2026-11-22 反馈「自动下载没有任何提示」），待机「采集」（红底）。
+     */
     private fun applyLabel() {
         val btn = attachedButton ?: return
         val running = XhsBatchDriver.isRunning()
         runCatching {
-            btn.text = if (running) "取消" else "采集"
+            val n = XhsBatchDriver.processedCount()
+            btn.text = when {
+                !running -> "采集"
+                XhsBatchDriver.isStopping() -> "收尾"
+                n > 0 -> "取消\n$n"
+                else -> "取消"
+            }
             (btn.background as? GradientDrawable)?.setColor(if (running) 0xCC555555.toInt() else 0xCCFF2E4D.toInt())
         }
     }
@@ -150,40 +277,13 @@ object XhsAutoEntry {
     }
 
     private fun toggle(ctx: android.content.Context, module: XposedModule) {
-        if (XhsBatchDriver.isRunning()) {
-            XhsBatchDriver.stop(module, ctx)
-            return
+        // 这是宿主主线程的点击回调：抛出去就是宿主崩溃（2026-11-22 审计 #2）
+        runCatching {
+            if (XhsBatchDriver.isRunning()) XhsBatchDriver.stop(module, ctx) else XhsBatchDriver.start(module, ctx)
+        }.onFailure {
+            module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 启停失败: ${it.javaClass.simpleName}: ${it.message}")
         }
-        // 无障碍服务没开 = 没人滚动页面 = 一条笔记都登记不到，明确告诉用户去哪开
-        if (!accessibilityEnabled(ctx)) {
-            runCatching {
-                android.widget.Toast.makeText(
-                    ctx,
-                    "请先在 HonorHook → 工具箱 → 批量采集 开启无障碍服务",
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }
-            return
-        }
-        XhsBatchDriver.start(module, ctx)
+        runCatching { applyLabel() }
     }
 
-    /** 读 secure 表判断本模块无障碍服务是否在启用列表（普通应用可读该表，无需权限）。 */
-    private fun accessibilityEnabled(ctx: android.content.Context): Boolean = runCatching {
-        val v = android.provider.Settings.Secure.getString(
-            ctx.contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-        ) ?: return@runCatching false
-        v.split(':').any { it.startsWith("${AutoActions.MODULE_PACKAGE}/") }
-    }.getOrDefault(false)
-
-    /** 主页判据：decorView 内存在 desc 以「笔记,」开头的视图（瀑布流卡片）。深度优先，找到即返回。 */
-    private fun isProfilePage(root: View): Boolean {
-        if (root.contentDescription?.startsWith(CARD_DESC_PREFIX) == true) return true
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                if (isProfilePage(root.getChildAt(i))) return true
-            }
-        }
-        return false
-    }
 }

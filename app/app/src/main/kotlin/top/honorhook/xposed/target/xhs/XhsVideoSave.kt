@@ -101,28 +101,21 @@ object XhsVideoSave {
      */
     internal fun shareLinkOf(noteId: String): String? = noteShares[noteId]?.link
 
-    /** 该 noteId 是否已有下载凭据（整条 share link 或裸 xsec_token）——[XhsFeedIndex] 的登记门。 */
-    internal fun hasCredentials(noteId: String): Boolean {
-        val s = noteShares[noteId] ?: return false
-        return !s.link.isNullOrEmpty() || s.token != null
-    }
-
+    /** 该笔记登记过的裸 xsec_token（仅 token 形态的响应用）。 */
     internal fun tokenOf(noteId: String): String? = noteShares[noteId]?.token
 
     /**
-     * token-only 条目的分享链合成（2026-11-21 批量采集，静态依据见 [XhsFeedIndex]）。
-     *
-     * 字段名/参数名都不是猜的：`xsec_token` 来自列表响应同级字段（NoteItemBean:605），
-     * `discovery/item/<id>` 与 `xsec_source=app_share` 取自 app 自己拼的 share_info.link 形态
-     * （P_SHARE_LINK 实采样本）。**风险已知**：整条 dex 里搜不到 `xsec_source` 字面量 ⇒ 该参数
-     * 由服务端下发而非本地拼接，合成链若被判无效，症状是 resolve 失败（计入失败计数，不静默）；
-     * 届时改为「打开详情页借宿主自己拼链」的退路。ponytail: 合成链未经真机全量验证，
-     * 失败计数持续 >0 时改走详情页取链。
+     * 只有 token、没有 `share_info.link` 时合成一条分享链（2026-11-22 批量采集实测：列表/详情响应
+     * 大量条目只带裸 `xsec_token`，`shareLinkOf` 返 null ⇒ 每篇都「无 share link，解析跳过」）。
+     * 形态与宿主 `share_info.link` 一致（`xsec_source=app_share`）。
+     * ponytail: dex 内无 `xsec_source` 字面量（服务端拼该参数），合成链可能被判无效；无效时上游
+     * resolve 返空 → 该 noteId 进 parsedEmptyNotes 拉黑，行为退化为原来的「解析跳过」，不会更坏。
      */
-    internal fun synthShareLinkOf(noteId: String): String? {
-        val token = tokenOf(noteId) ?: return null
-        return "https://www.xiaohongshu.com/discovery/item/$noteId?xsec_token=$token&xsec_source=app_share"
-    }
+    internal fun synthShareLinkOf(noteId: String): String? =
+        tokenOf(noteId)?.takeIf { it.isNotEmpty() }
+            ?.let { "https://www.xiaohongshu.com/discovery/item/$noteId?xsec_token=$it&xsec_source=app_share" }
+
+
 
     /**
      * share_info.link（例：`https://www.xiaohongshu.com/discovery/item/<id>?…&xsec_source=app_share&xsec_token=…`）。
@@ -415,14 +408,24 @@ object XhsVideoSave {
         }
         // X5 点击轨 noteId 回落锚：videofeed 响应 URL query 必带 note_id（harvest 入表回落同款口径），
         // 记录「当前视频笔记」——invoke 的 String 参数语义不可证时（见 XhsBatchSave 挂载处）唯一归属来源
+        if (url.contains("note/user/posted")) {
+            // 主页列表取证（2026-11-22）：页面显示「服务异常」时，先分清是请求根本没发出、
+            // 还是服务端返回了错误码——否则只能靠猜。
+            val code = runCatching { response.callMethod("code") }.getOrNull()
+            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主页列表 code=$code len=${body.length}")
+        }
         if (url.contains("/note/videofeed")) queryParam(url, "note_id")?.let { lastVideoNoteId = it }
         harvestNoteShare(body, module, url)
         // 作者主页笔记索引（2026-11-21 零长按架构）：/posted 响应登记 noteId 序列 + 作者 user_id
-        runCatching { XhsFeedIndex.harvest(url, body) }
         // 评论图被动采集（2026-11-03 用户需求）：评论区响应顺带抽图链（X5 批量消费，见 XhsCommentHarvest）
         if (url.contains("comment")) XhsCommentHarvest.harvest(url, body)
         return null
     }
+
+    /** 最近登记分享链接的 noteId（批量采集用来认「当前打开的笔记」）。 */
+    @Volatile private var recentShareNoteId: String? = null
+
+    internal fun lastShareNoteId(): String? = recentShareNoteId
 
     private fun peekBodyString(response: Any): String? = runCatching {
         val peek = response.callMethod("peekBody", MAX_BODY) ?: return null
@@ -448,6 +451,8 @@ object XhsVideoSave {
             if (noteShares.size > URL_MAP_LIMIT) noteShares.clear()
             val old = noteShares[nid]
             noteShares[nid] = NoteShare(value, old?.token)
+            // 批量采集（2026-11-22）：最近一次登记分享链接的 noteId = 刚打开的那篇的笔记
+            recentShareNoteId = nid
         }
         // 同级 xsec_token 兜底（link 缺失的响应形态）
         var tm = P_XSEC_TOKEN.matcher(body)
@@ -468,7 +473,7 @@ object XhsVideoSave {
         val added = noteShares.size - before
         if (added > 0) {
             module?.log(Log.INFO, MountEngine.TAG,
-                "$JUDGE_PREFIX 分享链登记 +$added 共${noteShares.size} 端点=${url?.substringBefore('?')?.takeLast(48)}")
+                "$JUDGE_PREFIX 分享链登记 +$added 共${noteShares.size} id=${recentShareNoteId} 端点=${url?.substringBefore('?')?.takeLast(48)}")
         }
     }
 

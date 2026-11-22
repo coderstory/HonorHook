@@ -195,6 +195,7 @@ object XhsSavePivot {
      * XhsBatchSave 弹，下次点击 [availableShareLink] 返 null 放行宿主。
      */
     suspend fun resolveByShareLink(noteId: String, module: XposedModule): ResolvedNote? = withContext(Dispatchers.IO) {
+        // 整条链优先；只有裸 xsec_token 时合成一条（2026-11-22：批量采集逐篇打开时响应多为 token-only）
         val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId) ?: run {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 无 share link noteId=$noteId，解析跳过")
             parsedEmptyNotes.add(noteId)
@@ -223,7 +224,15 @@ object XhsSavePivot {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (t: Throwable) {
-            val detail = t.cause?.run { "${javaClass.simpleName}: $message" } ?: t.message
+            // XhsResolveException 的 message 是 null（父类 Exception(cause) 且上游常传 null cause），
+            // 真正的原因在 `failure` 字段里（DownloadFailure.Network/Parsing/RequiresWebView…）。
+            val failure = runCatching {
+                t.javaClass.getDeclaredField("failure").let { it.isAccessible = true; it.get(t)?.toString() }
+            }.getOrNull()
+            val detail = failure
+                ?: t.cause?.run { "${javaClass.simpleName}: $message" }
+                ?: t.message
+                ?: "无 message"
             module.log(Log.WARN, MountEngine.TAG,
                 "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId ${t.javaClass.simpleName}: $detail")
             parsedEmptyNotes.add(noteId)

@@ -15,6 +15,7 @@ package top.honorhook
  *  - 宿主进程 → 模块进程：ACTION_XHS_AUTO_STATE / _PROGRESS / _DONE（进度与状态回传）
  *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_STOP（UI 页停止按钮）
  *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_QUERY（注入后对准真实状态）
+ *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_CONFIG（每篇之间的随机节奏范围，分秒）
  */
 object AutoActions {
     const val MODULE_PACKAGE = "io.github.coderstory.honorhook"
@@ -26,7 +27,11 @@ object AutoActions {
     const val PROGRESS = "top.honorhook.action.XHS_AUTO_PROGRESS"
     const val DONE = "top.honorhook.action.XHS_AUTO_DONE"
     const val STOP = "top.honorhook.action.XHS_AUTO_STOP"
+    const val CONFIG = "top.honorhook.action.XHS_AUTO_CONFIG"
 
     const val EXTRA_RUNNING = "top.honorhook.extra.RUNNING"
     const val EXTRA_TEXT = "top.honorhook.extra.TEXT"
+    /** 节奏范围单位是**分秒（0.1 秒）**：UI 步进 0.5s，整秒存不下。 */
+    const val EXTRA_PACE_MIN_DS = "top.honorhook.extra.PACE_MIN_DS"
+    const val EXTRA_PACE_MAX_DS = "top.honorhook.extra.PACE_MAX_DS"
 }

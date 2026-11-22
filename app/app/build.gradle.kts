@@ -149,6 +149,8 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.activity.compose)
     implementation(libs.androidx.core.ktx)
+    // 批量采集驱动要点宿主的列表（compileOnly：类由宿主提供，不随模块打包）
+    compileOnly("androidx.recyclerview:recyclerview:1.3.2")
 
     // ---- MFA 验证器扫码（2026-11-03）：zxing 解码 + CameraX 取景 ----
     implementation(libs.zxing.core)

@@ -910,6 +910,9 @@ object XhsBatchSave {
      * 「已下载过 N 项（时间）」并跳过——不重复落盘；未命中 / noteId 不可得照旧直下。
      * 弹卡路径不走这里：重复提示在卡内展示，「仍要下载」由用户显式选择（不硬拦）。
      */
+    /** 最近一次「去重命中」的时刻（单调递增）：[XhsBatchDriver] 用它把「跳过」和「失败」分开。 */
+    @Volatile internal var lastDedupAt: Long = 0L
+
     private fun dedupThenDownload(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
         if (noteId != null) {
             val (count, last, source) = runCatching { XhsDownloadLedger.downloaded(activity, noteId) }
@@ -919,6 +922,7 @@ object XhsBatchSave {
                 val what = "已下载过 $count 项" + if (at.isEmpty()) "" else "（$at）" + "，跳过重复下载"
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重命中 noteId=$noteId count=$count source=$source，跳过")
                 android.widget.Toast.makeText(activity, what, android.widget.Toast.LENGTH_LONG).show()
+                lastDedupAt = System.currentTimeMillis()
                 return
             }
         }
@@ -1150,8 +1154,6 @@ object XhsBatchSave {
      * （幂等）后弹既有完成卡（取消时文案带「已取消」）。
      * 2026-11-21 去重：noteId 非空时文件名带 `xhs_<noteId>_` 前缀（[XhsDownloadLedger]），查重
      * 入口在调用方（dedupThenDownload / 弹卡 already 提示），本函数只负责按前缀命名落盘。
-     * 2026-11-21 批量采集：[quiet] = 后台静默轨（不弹进度卡/完成卡/Toast，进度由
-     * [XhsBatchDriver] 汇总上报），[done] 在整轮（含记账）结束后 countDown，供驱动同步等待。
      */
     private fun downloadAll(
         activity: Activity,
@@ -1163,14 +1165,16 @@ object XhsBatchSave {
     ) {
         imageCancelRequested = false
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下开始 ${urls.size} 张")
-        if (!quiet) mainHandler.post {
+        mainHandler.post {
             runCatching {
                 // 后台静默下载（2026-11-03 用户需求，xhs.silent_download）：开 = 不弹批量进度卡，
                 // Toast 轻提示保留作后台线索；取消旗标无人置位（恒 false）→ 循环自然跑完，完成卡照弹。
-                if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+                if (!quiet && !RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
                     showImageProgressDialog(activity, urls.size, module)
                 }
-                android.widget.Toast.makeText(activity, "开始下载 ${urls.size} 张…", android.widget.Toast.LENGTH_SHORT).show()
+                if (!quiet) {
+                    android.widget.Toast.makeText(activity, "开始下载 ${urls.size} 张…", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
         }
         Thread({
@@ -1217,12 +1221,13 @@ object XhsBatchSave {
                         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张已过滤（低画质，不落盘）")
                     }
                     else module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 第 ${i + 1} 张下载失败: ${url.take(80)}")
-                    if (!quiet) updateImageProgress(i + 1, urls.size)
+                    updateImageProgress(i + 1, urls.size)
                 }
             } finally {
                 // 收尾必关（完成/取消/异常都到这）：清当前张引用 + 幂等 dismiss
                 currentImageUri = null
                 dismissImageProgress()
+                done?.countDown()
             }
             val canceled = imageCancelRequested
             if (canceled) {
@@ -1230,8 +1235,9 @@ object XhsBatchSave {
             }
             // 完成态提示（替换旧 Toast「已保存 N/N」，用户定案 2026-10-14）；走追踪 Activity（修 BadToken）
             // 静默（2026-11-03，xhs.silent_download）：完成态 Toast（张数+总体积），不弹完成卡
-            if (!quiet) {
-            if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
+            if (quiet) {
+                // 驱动接管（批量采集，2026-11-22）：完成态由驱动逐篇报，这里不弹卡不 Toast
+            } else if (RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_SILENT_DOWNLOAD)) {
                 val what = buildString {
                     append(if (canceled) "已取消 $ok/${urls.size}" else "下载完毕 $ok/${urls.size}")
                     append(" · ${fmtSize(bytes)}")
@@ -1243,7 +1249,6 @@ object XhsBatchSave {
             } else {
                 showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled, filtered) }
             }
-            }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}${if (filtered > 0) " 过滤$filtered" else ""}")
             // 去重记账（2026-11-21）：有成功落盘才记（全失败/取消不记，重试不误拦）；
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
@@ -1254,16 +1259,34 @@ object XhsBatchSave {
         }, "HonorHook-xhs-batch").start()
     }
 
+
     /**
-     * 批量采集（[XhsBatchDriver]）用的同步入口：走 [downloadAll] 静默轨并等整轮结束。
-     * 返回值 = 本轮是否真的落了盘（去重台账为主判据，与用户侧「已下载过」同一口径）。
+     * 批量采集驱动的静默下载入口（2026-11-22）：不弹进度卡/完成卡/Toast，阻塞到本轮落盘结束。
+     * 返回 = 台账是否增长（真实落盘张数 > 0）。
      */
-    internal fun downloadNoteSync(activity: Activity, urls: List<String>, module: XposedModule, noteId: String): Boolean {
+    internal fun downloadNoteQuiet(activity: Activity, urls: List<String>, module: XposedModule, noteId: String): Boolean {
+        val before = XhsDownloadLedger.stamp(activity.applicationContext)
         val latch = java.util.concurrent.CountDownLatch(1)
         downloadAll(activity, urls, module, noteId, quiet = true, done = latch)
-        latch.await(5, java.util.concurrent.TimeUnit.MINUTES)
-        return runCatching { XhsDownloadLedger.downloaded(activity.applicationContext, noteId).first > 0 }
-            .getOrDefault(false)
+        // 分片等：随时可被批量采集的「取消」打断（原来一次 await 10 分钟，取消形同虚设）
+        while (!latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            if (cancelRequested) break
+        }
+        // 台账写入在下载线程收尾处，latch 之后，给它一点余量再判
+        Thread.sleep(300)
+        return XhsDownloadLedger.stamp(activity.applicationContext) > before
+    }
+
+    /** 批量采集的「取消」= 置位本张取消旗标（下载循环每张前查它）。 */
+    @Volatile private var cancelRequested = false
+
+    internal fun requestCancel() {
+        cancelRequested = true
+        imageCancelRequested = true
+    }
+
+    internal fun clearCancel() {
+        cancelRequested = false
     }
 
     /** 体积显示（单点实现）：1024 进制一位小数 MB（截断）。 */
