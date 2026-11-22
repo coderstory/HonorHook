@@ -146,25 +146,6 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
                     }
                 }
             }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp), Arrangement.spacedBy(8.dp)) {
-                        Text("兜底停止", fontSize = 15.sp)
-                        Text(
-                            "正常在小红书里点「取消」即可。若面板和按钮已随页面退出，用这里停。",
-                            fontSize = 12.sp, color = colorScheme.onSecondaryContainer,
-                        )
-                        TextButton(
-                            text = "停止采集",
-                            onClick = {
-                                context.sendBroadcast(
-                                    Intent(AutoActions.STOP).setPackage(AutoActions.HOST_PACKAGE),
-                                )
-                            },
-                        )
-                    }
-                }
-            }
         }
     }
 }

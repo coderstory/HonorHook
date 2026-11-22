@@ -34,6 +34,12 @@ object XhsAutoEntry {
     /** 当前按钮宿主（activity 的 decorView）；离开主页/页销毁即摘除。 */
     @Volatile private var attachedButton: TextView? = null
     @Volatile private var attachedDecor: ViewGroup? = null
+    /**
+     * 按钮/面板所属的 Activity。**不能从 decor.context 反推**：API 31+ 的 decorView.context 是
+     * `com.android.internal.policy.DecorContext`（2026-11-22 真机实证），`as? Activity` 恒为 null，
+     * 面板就这么静默挂不上。
+     */
+    @Volatile private var attachedActivity: Activity? = null
 
     /** 过程消息面板（同一个 View 持续刷新，替代逐条 Toast）；只在采集期间显示。 */
     @Volatile private var attachedPanel: View? = null
@@ -260,6 +266,7 @@ object XhsAutoEntry {
         decor.addView(btn)
         attachedButton = btn
         attachedDecor = decor
+        attachedActivity = activity
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 悬浮按钮已注入")
         panelSync()
     }
@@ -288,8 +295,12 @@ object XhsAutoEntry {
      * 收工后再留 4 秒让人看完最后几条（用户「要滚动消息」的原始诉求就是过程可见）。
      */
     private fun panelSync() {
-        val decor = attachedDecor ?: return
-        val act = decor.context as? android.app.Activity ?: return
+        val decor = attachedDecor
+        val act = attachedActivity
+        if (decor == null || act == null) {
+            XhsBatchDriver.logEntry("面板未挂：还没有按钮宿主")
+            return
+        }
         if (XhsBatchDriver.isRunning()) ensurePanel(act, decor) else schedulePanelRemoval()
     }
 
@@ -302,6 +313,7 @@ object XhsAutoEntry {
             renderLines(lastLines)
             return
         }
+        XhsBatchDriver.logEntry("正在注入面板：${activity.javaClass.simpleName} decor=${decor.javaClass.simpleName}")
         removePanel()
         val dp = activity.resources.displayMetrics.density
         val header = TextView(activity).apply {
@@ -343,7 +355,14 @@ object XhsAutoEntry {
                 bottomMargin = (120 * dp).toInt()
             }
         }
-        runCatching { decor.addView(box) }
+        val added = runCatching { decor.addView(box) }
+        added.onFailure { XhsBatchDriver.logEntry("面板 addView 失败：${it.javaClass.simpleName}: ${it.message}") }
+        added.onSuccess {
+            XhsBatchDriver.logEntry(
+                "面板已挂：${box.width}x${box.height} 父=${decor.javaClass.simpleName} 父宽高=${decor.width}x${decor.height} " +
+                    "子数=${decor.childCount} 屏=${activity.resources.displayMetrics.widthPixels}x${activity.resources.displayMetrics.heightPixels}",
+            )
+        }
         attachedPanel = box
         panelText = tv
         panelHeader = header
@@ -404,6 +423,7 @@ object XhsAutoEntry {
         runCatching { attachedDecor?.let { d -> attachedButton?.let { d.removeView(it) } } }
         attachedButton = null
         attachedDecor = null
+        attachedActivity = null
         removePanel()
     }
 

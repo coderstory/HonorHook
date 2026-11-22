@@ -174,6 +174,8 @@ object XhsBatchDriver {
         val app = ctx.applicationContext
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")
         xlog(app, "采集开始")
+        vlog(app, "启动参数：节奏 ${paceMinMs}~${paceMaxMs}ms 线程=${Thread.currentThread().name} " +
+            "前台=${runCatching { XhsBatchSave.activityOrNull()?.javaClass?.simpleName }.getOrNull()}")
         // 驱动线程是裸 Thread：任何逃出去的 Throwable 会走默认 UncaughtExceptionHandler
         // **直接杀宿主进程**（且 running 卡在 true，按钮永远显示「取消」）。双重兜底（2026-11-22 审计 #1）。
         val worker = Thread({
@@ -275,6 +277,9 @@ object XhsBatchDriver {
                 if (seen.size > SEEN_LIMIT) seen.clear()
 
                 val pending = cards.filter { it.second !in seen }
+                val keysPreview = cards.take(3).joinToString("|") { it.second.take(14) }
+                vlog(ctx, "扫描[${act.javaClass.simpleName}] 卡=${cards.size} 未处理=${pending.size} 已见=${seen.size} " +
+                    "首top=${cards.first().first.top()} 键=$keysPreview")
                 syncStats(ok, skipped, failed, pending.size)
                 if (pending.isEmpty()) {
                     // 这一屏没有新卡了：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
@@ -284,6 +289,7 @@ object XhsBatchDriver {
                     swipeUp(act)
                     Thread.sleep(1200)
                     val after = onMain { findCards(act) }.orEmpty()
+                    vlog(ctx, "滚动后：${beforeSize}张/top=$beforeTop → ${after.size}张/top=${after.firstOrNull()?.top() ?: -1}")
                     val moved = after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop
                     if (moved) {
                         scrollIdle = 0
@@ -322,6 +328,7 @@ object XhsBatchDriver {
                     continue
                 }
                 xlog(ctx, "点开第 $handled 张（本屏剩 ${pending.size} 张，noteId=${known ?: "待取"}）")
+                vlog(ctx, "卡片详情：key=${key.take(30)} bounds=${runCatching { card.let { v -> val r = android.graphics.Rect(); v.getGlobalVisibleRect(r); r.toString() } }.getOrNull()} 可点=${card.isClickable} 可见=${card.isShown}")
                 val prev = XhsVideoSave.lastShareNoteId()
                 if (onMain { clickView(card) } != true) {
                     failed++
@@ -402,7 +409,11 @@ object XhsBatchDriver {
             xlog(ctx, "解析不出图片 noteId=$noteId")
             return SaveOutcome.FAIL
         }
+        val t0 = System.currentTimeMillis()
+        vlog(ctx, "开始落盘 noteId=$noteId 文件数=${urls.size} 首个=${urls.firstOrNull()?.take(60)}")
         val ok = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId) }.getOrDefault(false)
+        vlog(ctx, "落盘结束 noteId=$noteId 成功=$ok 耗时=${System.currentTimeMillis() - t0}ms " +
+            "台账=${runCatching { XhsDownloadLedger.downloaded(ctx, noteId).first }.getOrNull()}")
         return if (ok) SaveOutcome.OK else SaveOutcome.FAIL
     }
 
@@ -713,6 +724,12 @@ object XhsBatchDriver {
      * Toast 每条都要抢焦点、还会叠成一串；滚动面板是同一个 View 持续更新，看得见上下文。
      * 转储类长文本（[dumpViews]）只进文件不上面板，否则一次 40 行把面板顶满。
      */
+    /**
+     * 只进文件的详细日志（2026-11-22 用户要求「所有数据和情况都打印」）：
+     * 面板只有 6 行，细节全塞进去就没法看了，所以决策链路一律走这里。
+     */
+    private fun vlog(ctx: Context, msg: String) = xlog(ctx, msg, toast = false)
+
     private fun xlog(ctx: Context, msg: String, toast: Boolean = true) {
         runCatching {
             Log.i(TAG, msg)
