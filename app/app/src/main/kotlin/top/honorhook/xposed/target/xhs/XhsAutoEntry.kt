@@ -280,6 +280,25 @@ object XhsAutoEntry {
      * 按钮文案/配色跟随运行态：运行中「取消」（灰底，带已处理篇数——静默下载没有其它进度提示，
      * 用户 2026-11-22 反馈「自动下载没有任何提示」），待机「采集」（红底）。
      */
+    /**
+     * 一键复制诊断（用户 2026-11-22）：剪贴板 + 落一份文件，异常时直接粘给 AI 分析。
+     * 面板右上角「⧉」触发，采集前后都能点。
+     */
+    private fun copyDiagnostics(activity: Activity) {
+        runCatching {
+            val text = XhsBatchDriver.diagnostics(activity)
+            val cm = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                as? android.content.ClipboardManager
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("HonorHook诊断", text))
+            runCatching {
+                java.io.File(activity.getExternalFilesDir(null), "xhs_diag.txt").writeText(text)
+            }
+            android.widget.Toast.makeText(activity, "诊断信息已复制（${text.length} 字符）", android.widget.Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            android.widget.Toast.makeText(activity, "复制失败：${it.javaClass.simpleName}", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun applyLabel() {
         val running = XhsBatchDriver.isRunning()
         if (running && !lastRunning) panelDismissed = false   // 新一轮：面板重新回来
@@ -332,6 +351,13 @@ object XhsAutoEntry {
             setTextColor(Color.WHITE)
             text = XhsBatchDriver.header()
         }
+        val copy = TextView(activity).apply {
+            text = "⧉"
+            textSize = 18f
+            setTextColor(0xEEFFFFFF.toInt())
+            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
+            setOnClickListener { copyDiagnostics(activity) }
+        }
         val close = TextView(activity).apply {
             text = "×"
             textSize = 20f
@@ -346,6 +372,7 @@ object XhsAutoEntry {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             addView(header, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(copy)
             addView(close)
         }
         val linesBox = android.widget.LinearLayout(activity).apply {

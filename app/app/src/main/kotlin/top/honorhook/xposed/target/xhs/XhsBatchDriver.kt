@@ -736,6 +736,44 @@ object XhsBatchDriver {
      */
     private fun vlog(ctx: Context, msg: String) = xlog(ctx, msg, toast = false)
 
+    /**
+     * 一键复制用的诊断文本（用户 2026-11-22：「针对异常情况，增加一键复制信息功能，包含诊断必要信息」）。
+     * 只放**能定位问题**的东西：版本、屏幕、运行参数、汇总计数、最近 300 行过程日志、失败行汇总；
+     * 不放用户内容、不放 URL 全量（只留首个 URL 的域名级片段）。
+     */
+    fun diagnostics(ctx: Context): String {
+        val sb = StringBuilder()
+        val now = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+        sb.appendLine("===== HonorHook 批量采集诊断 =====")
+        sb.appendLine("时间: $now")
+        sb.appendLine("模块: ${appVersion(ctx, AutoActions.MODULE_PACKAGE)}")
+        sb.appendLine("宿主: ${appVersion(ctx, AutoActions.HOST_PACKAGE)}")
+        val dm = runCatching { ctx.resources.displayMetrics }.getOrNull()
+        sb.appendLine("系统: Android ${android.os.Build.VERSION.RELEASE}(SDK ${android.os.Build.VERSION.SDK_INT}) " +
+            "${dm?.widthPixels}x${dm?.heightPixels} @${dm?.densityDpi}dpi ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        sb.appendLine("状态: ${if (running) (if (stopRequested) "收尾中" else "采集中") else "空闲"} " +
+            "已处理=$processed 已发现=$discoveredCount 已存=$okCount 跳过=$skippedCount 失败=$failedCount 本屏待处理=$pendingNow")
+        sb.appendLine("节奏: ${paceMinMs}~${paceMaxMs}ms")
+        sb.appendLine("前台: ${runCatching { XhsBatchSave.activityOrNull()?.javaClass?.name }.getOrNull() ?: "?"}")
+        sb.appendLine("面板日志: ${lastLines().size} 条")
+        sb.appendLine("--- 最近 300 行日志 ---")
+        val tail = runCatching {
+            val f = java.io.File(ctx.getExternalFilesDir(null), "xhs_batch.log")
+            if (!f.exists()) emptyList() else f.readLines().takeLast(300)
+        }.getOrDefault(emptyList())
+        tail.forEach { sb.appendLine(it) }
+        sb.appendLine("--- 失败/异常行 ---")
+        tail.filter { line -> listOf("失败", "异常", "解析不出", "超时", "未挂", "错误").any { line.contains(it) } }
+            .forEach { sb.appendLine(it) }
+        return sb.toString()
+    }
+
+    private fun appVersion(ctx: Context, pkg: String): String = runCatching {
+        val pm = ctx.packageManager
+        val info = pm.getPackageInfo(pkg, 0)
+        "$pkg ${info.versionName}"
+    }.getOrDefault("$pkg ?")
+
     private fun xlog(ctx: Context, msg: String, toast: Boolean = true) {
         runCatching {
             Log.i(TAG, msg)
