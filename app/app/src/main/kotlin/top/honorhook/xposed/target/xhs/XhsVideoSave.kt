@@ -105,6 +105,22 @@ object XhsVideoSave {
     internal fun tokenOf(noteId: String): String? = noteShares[noteId]?.token
 
     /**
+     * 用**卡片实体**自带的 xsecToken 补凭据（2026-11-22）。
+     *
+     * 为什么需要：详情页命中本地缓存时宿主不发 imagefeed，`noteShares` 里就没有这一篇；
+     * 而作者主页列表卡片背后就是 `NoteItemBean`（`xsec_token` 字段，classes5 反编译实证），
+     * 点开之前把它读出来登记，缓存笔记也能走「noteId + token → 合成分享链」直下。
+     * 不覆盖已有 link（旁路登记的完整分享链优先）。
+     */
+    internal fun registerToken(noteId: String, token: String?) {
+        if (token.isNullOrBlank()) return
+        val old = noteShares[noteId]
+        if (old?.link != null) return
+        if (old?.token == token) return
+        noteShares[noteId] = NoteShare(old?.link, token)
+    }
+
+    /**
      * 只有 token、没有 `share_info.link` 时合成一条分享链（2026-11-22 批量采集实测：列表/详情响应
      * 大量条目只带裸 `xsec_token`，`shareLinkOf` 返 null ⇒ 每篇都「无 share link，解析跳过」）。
      * 形态与宿主 `share_info.link` 一致（`xsec_source=app_share`）。

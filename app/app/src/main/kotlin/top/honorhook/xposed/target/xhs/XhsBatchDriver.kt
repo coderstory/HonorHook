@@ -483,6 +483,13 @@ object XhsBatchDriver {
                 val cardNoteId = runCatching { onMain { noteIdOfCard(card) } }.getOrNull()
                 if (cardNoteId != null) seen.add(cardNoteId)
                 val known = cardNoteId
+                if (known != null && XhsVideoSave.shareLinkOf(known) == null) {
+                    val tok = runCatching { onMain { tokenOfCard(card, known) } }.getOrNull()
+                    if (!tok.isNullOrBlank()) {
+                        XhsVideoSave.registerToken(known, tok)
+                        vlog(ctx, "卡片 token 登记 noteId=$known token=${tok.take(6)}…")
+                    }
+                }
                 // 整条 share link 已经在表里（homefeed/上一屏响应登记过）⇒ 根本不用点开这篇：
                 // 零详情页、零等待，直接解析直下。这是最快也最稳的一条路（2026-11-22）。
                 if (known != null && XhsVideoSave.shareLinkOf(known) != null) {
@@ -559,6 +566,55 @@ object XhsBatchDriver {
 
     private enum class SaveOutcome { OK, SKIPPED, FAIL }
 
+    /** 24 位 hex（小红书 id 形态）。 */
+    private val hexId = Regex("^[0-9a-f]{24}$")
+
+    /** 每个 Activity 类上「能问出 noteId」的方法缓存（name=null 表示该类没有）。 */
+    private val idMethodCache = HashMap<String, java.lang.reflect.Method?>()
+
+    /**
+     * 直接从**当前详情页 Activity** 问 noteId（2026-11-22 用户实测：缓存命中的笔记详情页不发
+     * imagefeed，旁路登记拿不到 id，整轮卡在「详情页没拿到 noteId」）。
+     *
+     * 静态实证（`.buildtmp/xhs9533-c8/sources/com/xingin/matrix/notedetail/NoteDetailActivity.java:651`）：
+     * `public String s1()`（实现 `dx9.a`）返回 `((b1) controller).h2().J.getId()`，方法名带混淆、
+     * 每个版本都会变 ⇒ 不写死名字，改为「该类 public 无参且返回 String 的方法，返回值像 24 位 hex 就用它」，
+     * 结果按类缓存。兜底再看 Intent：同文件 :661 用 `getIntent().getStringExtra("id")` 兜底。
+     *
+     * 只在当前活动 Activity 上试；不在详情页（列表页）时这些方法不返回 hex，天然安全。
+     */
+    private fun noteIdFromActivity(activity: Activity): String? {
+        val cls = activity.javaClass
+        val cached = idMethodCache[cls.name]
+        if (cached != null) {
+            runCatching { cached.invoke(activity) as? String }
+                .getOrNull()?.takeIf { hexId.matches(it) }?.let { return it }
+        } else if (!idMethodCache.containsKey(cls.name)) {
+            var found: java.lang.reflect.Method? = null
+            for (m in cls.methods) {
+                if (m.parameterCount != 0 || m.returnType != String::class.java) continue
+                if (m.declaringClass == android.app.Activity::class.java) continue
+                val v = runCatching { m.invoke(activity) as? String }.getOrNull() ?: continue
+                if (hexId.matches(v)) {
+                    found = m
+                    idMethodCache[cls.name] = m
+                    return v
+                }
+            }
+            if (found == null) idMethodCache[cls.name] = null
+        }
+        // Intent 兜底：详情页 `getIntent().getStringExtra("id")` 就是它自己的 noteId
+        val intent = runCatching { activity.intent }.getOrNull() ?: return null
+        runCatching { intent.getStringExtra("id") }.getOrNull()
+            ?.takeIf { hexId.matches(it) }?.let { return it }
+        val extras = runCatching { intent.extras }.getOrNull() ?: return null
+        for (key in extras.keySet()) {
+            val v = runCatching { extras.get(key) as? String }.getOrNull() ?: continue
+            if (hexId.matches(v)) return v
+        }
+        return null
+    }
+
     /**
      * 整篇级重试：失败不是终点，最多 [ITEM_MAX_ATTEMPTS] 次（取消时不重试）。
      * 「刷新即失败」多半是解析超时/凭据还没登记，隔一拍再试常常就好了。
@@ -591,15 +647,17 @@ object XhsBatchDriver {
         val registered = if (knownReady) null
         // 有卡片反射出来的 id 时，详情页登记的必须是**同一篇**才算命中：详情页的评论/推荐响应也会
         // 改最近登记值，取错了就「把 A 的图存成 B 的 noteId」（2026-11-22 审计 P0）。
-        else await(NOTE_ID_WAIT_MS) {
-            XhsVideoSave.lastShareNoteId()?.takeIf { it != prev && (known == null || it == known) }
-        }
+        // 详情页自己知道本篇 id（方法/Intent）⇒ 先问它，不必等那 8 秒、也不必依赖 imagefeed
+        else XhsBatchSave.activityOrNull()?.let { noteIdFromActivity(it) }?.takeIf { it != prev }
+            ?: await(NOTE_ID_WAIT_MS) {
+                XhsVideoSave.lastShareNoteId()?.takeIf { it != prev && (known == null || it == known) }
+            }
         val noteId = registered ?: known
         if (!knownReady && registered == null && known != null) {
             vlog(ctx, "详情页没登记，用卡片反射的 noteId=$known 兜底")
         }
         if (noteId == null) {
-            xlog(ctx, "详情页没拿到 noteId（没人登记分享链）")
+            xlog(ctx, "详情页没拿到 noteId（活动方法/Intent/分享链登记都没给出 24 位 id）")
             dumpViews(ctx, "详情页", XhsBatchSave.activityOrNull())
             return SaveOutcome.FAIL
         }
@@ -884,6 +942,39 @@ object XhsBatchDriver {
      * 的 OnClickListener 闭包里握着这条笔记的 bean，24hex 的 id 就在里面，反射两跳即可。
      * 全程 runCatching，取不到返回 null（调用方退回「点开 + 等网络登记」的旧路）。
      */
+    /**
+     * 卡片实体里的 `xsec_token`（2026-11-22）。缓存笔记的详情页不发 imagefeed，
+     * 光有 noteId 也合成不出可用分享链；而列表卡片背后就是带 token 的 NoteItemBean，
+     * 点开前登记一次，`synthShareLinkOf` 这条兜底才真的能出图。
+     */
+    private fun tokenOfCard(card: View, id: String?): String? = try {
+        val li = View::class.java.getDeclaredField("mListenerInfo").let { it.isAccessible = true; it.get(card) }
+            ?: return null
+        val l = li.javaClass.getDeclaredField("mOnClickListener").let { it.isAccessible = true; it.get(li) }
+            ?: return null
+        fun tokenIn(owner: Any): String? {
+            owner.javaClass.declaredFields.forEach { f ->
+                if (!f.name.lowercase().contains("token")) return@forEach
+                val v = runCatching { f.isAccessible = true; f.get(owner) as? String }.getOrNull()
+                if (!v.isNullOrBlank()) return v
+            }
+            return null
+        }
+        tokenIn(l)?.let { return it }
+        l.javaClass.declaredFields.forEach { f ->
+            val bean = runCatching { f.isAccessible = true; f.get(l) }.getOrNull() ?: return@forEach
+            // 只认「这个 bean 里能读到的第一个 24hex 正好是我们这个 noteId」的 token，
+            // 否则可能把同页别的实体的凭据挂错篇（账号/作者实体也带 token 字段）
+            val beanId = bean.javaClass.declaredFields.firstNotNullOfOrNull { bf ->
+                runCatching { bf.isAccessible = true; (bf.get(bean) as? String)?.takeIf { it.matches(HEX24) } }.getOrNull()
+            }
+            if (id == null || beanId == id) tokenIn(bean)?.let { return it }
+        }
+        null
+    } catch (t: Throwable) {
+        null
+    }
+
     private fun noteIdOfCard(card: View): String? = try {
         val li = View::class.java.getDeclaredField("mListenerInfo").let { it.isAccessible = true; it.get(card) }
             ?: return null
