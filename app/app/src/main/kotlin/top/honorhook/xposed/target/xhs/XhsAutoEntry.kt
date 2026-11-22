@@ -277,6 +277,23 @@ object XhsAutoEntry {
      * 「采集」按钮，一键下去就把**别人的笔记**当目标作者的作品装了。加上资料区标记后，详情页不再有按钮。
      * 单次 DFS 同时收集两个标记，限深 30、只看可见节点（本页挂在 OnGlobalLayout 上每 250ms 跑一次）。
      */
+    /**
+     * 只看**页面身份**：作者主页 vs 详情页/首页。
+     *
+     * 2026-11-22 真机（22:42–22:45 日志）：详情页盖在主页上，decor 里既有「粉丝」资料区、
+     * 又有「笔记,」卡片 ⇒ 光看视图内容永远分不清，于是「采集」按钮出现在详情页上，
+     * 一点就把详情页当成作者主页开始跑，最后只会在首页和详情页之间来回按返回、一篇不采
+     * （`起跑页不是作者主页（NoteDetailActivity …），退一页` → `起跑页是首页（IndexActivityV2）`）。
+     * 类名是唯一可靠的区分：小红书作者主页是 `…profile.newpage.NewOtherUserActivity`，
+     * 详情页是 `…notedetail.NoteDetailActivity` / `DetailFeedActivity`，首页是 `IndexActivityV2`。
+     */
+    internal fun looksLikeProfileActivity(activity: Activity): Boolean {
+        val n = activity.javaClass.simpleName
+        if (n.contains("Detail", ignoreCase = true)) return false
+        if (n.contains("Index", ignoreCase = true) || n.contains("Splash", ignoreCase = true)) return false
+        return n.contains("User", ignoreCase = true) || n.contains("Profile", ignoreCase = true)
+    }
+
     internal fun isProfilePage(root: View): Boolean {
         var cards = false
         var profileStats = false
@@ -323,6 +340,8 @@ object XhsAutoEntry {
      * 那几页也要留按钮，否则跑到一半没地方取消。
      */
     private fun syncButton(activity: Activity, module: XposedModule) {
+        // 类名硬门（见 looksLikeProfileActivity）：详情页/首页即使视图里能看到资料区，
+        // 也不注入「采集」——否则用户会在详情页上点采集，然后整轮空转。运行中仍允许（要能取消）。
         // 功能开关（FeatureCatalog.KEY_XHS_BATCH，默认关）：关着就彻底不注入按钮/面板，
         // 也不参与驱动——宿主页面零改动（2026-11-22 用户要求「还缺了功能开关，默认关闭」）。
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_BATCH)) {
@@ -330,7 +349,7 @@ object XhsAutoEntry {
             return
         }
         val decor = activity.window?.decorView as? ViewGroup ?: return
-        if (!isProfilePage(decor) && !XhsBatchDriver.isRunning()) {
+        if (!looksLikeProfileActivity(activity) && !isProfilePage(decor) && !XhsBatchDriver.isRunning()) {
             // 判据失效时按钮会静默消失（用户和诊断都看不出原因）：摘除前记一次
             if (attachedButton != null) {
                 XhsBatchDriver.logEntry("按钮摘除：本页不像作者主页（缺「笔记,」卡片或资料区文案）${activity.javaClass.simpleName}")

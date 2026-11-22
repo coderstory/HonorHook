@@ -269,7 +269,12 @@ object XhsBatchDriver {
         // 判据与按钮注入共用 XhsAutoEntry.isProfilePage（卡片 + 粉丝/获赞资料区）。
         val front = XhsBatchSave.activityOrNull()
         val frontDecor = runCatching { front?.window?.decorView }.getOrNull()
-        if (frontDecor == null || !runCatching { XhsAutoEntry.isProfilePage(frontDecor) }.getOrDefault(false)) {
+        // 先看页面身份（类名），再看内容：详情页/首页的 decor 里同样有「粉丝」和卡片，
+        // 只靠内容判定会让用户在详情页起跑（真机 22:42–22:45：整轮在详情↔首页之间空转）。
+        val byClass = front != null && runCatching { XhsAutoEntry.looksLikeProfileActivity(front!!) }.getOrDefault(false)
+        if (frontDecor == null || !byClass ||
+            !runCatching { XhsAutoEntry.isProfilePage(frontDecor) }.getOrDefault(false)
+        ) {
             val where = runCatching { front?.javaClass?.simpleName }.getOrNull() ?: "无前台页面"
             xlog(ctx.applicationContext, "没有开始：当前页不是作者主页（前台=$where）")
             toast(ctx, "请先打开作者主页再点采集（当前停在$where）")
@@ -350,41 +355,6 @@ object XhsBatchDriver {
      * （noteId 优先、退化用 contentDescription）：只要这一屏还有没见过的卡，就一定要处理它，
      * 不看序号，所以重排、复用、返回后轻微位移都不会漏。
      */
-    /**
-     * 起跑页归一（2026-11-22 真机根因）：用户点「采集」时常常停在**详情页**上——那是盖在作者主页
-     * 之上的浮层，decor 里既有主页的卡片、也有「粉丝」资料区，`isProfilePage` 会判成主页（判据没错），
-     * 但把 `listClassName` 锁成详情页之后，后续的「翻页 / 收工」判断就都建立在错的前提上：
-     * 一篇**没有相关推荐**的详情页会把卡片数变成 0，于是 10 轮后宣布「采集完成」，
-     * 实际主页上还有几十篇没采（2026-11-22 22:22 真机：失败 24 次后提前收工）。
-     *
-     * 这里在进入主循环前把页面退回真正的作者主页：**类名含 Detail/Feed 或没有资料区标记**就按返回，
-     * 最多 [MAX_BACK_PRESSES] 次；成功后把列表页类名重新锁到当前页。
-     */
-    private fun normalizeStartPage(module: XposedModule, ctx: Context) {
-        repeat(MAX_BACK_PRESSES + 1) {
-            if (stopRequested) return
-            val act = XhsBatchSave.activityOrNull() ?: return
-            val cls = act.javaClass.name
-            val stats = onMainOrTimeout { act.window?.decorView?.let { XhsAutoEntry.hasProfileMarkers(it) } }
-                .second ?: false
-            val detailLike = cls.contains("Detail", ignoreCase = true)
-            if (!detailLike && stats) {
-                if (listClassName != cls) {
-                    listClassName = cls
-                    xlog(ctx, "列表页锁定：${act.javaClass.simpleName}")
-                }
-                return
-            }
-            if (isAppRoot(act)) {
-                xlog(ctx, "起跑页是首页（${act.javaClass.simpleName}），请先打开作者主页再点采集")
-                return
-            }
-            xlog(ctx, "起跑页不是作者主页（${act.javaClass.simpleName} 详情=${detailLike} 资料区=${stats}），退一页")
-            pressBack(act)
-            Thread.sleep(900)
-        }
-    }
-
     private fun loop(module: XposedModule, ctx: Context, gen: Int) {
         var ok = 0
         var skipped = 0
@@ -405,7 +375,6 @@ object XhsBatchDriver {
         // 「已发现」= 本轮扫到过的不同卡片（不是已处理数）：否则首屏 30 张时面板显示「已发现 0」
         val discoveredKeys = HashSet<String>()
         try {
-            normalizeStartPage(module, ctx)
             while (!stopRequested) {
                 // 看门狗必须在循环最外层：act==null（用户切走）与 !scanned（主线程卡）这两条
                 // continue 原来永不超时，表现是「一直采集中、零日志」（2026-11-22 审计 P1）。
