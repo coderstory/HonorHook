@@ -53,6 +53,13 @@ object XhsBatchDriver {
     private const val PACE_MAX_MS = 4000L
     private const val IDLE_LIMIT = 3
 
+    /**
+     * 单篇最多尝试次数（用户 2026-11-22：「下载失败最多重试三次」）。
+     * 单文件级重试另有 `XhsBatchSave.FETCH_MAX_ATTEMPTS = 3`；这里管「整篇重来」——
+     * 解析超时、详情页没登记、某张图连败三次之后，整篇还有两次机会。
+     */
+    private const val ITEM_MAX_ATTEMPTS = 3
+
     /** 无进展看门狗上限（见 loop 里的 lastProgressAt）：2 分钟既不动卡片也不动列表 = 收工。 */
     private const val NO_PROGRESS_LIMIT_MS = 120_000L
 
@@ -195,9 +202,27 @@ object XhsBatchDriver {
     }
 
     /** 面板顶栏文本：两行（窄屏一排放不下五项）。 */
-    fun header(): String {
+    /** 面板用的结构化快照：[已处理篇, 累计资源, 失败, 跳过, 当前文章资源, 本屏待处理, 用时秒]。 */
+    fun stats(): LongArray = longArrayOf(
+        okCount.toLong(), resourceCount.toLong(), failedCount.toLong(), skippedCount.toLong(),
+        currentNoteRes.toLong(), pendingNow.toLong(), elapsedSec(),
+    )
+
+    fun stateLabel(): String = when {
+        !running -> if (endedAt > 0) "已结束" else "空闲"
+        stopRequested -> "收尾中"
+        else -> "采集中"
+    }
+
+    fun isStoppingNow(): Boolean = stopRequested
+
+    private fun elapsedSec(): Long {
         val endAt = if (!running && endedAt > 0) endedAt else System.currentTimeMillis()
-        val secs = if (startedAt == 0L) 0L else (endAt - startedAt) / 1000
+        return if (startedAt == 0L) 0L else (endAt - startedAt) / 1000
+    }
+
+    fun header(): String {
+        val secs = elapsedSec()
         val ss = (secs % 60).toString().padStart(2, '0')
         val state = when {
             !running -> "已结束"
@@ -461,8 +486,7 @@ object XhsBatchDriver {
                 // 整条 share link 已经在表里（homefeed/上一屏响应登记过）⇒ 根本不用点开这篇：
                 // 零详情页、零等待，直接解析直下。这是最快也最稳的一条路（2026-11-22）。
                 if (known != null && XhsVideoSave.shareLinkOf(known) != null) {
-                    val direct = runCatching { collect(module, ctx, prev = null, known = known) }
-                        .getOrDefault(SaveOutcome.FAIL)
+                    val direct = collectWithRetry(module, ctx, prev = null, known = known)
                     when (direct) {
                         SaveOutcome.OK -> ok++
                         SaveOutcome.SKIPPED -> skipped++
@@ -503,7 +527,7 @@ object XhsBatchDriver {
                     sleepPace()   // 原来 sleep(paceMs())：节奏配到 120s 时取消要等两分钟才生效
                     continue
                 }
-                val saved = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
+                val saved = collectWithRetry(module, ctx, prev, known)
                 when (saved) {
                     SaveOutcome.OK -> ok++
                     SaveOutcome.SKIPPED -> skipped++
@@ -534,6 +558,22 @@ object XhsBatchDriver {
     }
 
     private enum class SaveOutcome { OK, SKIPPED, FAIL }
+
+    /**
+     * 整篇级重试：失败不是终点，最多 [ITEM_MAX_ATTEMPTS] 次（取消时不重试）。
+     * 「刷新即失败」多半是解析超时/凭据还没登记，隔一拍再试常常就好了。
+     */
+    private fun collectWithRetry(module: XposedModule, ctx: Context, prev: String?, known: String?): SaveOutcome {
+        var outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
+        var attempt = 1
+        while (outcome == SaveOutcome.FAIL && attempt < ITEM_MAX_ATTEMPTS && !stopRequested) {
+            attempt++
+            xlog(ctx, "本篇第 $attempt/$ITEM_MAX_ATTEMPTS 次重试", toast = false)
+            sleepPace()
+            outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
+        }
+        return outcome
+    }
 
     /**
      * 点开之后：认 noteId → 查去重 → 解析图片 → 静默直下。
@@ -688,6 +728,18 @@ object XhsBatchDriver {
         if (result.canceled && !savedAny && videoFail == 0) {
             xlog(ctx, "已取消，本篇未落盘 noteId=$noteId")
             return SaveOutcome.FAIL
+        }
+        // 台账 = 「这篇已经完整拿全」的凭据（用户 2026-11-22：「没有全部成功的不记录 noteid」）。
+        // 半篇记了台账 ⇒ 以后永远被判「已下载过」，缺的图再也补不回来（审计 #5）。
+        val imagesAccounted = urls.isEmpty() ||
+            result.ok + result.filtered + (urls.size - missingIdx.size) >= urls.size
+        val videosAccounted = videos.isEmpty() || videoExists || videoOk + videoSmall >= videos.size
+        val noFailures = result.failed == 0 && videoFail == 0 && !result.canceled && !stopRequested
+        if (noFailures && imagesAccounted && videosAccounted && (savedAny || filteredAll || videoAllSmall)) {
+            runCatching { XhsDownloadLedger.record(ctx, noteId, count = urls.size) }
+            vlog(ctx, "台账登记 noteId=$noteId 图=${urls.size} 视频=${videos.size}（全篇成功）")
+        } else if (!noFailures) {
+            vlog(ctx, "不记台账 noteId=$noteId（图败${result.failed}/视频败$videoFail/取消${result.canceled}）")
         }
         return if (savedAny) SaveOutcome.OK else SaveOutcome.FAIL
     }

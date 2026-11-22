@@ -57,7 +57,10 @@ object XhsAutoEntry {
     @Volatile private var installedModule: XposedModule? = null
     /** 消息容器：每行一个 TextView，按成败上色（用户 2026-11-22：嗅探失败的要用红色系）。 */
     @Volatile private var panelLog: android.widget.LinearLayout? = null
-    @Volatile private var panelHeader: TextView? = null
+    @Volatile private var panelStatus: TextView? = null
+    @Volatile private var panelStatValues: List<TextView> = emptyList()
+    @Volatile private var panelDetail: TextView? = null
+    @Volatile private var panelScroll: android.widget.ScrollView? = null
     @Volatile private var panelDecor: ViewGroup? = null
     /** 用时每秒都在变，顶栏靠一个 1 秒心跳刷新（其余数字由驱动事件驱动）。 */
     @Volatile private var ticker: Runnable? = null
@@ -376,7 +379,7 @@ object XhsAutoEntry {
             // 收工：心跳停掉 + 顶栏立刻刷一次（header 在 !running 时用 endedAt 冻住用时，
             // 否则面板会永远显示「已结束 · 用时 3:41 还在涨」——2026-11-22 审计 #13）
             stopTicker()
-            runCatching { panelHeader?.text = XhsBatchDriver.header() }
+            refreshPanel()
         }
         lastRunning = running
         // 运行中保证看门狗在跑；收工后它会自己退出（见 ensurePanelGuard）
@@ -459,68 +462,121 @@ object XhsAutoEntry {
             removePanel()
         }
         val dp = activity.resources.displayMetrics.density
-        val header = TextView(activity).apply {
-            textSize = 15f
+        fun px(v: Float): Int = (v * dp).toInt()
+
+        // 顶部：状态徽标 + 复制/关闭（用户 2026-11-22：「信息窗好好设计一下，目前我都不能好好查看」）
+        val status = TextView(activity).apply {
+            textSize = 14f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            text = XhsBatchDriver.header()
+            setTextColor(0xFF8CFFC1.toInt())
+            letterSpacing = 0.04f
+            text = "采集中"
         }
         val copy = TextView(activity).apply {
             text = "⧉"
-            textSize = 18f
+            textSize = 17f
             setTextColor(0xEEFFFFFF.toInt())
-            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
+            setPadding(px(9f), px(2f), px(9f), px(2f))
             setOnClickListener { copyDiagnostics(activity) }
         }
         val close = TextView(activity).apply {
             text = "×"
-            textSize = 20f
+            textSize = 19f
             setTextColor(0x99FFFFFF.toInt())
-            setPadding((10 * dp).toInt(), 0, (6 * dp).toInt(), 0)
+            setPadding(px(9f), px(2f), px(4f), px(2f))
             setOnClickListener {
                 panelDismissed = true
                 removePanel()
             }
         }
-        val headerRow = android.widget.LinearLayout(activity).apply {
+        val titleRow = android.widget.LinearLayout(activity).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
-            addView(header, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(status, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(copy)
             addView(close)
         }
+
+        // 四列大数字：一行能扫完，比长句好读
+        val statRow = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            setPadding(0, px(6f), 0, px(2f))
+        }
+        val statValues = ArrayList<TextView>(4)
+        listOf("已处理 篇", "累计 资源", "失败", "用时").forEach { label ->
+            val value = TextView(activity).apply {
+                textSize = 19f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(Color.WHITE)
+                text = "0"
+            }
+            val cap = TextView(activity).apply {
+                textSize = 10f
+                setTextColor(0xB3FFFFFF.toInt())
+                text = label
+            }
+            val col = android.widget.LinearLayout(activity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                addView(value)
+                addView(cap)
+            }
+            statRow.addView(col, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            statValues += value
+        }
+
+        val detail = TextView(activity).apply {
+            textSize = 11.5f
+            setTextColor(0xCCFFFFFF.toInt())
+            text = "当前文章 0 个资源 · 本屏待处理 0 · 跳过 0"
+        }
+
         val linesBox = android.widget.LinearLayout(activity).apply {
             orientation = android.widget.LinearLayout.VERTICAL
         }
         val scroll = android.widget.ScrollView(activity).apply {
             isVerticalScrollBarEnabled = false
-            addView(linesBox, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(
+                linesBox,
+                android.widget.FrameLayout.LayoutParams(
+                    android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
             isClickable = false
             isFocusable = false
         }
+
+        val metrics = activity.resources.displayMetrics
         val box = android.widget.LinearLayout(activity).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding((14 * dp).toInt(), (10 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
-            // 红→粉渐变底（用户 2026-11-22：底色要红色和粉色的混合），白字仍读得清
+            setPadding(px(14f), px(10f), px(14f), px(10f))
+            // 暗红→暗粉渐变（用户要红粉底），压暗保证白字对比度
             background = GradientDrawable().apply {
-                cornerRadius = 14 * dp
+                cornerRadius = 16 * dp
                 gradientType = GradientDrawable.LINEAR_GRADIENT
                 orientation = GradientDrawable.Orientation.TL_BR
-                colors = intArrayOf(0xE6C62828.toInt(), 0xE6EC407A.toInt())
+                colors = intArrayOf(0xF0A31515.toInt(), 0xF0AD1457.toInt())
             }
-            addView(headerRow)
-            addView(View(activity).apply { setBackgroundColor(0x33FFFFFF) },
-                android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
-                    topMargin = (6 * dp).toInt(); bottomMargin = (6 * dp).toInt()
-                })
+            addView(titleRow)
+            addView(statRow)
+            addView(detail)
+            addView(
+                View(activity).apply { setBackgroundColor(0x40FFFFFF) },
+                android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    1,
+                ).apply { topMargin = px(7f); bottomMargin = px(5f) },
+            )
             addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            val w = (activity.resources.displayMetrics.widthPixels * 0.86f).toInt()
-            layoutParams = FrameLayout.LayoutParams(w, (250 * dp).toInt()).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                metrics.widthPixels - px(20f),
+                (metrics.heightPixels * 0.42f).toInt(),
+            ).apply {
                 gravity = android.view.Gravity.START or android.view.Gravity.BOTTOM
-                leftMargin = (12 * dp).toInt()
-                bottomMargin = (110 * dp).toInt()
+                leftMargin = px(10f)
+                bottomMargin = px(100f)
             }
-            elevation = (12 * dp)
+            elevation = 14 * dp
         }
         val added = runCatching { decor.addView(box) }
         if (added.isFailure) {
@@ -536,7 +592,10 @@ object XhsAutoEntry {
         }
         attachedPanel = box
         panelLog = linesBox
-        panelHeader = header
+        panelStatus = status
+        panelStatValues = statValues
+        panelDetail = detail
+        panelScroll = scroll
         panelDecor = decor
         renderLines(lastLines)
         startTicker()
@@ -544,6 +603,28 @@ object XhsAutoEntry {
     }
 
     /** 顶栏每秒刷一次（用时在走，其余数字由驱动事件刷新）。 */
+    /** 顶栏（状态/四列数字/当前文章）统一从这里刷，ticker 与数据事件共用。 */
+    private fun refreshPanel() {
+        runCatching {
+            val st = XhsBatchDriver.stats()
+            panelStatus?.apply {
+                text = XhsBatchDriver.stateLabel()
+                setTextColor(
+                    when {
+                        XhsBatchDriver.isStoppingNow() -> 0xFFFFD166.toInt()
+                        XhsBatchDriver.isRunning() -> 0xFF8CFFC1.toInt()
+                        else -> 0xE6FFFFFF.toInt()
+                    },
+                )
+            }
+            panelStatValues.getOrNull(0)?.text = st[0].toString()
+            panelStatValues.getOrNull(1)?.text = st[1].toString()
+            panelStatValues.getOrNull(2)?.text = st[2].toString()
+            panelStatValues.getOrNull(3)?.text = "${st[6] / 60}:${(st[6] % 60).toString().padStart(2, '0')}"
+            panelDetail?.text = "当前文章 ${st[4]} 个资源 · 本屏待处理 ${st[5]} · 跳过 ${st[3]}"
+        }
+    }
+
     private fun startTicker() {
         stopTicker()
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -551,7 +632,7 @@ object XhsAutoEntry {
             override fun run() {
                 // 只认「当前这一条」心跳：换页会重建面板，旧 Runnable 不能复活
                 if (ticker !== this) return
-                runCatching { panelHeader?.text = XhsBatchDriver.header() }
+                refreshPanel()
                 if (attachedPanel != null) handler.postDelayed(this, 1000) else ticker = null
             }
         }
@@ -581,29 +662,30 @@ object XhsAutoEntry {
         // 同一份列表每秒会被 header 心跳重复推一遍：内容没变就别 removeAllViews 重建
         // （重建会触发下一次 onGlobalLayout，形成 4Hz 自激全量重建，长跑后主线程掉帧）
         if (lines === renderedLines) {
-            runCatching { panelHeader?.text = XhsBatchDriver.header() }
+            refreshPanel()
             return
         }
         renderedLines = lines
         lastLines = lines
-        runCatching { panelHeader?.text = XhsBatchDriver.header() }
+        refreshPanel()
         val box = panelLog ?: return
         runCatching {
             val act = attachedActivity ?: return@runCatching
             val dp = act.resources.displayMetrics.density
             box.removeAllViews()
-            lines.forEach { line ->
+            lines.forEach { raw ->
+                val line = raw.removePrefix("· ").trim()
                 box.addView(TextView(act).apply {
-                    textSize = 13f
+                    textSize = 12.5f
                     setTextColor(lineColor(line))
-                    setLineSpacing((3 * dp), 1f)
-                    text = line
+                    setLineSpacing(4 * dp, 1f)
+                    setPadding(0, (2 * dp).toInt(), 0, (2 * dp).toInt())
+                    text = if (line.startsWith("已保存") || line.startsWith("落盘") || line.startsWith("台账")) "✔ $line" else "· $line"
                 })
             }
             (attachedPanel as? ViewGroup)?.post {
                 runCatching {
-                    val sv = (attachedPanel as? ViewGroup)?.getChildAt(2) as? android.widget.ScrollView
-                    sv?.fullScroll(View.FOCUS_DOWN)
+                    panelScroll?.fullScroll(View.FOCUS_DOWN)
                 }
             }
         }
@@ -617,7 +699,10 @@ object XhsAutoEntry {
         runCatching { panelDecor?.let { d -> attachedPanel?.let { d.removeView(it) } } }
         attachedPanel = null
         panelLog = null
-        panelHeader = null
+        panelStatus = null
+        panelStatValues = emptyList()
+        panelDetail = null
+        panelScroll = null
         panelDecor = null
     }
 

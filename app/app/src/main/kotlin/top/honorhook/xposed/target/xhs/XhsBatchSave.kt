@@ -1276,7 +1276,8 @@ object XhsBatchSave {
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
             // 只有「零真实失败」才记账：100 张里 3 张成功 97 张 404 时若记账，下次采集会
             // 「已下载过，跳过」，缺的图永远补不回来（2026-11-22 审计 P1）。
-            if (!canceled && (ok > 0 || skipIndexes.isNotEmpty()) && noteId != null &&
+            // 静默批量路径的台账改由 XhsBatchDriver 记（它才知道视频轨结果），这里只服务交互路径。
+            if (!quiet && !canceled && (ok > 0 || skipIndexes.isNotEmpty()) && noteId != null &&
                 urls.size - ok - filtered - skipIndexes.size == 0
             ) {
                 runCatching { XhsDownloadLedger.record(activity.applicationContext, noteId, count = urls.size) }
