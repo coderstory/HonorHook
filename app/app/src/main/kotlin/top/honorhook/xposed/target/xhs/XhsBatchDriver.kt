@@ -585,7 +585,51 @@ object XhsBatchDriver {
      *
      * 只在当前活动 Activity 上试；不在详情页（列表页）时这些方法不返回 hex，天然安全。
      */
+    /**
+     * 等到本篇 noteId：每 200ms 探一次，**连续两次读到同一个值**才认。
+     *
+     * 为什么要求稳定：点开卡片的瞬间详情页还是上一篇（controller 尚未换），Activity 上读到的是上一页的 id；
+     * 认了它就会把「没打开过的篇」当成「已下载过」（2026-11-22 用户真机：一堆从没打开的篇直接跳过）。
+     * 卡片反射出来的 id（known）非空时只接受同一篇，避免串到邻篇。
+     */
+    private fun awaitNoteId(ctx: Context, prev: String?, known: String?): String? {
+        val deadline = System.currentTimeMillis() + NOTE_ID_WAIT_MS
+        var stable: String? = null
+        while (System.currentTimeMillis() < deadline && !stopRequested) {
+            val act = XhsBatchSave.activityOrNull()
+            val fromAct = if (act != null && act.javaClass.simpleName.contains("Detail")) {
+                runCatching { noteIdFromActivity(act) }.getOrNull()
+            } else null
+            val cand = fromAct?.takeIf { it != prev && (known == null || it == known) }
+            if (cand != null) {
+                if (stable == cand) return cand
+                stable = cand
+            } else {
+                stable = null
+            }
+            val reg = XhsVideoSave.lastShareNoteId()?.takeIf { it != prev && (known == null || it == known) }
+            if (reg != null) return reg
+            Thread.sleep(200)
+        }
+        return null
+    }
+
     private fun noteIdFromActivity(activity: Activity): String? {
+        // **先看 Intent**：详情页的 `getIntent().getStringExtra("id")` 是它被创建时那一篇的 id，权威且不会串；
+        // Activity 上的方法可能是 controller/adapter 的残留值（2026-11-22 真机：不同卡片拿到同一个 id，
+        // 导致从没打开过的篇也被判「已下载过」）。
+        val intent = runCatching { activity.intent }.getOrNull()
+        if (intent != null) {
+            runCatching { intent.getStringExtra("id") }.getOrNull()
+                ?.takeIf { hexId.matches(it) }?.let { return it }
+            val extras = runCatching { intent.extras }.getOrNull()
+            if (extras != null) {
+                for (key in extras.keySet()) {
+                    val v = runCatching { extras.get(key) as? String }.getOrNull() ?: continue
+                    if (hexId.matches(v)) return v
+                }
+            }
+        }
         val cls = activity.javaClass
         val cached = idMethodCache[cls.name]
         if (cached != null) {
@@ -604,15 +648,6 @@ object XhsBatchDriver {
                 }
             }
             if (found == null) idMethodCache[cls.name] = null
-        }
-        // Intent 兜底：详情页 `getIntent().getStringExtra("id")` 就是它自己的 noteId
-        val intent = runCatching { activity.intent }.getOrNull() ?: return null
-        runCatching { intent.getStringExtra("id") }.getOrNull()
-            ?.takeIf { hexId.matches(it) }?.let { return it }
-        val extras = runCatching { intent.extras }.getOrNull() ?: return null
-        for (key in extras.keySet()) {
-            val v = runCatching { extras.get(key) as? String }.getOrNull() ?: continue
-            if (hexId.matches(v)) return v
         }
         return null
     }
@@ -652,19 +687,10 @@ object XhsBatchDriver {
         // 早先只在点完卡片那一下问一次，那会儿详情页还没 resume（controller 还没挂上），
         // 之后就只轮询分享链登记，缓存命中的笔记永远等不到 ⇒ 「详情页没拿到 noteId」（2026-11-22 真机 17:47）。
         // 只问类名像 Detail 的页面：列表页上某些方法也可能返回 24 位串（作者 id），认错就串篇。
-        var byActivity = false
-        val registered = if (knownReady) null else await(NOTE_ID_WAIT_MS) { a ->
-            val fromAct = if (a.javaClass.simpleName.contains("Detail")) noteIdFromActivity(a) else null
-            if (fromAct != null && fromAct != prev) {
-                byActivity = true
-                fromAct
-            } else {
-                XhsVideoSave.lastShareNoteId()?.takeIf { it != prev && (known == null || it == known) }
-            }
-        }
+        val registered = if (knownReady) null else awaitNoteId(ctx, prev, known)
         val noteId = registered ?: known
         if (noteId != null && registered != null) {
-            vlog(ctx, "noteId 来源=${if (byActivity) "详情页方法/Intent" else "分享链登记"} noteId=$registered")
+            vlog(ctx, "noteId 来源=详情页/分享链轮询 noteId=$registered")
         }
         if (!knownReady && registered == null && known != null) {
             vlog(ctx, "详情页没登记，用卡片反射的 noteId=$known 兜底")
