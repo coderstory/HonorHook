@@ -309,7 +309,9 @@ object XhsAutoEntry {
             return
         }
         if (panelDismissed) return
-        // 收工后也保留最后一份内容（用户要求），只有下一轮开始才重新出现
+        // 没在采集就不要凭空造面板（2026-11-22 用户：还没开始采集时别显示信息窗）；
+        // 已在屏幕上的那份保持不动——收工不自动隐藏，只有 × 能关。
+        if (!XhsBatchDriver.isRunning()) return
         ensurePanel(act, decor)
     }
 
