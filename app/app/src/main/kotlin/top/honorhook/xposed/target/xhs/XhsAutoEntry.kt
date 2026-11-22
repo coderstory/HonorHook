@@ -114,6 +114,8 @@ object XhsAutoEntry {
                             // 靠网络分页才出现 —— 单靠轮询要么慢要么超时收手（用户 2026-11-22
                             // 反馈「按钮展示不灵光」）。改成「布局观察者为主 + 轮询兜底」。
                             watchDecor(a, module, main)
+                            // 立刻补一拍：换页时面板要马上跟到新 decor（等轮询第一拍就是肉眼可见的「消失」）
+                            main.post { runCatching { syncButton(a, module) } }
                             retrySync(a, module, main, attempts = 30, intervalMs = 500)
                         }
 
@@ -436,11 +438,26 @@ object XhsAutoEntry {
      * 下面才是滚动的过程消息；右上角 × 由用户主动关闭。汇总常驻不滚，过程消息自动滚到底。
      */
     private fun ensurePanel(activity: Activity, decor: ViewGroup) {
-        if (attachedPanel != null && panelDecor === decor) {
-            renderLines(lastLines)
-            return
+        val existing = attachedPanel
+        if (existing != null) {
+            if (panelDecor === decor) {
+                renderLines(lastLines)
+                return
+            }
+            // **换页不重建，直接搬家**（2026-11-22 用户：「切换列表页和详情页会消失，然后又刷出来」）。
+            // 旧做法是先 removePanel 再 addView 到新 decor：中间隔着一次布局，看起来就是闪一下；
+            // 现在把同一个 View 从旧父摘掉立刻挂到新父上，同一帧完成，内容/滚动位置都不丢。
+            val moved = runCatching {
+                (existing.parent as? ViewGroup)?.removeView(existing)
+                decor.addView(existing, existing.layoutParams)
+            }
+            if (moved.isSuccess) {
+                panelDecor = decor
+                renderLines(lastLines)
+                return
+            }
+            removePanel()
         }
-        removePanel()
         val dp = activity.resources.displayMetrics.density
         val header = TextView(activity).apply {
             textSize = 15f
