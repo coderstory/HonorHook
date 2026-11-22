@@ -123,6 +123,11 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
                                 "过滤：图片短边≤720、视频<5MB 不落盘；下载过的笔记自动跳过。",
                             fontSize = 13.sp, color = colorScheme.onSecondaryContainer,
                         )
+                        Text(
+                            "⚠️ 该功能默认关闭：请到「功能」页 → 小红书 → 打开「批量采集」，" +
+                                "并重开小红书（开关在下次宿主进程注入时生效）。",
+                            fontSize = 13.sp, color = colorScheme.error,
+                        )
                     }
                 }
             }

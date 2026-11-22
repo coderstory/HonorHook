@@ -122,6 +122,8 @@
     <string name="feature_xhs_takeover_save_title">接管下载</string>
     <string name="feature_xhs_takeover_save_desc">保存时由模块接手：图片下原图（实况图只下静态那张），视频自动换到原片（作者关掉下载时会先弹卡片问你），顺手去水印，带进度和取消按钮</string>
     <string name="feature_xhs_silent_download_title">后台静默下载</string>
+    <string name="feature_xhs_batch_title">批量采集</string>
+    <string name="feature_xhs_batch_desc">在作者主页注入「采集」悬浮按钮，逐篇打开详情、解析分享链并静默下载原图/视频（含去重、720p 与 5MB 过滤）；默认关闭</string>
     <string name="feature_xhs_silent_download_desc">保存后不再弹任何确认/进度弹窗，直接后台下载，Toast 提示开始与完成（含张数/体积）；取消按钮随之不可用</string>
 
     <string name="target_name_wallpapereditor">壁纸视频增强</string>

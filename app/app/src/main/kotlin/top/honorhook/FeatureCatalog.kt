@@ -61,6 +61,12 @@ object FeatureCatalog {
     /** 小红书图片/视频下载后台静默（2026-11-03 用户需求）：开 = 不弹进度卡（视频 HD 卡/图片批量卡），完成提示卡保留。 */
     const val KEY_XHS_SILENT_DOWNLOAD = "xhs.silent_download"
 
+    /**
+     * 批量采集（2026-11-22 用户要求「功能开关，默认关闭」）：开 = 作者主页注入「采集」悬浮按钮并允许
+     * 逐篇静默下载；关 = 完全不注入按钮、不跑驱动（零 hook 副作用，只有 X4 旁路登记照旧）。
+     */
+    const val KEY_XHS_BATCH = "xhs.batch"
+
     /** 荣耀图库 AI 能力执行器（2026-11-10）：AI 超清 / AI 扩图后台直调（visionkit 进程内调用）。 */
     const val KEY_PHOTOS_AI = "photos.ai_capability"
 
@@ -387,6 +393,10 @@ object FeatureCatalog {
                 Feature(KEY_XHS_SAVE_UNLOCK, R.string.feature_xhs_save_unlock_title, R.string.feature_xhs_save_unlock_desc),
                 Feature(KEY_XHS_TAKEOVER_SAVE, R.string.feature_xhs_takeover_save_title, R.string.feature_xhs_takeover_save_desc),
                 Feature(KEY_XHS_SILENT_DOWNLOAD, R.string.feature_xhs_silent_download_title, R.string.feature_xhs_silent_download_desc),
+                Feature(
+                    KEY_XHS_BATCH, R.string.feature_xhs_batch_title, R.string.feature_xhs_batch_desc,
+                    defaultEnabled = false,   // 2026-11-22 用户拍板：批量采集是新功能，默认关
+                ),
             ),
             baselineVersion = "9.50.0",  // dumpsys 实证 2026-10-19（设备已升）；X1/X4 零漂移，X2b/X3/X5 重选点（docs/reverse/xhs.md §八）
             extraVersions = setOf("9.49.1", "9.51.0", "9.52.1", "9.53.3", "9.54.0"),  // 9.51 = 10-23；9.52.1 = 11-02（XhsPoints 9.52 套）；9.53.3 = 11-07 实装（6 点在位，videoClick/h0/e0 仍无家）；9.54.0 = 11-12 适配（X2c 注解候选制 + 6 点新坐标，装机复采前 X2/X5 判据未达）

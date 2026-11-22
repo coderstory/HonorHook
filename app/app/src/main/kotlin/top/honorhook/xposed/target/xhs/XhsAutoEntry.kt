@@ -11,7 +11,9 @@ import android.widget.TextView
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
 import top.honorhook.AutoActions
+import top.honorhook.FeatureCatalog
 import top.honorhook.xposed.core.MountEngine
+import top.honorhook.xposed.data.RemoteConfig
 
 /**
  * 批量采集入口（2026-11-21 用户拍板「加主页悬浮按钮」）：作者主页注入悬浮按钮，
@@ -299,6 +301,12 @@ object XhsAutoEntry {
      * 那几页也要留按钮，否则跑到一半没地方取消。
      */
     private fun syncButton(activity: Activity, module: XposedModule) {
+        // 功能开关（FeatureCatalog.KEY_XHS_BATCH，默认关）：关着就彻底不注入按钮/面板，
+        // 也不参与驱动——宿主页面零改动（2026-11-22 用户要求「还缺了功能开关，默认关闭」）。
+        if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_BATCH)) {
+            if (attachedButton != null) detach()
+            return
+        }
         val decor = activity.window?.decorView as? ViewGroup ?: return
         if (!isProfilePage(decor) && !XhsBatchDriver.isRunning()) {
             // 判据失效时按钮会静默消失（用户和诊断都看不出原因）：摘除前记一次
@@ -721,6 +729,11 @@ object XhsAutoEntry {
         lastToggleAt = now
         // 这是宿主主线程的点击回调：抛出去就是宿主崩溃（2026-11-22 审计 #2）
         runCatching {
+            if (!XhsBatchDriver.isRunning() && !RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_BATCH)) {
+                // 开关关着时按钮不该存在；万一残留，点了也不跑（不静默吞，写一行日志）
+                XhsBatchDriver.logEntry("批量采集开关是关的，忽略点击（功能页开启 xhs.batch 后生效）")
+                return@runCatching
+            }
             if (XhsBatchDriver.isRunning()) XhsBatchDriver.stop(module, ctx) else XhsBatchDriver.start(module, ctx)
         }.onFailure {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 启停失败: ${it.javaClass.simpleName}: ${it.message}")
