@@ -375,6 +375,10 @@ object XhsBatchDriver {
                 }
                 return
             }
+            if (isAppRoot(act)) {
+                xlog(ctx, "起跑页是首页（${act.javaClass.simpleName}），请先打开作者主页再点采集")
+                return
+            }
             xlog(ctx, "起跑页不是作者主页（${act.javaClass.simpleName} 详情=${detailLike} 资料区=${stats}），退一页")
             pressBack(act)
             Thread.sleep(900)
@@ -1003,7 +1007,25 @@ object XhsBatchDriver {
      * 整轮卡在 NoteDetailActivity 到收工。这里每级都等 300ms 看有没有真的换页，仍在原地才降级；
      * **列表页本身绝不 finish**（不然就把用户主页关掉了）。
      */
+    /**
+     * 是不是小红书自己的**首页/根页**（IndexActivityV2 之类）。
+     * 2026-11-22 用户反馈「采集中小红书被关了」：`dumpsys activity exit-info` 里那条是
+     * `reason=10 (USER REQUESTED) subreason=22 (REMOVE TASK)`——不是崩溃，是我们按返回把
+     * 任务栈整个弹空了，系统于是移除任务，观感就是「小红书自己关了」。
+     * 根页永远不能按返回：再按一下就是退出 App。
+     */
+    private fun isAppRoot(activity: Activity): Boolean {
+        val n = activity.javaClass.simpleName
+        if (n.contains("Index") || n.contains("Splash") || n.contains("Main")) return true
+        // 兜底：任务根 Activity 且不是我们锁定的列表页（作者主页是从别处 push 上来的，不会是 task root）
+        return activity.isTaskRoot && listClassName != null && activity.javaClass.name != listClassName
+    }
+
     private fun pressBack(activity: Activity) {
+        if (isAppRoot(activity)) {
+            xlog(activity.applicationContext, "已在首页（${activity.javaClass.simpleName}），不再按返回", toast = false)
+            return
+        }
         // 必须成对发 DOWN+UP：AOSP 的 back 由 onKeyUp 触发，只发 DOWN 时页面纹丝不动
         // （2026-11-22 真机：正是这个原因导致每级兜底都降级到 onBackPressed）（审计 #10）
         onMain {
