@@ -47,16 +47,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** 本页可观察状态（驱动在宿主进程，进度经广播回传到这里）。 */
-private object XhsAutoUiState {
-    var running by mutableStateOf(false)
-    var phase by mutableStateOf("待机")
-    var ok by mutableIntStateOf(0)
-    var skipped by mutableIntStateOf(0)
-    var failed by mutableIntStateOf(0)
-    val logs = mutableStateListOf<String>()
-}
-
 /**
  * 节奏范围本地存档（模块侧，跨进程下发给宿主驱动）。
  * 单位是**分秒（0.1 秒）**：UI 步进 0.5s，用整秒存不下（2026-11-22 用户要求步进 0.5）。
@@ -77,17 +67,16 @@ private object PaceStore {
 }
 
 /**
- * 批量采集页（2026-11-22）：观测面板 + 节奏配置。
+ * 批量采集页（2026-11-22）：**只放设置与用法，不放状态统计**。
  *
- * 采集本身完全在小红书进程内完成（[top.honorhook.xposed.target.xhs.XhsBatchDriver] 直接点宿主的
- * view），不需要无障碍服务。本页做四件事：看进度、半途停止（广播到宿主）、改每篇之间的
- * 随机节奏（广播下发）、看日志尾。触发入口仍是作者主页的悬浮「采集」按钮。
+ * 用户 2026-11-22 明确要求「统计弹窗是小红书里显示，不是放本应用」——所有进度/汇总/过程消息
+ * 都在小红书内的悬浮面板（[top.honorhook.xposed.target.xhs.XhsAutoEntry] 注入宿主 decorView）。
+ * 本页只做三件事：说清怎么用、配每篇之间的随机节奏（广播下发宿主）、提供一个兜底的「停止」。
+ * 采集本身完全在小红书进程内完成，不需要无障碍服务。
  */
 @Composable
 fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 0.dp) {
     val context = LocalContext.current
-    val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
-    val st = XhsAutoUiState
     var minSec by remember { mutableIntStateOf(PaceStore.min(context)) }
     var maxSec by remember { mutableIntStateOf(PaceStore.max(context)) }
 
@@ -101,57 +90,7 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
                 .putExtra(AutoActions.EXTRA_PACE_MAX_DS, maxSec),
         )
     }
-    LaunchedEffect(Unit) {
-        pushPace()
-        // 驱动在宿主进程、状态不在本进程里：进页问一次真实运行态（审计 #13），
-        // 否则中途打开本页会一直显示「待机」且没有「停止采集」可用。
-        runCatching {
-            context.sendBroadcast(Intent(AutoActions.QUERY).setPackage(AutoActions.HOST_PACKAGE))
-        }
-    }
-
-    // 驱动发来的进度广播 → 本页状态（离开页面即摘，避免泄漏）
-    DisposableEffect(Unit) {
-        val r = object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) {
-                when (i.action) {
-                    AutoActions.STATE, AutoActions.DONE -> {
-                        val on = i.getBooleanExtra(AutoActions.EXTRA_RUNNING, false)
-                        // 新起一轮：清掉上一轮的计数与日志，别把旧数字当成本轮（审计 #20）
-                        if (on && !st.running) {
-                            st.ok = 0
-                            st.skipped = 0
-                            st.failed = 0
-                            st.logs.clear()
-                        }
-                        st.running = on
-                    }
-                    AutoActions.PROGRESS -> {
-                        // 进度带 running=true 就说明在跑（收尾那条带 false，不能反手点亮）（审计 #13）
-                        if (i.getBooleanExtra(AutoActions.EXTRA_RUNNING, false)) st.running = true
-                        st.ok = i.getIntExtra("ok", st.ok)
-                        st.skipped = i.getIntExtra("skipped", st.skipped)
-                        st.failed = i.getIntExtra("failed", st.failed)
-                    }
-                }
-                i.getStringExtra(AutoActions.EXTRA_TEXT)?.let {
-                    st.phase = it
-                    st.logs.add("${timeFmt.format(Date())} $it")
-                    while (st.logs.size > 60) st.logs.removeAt(0)
-                }
-            }
-        }
-        ContextCompat.registerReceiver(
-            context, r,
-            IntentFilter().apply {
-                addAction(AutoActions.STATE)
-                addAction(AutoActions.PROGRESS)
-                addAction(AutoActions.DONE)
-            },
-            ContextCompat.RECEIVER_EXPORTED,
-        )
-        onDispose { runCatching { context.unregisterReceiver(r) } }
-    }
+    LaunchedEffect(Unit) { pushPace() }
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -179,35 +118,11 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
                         Text(
                             "打开小红书 → 进某个作者的主页 → 点右侧红色「采集」按钮。" +
                                 "之后自动逐篇打开、下载原图并返回列表，一直滚到底。" +
-                                "运行中按钮变「取消」（带已处理篇数），随时可停。" +
+                                "**进度、已存/失败篇数、待处理与用时，都显示在小红书内的悬浮面板上**（左下角），" +
+                                "运行中按钮变「取消」，随时可停。" +
                                 "过滤：图片短边≤720、视频<5MB 不落盘；下载过的笔记自动跳过。",
                             fontSize = 13.sp, color = colorScheme.onSecondaryContainer,
                         )
-                    }
-                }
-            }
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp), Arrangement.spacedBy(8.dp)) {
-                        Text("状态", fontSize = 15.sp)
-                        Text(if (st.running) "运行中" else "待机", fontSize = 14.sp)
-                        Text(st.phase, fontSize = 13.sp, color = colorScheme.onSecondaryContainer)
-                        Text(
-                            "成功 ${st.ok} 篇 · 跳过 ${st.skipped} 篇 · 失败 ${st.failed} 篇",
-                            fontSize = 13.sp, color = colorScheme.onSecondaryContainer,
-                        )
-                        if (st.running) {
-                            // 停止 = 广播到宿主进程的驱动（驱动在 com.xingin.xhs 里，UI 进程调不到）
-                            Button(
-                                onClick = {
-                                    context.sendBroadcast(
-                                        Intent(AutoActions.STOP).setPackage(AutoActions.HOST_PACKAGE),
-                                    )
-                                    st.phase = "已发送停止"
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("停止采集") }
-                        }
                     }
                 }
             }
@@ -231,15 +146,22 @@ fun XhsAutoScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: D
                     }
                 }
             }
-            if (st.logs.isNotEmpty()) {
-                item {
-                    Card {
-                        Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) {
-                            Text("日志", fontSize = 15.sp)
-                            st.logs.forEach {
-                                Text(it, fontSize = 12.sp, color = colorScheme.onSecondaryContainer)
-                            }
-                        }
+            item {
+                Card {
+                    Column(Modifier.padding(16.dp), Arrangement.spacedBy(8.dp)) {
+                        Text("兜底停止", fontSize = 15.sp)
+                        Text(
+                            "正常在小红书里点「取消」即可。若面板和按钮已随页面退出，用这里停。",
+                            fontSize = 12.sp, color = colorScheme.onSecondaryContainer,
+                        )
+                        TextButton(
+                            text = "停止采集",
+                            onClick = {
+                                context.sendBroadcast(
+                                    Intent(AutoActions.STOP).setPackage(AutoActions.HOST_PACKAGE),
+                                )
+                            },
+                        )
                     }
                 }
             }

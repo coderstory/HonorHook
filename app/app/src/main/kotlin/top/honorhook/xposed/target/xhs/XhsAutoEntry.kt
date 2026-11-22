@@ -350,6 +350,7 @@ object XhsAutoEntry {
         panelDecor = decor
         renderLines(lastLines)
         startTicker(activity)
+        XhsBatchDriver.logEntry("悬浮面板已注入 ${activity.javaClass.simpleName}（汇总顶栏 + 过程消息）")
     }
 
     /** 顶栏每秒刷一次（用时在走，其余数字由驱动事件刷新）。 */

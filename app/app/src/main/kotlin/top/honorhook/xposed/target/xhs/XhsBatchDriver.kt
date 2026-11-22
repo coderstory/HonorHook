@@ -100,6 +100,12 @@ object XhsBatchDriver {
     /** 过程消息监听（主线程外调用，落地由 [XhsAutoEntry] 切主线程渲染）。 */
     @Volatile var uiListener: ((List<String>) -> Unit)? = null
 
+    /** 入口侧（按钮/面板）写一行到同一份文件日志：面板到底注入没有，只能靠这里验。 */
+    internal fun logEntry(msg: String) {
+        val app = currentApp ?: return
+        runCatching { xlog(app, msg) }
+    }
+
     fun lastLines(): List<String> = synchronized(logLock) { logLines.toList() }
 
     private fun pushLine(msg: String) {
