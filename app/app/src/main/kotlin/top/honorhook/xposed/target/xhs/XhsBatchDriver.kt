@@ -792,6 +792,12 @@ object XhsBatchDriver {
         val videoExists = videos.isNotEmpty() && runCatching {
             XhsDownloadLedger.hasVideoFile(ctx.contentResolver, noteId)
         }.getOrDefault(false)
+        // 相册已经齐了（一张不缺、视频也在）就别再进下载：downloadAll 的 onlyIndexes 空集语义是「全都下」，
+        // 传空集进去会把整篇重下一遍，日志表现成「存0/败0 耗时1ms → 判失败并重试三次」（2026-11-22 自测）。
+        if (missingIdx.isEmpty() && (videos.isEmpty() || videoExists)) {
+            xlog(ctx, "相册已齐（图 ${urls.size}/${urls.size}${if (videos.isEmpty()) "" else "，视频已在"}），跳过 noteId=$noteId")
+            return SaveOutcome.SKIPPED
+        }
         if (urls.isEmpty() && videoExists) {
             xlog(ctx, "相册已有该篇视频，跳过 noteId=$noteId")
             return SaveOutcome.SKIPPED
