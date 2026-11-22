@@ -35,6 +35,13 @@ object XhsAutoEntry {
     @Volatile private var attachedButton: TextView? = null
     @Volatile private var attachedDecor: ViewGroup? = null
 
+    /** 过程消息面板（同一个 View 持续刷新，替代逐条 Toast）；只在采集期间显示。 */
+    @Volatile private var attachedPanel: View? = null
+    @Volatile private var panelText: TextView? = null
+    @Volatile private var panelDecor: ViewGroup? = null
+    /** 面板最近一次内容：面板晚于消息建出来时用它补渲染（首条消息早于注入很常见）。 */
+    @Volatile private var lastLines: List<String> = emptyList()
+
     /** 当前挂着的全局布局观察者（哪棵 decor、哪个 listener、上次检查时间）。 */
     @Volatile private var watchedDecor: ViewGroup? = null
     /** 当前那次注入轮询的 Runnable（销毁时精确取消，不误伤别的定时器）。 */
@@ -57,7 +64,9 @@ object XhsAutoEntry {
                 }
                 if (!tracked.compareAndSet(false, true)) return
                 // 驱动状态变化 → 按钮文案（驱动在自己的线程里改状态，回主线程刷 View）
-                XhsBatchDriver.stateListener = { main.post { applyLabel() } }
+                XhsBatchDriver.stateListener = { main.post { applyLabel(); panelSync() } }
+                // 过程消息 → 悬浮面板（不再逐条 Toast：用户 2026-11-22「toast 不太行」）
+                XhsBatchDriver.uiListener = { lines -> main.post { renderLines(lines) } }
                 runCatching { registerStopReceiver(app, module, main) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 停止接收器注册失败: ${it.message}") }
                 runCatching {
@@ -249,6 +258,7 @@ object XhsAutoEntry {
         attachedButton = btn
         attachedDecor = decor
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 悬浮按钮已注入")
+        panelSync()
     }
 
     /**
@@ -270,10 +280,81 @@ object XhsAutoEntry {
         }
     }
 
+    /**
+     * 面板跟随运行态与当前页：采集期间每翻一页都可能换 decor，面板要跟过去；
+     * 收工后再留 4 秒让人看完最后几条（用户「要滚动消息」的原始诉求就是过程可见）。
+     */
+    private fun panelSync() {
+        val decor = attachedDecor ?: return
+        val act = decor.context as? android.app.Activity ?: return
+        if (XhsBatchDriver.isRunning()) ensurePanel(act, decor) else schedulePanelRemoval()
+    }
+
+    private fun ensurePanel(activity: Activity, decor: ViewGroup) {
+        if (attachedPanel != null && panelDecor === decor) {
+            renderLines(lastLines)
+            return
+        }
+        removePanel()
+        val dp = activity.resources.displayMetrics.density
+        val tv = TextView(activity).apply {
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            setPadding((10 * dp).toInt(), (8 * dp).toInt(), (10 * dp).toInt(), (8 * dp).toInt())
+            text = lastLines.joinToString("\n")
+        }
+        val scroll = android.widget.ScrollView(activity).apply {
+            isVerticalScrollBarEnabled = false
+            addView(tv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            background = GradientDrawable().apply {
+                cornerRadius = 10 * dp
+                setColor(0xB3000000.toInt())
+            }
+            val w = (activity.resources.displayMetrics.widthPixels * 0.62f).toInt()
+            layoutParams = FrameLayout.LayoutParams(w, (106 * dp).toInt()).apply {
+                gravity = android.view.Gravity.START or android.view.Gravity.BOTTOM
+                leftMargin = (14 * dp).toInt()
+                bottomMargin = (120 * dp).toInt()
+            }
+            isClickable = false
+            // 面板不抢触摸：用户还要在上面点卡片
+            isFocusable = false
+        }
+        runCatching { decor.addView(scroll) }
+        attachedPanel = scroll
+        panelText = tv
+        panelDecor = decor
+        renderLines(lastLines)
+    }
+
+    private fun renderLines(lines: List<String>) {
+        lastLines = lines
+        val tv = panelText ?: return
+        runCatching {
+            tv.text = lines.joinToString("\n")
+            (attachedPanel as? android.widget.ScrollView)?.post {
+                runCatching { (attachedPanel as? android.widget.ScrollView)?.fullScroll(View.FOCUS_DOWN) }
+            }
+        }
+    }
+
+    private fun schedulePanelRemoval() {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        main.postDelayed({ if (!XhsBatchDriver.isRunning()) removePanel() }, 4000)
+    }
+
+    private fun removePanel() {
+        runCatching { panelDecor?.let { d -> attachedPanel?.let { d.removeView(it) } } }
+        attachedPanel = null
+        panelText = null
+        panelDecor = null
+    }
+
     private fun detach() {
         runCatching { attachedDecor?.let { d -> attachedButton?.let { d.removeView(it) } } }
         attachedButton = null
         attachedDecor = null
+        removePanel()
     }
 
     private fun toggle(ctx: android.content.Context, module: XposedModule) {

@@ -37,6 +37,8 @@ import top.honorhook.xposed.core.MountEngine
  */
 object XhsBatchDriver {
 
+    private const val LOG_LINES = 6
+
     private const val JUDGE_PREFIX = "XhsHook·Batch"
     private const val TAG = "HonorHookXhsBatch"
 
@@ -87,6 +89,24 @@ object XhsBatchDriver {
 
     /** 运行态变化回调（宿主进程内、任意线程调用）——悬浮按钮据此刷新「采集/取消」。 */
     @Volatile var stateListener: (() -> Unit)? = null
+
+    /** 最近若干条过程消息（宿主内悬浮面板显示用，替代逐条 Toast——用户 2026-11-22「toast 不太行」）。 */
+    private val logLines = ArrayDeque<String>()
+    private val logLock = Any()
+
+    /** 过程消息监听（主线程外调用，落地由 [XhsAutoEntry] 切主线程渲染）。 */
+    @Volatile var uiListener: ((List<String>) -> Unit)? = null
+
+    fun lastLines(): List<String> = synchronized(logLock) { logLines.toList() }
+
+    private fun pushLine(msg: String) {
+        val snap = synchronized(logLock) {
+            logLines.addLast(msg)
+            while (logLines.size > LOG_LINES) logLines.removeFirst()
+            logLines.toList()
+        }
+        runCatching { uiListener?.invoke(snap) }
+    }
 
     /** 最近一次驱动的应用上下文（跨进程查询状态时用来发广播）。 */
     @Volatile private var currentApp: Context? = null
@@ -640,9 +660,9 @@ object XhsBatchDriver {
 
     /** 文件日志：宿主进程的 logcat 在荣耀 HKS 下是密文，排障只能靠这个。 */
     /**
-     * 每一步都写文件日志 + Toast（2026-11-22 用户要求「用 toast 打印所有操作」）：
-     * 手机上直接看得到我在干什么，不用去翻文件。转储类长文本（[dumpViews]）只进文件不弹，
-     * 否则一次弹 40 行会把屏幕盖住。
+     * 每一步都写文件日志 + 推给宿主内悬浮面板（2026-11-22 用户反馈「toast 不太行，要滚动消息」）：
+     * Toast 每条都要抢焦点、还会叠成一串；滚动面板是同一个 View 持续更新，看得见上下文。
+     * 转储类长文本（[dumpViews]）只进文件不上面板，否则一次 40 行把面板顶满。
      */
     private fun xlog(ctx: Context, msg: String, toast: Boolean = true) {
         runCatching {
@@ -652,6 +672,6 @@ object XhsBatchDriver {
             val t = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())
             f.appendText("$t $msg\n")
         }
-        if (toast) runCatching { toast(ctx, msg.take(60)) }
+        if (toast) runCatching { pushLine(msg) }
     }
 }
