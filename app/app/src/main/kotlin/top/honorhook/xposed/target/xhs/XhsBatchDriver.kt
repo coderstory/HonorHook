@@ -45,7 +45,7 @@ object XhsBatchDriver {
     private const val JUDGE_PREFIX = "XhsHook·Batch"
     private const val TAG = "HonorHookXhsBatch"
 
-    private const val NOTE_ID_WAIT_MS = 8000L
+    private const val NOTE_ID_WAIT_MS = 4000L
     private const val NOTE_RESOLVE_MS = 90_000L
     private const val LIST_BACK_MS = 5000L
     /** 每篇之间的随机节奏默认 2~4s（用户 2026-11-21 定案；UI 页可改，经 CONFIG 广播下发）。 */
@@ -70,7 +70,7 @@ object XhsBatchDriver {
     private const val MAX_BACK_PRESSES = 2
 
     /** 详情页开出后等分享链/裸 token 落表的上限（宿主命中缓存时不发请求，要给足时间）。 */
-    private const val LINK_WAIT_MS = 15_000L
+    private const val LINK_WAIT_MS = 5_000L
 
     /** 宿主 noteId 形态（24 位小写 hex），与 XhsSavePivot.HEX24 同口径。 */
     private val HEX24 = Regex("[0-9a-f]{24}")
@@ -169,6 +169,10 @@ object XhsBatchDriver {
      * 所有作者主页共用同一个 Activity 类（2026-11-22 审计 #11）。来源见 [XhsAuthorTrack]。
      */
     @Volatile private var lockedAuthor: String? = null
+    /** 本轮已「成功或跳过」的 noteId：同轮不重复处理同一篇（滚屏后卡片会以不同 top 再次出现）。 */
+    private val finishedIds = HashSet<String>()
+    /** collect 最近一次解析到的 noteId；循环据此登记 finishedIds。 */
+    @Volatile private var lastNoteId: String? = null
 
     /** 累计落盘**文件**数（不是篇数）：用户 2026-11-22 要求面板同时给出「篇」与「资源」两个口径。 */
     @Volatile private var resourceCount = 0
@@ -503,6 +507,7 @@ object XhsBatchDriver {
                 // 零详情页、零等待，直接解析直下。这是最快也最稳的一条路（2026-11-22）。
                 if (known != null && XhsVideoSave.shareLinkOf(known) != null) {
                     val direct = collectWithRetry(module, ctx, prev = null, known = known)
+                    if (direct != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                     when (direct) {
                         SaveOutcome.OK -> ok++
                         SaveOutcome.SKIPPED -> skipped++
@@ -544,6 +549,7 @@ object XhsBatchDriver {
                     continue
                 }
                 val saved = collectWithRetry(module, ctx, prev, known)
+                if (saved != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                 when (saved) {
                     SaveOutcome.OK -> ok++
                     SaveOutcome.SKIPPED -> skipped++
@@ -693,6 +699,11 @@ object XhsBatchDriver {
         // 只问类名像 Detail 的页面：列表页上某些方法也可能返回 24 位串（作者 id），认错就串篇。
         val registered = if (knownReady) null else awaitNoteId(ctx, prev, known)
         val noteId = registered ?: known
+        lastNoteId = noteId
+        if (noteId != null && noteId in finishedIds) {
+            xlog(ctx, "本篇本轮已处理过，跳过 noteId=$noteId")
+            return SaveOutcome.SKIPPED
+        }
         if (noteId != null && registered != null) {
             vlog(ctx, "noteId 来源=详情页/分享链轮询 noteId=$registered")
         }
