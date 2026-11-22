@@ -27,12 +27,58 @@ internal object XhsDownloadLedger {
     /** LIKE 前缀：同笔记的图片与视频文件名都以它开头。 */
     internal fun likePrefix(noteId: String): String = "xhs_$noteId%"
 
-    /** 记账（downloadAll 成功落盘后调用，后台线程）：append 一行，失败静默（下次 MediaStore 查询兜底）。 */
-    internal fun record(context: android.content.Context, noteId: String, atSec: Long = System.currentTimeMillis() / 1000) {
+    /**
+     * 记账（downloadAll 零失败落盘后调用，后台线程）：append 一行 `noteId\tts\t张数`，失败静默。
+     * 张数是「这一篇到底该有几张」的现场值：老行只有两列（= 张数未知），补齐时不拿它当完整依据。
+     */
+    internal fun record(
+        context: android.content.Context,
+        noteId: String,
+        atSec: Long = System.currentTimeMillis() / 1000,
+        count: Int = 0,
+    ) {
         runCatching {
-            java.io.File(context.filesDir, LEDGER_FILE).appendText("$noteId\t$atSec\n")
+            java.io.File(context.filesDir, LEDGER_FILE).appendText("$noteId\t$atSec\t$count\n")
         }
     }
+
+    /**
+     * 相册里这篇**已经存在哪些图片序号**（文件名 `xhs_<noteId>_<ts>_<i>.<ext>`）。
+     * 用它做「补齐」而不是「整篇重下」：缺 2 张就只下那 2 张，已存在的不再产生重复文件。
+     * 老命名（无 noteId）不参与，解析不出序号的行直接跳过。
+     */
+    internal fun existingImageIndexes(resolver: ContentResolver, noteId: String): Set<Int> {
+        val out = HashSet<Int>()
+        runCatching {
+            resolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?",
+                arrayOf(likePrefix(noteId)),
+                null,
+            )?.use { c ->
+                val col = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                while (c.moveToNext()) {
+                    val name = c.getString(col) ?: continue
+                    // xhs_<noteId>_<ts>_<i>.<ext>
+                    val idx = name.substringBeforeLast('.').split('_').getOrNull(3)?.toIntOrNull()
+                    if (idx != null) out.add(idx)
+                }
+            }
+        }
+        return out
+    }
+
+    /** 相册里这篇是否已有视频文件（`xhs_<noteId>_hd.mp4` / `_origin.mov`）。 */
+    internal fun hasVideoFile(resolver: ContentResolver, noteId: String): Boolean = runCatching {
+        resolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?",
+            arrayOf(likePrefix(noteId)),
+            null,
+        )?.use { it.count > 0 } ?: false
+    }.getOrDefault(false)
 
     /** 主台账查询：返回该 noteId 最近一次落盘时间（秒），无记录 = 0。 */
     internal fun ledgerDownloaded(context: android.content.Context, noteId: String): Long = runCatching {

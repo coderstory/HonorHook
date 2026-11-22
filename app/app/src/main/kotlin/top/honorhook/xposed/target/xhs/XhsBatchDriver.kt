@@ -547,9 +547,11 @@ object XhsBatchDriver {
                 if (XhsVideoSave.shareLinkOf(noteId) != null || XhsVideoSave.tokenOf(noteId) != null) true else null
             }
         }
-        val already = runCatching { XhsDownloadLedger.downloaded(ctx, noteId).first }.getOrDefault(0)
-        if (already > 0) {
-            xlog(ctx, "已下载过，跳过 noteId=$noteId")
+        // 只认台账里的「整篇零失败」记录。早先还看相册前缀：只要有一张旧文件就整篇跳过，
+        // 于是早前中断留下的半篇永远停在缺图状态（2026-11-22 用户「为啥跳过的这么多」+ 审计 #5）。
+        // 相册现状留到解析之后按**序号**核对，缺哪张补哪张。
+        if (runCatching { XhsDownloadLedger.ledgerDownloaded(ctx, noteId) }.getOrDefault(0L) > 0) {
+            xlog(ctx, "台账记过整篇，跳过 noteId=$noteId")
             return SaveOutcome.SKIPPED
         }
         val activity = XhsBatchSave.activityOrNull()
@@ -600,12 +602,32 @@ object XhsBatchDriver {
             xlog(ctx, "解析结果没有可下载文件 noteId=$noteId")
             return SaveOutcome.FAIL
         }
+        // 补齐：相册里已有哪些图片序号（文件名 `xhs_<noteId>_<ts>_<i>`），只补缺的
+        val existingIdx = runCatching {
+            XhsDownloadLedger.existingImageIndexes(ctx.contentResolver, noteId)
+        }.getOrDefault(emptySet())
+        val missingIdx = urls.indices.filter { it !in existingIdx }.toSet()
+        // 视频是否已在相册（文件名同为 xhs_<noteId>_ 前缀）；注意必须是「有视频且文件在」
+        val videoExists = videos.isNotEmpty() && runCatching {
+            XhsDownloadLedger.hasVideoFile(ctx.contentResolver, noteId)
+        }.getOrDefault(false)
+        if (urls.isEmpty() && videoExists) {
+            xlog(ctx, "相册已有该篇视频，跳过 noteId=$noteId")
+            return SaveOutcome.SKIPPED
+        }
+        if (urls.isNotEmpty() && missingIdx.isEmpty() && videoExists) {
+            xlog(ctx, "相册已下齐（图 ${existingIdx.size}/${urls.size}），跳过 noteId=$noteId")
+            return SaveOutcome.SKIPPED
+        }
+        if (missingIdx.size < urls.size) {
+            xlog(ctx, "补齐缺失 noteId=$noteId 已有 ${urls.size - missingIdx.size}/${urls.size} 张")
+        }
         val t0 = System.currentTimeMillis()
         // 只记域名级片段：完整 URL 带 xsec_token，进了诊断文本就等于把凭据复制进剪贴板（审计 #18）
         val hostOnly = urls.firstOrNull()?.let { u -> runCatching { java.net.URI(u).host }.getOrNull() } ?: "-"
         vlog(ctx, "开始落盘 noteId=$noteId 图=${urls.size} 视频=${videos.size} 域名=$hostOnly")
-        val result = if (urls.isEmpty()) XhsBatchSave.QuietResult(0, 0, 0, false)
-        else runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId, dlGen) }
+        val result = if (missingIdx.isEmpty()) XhsBatchSave.QuietResult(0, 0, 0, false)
+        else runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId, dlGen, missingIdx) }
             .onFailure { xlog(ctx, "落盘调用异常 ${it.javaClass.simpleName} noteId=$noteId") }
             .getOrNull()
         vlog(ctx, "落盘结束 noteId=$noteId 结果=${result?.let { "存${it.ok}/滤${it.filtered}/败${it.failed}/取消${it.canceled}" } ?: "无结果"} " +
@@ -620,6 +642,7 @@ object XhsBatchDriver {
         var videoFail = 0
         for (v in videos) {
             if (stopRequested) break
+            if (videoExists) break   // 相册里已有该篇视频：不重复下
             when (XhsBatchVideo.save(ctx, noteId, v, { XhsBatchSave.canceled() })) {
                 XhsBatchVideo.Outcome.OK -> videoOk++
                 XhsBatchVideo.Outcome.TOO_SMALL -> videoSmall++

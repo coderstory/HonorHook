@@ -1161,6 +1161,8 @@ object XhsBatchSave {
         quiet: Boolean = false,
         done: java.util.concurrent.CountDownLatch? = null,
         gen: Int = downloadGen.get(),
+        slot: Int = 0,
+        skipIndexes: Set<Int> = emptySet(),
     ) {
         // 入口清零只对「新一轮」生效：驱动已经在取消（cancelRequested=true）时不能把它擦掉，
         // 否则取消落在等链/等 id 阶段，等待结束后照样整篇下完（2026-11-22 审计 P1）。
@@ -1184,6 +1186,8 @@ object XhsBatchSave {
             var filtered = 0   // 画质过滤张数（2026-11-21）：短边≤720 删行跳过，不计失败
             try {
                 for ((i, raw) in urls.withIndex()) {
+                    // 相册里已经有这一张（补齐场景）：跳过，不产生重复文件，也不计入成功/失败
+                    if (i in skipIndexes) continue
                     // 取消（本张之前就点了）或**新一代下载已开始**（用户取消后又立刻点采集）时立刻退出：
                     // 旧线程不退出会和新一轮并发写同一篇，并且把 ok/计数写乱（2026-11-22 审计 #3）。
                     if (imageCancelRequested || gen != downloadGen.get()) break
@@ -1261,7 +1265,7 @@ object XhsBatchSave {
             // 结果按代次回传（2026-11-22 审计 #7）：全局 lastQuiet* 会被下一轮/孤儿线程写乱，
             // 驱动现在读的是「本次 gen 的结果对象」，不再靠全局台账行数猜成功。
             if (quiet) {
-                quietResults[gen] = QuietResult(
+                quietResults[slot] = QuietResult(
                     ok = ok,
                     failed = urls.size - ok - filtered,
                     filtered = filtered,
@@ -1272,8 +1276,10 @@ object XhsBatchSave {
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
             // 只有「零真实失败」才记账：100 张里 3 张成功 97 张 404 时若记账，下次采集会
             // 「已下载过，跳过」，缺的图永远补不回来（2026-11-22 审计 P1）。
-            if (!canceled && ok > 0 && noteId != null && urls.size - ok - filtered == 0) {
-                runCatching { XhsDownloadLedger.record(activity.applicationContext, noteId) }
+            if (!canceled && (ok > 0 || skipIndexes.isNotEmpty()) && noteId != null &&
+                urls.size - ok - filtered - skipIndexes.size == 0
+            ) {
+                runCatching { XhsDownloadLedger.record(activity.applicationContext, noteId, count = urls.size) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重记账失败: ${it.message}") }
             }
         }, "HonorHook-xhs-batch")
@@ -1312,22 +1318,26 @@ object XhsBatchSave {
         module: XposedModule,
         noteId: String,
         gen: Int = downloadGen.get(),
+        skipIndexes: Set<Int> = emptySet(),
     ): QuietResult? {
         val latch = java.util.concurrent.CountDownLatch(1)
-        downloadAll(activity, urls, module, noteId, quiet = true, done = latch, gen = gen)
+        // **每次落盘一个独立槽位**：早先用代次当键，同一轮第二篇会立刻读到上一篇刚写好的结果
+        // （表现：`耗时=2ms 存4`，计数翻倍、真实下载还在后台跑就开了下一篇）——2026-11-22 真机诊断实证。
+        val slot = resultSlot.incrementAndGet()
+        downloadAll(activity, urls, module, noteId, quiet = true, done = latch, gen = gen, slot = slot, skipIndexes = skipIndexes)
         val deadline = System.currentTimeMillis() + NOTE_SAVE_LIMIT_MS
         var waited = 0L
         while (true) {
-            quietResults[gen]?.let { return it }
+            quietResults[slot]?.let { return quietResults.remove(slot) }
             if (System.currentTimeMillis() > deadline) {
                 // 到点就按本张取消：让下载线程在下一张前退出，别让它继续吃网络（本篇记失败，下次重试）
                 requestCancel()
                 module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 单篇落盘超时 ${NOTE_SAVE_LIMIT_MS / 1000}s noteId=$noteId")
-                return quietResults[gen]
+                return quietResults.remove(slot)
             }
             if (cancelRequested) {
                 // 用户取消：等线程收尾最多 5 秒拿结果，拿不到就按「部分完成」处理（已落盘的账不算全篇）
-                if (waited > 5000) return quietResults[gen]
+                if (waited > 5000) return quietResults.remove(slot)
             }
             Thread.sleep(200)
             waited += 200
@@ -1343,9 +1353,11 @@ object XhsBatchSave {
     /** 每次都「点采集」递增：旧代次的下载线程看到自己过期就退出（取消后立刻重启不复活旧线程）。 */
     private val downloadGen = java.util.concurrent.atomic.AtomicInteger(0)
 
-    /** 按代次存结果：驱动只读自己那一代，孤儿线程写不进新一轮。 */
+    /** 按**落盘槽位**存结果：每次 downloadNoteQuiet 一个槽位，互不串（代次只负责取消语义）。 */
     private val quietResults =
         java.util.concurrent.ConcurrentHashMap<Int, QuietResult>()
+
+    private val resultSlot = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** 新一轮开始：换代次 + 清取消；返回本轮代次（驱动后续落盘都用它）。 */
     internal fun beginRun(): Int {
@@ -1353,7 +1365,8 @@ object XhsBatchSave {
         imageCancelRequested = false
         // 只留最近两代的结果，避免长期驻留（正常一轮最多几十篇，键是代次不是篇数）
         val cur = downloadGen.incrementAndGet()
-        quietResults.keys.filter { it < cur - 1 }.forEach { quietResults.remove(it) }
+        // 上一轮的孤儿结果全清（没被读走的槽位不会再有人读）
+        quietResults.clear()
         return cur
     }
 
