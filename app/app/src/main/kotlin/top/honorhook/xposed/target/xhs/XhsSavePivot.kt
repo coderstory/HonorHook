@@ -212,7 +212,7 @@ object XhsSavePivot {
         noteId: String,
         module: XposedModule,
         fromBatch: Boolean = false,
-        webView: Boolean = false,
+        webViewFallback: Boolean = false,
     ): ResolvedNote? = withContext(Dispatchers.IO) {
         // 整条链优先；只有裸 xsec_token 时合成一条（2026-11-22：批量采集逐篇打开时响应多为 token-only）
         val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId) ?: run {
@@ -225,17 +225,38 @@ object XhsSavePivot {
             if (!fromBatch) parsedEmptyNotes.add(noteId)
             return@withContext null
         }
-        try {
-            lastFailureDetail = null
-            val note = repository(module, if (webView) { url ->
-                // 先让真网页跑起来取 DOM；失败再退回 okhttp 原文（至少不会比原来更差）
-                XhsWebFetch.html(XhsBatchSave.activityOrNull(), url) ?: XhsVideoSave.fetchNotePageHtml(url)
-            } else null).resolve(shortUrl)
+        val first = resolveOnce(noteId, shortUrl, module, null, fromBatch)
+        if (first != null) return@withContext first
+        // [webViewFallback]：只有「分享页需要网页渲染」才值得开 WebView——那种笔记的分享页
+        // 靠 JS 渲染，okhttp 拿到的 HTML 里没有 __INITIAL_STATE__（真机 22:22 一轮 76 篇里 24 篇）。
+        // 网络/真没图之类的失败重试网页没有意义，直接算失败。
+        // 手点保存与批量采集共用这一段（用户 2026-11-22：「代码不共享的？」）。
+        if (!webViewFallback || lastFailureDetail?.contains("RequiresWebView") != true) return@withContext null
+        module.log(Log.INFO, MountEngine.TAG,
+            "$JUDGE_PREFIX 分享页需网页渲染，改用内置 WebView 重试 noteId=$noteId")
+        resolveOnce(noteId, shortUrl, module,
+            { url -> XhsWebFetch.html(XhsBatchSave.activityOrNull(), url) }, fromBatch)
+    }
+
+    /**
+     * 单次解析（不换数据源）。[fetchOverride] 非空时用它替代默认的 okhttp 抓取
+     * （WebView 兜底走这里）。
+     */
+    private suspend fun resolveOnce(
+        noteId: String,
+        shortUrl: String,
+        module: XposedModule,
+        fetchOverride: ((String) -> String?)?,
+        fromBatch: Boolean,
+    ): ResolvedNote? {
+        lastFailureDetail = null
+        return try {
+            val note = repository(module, fetchOverride).resolve(shortUrl)
             if (note.videos.isEmpty() && note.images.isEmpty() && note.livePhotos.isEmpty()) {
                 module.log(Log.WARN, MountEngine.TAG,
                     "$JUDGE_PREFIX 解析成功但图/视频/live 全空 noteId=$noteId $lastFetchDiag")
                 if (!fromBatch) parsedEmptyNotes.add(noteId)
-                return@withContext null
+                return null
             }
             // 可下 N = 图片分支合并后 URL 数（images + livePhotos 静帧原图；videos 图片分支不消费，
             // 归 X4 HD 询问）。旧「候选」= 视频 candidates 总数，对纯实况图集恒 0、误判「无可用」时
@@ -258,33 +279,17 @@ object XhsSavePivot {
                         t.javaClass.declaredFields.joinToString(",") { it.name })
                 null
             }.getOrNull()
-            val detail = failure
+            lastFailureDetail = failure
                 ?: t.cause?.run { "${javaClass.simpleName}: $message" }
                 ?: t.message
                 ?: "无 message"
-            lastFailureDetail = detail
             module.log(Log.WARN, MountEngine.TAG,
-                "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId ${t.javaClass.simpleName}: $detail")
+                "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId ${t.javaClass.simpleName}: $lastFailureDetail")
             if (!fromBatch) parsedEmptyNotes.add(noteId)
             null
         }
     }
 
-    /**
-     * 宿主 ShareService.getShortUrl 直调（单链第 2 步，全程反射）：i3c.d.Companion（服务定位器）
-     * `e(Class)` 取 ShareService 实例（u2c/y.java:51 锚）→ `getShortUrl(长链)` 返回宿主 loader 的
-     * io.reactivex.Observable → 反射 `timeout(3, SECONDS)`（TimeUnit 是 JDK 类，安全引用）→
-     * `blockingFirst(default)` 同步收口发射值（NoSuchMethod 记 WARN 后试 `blockingLatest()`
-     * Iterable 取首元素）→ q1c.q 包装 `a()` 取 short_url（u2c/y.java:70 `qVar.a()`、
-     * q1c/q.java:10 `public final String a()` 9.50 实证；String 直发形态防御兼容）。锚行
-     * "getShortUrlObservableIfNeed success"（u2c/y.java:70，9.50 实证）。
-     *
-     * 2026-10-19 19:34 真机 CNFE 实证：模块经 Proxy/lambda 实装 io.reactivex.functions.Consumer
-     * 订阅 → 接口类型须由定义方（模块）classloader 解析而 rx 类在宿主 → 必炸
-     * ClassNotFoundException。约束：本函数**全程反射、模块代码零 rx 类型**——Observable 全程仅持
-     * Object，不 import / 不引用任何 io.reactivex.*，blocking 算子在宿主侧收口发射值。
-     * 任何一步失败 runCatching 收口返 null（异常类名进 WARN，调用方记 [parsedEmptyNotes]）。
-     */
     private fun hostShortUrl(longUrl: String, module: XposedModule): String? = runCatching {
         val loader = XhsVideoSave.hostLoaderOrThrow()
         val serviceCls = Class.forName("com.xingin.sharesdk.api.ShareService", true, loader)

@@ -831,9 +831,13 @@ object XhsBatchDriver {
             xlog(ctx, "已取消，这一篇不再解析 noteId=$noteId")
             return SaveOutcome.FAIL
         }
-        var note = try {
+        // webViewFallback = 分享页需要 JS 渲染（RequiresWebView）时由 XhsSavePivot 内部用内置
+        // WebView 再取一次；手点保存走的是同一个函数、同一个兜底（2026-11-22 用户要求代码共享）。
+        val note = try {
             kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) { XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true) }
+                kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
+                    XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webViewFallback = true)
+                }
             }
         } catch (t: kotlinx.coroutines.TimeoutCancellationException) {
             // 超时 ≠ 这篇没图：网络/上游解析挂住时下一轮还可能成功，必须和「解析不出」分开记
@@ -842,25 +846,6 @@ object XhsBatchDriver {
         } catch (t: Throwable) {
             xlog(ctx, "解析异常 ${t.javaClass.simpleName}: ${t.message} noteId=$noteId")
             return SaveOutcome.FAIL
-        }
-        if (note == null) {
-            // 分享页靠 JS 渲染的那些笔记（真机 22:22 那轮 76 篇里 24 篇）用 okhttp 拿到的 HTML
-            // 里没有 __INITIAL_STATE__，上游归成 RequiresWebView。这种才值得开一次真 WebView
-            // 兜底（12s 上限）；其它失败原因（网络/超时/真没图）重试网页没有意义，直接算失败。
-            val failure = XhsSavePivot.lastFailure()
-            if (failure != null && failure.contains("RequiresWebView") && !stopRequested) {
-                xlog(ctx, "分享页需要网页加载，改用内置 WebView 重试 noteId=$noteId")
-                note = try {
-                    kotlinx.coroutines.runBlocking {
-                        kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
-                            XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webView = true)
-                        }
-                    }
-                } catch (t: Throwable) {
-                    xlog(ctx, "WebView 兜底失败 ${t.javaClass.simpleName}: ${t.message} noteId=$noteId")
-                    null
-                }
-            }
         }
         if (note == null) {
             xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=${XhsSavePivot.lastFailure() ?: "未知"}）")

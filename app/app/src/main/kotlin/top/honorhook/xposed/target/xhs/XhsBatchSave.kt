@@ -630,7 +630,11 @@ object XhsBatchSave {
             // 解析（网络）在后台线程；交互与旧采集管线一致（1 张静默 / ≥2 张确认卡）
             Thread({
                 val urls = runCatching {
-                    val note = kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
+                    // webViewFallback = 分享页需要 JS 渲染时用内置 WebView 再取一次（与批量采集同一条
+                    // 代码路径；手点保存的那些多图/实况图集也能救回来 —— 2026-11-22）
+                    val note = kotlinx.coroutines.runBlocking {
+                        XhsSavePivot.resolveByShareLink(noteId, module, webViewFallback = true)
+                    }
                     // 收集口径统一走 [xhsContentImageUrls]（①②④ 释义与 2026-11-14 slides cover 例外见其 KDoc）
                     // ③ videos 维持不消费（视频流归 X4 HD 询问分支）
                     val commentUrls = XhsCommentHarvest.urlsOf(noteId)
