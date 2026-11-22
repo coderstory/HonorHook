@@ -628,7 +628,9 @@ object XhsAutoEntry {
             panelStatValues.getOrNull(0)?.text = st[0].toString()
             panelStatValues.getOrNull(1)?.text = st[1].toString()
             panelStatValues.getOrNull(2)?.text = st[2].toString()
-            panelStatValues.getOrNull(3)?.text = "${st[6] / 60}:${(st[6] % 60).toString().padStart(2, '0')}"
+            // 用时统一两位：00:15 而不是 0:15（用户 2026-11-22）
+            panelStatValues.getOrNull(3)?.text =
+                "${(st[6] / 60).toString().padStart(2, '0')}:${(st[6] % 60).toString().padStart(2, '0')}"
             panelDetail?.text = "当前文章 ${st[4]} 个资源 · 本屏待处理 ${st[5]} · 跳过 ${st[3]}"
         }
     }

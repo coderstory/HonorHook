@@ -231,7 +231,8 @@ object XhsBatchDriver {
         }
         // 用户 2026-11-22 指定的口径：处理 N 篇 / 累计下载 N 个资源 / 当前文章 N 个资源
         return "$state · 已处理 $okCount 篇 · 累计下载 $resourceCount 个 · 失败 $failedCount\n" +
-            "当前文章 $currentNoteRes 个资源 · 本屏待处理 $pendingNow · 跳过 $skippedCount · 用时 ${secs / 60}:$ss"
+            "当前文章 $currentNoteRes 个资源 · 本屏待处理 $pendingNow · 跳过 $skippedCount · " +
+            "用时 ${(secs / 60).toString().padStart(2, '0')}:$ss"
     }
 
     /** 回答模块面板的状态查询（跨进程，面板进页时问一次）。 */
