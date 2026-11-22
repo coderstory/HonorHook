@@ -360,9 +360,12 @@ object XhsAutoEntry {
         val box = android.widget.LinearLayout(activity).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding((14 * dp).toInt(), (10 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
+            // 红→粉渐变底（用户 2026-11-22：底色要红色和粉色的混合），白字仍读得清
             background = GradientDrawable().apply {
                 cornerRadius = 14 * dp
-                setColor(0xD9000000.toInt())
+                gradientType = GradientDrawable.LINEAR_GRADIENT
+                orientation = GradientDrawable.Orientation.TL_BR
+                colors = intArrayOf(0xE6C62828.toInt(), 0xE6EC407A.toInt())
             }
             addView(headerRow)
             addView(View(activity).apply { setBackgroundColor(0x33FFFFFF) },
