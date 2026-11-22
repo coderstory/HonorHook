@@ -53,6 +53,9 @@ object XhsBatchDriver {
     private const val PACE_MAX_MS = 4000L
     private const val IDLE_LIMIT = 3
 
+    /** 无进展看门狗上限（见 loop 里的 lastProgressAt）：2 分钟既不动卡片也不动列表 = 收工。 */
+    private const val NO_PROGRESS_LIMIT_MS = 120_000L
+
     /** 同一列表页重绘等待轮次（700ms/轮 ≈ 7s），超时才收工。 */
     private const val LIST_REDRAW_WAIT = 10
 
@@ -242,6 +245,9 @@ object XhsBatchDriver {
         var redrawWaits = 0
         var offList = 0
         var cardsTotal = 0
+        // 看门狗（2026-11-22）：任何路径（主线程卡死、宿主改版、视图树判据失效）都可能让
+        // 循环既不推进也不退出，用户看到的是「一直采集中」。无进展超时即收工并说清原因。
+        var lastProgressAt = System.currentTimeMillis()
         // 本轮已处理过的卡片身份。noteId 拿不到时退化成 contentDescription（「笔记, 标题…」）。
         // 上限兜底：超长主页会把集合撑大，超过就整体清空（清空只会导致重复去重查询，不会漏）。
         val seen = HashSet<String>()
@@ -310,6 +316,10 @@ object XhsBatchDriver {
                 vlog(ctx, "扫描[${act.javaClass.simpleName}] 卡=${cards.size} 未处理=${pending.size} 已见=${seen.size} " +
                     "首top=${cards.first().first.top()} 键=$keysPreview")
                 syncStats(ok, skipped, failed, pending.size, seen.size)
+                if (System.currentTimeMillis() - lastProgressAt > NO_PROGRESS_LIMIT_MS) {
+                    xlog(ctx, "连续 ${NO_PROGRESS_LIMIT_MS / 1000} 秒没有进展，收工")
+                    break
+                }
                 if (pending.isEmpty()) {
                     // 这一屏没有新卡了：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
                     val beforeTop = cards.first().first.top()
@@ -322,6 +332,7 @@ object XhsBatchDriver {
                     val moved = after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop
                     if (moved) {
                         scrollIdle = 0
+                        lastProgressAt = System.currentTimeMillis()
                     } else if (++scrollIdle >= IDLE_LIMIT) {
                         xlog(ctx, "列表滚不动了，收工")
                         break
@@ -329,6 +340,7 @@ object XhsBatchDriver {
                     continue
                 }
 
+                lastProgressAt = System.currentTimeMillis()
                 val (card, key) = pending.first()
                 // 先标记再处理：处理失败也不该在同一屏反复点它（失败的账已经记在 failed 里）
                 seen.add(key)
