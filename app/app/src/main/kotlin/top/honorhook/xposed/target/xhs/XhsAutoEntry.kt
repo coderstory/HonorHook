@@ -50,6 +50,9 @@ object XhsAutoEntry {
     @Volatile private var ticker: Runnable? = null
     /** 面板最近一次内容：面板晚于消息建出来时用它补渲染（首条消息早于注入很常见）。 */
     @Volatile private var lastLines: List<String> = emptyList()
+    /** 用户点过面板上的 ×：本轮不再自动挂回来，下次点「采集」开新一轮才复位。 */
+    @Volatile private var panelDismissed = false
+    @Volatile private var lastRunning = false
 
     /** 当前挂着的全局布局观察者（哪棵 decor、哪个 listener、上次检查时间）。 */
     @Volatile private var watchedDecor: ViewGroup? = null
@@ -242,6 +245,7 @@ object XhsAutoEntry {
         }
         if (attachedButton != null && attachedDecor === decor) {
             applyLabel()
+            panelSync()
             return
         }
         detach()
@@ -276,8 +280,10 @@ object XhsAutoEntry {
      * 用户 2026-11-22 反馈「自动下载没有任何提示」），待机「采集」（红底）。
      */
     private fun applyLabel() {
-        val btn = attachedButton ?: return
         val running = XhsBatchDriver.isRunning()
+        if (running && !lastRunning) panelDismissed = false   // 新一轮：面板重新回来
+        lastRunning = running
+        val btn = attachedButton ?: return
         runCatching {
             val n = XhsBatchDriver.processedCount()
             btn.text = when {
@@ -291,8 +297,8 @@ object XhsAutoEntry {
     }
 
     /**
-     * 面板跟随运行态与当前页：采集期间每翻一页都可能换 decor，面板要跟过去；
-     * 收工后再留 4 秒让人看完最后几条（用户「要滚动消息」的原始诉求就是过程可见）。
+     * 面板跟随运行态与当前页：采集期间每翻一页都可能换 decor，面板要跟过去。
+     * **关闭只由用户点面板上的 × 决定**（2026-11-22 用户：别自动隐藏/关闭），收工后也留在屏幕上。
      */
     private fun panelSync() {
         val decor = attachedDecor
@@ -301,59 +307,76 @@ object XhsAutoEntry {
             XhsBatchDriver.logEntry("面板未挂：还没有按钮宿主")
             return
         }
-        if (XhsBatchDriver.isRunning()) ensurePanel(act, decor) else schedulePanelRemoval()
+        if (panelDismissed) return
+        // 收工后也保留最后一份内容（用户要求），只有下一轮开始才重新出现
+        ensurePanel(act, decor)
     }
 
     /**
      * 面板布局（2026-11-22 用户指定）：**顶栏是汇总**（状态/已处理/已存/失败，第二行待处理/用时），
-     * 下面才是滚动的过程消息。汇总常驻不滚，过程消息只留最近 6 条自动滚到底。
+     * 下面才是滚动的过程消息；右上角 × 由用户主动关闭。汇总常驻不滚，过程消息自动滚到底。
      */
     private fun ensurePanel(activity: Activity, decor: ViewGroup) {
         if (attachedPanel != null && panelDecor === decor) {
             renderLines(lastLines)
             return
         }
-        XhsBatchDriver.logEntry("正在注入面板：${activity.javaClass.simpleName} decor=${decor.javaClass.simpleName}")
         removePanel()
         val dp = activity.resources.displayMetrics.density
         val header = TextView(activity).apply {
-            textSize = 12.5f
+            textSize = 15f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             setTextColor(Color.WHITE)
             text = XhsBatchDriver.header()
         }
-        val divider = View(activity).apply {
-            setBackgroundColor(0x33FFFFFF)
-            layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1)
+        val close = TextView(activity).apply {
+            text = "×"
+            textSize = 20f
+            setTextColor(0x99FFFFFF.toInt())
+            setPadding((10 * dp).toInt(), 0, (6 * dp).toInt(), 0)
+            setOnClickListener {
+                panelDismissed = true
+                removePanel()
+            }
+        }
+        val headerRow = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(header, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(close)
         }
         val tv = TextView(activity).apply {
-            textSize = 11f
-            setTextColor(0xCCFFFFFF.toInt())
+            textSize = 13f
+            setTextColor(0xEEFFFFFF.toInt())
+            setLineSpacing((3 * dp), 1f)
             text = lastLines.joinToString("\n")
         }
         val scroll = android.widget.ScrollView(activity).apply {
             isVerticalScrollBarEnabled = false
             addView(tv, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
-            // 面板不抢触摸：用户还要在上面点卡片
             isClickable = false
             isFocusable = false
         }
         val box = android.widget.LinearLayout(activity).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding((10 * dp).toInt(), (8 * dp).toInt(), (10 * dp).toInt(), (8 * dp).toInt())
+            setPadding((14 * dp).toInt(), (10 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
             background = GradientDrawable().apply {
-                cornerRadius = 10 * dp
-                setColor(0xB3000000.toInt())
+                cornerRadius = 14 * dp
+                setColor(0xD9000000.toInt())
             }
-            addView(header)
-            addView(divider, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = (4 * dp).toInt(); bottomMargin = (4 * dp).toInt() })
+            addView(headerRow)
+            addView(View(activity).apply { setBackgroundColor(0x33FFFFFF) },
+                android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
+                    topMargin = (6 * dp).toInt(); bottomMargin = (6 * dp).toInt()
+                })
             addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            val w = (activity.resources.displayMetrics.widthPixels * 0.62f).toInt()
-            layoutParams = FrameLayout.LayoutParams(w, (150 * dp).toInt()).apply {
+            val w = (activity.resources.displayMetrics.widthPixels * 0.86f).toInt()
+            layoutParams = FrameLayout.LayoutParams(w, (250 * dp).toInt()).apply {
                 gravity = android.view.Gravity.START or android.view.Gravity.BOTTOM
-                leftMargin = (14 * dp).toInt()
-                bottomMargin = (120 * dp).toInt()
+                leftMargin = (12 * dp).toInt()
+                bottomMargin = (110 * dp).toInt()
             }
+            elevation = (12 * dp)
         }
         val added = runCatching { decor.addView(box) }
         added.onFailure { XhsBatchDriver.logEntry("面板 addView 失败：${it.javaClass.simpleName}: ${it.message}") }
@@ -379,7 +402,7 @@ object XhsAutoEntry {
         val r = object : Runnable {
             override fun run() {
                 runCatching { panelHeader?.text = XhsBatchDriver.header() }
-                if (XhsBatchDriver.isRunning()) handler.postDelayed(this, 1000) else ticker = null
+                if (attachedPanel != null) handler.postDelayed(this, 1000) else ticker = null
             }
         }
         ticker = r
@@ -387,7 +410,7 @@ object XhsAutoEntry {
     }
 
     private fun stopTicker() {
-        ticker = null   // Runnable 自己会看到 running=false 退出；置空即断开引用
+        ticker = null
     }
 
     private fun renderLines(lines: List<String>) {
@@ -403,11 +426,6 @@ object XhsAutoEntry {
                 }
             }
         }
-    }
-
-    private fun schedulePanelRemoval() {
-        android.os.Handler(android.os.Looper.getMainLooper())
-            .postDelayed({ if (!XhsBatchDriver.isRunning()) removePanel() }, 4000)
     }
 
     private fun removePanel() {

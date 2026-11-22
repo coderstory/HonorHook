@@ -37,7 +37,7 @@ import top.honorhook.xposed.core.MountEngine
  */
 object XhsBatchDriver {
 
-    private const val LOG_LINES = 6
+    private const val LOG_LINES = 10
 
     /** 已处理卡片身份的集合上限（超长主页兜底，清空只是重复查询，不漏）。 */
     private const val SEEN_LIMIT = 4000
@@ -103,7 +103,7 @@ object XhsBatchDriver {
     /** 入口侧（按钮/面板）写一行到同一份文件日志：面板到底注入没有，只能靠这里验。 */
     internal fun logEntry(msg: String) {
         val app = currentApp ?: return
-        runCatching { xlog(app, msg) }
+        runCatching { vlog(app, msg) }   // 只进文件：注入自述不该占面板的 6 行
     }
 
     fun lastLines(): List<String> = synchronized(logLock) { logLines.toList() }
@@ -132,13 +132,17 @@ object XhsBatchDriver {
     @Volatile private var skippedCount = 0
     @Volatile private var failedCount = 0
     @Volatile private var pendingNow = 0
+
+    /** 本轮已经「看见过」的卡片数（跨屏累计，按 noteId/描述去重）——服务端不给总篇数，这是能给的上界。 */
+    @Volatile private var discoveredCount = 0
     @Volatile private var startedAt = 0L
 
-    private fun syncStats(ok: Int, skipped: Int, failed: Int, pending: Int) {
+    private fun syncStats(ok: Int, skipped: Int, failed: Int, pending: Int, discovered: Int = 0) {
         okCount = ok
         skippedCount = skipped
         failedCount = failed
         pendingNow = pending
+        if (discovered > discoveredCount) discoveredCount = discovered
         processed = ok + skipped
     }
 
@@ -151,7 +155,8 @@ object XhsBatchDriver {
             stopRequested -> "收尾中"
             else -> "采集中"
         }
-        return "$state · 已处理 $processed 篇 · 已存 $okCount · 失败 $failedCount\n待处理 $pendingNow · 用时 ${secs / 60}:$ss"
+        return "$state · 已发现 $discoveredCount 篇 · 已存 $okCount · 失败 $failedCount\n" +
+            "本屏待处理 $pendingNow · 跳过 $skippedCount · 用时 ${secs / 60}:$ss"
     }
 
     /** 回答模块面板的状态查询（跨进程，面板进页时问一次）。 */
@@ -168,7 +173,8 @@ object XhsBatchDriver {
         running = true
         stopRequested = false
         processed = 0
-        syncStats(0, 0, 0, 0)
+        syncStats(0, 0, 0, 0, 0)
+        discoveredCount = 0
         startedAt = System.currentTimeMillis()
         listActivity = null
         val app = ctx.applicationContext
@@ -280,7 +286,7 @@ object XhsBatchDriver {
                 val keysPreview = cards.take(3).joinToString("|") { it.second.take(14) }
                 vlog(ctx, "扫描[${act.javaClass.simpleName}] 卡=${cards.size} 未处理=${pending.size} 已见=${seen.size} " +
                     "首top=${cards.first().first.top()} 键=$keysPreview")
-                syncStats(ok, skipped, failed, pending.size)
+                syncStats(ok, skipped, failed, pending.size, seen.size)
                 if (pending.isEmpty()) {
                     // 这一屏没有新卡了：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
                     val beforeTop = cards.first().first.top()
@@ -321,7 +327,7 @@ object XhsBatchDriver {
                         SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                     }
                     xlog(ctx, dt)
-                    syncStats(ok, skipped, failed, pending.size - 1)
+                    syncStats(ok, skipped, failed, pending.size - 1, seen.size)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, dt, ok, skipped, failed, cardsTotal)
                     sleepPace()
@@ -332,7 +338,7 @@ object XhsBatchDriver {
                 val prev = XhsVideoSave.lastShareNoteId()
                 if (onMain { clickView(card) } != true) {
                     failed++
-                    syncStats(ok, skipped, failed, pending.size - 1)
+                    syncStats(ok, skipped, failed, pending.size - 1, seen.size)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
                     xlog(ctx, "卡片点不动（本屏剩 ${pending.size - 1} 张）")
@@ -352,7 +358,7 @@ object XhsBatchDriver {
                 }
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX $text")
                 xlog(ctx, "$text（本屏剩 ${pending.size - 1} 张）")
-                syncStats(ok, skipped, failed, pending.size - 1)
+                syncStats(ok, skipped, failed, pending.size - 1, seen.size)
                 stateListener?.invoke()
                 notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $ok · 跳过 $skipped · 失败 $failed）", ok, skipped, failed, cardsTotal)
                 backToList()
