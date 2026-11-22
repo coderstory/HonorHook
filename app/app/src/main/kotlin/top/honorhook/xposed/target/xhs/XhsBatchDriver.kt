@@ -422,6 +422,10 @@ object XhsBatchDriver {
                         listClassName = cls
                     } else if (locked != cls) {
                         // 非列表页的卡片（详情页相关推荐等）：不是目标作者的作品，绝不下、只退回列表
+                        if (isAppRoot(act)) {
+                            xlog(ctx, "已回到首页（${act.javaClass.simpleName}），本轮结束（不按返回，避免把 App 退掉）")
+                            break
+                        }
                         offList++
                         xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 有卡片但不是列表页")
                         if (offList > MAX_BACK_PRESSES) break
