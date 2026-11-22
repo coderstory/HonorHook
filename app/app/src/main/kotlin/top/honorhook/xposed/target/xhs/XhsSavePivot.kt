@@ -199,7 +199,21 @@ object XhsSavePivot {
      * 黑名单是给「用户点一次保存就失败」的交互路径用的（下次点击放行宿主原生保存）；
      * 批量采集时一篇只试一次，把网络抖动写成永久拉黑会让同一篇在本次会话里再也下不了。
      */
-    suspend fun resolveByShareLink(noteId: String, module: XposedModule, fromBatch: Boolean = false): ResolvedNote? = withContext(Dispatchers.IO) {
+    /**
+     * 最近一次解析失败的归类（`DownloadFailure` 的 toString，如 `RequiresWebView`）。
+     * 驱动用它决定要不要为这一篇再走一次 [XhsWebFetch]（2026-11-22）。
+     */
+    @Volatile
+    private var lastFailureDetail: String? = null
+
+    internal fun lastFailure(): String? = lastFailureDetail
+
+    suspend fun resolveByShareLink(
+        noteId: String,
+        module: XposedModule,
+        fromBatch: Boolean = false,
+        webView: Boolean = false,
+    ): ResolvedNote? = withContext(Dispatchers.IO) {
         // 整条链优先；只有裸 xsec_token 时合成一条（2026-11-22：批量采集逐篇打开时响应多为 token-only）
         val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId) ?: run {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 无 share link noteId=$noteId，解析跳过")
@@ -212,7 +226,11 @@ object XhsSavePivot {
             return@withContext null
         }
         try {
-            val note = repository(module).resolve(shortUrl)
+            lastFailureDetail = null
+            val note = repository(module, if (webView) { url ->
+                // 先让真网页跑起来取 DOM；失败再退回 okhttp 原文（至少不会比原来更差）
+                XhsWebFetch.html(XhsBatchSave.activityOrNull(), url) ?: XhsVideoSave.fetchNotePageHtml(url)
+            } else null).resolve(shortUrl)
             if (note.videos.isEmpty() && note.images.isEmpty() && note.livePhotos.isEmpty()) {
                 module.log(Log.WARN, MountEngine.TAG,
                     "$JUDGE_PREFIX 解析成功但图/视频/live 全空 noteId=$noteId $lastFetchDiag")
@@ -244,6 +262,7 @@ object XhsSavePivot {
                 ?: t.cause?.run { "${javaClass.simpleName}: $message" }
                 ?: t.message
                 ?: "无 message"
+            lastFailureDetail = detail
             module.log(Log.WARN, MountEngine.TAG,
                 "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId ${t.javaClass.simpleName}: $detail")
             if (!fromBatch) parsedEmptyNotes.add(noteId)
@@ -407,12 +426,15 @@ object XhsSavePivot {
      * resolveShortUrl 注入 [expandShortUrl]：上游 resolve 对 xhslink 短链先经此 canonical 化
      * （UrlParser 规范化设计路），展开链自带 fresh token 后 parser 才拿得到 expectedNoteId。
      */
-    private fun repository(module: XposedModule): DefaultXhsContentRepository =
+    private fun repository(
+        module: XposedModule,
+        fetchOverride: ((String) -> String?)? = null,
+    ): DefaultXhsContentRepository =
         DefaultXhsContentRepository(
             fetchHtml = { url ->
                 withContext(Dispatchers.IO) {
                     try {
-                        XhsVideoSave.fetchNotePageHtml(url).also { body ->
+                        (fetchOverride?.invoke(url) ?: XhsVideoSave.fetchNotePageHtml(url)).also { body ->
                             lastFetchDiag = "url=${url.take(80)} bodyLen=${body?.length ?: -1}"
                             if (body.isNullOrEmpty()) {
                                 module.log(Log.WARN, MountEngine.TAG,

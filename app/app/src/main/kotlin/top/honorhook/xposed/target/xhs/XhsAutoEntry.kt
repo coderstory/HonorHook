@@ -284,17 +284,37 @@ object XhsAutoEntry {
             if (depth > 30 || (cards && profileStats)) return
             if (v.isShown) {
                 if (!cards && XhsBatchDriver.isCardDesc(v.contentDescription?.toString())) cards = true
-                if (!profileStats) {
-                    val t = (v as? TextView)?.text?.toString().orEmpty()
-                    if (t == "粉丝" || t.startsWith("粉丝") || t.endsWith("粉丝") || t.contains("获赞与收藏")) {
-                        profileStats = true
-                    }
-                }
+                if (!profileStats) profileStats = isStatsText((v as? TextView)?.text?.toString())
             }
             if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i)?.let { dfs(it, depth + 1) }
         }
         runCatching { dfs(root, 0) }
         return cards && profileStats
+    }
+
+    /**
+     * 只看「资料区」标记（粉丝 / 获赞与收藏），不看卡片。
+     * 驱动用它区分「作者主页正在重绘」与「其实已经翻进详情页了」——2026-11-22 真机：
+     * 详情页是盖在主页上的浮层，同一个 Activity 里既有相关推荐卡片、又可能一张卡都没有；
+     * 只按类名判断会把「停在详情页」当成「主页没卡片」，于是提前宣布采集完成。
+     */
+    internal fun hasProfileMarkers(root: View): Boolean {
+        var found = false
+        fun dfs(v: View, depth: Int) {
+            if (depth > 30 || found) return
+            if (v.isShown && isStatsText((v as? TextView)?.text?.toString())) {
+                found = true
+                return
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i)?.let { dfs(it, depth + 1) }
+        }
+        runCatching { dfs(root, 0) }
+        return found
+    }
+
+    private fun isStatsText(t: String?): Boolean {
+        val s = t.orEmpty()
+        return s == "粉丝" || s.startsWith("粉丝") || s.endsWith("粉丝") || s.contains("获赞与收藏")
     }
 
     /**

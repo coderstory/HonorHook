@@ -350,6 +350,37 @@ object XhsBatchDriver {
      * （noteId 优先、退化用 contentDescription）：只要这一屏还有没见过的卡，就一定要处理它，
      * 不看序号，所以重排、复用、返回后轻微位移都不会漏。
      */
+    /**
+     * 起跑页归一（2026-11-22 真机根因）：用户点「采集」时常常停在**详情页**上——那是盖在作者主页
+     * 之上的浮层，decor 里既有主页的卡片、也有「粉丝」资料区，`isProfilePage` 会判成主页（判据没错），
+     * 但把 `listClassName` 锁成详情页之后，后续的「翻页 / 收工」判断就都建立在错的前提上：
+     * 一篇**没有相关推荐**的详情页会把卡片数变成 0，于是 10 轮后宣布「采集完成」，
+     * 实际主页上还有几十篇没采（2026-11-22 22:22 真机：失败 24 次后提前收工）。
+     *
+     * 这里在进入主循环前把页面退回真正的作者主页：**类名含 Detail/Feed 或没有资料区标记**就按返回，
+     * 最多 [MAX_BACK_PRESSES] 次；成功后把列表页类名重新锁到当前页。
+     */
+    private fun normalizeStartPage(module: XposedModule, ctx: Context) {
+        repeat(MAX_BACK_PRESSES + 1) {
+            if (stopRequested) return
+            val act = XhsBatchSave.activityOrNull() ?: return
+            val cls = act.javaClass.name
+            val stats = onMainOrTimeout { act.window?.decorView?.let { XhsAutoEntry.hasProfileMarkers(it) } }
+                .second ?: false
+            val detailLike = cls.contains("Detail", ignoreCase = true)
+            if (!detailLike && stats) {
+                if (listClassName != cls) {
+                    listClassName = cls
+                    xlog(ctx, "列表页锁定：${act.javaClass.simpleName}")
+                }
+                return
+            }
+            xlog(ctx, "起跑页不是作者主页（${act.javaClass.simpleName} 详情=${detailLike} 资料区=${stats}），退一页")
+            pressBack(act)
+            Thread.sleep(900)
+        }
+    }
+
     private fun loop(module: XposedModule, ctx: Context, gen: Int) {
         var ok = 0
         var skipped = 0
@@ -370,6 +401,7 @@ object XhsBatchDriver {
         // 「已发现」= 本轮扫到过的不同卡片（不是已处理数）：否则首屏 30 张时面板显示「已发现 0」
         val discoveredKeys = HashSet<String>()
         try {
+            normalizeStartPage(module, ctx)
             while (!stopRequested) {
                 // 看门狗必须在循环最外层：act==null（用户切走）与 !scanned（主线程卡）这两条
                 // continue 原来永不超时，表现是「一直采集中、零日志」（2026-11-22 审计 P1）。
@@ -433,9 +465,15 @@ object XhsBatchDriver {
                     }
                     // 扫到过卡片的同一页现在空 = 宿主重绘/占位中，**绝不能按返回**（2026-11-22 真机：
                     // 连按 3 次把小红书一路退到桌面，整轮就这么收工了）。等它画出来。
-                    if (act.javaClass.name == listClassName) {
+                    // 「同类的页」不等于「作者主页」：小红书详情页是盖在主页上的浮层，同一个
+                    // Activity 里可能一张卡都没有（2026-11-22 真机：这样会被当成「主页没卡片」，
+                    // 10 轮后提前宣布采集完成）。所以这里还要看资料区标记（粉丝 / 获赞与收藏）。
+                    val stillGrid = act.javaClass.name == listClassName &&
+                        onMainOrTimeout { act.window?.decorView?.let { XhsAutoEntry.hasProfileMarkers(it) } }
+                            .second != false
+                    if (stillGrid) {
                         if (++redrawWaits >= LIST_REDRAW_WAIT) {
-                            xlog(ctx, "列表页一直没卡片，收工")
+                            xlog(ctx, "作者主页一直没卡片，收工")
                             break
                         }
                         Thread.sleep(700)
@@ -793,7 +831,7 @@ object XhsBatchDriver {
             xlog(ctx, "已取消，这一篇不再解析 noteId=$noteId")
             return SaveOutcome.FAIL
         }
-        val note = try {
+        var note = try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) { XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true) }
             }
@@ -806,7 +844,26 @@ object XhsBatchDriver {
             return SaveOutcome.FAIL
         }
         if (note == null) {
-            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind）")
+            // 分享页靠 JS 渲染的那些笔记（真机 22:22 那轮 76 篇里 24 篇）用 okhttp 拿到的 HTML
+            // 里没有 __INITIAL_STATE__，上游归成 RequiresWebView。这种才值得开一次真 WebView
+            // 兜底（12s 上限）；其它失败原因（网络/超时/真没图）重试网页没有意义，直接算失败。
+            val failure = XhsSavePivot.lastFailure()
+            if (failure != null && failure.contains("RequiresWebView") && !stopRequested) {
+                xlog(ctx, "分享页需要网页加载，改用内置 WebView 重试 noteId=$noteId")
+                note = try {
+                    kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
+                            XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webView = true)
+                        }
+                    }
+                } catch (t: Throwable) {
+                    xlog(ctx, "WebView 兜底失败 ${t.javaClass.simpleName}: ${t.message} noteId=$noteId")
+                    null
+                }
+            }
+        }
+        if (note == null) {
+            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=${XhsSavePivot.lastFailure() ?: "未知"}）")
             return SaveOutcome.FAIL
         }
         // 第二道作者校验：就算页面树里混进了别人的卡片，解析结果里的 authorId 也不会撒谎。
