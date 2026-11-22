@@ -305,7 +305,7 @@ object XhsVideoSave {
         }
         if (cached != null) return cached
         val note = runCatching {
-            kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module) }
+            kotlinx.coroutines.runBlocking { XhsSavePivot.resolveByShareLink(noteId, module, webViewFallback = true) }
         }.onFailure {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId: ${it.message}")
         }.getOrNull()
@@ -1020,7 +1020,7 @@ object XhsVideoSave {
         Thread({
             runCatching {
                 val note = kotlinx.coroutines.runBlocking {
-                    XhsSavePivot.resolveByShareLink(noteId, module)
+                    XhsSavePivot.resolveByShareLink(noteId, module, webViewFallback = true)
                 }
                 offerHdDownloadFromNote(noteId, t0, note, module)
             }.onFailure {

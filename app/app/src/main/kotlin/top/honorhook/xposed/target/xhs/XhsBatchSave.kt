@@ -560,7 +560,7 @@ object XhsBatchSave {
         Thread({
             runCatching {
                 val note = kotlinx.coroutines.runBlocking {
-                    XhsSavePivot.resolveByShareLink(noteId, module)
+                    XhsSavePivot.resolveByShareLink(noteId, module, webViewFallback = true)
                 }
                 if (note == null && failCard) {
                     showOnTrackedActivity(module, "原片解析失败卡") {
