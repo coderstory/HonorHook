@@ -81,6 +81,25 @@ internal object XhsDownloadLedger {
     }.getOrDefault(false)
 
     /** 主台账查询：返回该 noteId 最近一次落盘时间（秒），无记录 = 0。 */
+    /**
+     * 台账里这一篇记录过的**期望资源数**（第三列；老行只有两列 → 0 = 未知）。
+     * 用它和相册现状比对：够数才跳过，不够就去补齐（用户 2026-11-22「还是大范围的提示重复下载」）。
+     */
+    internal fun ledgerCount(context: android.content.Context, noteId: String): Int = runCatching {
+        val f = java.io.File(context.filesDir, LEDGER_FILE)
+        if (!f.exists()) return 0
+        var best = 0
+        f.useLines { lines ->
+            for (line in lines) {
+                val parts = line.split('\t')
+                if (parts.size >= 3 && parts[0] == noteId) {
+                    parts[2].toIntOrNull()?.let { if (it > best) best = it }
+                }
+            }
+        }
+        best
+    }.getOrDefault(0)
+
     internal fun ledgerDownloaded(context: android.content.Context, noteId: String): Long = runCatching {
         val f = java.io.File(context.filesDir, LEDGER_FILE)
         if (!f.exists()) return 0L

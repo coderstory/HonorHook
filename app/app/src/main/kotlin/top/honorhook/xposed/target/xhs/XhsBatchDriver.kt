@@ -455,9 +455,10 @@ object XhsBatchDriver {
                     // 改成递增等待（1.2/2/3/4s）时每次都可能出现新卡，等满仍没动才算一次 idle。
                     var after = emptyList<View>()
                     var moved = false
-                    for (waitMs in longArrayOf(1200, 2000, 3000, 4000)) {
+                    // 每 400ms 探一次，最多 4s：翻页通常 1~2s 就回来，等满 10 秒纯浪费
+                    for (round in 0 until 10) {
                         if (stopRequested) break
-                        Thread.sleep(waitMs)
+                        Thread.sleep(400)
                         after = onMain { findCards(act) }.orEmpty()
                         if (after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop) {
                             moved = true
@@ -688,9 +689,21 @@ object XhsBatchDriver {
         // 只认台账里的「整篇零失败」记录。早先还看相册前缀：只要有一张旧文件就整篇跳过，
         // 于是早前中断留下的半篇永远停在缺图状态（2026-11-22 用户「为啥跳过的这么多」+ 审计 #5）。
         // 相册现状留到解析之后按**序号**核对，缺哪张补哪张。
-        if (runCatching { XhsDownloadLedger.ledgerDownloaded(ctx, noteId) }.getOrDefault(0L) > 0) {
-            xlog(ctx, "台账记过整篇，跳过 noteId=$noteId")
-            return SaveOutcome.SKIPPED
+        // 台账只说明「曾经记过整篇成功」，不说明文件还在（用户删图/系统清理/老版本的宽松记录都会让它失真）。
+        // 现在按台账里的**期望张数**核对相册：够数才跳过，不够就往下走去补齐缺的那几张
+        // （用户 2026-11-22：「还是大范围的提示重复下载」，就是老行一律当完整）。
+        val ledgerCount = runCatching { XhsDownloadLedger.ledgerCount(ctx, noteId) }.getOrDefault(0)
+        if (ledgerCount > 0) {
+            val resolver = ctx.contentResolver
+            val haveIdx = runCatching { XhsDownloadLedger.existingImageIndexes(resolver, noteId) }
+                .getOrDefault(emptySet())
+            val haveVideo = runCatching { XhsDownloadLedger.hasVideoFile(resolver, noteId) }.getOrDefault(false)
+            val haveTotal = haveIdx.size + if (haveVideo) 1 else 0
+            if (haveTotal >= ledgerCount) {
+                xlog(ctx, "台账记过整篇且相册齐全（$haveTotal/$ledgerCount），跳过 noteId=$noteId")
+                return SaveOutcome.SKIPPED
+            }
+            vlog(ctx, "台账记过但相册只有 $haveTotal/$ledgerCount，继续补齐 noteId=$noteId")
         }
         val activity = XhsBatchSave.activityOrNull()
         if (activity == null) {
@@ -1064,27 +1077,58 @@ object XhsBatchDriver {
     }
 
     /** 滚一屏：向 decorView 派发带 MOVE 的真手势（宿主列表只认真手势，scrollBy 无效）。 */
+    /** 视口里面积最大的「还能往下滚」的容器（作者主页是真 RecyclerView / NestedScroll，不是 androidx） */
+    private fun scrollableUnder(root: View): View? {
+        var best: View? = null
+        var bestArea = 0
+        fun walk(v: View, depth: Int) {
+            if (depth > 24) return
+            if (v.isShown && v.width > 0 && v.height > 0 && v.canScrollVertically(1)) {
+                val area = v.width * v.height
+                if (area > bestArea) {
+                    bestArea = area
+                    best = v
+                }
+            }
+            if (v is ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i), depth + 1)
+        }
+        walk(root, 0)
+        return best
+    }
+
     private fun swipeUp(activity: Activity): Boolean {
         val decor = activity.window?.decorView ?: return false
         return onMain {
             val w = decor.width
             val h = decor.height
             if (w <= 0 || h <= 0) return@onMain false
-            val x = w / 2f
-            val from = h * 0.75f
-            val to = h * 0.30f
+            // 2026-11-22 真机：整屏手势派给 decorView 时代码返回 true 但列表纹丝不动
+            // （`滚动后：6张/top=1132 → 6张/top=1132`，profile 页的 NestedScrollLayout 吃掉了事件）。
+            // 改成派给真正能滚的那个容器，坐标用它自己的坐标系；还不动就退化为 scrollBy。
+            val target = scrollableUnder(decor) ?: decor
+            val tw = if (target === decor) w else target.width
+            val th = if (target === decor) h else target.height
+            if (tw <= 0 || th <= 0) return@onMain false
+            val x = tw / 2f
+            val from = th * 0.75f
+            val to = th * 0.30f
             val t0 = android.os.SystemClock.uptimeMillis()
             val steps = 12
             // MotionEvent 全部 recycle（每篇滚一次，原来 14 个事件都靠 GC 兜底）
             fun send(t: Long, action: Int, y: Float): Boolean {
                 val e = MotionEvent.obtain(t0, t, action, x, y, 0)
-                return try { decor.dispatchTouchEvent(e) } finally { e.recycle() }
+                return try { target.dispatchTouchEvent(e) } finally { e.recycle() }
             }
             var ok = send(t0, MotionEvent.ACTION_DOWN, from)
             for (i in 1..steps) {
                 ok = send(t0 + i * 16L, MotionEvent.ACTION_MOVE, from + (to - from) * i / steps) || ok
             }
             ok = send(t0 + steps * 16L, MotionEvent.ACTION_UP, to) || ok
+            // 手势没让容器动（事件被更上层的布局吃掉）→ 直接滚它。
+            // 这是视图层面的滚，不经触摸分发，宿主自己的加载逻辑照旧（滚动回调触发翻页）。
+            if (target.canScrollVertically(1)) {
+                runCatching { target.scrollBy(0, (th * 0.6f).toInt()) }
+            }
             ok
         } == true
     }

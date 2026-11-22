@@ -453,6 +453,9 @@ object XhsAutoEntry {
         if (existing != null) {
             if (panelDecor === decor) {
                 renderLines(lastLines)
+                // 统计要一直跳：心跳只在「新建面板」时启动过，换页走的是搬家分支，
+                // 早先这里直接 return ⇒ 顶栏数字停住不动（用户 2026-11-22「统计不实时更新」）
+                startTicker()
                 return
             }
             // **换页不重建，直接搬家**（2026-11-22 用户：「切换列表页和详情页会消失，然后又刷出来」）。
@@ -465,6 +468,7 @@ object XhsAutoEntry {
             if (moved.isSuccess) {
                 panelDecor = decor
                 renderLines(lastLines)
+                startTicker()
                 return
             }
             removePanel()
