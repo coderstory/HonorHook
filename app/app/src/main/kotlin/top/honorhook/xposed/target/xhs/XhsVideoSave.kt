@@ -438,7 +438,6 @@ object XhsVideoSave {
             val result = runCatching { response.callMethod("result") }.getOrNull()
             // 作者身份锁定源：宿主每次进作者主页都会发这个请求，query 里的 user_id 就是「现在看的是谁」。
             // 批量采集靠它发现「用户中途换了作者」（2026-11-22 审计 #11）。
-            runCatching { XhsAuthorTrack.onPostedRequest(url) }
             module.log(Log.INFO, MountEngine.TAG,
                 "$JUDGE_PREFIX 主页列表 code=$code success=$success result=$result len=${body.length}")
         }
@@ -471,9 +470,9 @@ object XhsVideoSave {
         // 若它们也能改 recentShareNoteId，批量采集就会拿别的笔记的 id 落盘并记错台账
         // （2026-11-22 审计 P0）。
         val detailEndpoint = url != null && (url.contains("imagefeed") || url.contains("/note/detail"))
-        // 详情端点 = 用户已经在看某一篇笔记 ⇒ 告诉 XhsAuthorTrack「现在不在主页」。
-        // 页面身份只能靠这种宿主请求信号判断：本机作者主页与详情页同名同类同结构（2026-11-22 真机截图）。
-        if (detailEndpoint) runCatching { XhsAuthorTrack.onDetailRequest() }
+        // 详情端点只用来认「当前打开的是哪一篇」。传给 XhsAuthorTrack 的「在不在主页」信号
+        // **只挂在请求侧**（拦截器每请求一次）：响应侧双写会推翻时序，页面判据在本机又不可靠
+        // （主页与详情页同名同类，2026-11-22 真机截图；复核 P1-6）。
         // share_info.link 优先（值须含 xsec_token 才算分享链——普通 "link" 字段多，先过滤）
         var lm = P_SHARE_LINK.matcher(body)
         while (lm.find()) {

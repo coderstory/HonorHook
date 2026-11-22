@@ -276,17 +276,6 @@ object XhsAutoEntry {
     }
 
     /** 主页判据：decorView 内存在 desc 以「笔记,」开头的视图（瀑布流卡片）。深度优先，找到即返回。 */
-    /**
-     * 判「这是作者主页」：既要有笔记卡片（desc「笔记,」），又要有主页资料区（「粉丝」/「获赞与收藏」）。
-     *
-     * 只有卡片判据不够（2026-11-22 审计）：详情页的「相关推荐」同样是「笔记,」卡片，于是详情页也冒出
-     * 「采集」按钮，一键下去就把**别人的笔记**当目标作者的作品装了。加上资料区标记后，详情页不再有按钮。
-     * 单次 DFS 同时收集两个标记，限深 30、只看可见节点（本页挂在 OnGlobalLayout 上每 250ms 跑一次）。
-     */
-    private fun isStatsText(t: String?): Boolean {
-        val s = t.orEmpty()
-        return s == "粉丝" || s.startsWith("粉丝") || s.endsWith("粉丝") || s.contains("获赞与收藏")
-    }
 
     /**
      * 主页 ⇒ 确保按钮在；非主页 ⇒ 摘除。
@@ -301,7 +290,9 @@ object XhsAutoEntry {
             return
         }
         val decor = activity.window?.decorView as? ViewGroup ?: return
-        if (!XhsAuthorTrack.isProfileContextOrQuiet() && !XhsBatchDriver.isRunning()) {
+        // 只有「确实见过宿主信号」才允许摘：authorId==null 时 isProfileContextOrQuiet 恒 false，
+        // 冷启动直接落回主页、列表走内存缓存不发请求的情况下会把按钮摘掉再也不回来（P1-8）。
+        if (!XhsAuthorTrack.isProfileContextOrQuiet() && !XhsBatchDriver.isRunning() && XhsAuthorTrack.hasSignal()) {
             // 判据失效时按钮会静默消失（用户和诊断都看不出原因）：摘除前记一次
             if (attachedButton != null) {
                 XhsBatchDriver.logEntry(
@@ -716,7 +707,8 @@ object XhsAutoEntry {
     }
 
     private fun detach() {
-        XhsAuthorTrack.onProfileSignal = null
+        // 不要在这里置空 XhsAuthorTrack.onProfileSignal：install 只跑一次（installedOnce），
+        // 置空后「主页列表请求晚于首屏布局」的补注入就永久失效（2026-11-22 复核 P1-5）。
         runCatching { attachedDecor?.let { d -> attachedButton?.let { d.removeView(it) } } }
         attachedButton = null
         attachedDecor = null

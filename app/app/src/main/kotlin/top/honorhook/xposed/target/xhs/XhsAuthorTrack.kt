@@ -64,15 +64,16 @@ internal object XhsAuthorTrack {
     }
 
     /** 兼容旧调用点：等价于 [onRequest]。 */
-    fun onPostedRequest(url: String) = onRequest(url)
 
     /** 兼容旧调用点：等价于 [onRequest]。 */
-    fun onDetailRequest() = synchronized(lock) { detailAt = android.os.SystemClock.elapsedRealtime() }
 
     /**
      * 严格判据：最近一次宿主请求就是「作者主页列表」。
      * 只用于**日志**与内部判断，不再直接拿来拒绝起跑——「返回主页」场景它会是假的。
      */
+    /** 本进程是否见过任何宿主信号（没见过 ≠ 不在主页，不能据此摘按钮）。 */
+    fun hasSignal(): Boolean = synchronized(lock) { authorId != null }
+
     fun isProfileContext(): Boolean = synchronized(lock) { authorId != null && postedAt > detailAt }
 
     /**
@@ -81,7 +82,7 @@ internal object XhsAuthorTrack {
      */
     fun isProfileContextOrQuiet(): Boolean = synchronized(lock) {
         if (authorId == null) return false
-        postedAt > detailAt || System.currentTimeMillis() >= 0 && quiet()
+        postedAt > detailAt || quiet()
     }
 
     private fun quiet(): Boolean {
