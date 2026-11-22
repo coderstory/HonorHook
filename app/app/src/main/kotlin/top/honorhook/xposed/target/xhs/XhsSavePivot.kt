@@ -233,6 +233,12 @@ object XhsSavePivot {
             // 真正的原因在 `failure` 字段里（DownloadFailure.Network/Parsing/RequiresWebView…）。
             val failure = runCatching {
                 t.javaClass.getDeclaredField("failure").let { it.isAccessible = true; it.get(t)?.toString() }
+            }.getOrNull() ?: runCatching {
+                // 反射不到 failure（字段改名/换异常类型）时把实际字段列出来，否则永远只有「无 message」
+                module.log(Log.WARN, MountEngine.TAG,
+                    "$JUDGE_PREFIX 解析异常无 failure 字段：${t.javaClass.name} 字段=" +
+                        t.javaClass.declaredFields.joinToString(",") { it.name })
+                null
             }.getOrNull()
             val detail = failure
                 ?: t.cause?.run { "${javaClass.simpleName}: $message" }
@@ -280,12 +286,20 @@ object XhsSavePivot {
                     .get(null)
             }.getOrNull()
         } ?: throw NoSuchFieldException("服务定位器 Companion 未找到（试过 ${candidates.joinToString(" / ")}）")
-        val e = companion.javaClass.methods.first {
+        val e = companion.javaClass.methods.firstOrNull {
             it.name == "e" && it.parameterCount == 1 && it.parameterTypes[0] == Class::class.java
-        }
+        } ?: throw NoSuchMethodException(
+            "定位器缺少 e(Class)：候选=" + companion.javaClass.methods.filter { it.name == "e" }
+                .joinToString(" / ") { it.parameterTypes.joinToString(",", "e(") { p -> p.simpleName } + ")" },
+        )
         e.isAccessible = true
         val service = e.invoke(companion, serviceCls)
-        val getShortUrl = serviceCls.methods.first { it.name == "getShortUrl" && it.parameterCount == 1 }
+        val getShortUrl = serviceCls.methods.firstOrNull { it.name == "getShortUrl" && it.parameterCount == 1 }
+            ?: throw NoSuchMethodException(
+                "ShareService 缺少 getShortUrl(String)：候选=" +
+                    serviceCls.methods.filter { it.name == "getShortUrl" }
+                        .joinToString(" / ") { it.parameterTypes.joinToString(",", "getShortUrl(") { p -> p.simpleName } + ")" },
+            )
         getShortUrl.isAccessible = true
         val observable = getShortUrl.invoke(service, longUrl) ?: run {
             // 9.51 诊断（2026-10-24）：三处静默 null 曾无日志，getShortUrl 失败无法定位分支——各补一行
@@ -346,7 +360,7 @@ object XhsSavePivot {
      * 同款（手机 UA）；展开链自带 fresh xsec_token（2026-10-19 本地实证）。任何失败返 null
      * （上游侧回落短链原样进 fetchHtml，由其手动 302 兜底）。
      */
-    private fun expandShortUrl(startUrl: String): String? {
+    private fun expandShortUrl(startUrl: String, module: XposedModule? = null): String? {
         var u = startUrl
         var redirects = 0
         while (true) {
@@ -358,11 +372,24 @@ object XhsSavePivot {
             try {
                 when (val code = conn.responseCode) {
                     in 300..399 -> {
-                        if (++redirects > 5) return null
-                        u = conn.getHeaderField("Location") ?: return null
+                        if (++redirects > 5) {
+                            module?.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 短链展开失败：重定向超过 5 跳 url=${startUrl.take(60)}")
+                            return null
+                        }
+                        val next = conn.getHeaderField("Location")
+                        if (next == null) {
+                            module?.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 短链展开失败：302 无 Location code=$code")
+                            return null
+                        }
+                        u = next
                     }
                     200 -> return u
-                    else -> return null
+                    else -> {
+                        // 429/风控页/断网 与「真解析失败」在日志里必须分得开
+                        module?.log(Log.WARN, MountEngine.TAG,
+                            "$JUDGE_PREFIX 短链展开非预期响应 code=$code url=${startUrl.take(60)}")
+                        return null
+                    }
                 }
             } finally {
                 conn.disconnect()
@@ -401,6 +428,6 @@ object XhsSavePivot {
                     }
                 }
             },
-            resolveShortUrl = { url -> expandShortUrl(url) },
+            resolveShortUrl = { url -> expandShortUrl(url, module) },
         )
 }

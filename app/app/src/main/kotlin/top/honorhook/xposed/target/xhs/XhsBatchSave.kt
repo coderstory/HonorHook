@@ -911,7 +911,6 @@ object XhsBatchSave {
      * 弹卡路径不走这里：重复提示在卡内展示，「仍要下载」由用户显式选择（不硬拦）。
      */
     /** 最近一次「去重命中」的时刻（单调递增）：[XhsBatchDriver] 用它把「跳过」和「失败」分开。 */
-    @Volatile internal var lastDedupAt: Long = 0L
 
     private fun dedupThenDownload(activity: Activity, urls: List<String>, module: XposedModule, noteId: String?) {
         if (noteId != null) {
@@ -922,7 +921,6 @@ object XhsBatchSave {
                 val what = "已下载过 $count 项" + if (at.isEmpty()) "" else "（$at）" + "，跳过重复下载"
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 去重命中 noteId=$noteId count=$count source=$source，跳过")
                 android.widget.Toast.makeText(activity, what, android.widget.Toast.LENGTH_LONG).show()
-                lastDedupAt = System.currentTimeMillis()
                 return
             }
         }
@@ -1163,7 +1161,10 @@ object XhsBatchSave {
         quiet: Boolean = false,
         done: java.util.concurrent.CountDownLatch? = null,
     ) {
-        imageCancelRequested = false
+        // 入口清零只对「新一轮」生效：驱动已经在取消（cancelRequested=true）时不能把它擦掉，
+        // 否则取消落在等链/等 id 阶段，等待结束后照样整篇下完（2026-11-22 审计 P1）。
+        if (!cancelRequested) imageCancelRequested = false
+        val batchStartSec = System.currentTimeMillis() / 1000
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下开始 ${urls.size} 张")
         mainHandler.post {
             runCatching {
@@ -1249,13 +1250,24 @@ object XhsBatchSave {
             } else {
                 showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled, filtered) }
             }
+            // 取消时本轮已落盘的几张同样带 `xhs_<noteId>_` 前缀，留着会让下次采集的 MediaStore
+            // 前缀查询判成「已下载过」→ 这篇永远只有前几张（2026-11-22 审计 P1）。只删本轮新增。
+            if (canceled && quiet && noteId != null) {
+                runCatching { purgePartialOfRun(activity, noteId, batchStartSec) }
+            }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}${if (filtered > 0) " 过滤$filtered" else ""}")
             // 静默模式下把「本轮被画质规则滤掉几张」交给驱动：全被滤掉不算失败（用户 2026-11-21 的过滤规则
             // 是对的，判成失败会让人误以为功能坏了）
-            if (quiet) lastQuietFiltered = filtered
+            if (quiet) {
+                lastQuietFiltered = filtered
+                // 真实失败张数（既没落盘也没被过滤）：全被过滤 ≠ 全部失败（2026-11-22 审计 P1）
+                lastQuietFailed = urls.size - ok - filtered
+            }
             // 去重记账（2026-11-21）：有成功落盘才记（全失败/取消不记，重试不误拦）；
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
-            if (!canceled && ok > 0 && noteId != null) {
+            // 只有「零真实失败」才记账：100 张里 3 张成功 97 张 404 时若记账，下次采集会
+            // 「已下载过，跳过」，缺的图永远补不回来（2026-11-22 审计 P1）。
+            if (!canceled && ok > 0 && noteId != null && urls.size - ok - filtered == 0) {
                 runCatching { XhsDownloadLedger.record(activity.applicationContext, noteId) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重记账失败: ${it.message}") }
             }
@@ -1275,9 +1287,17 @@ object XhsBatchSave {
         while (!latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
             if (cancelRequested) break
         }
-        // 台账写入在下载线程收尾处，latch 之后，给它一点余量再判
-        Thread.sleep(300)
-        return XhsDownloadLedger.stamp(activity.applicationContext) > before
+        // 台账写入在下载线程收尾处、countDown 之后（finally 里先放闸），所以不能直接判——
+        // 轮询等它落账，最多 2 秒（2026-11-22 审计：固定 sleep(300) 在慢 IO 下会把「已落盘」判成失败，
+        // 用户就会看到同一篇先失败、下次又变成已下载）。
+        var after = XhsDownloadLedger.stamp(activity.applicationContext)
+        var waited = 0
+        while (after <= before && waited < 2000) {
+            Thread.sleep(200)
+            waited += 200
+            after = XhsDownloadLedger.stamp(activity.applicationContext)
+        }
+        return after > before
     }
 
     /** 批量采集的「取消」= 置位本张取消旗标（下载循环每张前查它）。 */
@@ -1286,6 +1306,9 @@ object XhsBatchSave {
     /** 最近一次静默下载里被画质规则过滤掉的张数（驱动据此把「全滤掉」记成跳过而不是失败）。 */
     @Volatile internal var lastQuietFiltered = 0
 
+    /** 最近一次静默下载里真实失败的张数（既没落盘也没被过滤）。 */
+    @Volatile internal var lastQuietFailed = 0
+
     internal fun requestCancel() {
         cancelRequested = true
         imageCancelRequested = true
@@ -1293,6 +1316,46 @@ object XhsBatchSave {
 
     internal fun clearCancel() {
         cancelRequested = false
+        lastQuietFiltered = 0
+        lastQuietFailed = 0
+    }
+
+    /**
+     * 删掉「本轮」为某篇落盘的半成品（取消时用）：按文件名前缀 + DATE_ADDED >= 本轮起点查，
+     * 用户以前下的同名笔记文件（DATE_ADDED 更早）不受影响。
+     */
+    private fun purgePartialOfRun(activity: Activity, noteId: String, sinceSec: Long) {
+        val resolver = activity.contentResolver
+        val prefix = XhsDownloadLedger.likePrefix(noteId)
+        val tables = listOf(
+            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+        )
+        var n = 0
+        tables.forEach { table ->
+            runCatching {
+                resolver.query(
+                    table,
+                    arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                    "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? AND " +
+                        "${android.provider.MediaStore.MediaColumns.DATE_ADDED} >= ?",
+                    arrayOf(prefix, (sinceSec - 5).toString()),
+                    null,
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        val id = c.getLong(0)
+                        runCatching { resolver.delete(android.content.ContentUris.withAppendedId(table, id), null, null) }
+                            .onSuccess { n++ }
+                    }
+                }
+            }
+        }
+        modulelessLog("取消时清掉本轮半成品 $n 张 noteId=$noteId")
+    }
+
+    /** 没 module 时的日志兜底（清理函数在下载线程里，拿不到 module 引用以外的上下文）。 */
+    private fun modulelessLog(msg: String) {
+        android.util.Log.i("HonorHookXhsBatch", msg)
     }
 
     /** 体积显示（单点实现）：1024 进制一位小数 MB（截断）。 */

@@ -410,13 +410,16 @@ object XhsVideoSave {
         // 记录「当前视频笔记」——invoke 的 String 参数语义不可证时（见 XhsBatchSave 挂载处）唯一归属来源
         if (url.contains("note/user/posted")) {
             // 主页列表取证（2026-11-22）：页面显示「服务异常」时，先分清是请求根本没发出、
-            // 还是服务端返回了错误码——否则只能靠猜。
+            // 还是服务端返回了错误码——否则只能靠猜。success/result 一起打，才能和宿主自己
+            // 的文案对上（code=0 但 success=false 是另一种失败）。
             val code = runCatching { response.callMethod("code") }.getOrNull()
-            module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 主页列表 code=$code len=${body.length}")
+            val success = runCatching { response.callMethod("success") }.getOrNull()
+            val result = runCatching { response.callMethod("result") }.getOrNull()
+            module.log(Log.INFO, MountEngine.TAG,
+                "$JUDGE_PREFIX 主页列表 code=$code success=$success result=$result len=${body.length}")
         }
         if (url.contains("/note/videofeed")) queryParam(url, "note_id")?.let { lastVideoNoteId = it }
         harvestNoteShare(body, module, url)
-        // 作者主页笔记索引（2026-11-21 零长按架构）：/posted 响应登记 noteId 序列 + 作者 user_id
         // 评论图被动采集（2026-11-03 用户需求）：评论区响应顺带抽图链（X5 批量消费，见 XhsCommentHarvest）
         if (url.contains("comment")) XhsCommentHarvest.harvest(url, body)
         return null
@@ -440,6 +443,10 @@ object XhsVideoSave {
      */
     private fun harvestNoteShare(body: String, module: XposedModule? = null, url: String? = null) {
         val before = noteShares.size
+        // 「当前打开的这篇」只认详情端点：评论、推荐、预取 feed 的响应同样带 share_info，
+        // 若它们也能改 recentShareNoteId，批量采集就会拿别的笔记的 id 落盘并记错台账
+        // （2026-11-22 审计 P0）。
+        val detailEndpoint = url != null && (url.contains("imagefeed") || url.contains("/note/detail"))
         // share_info.link 优先（值须含 xsec_token 才算分享链——普通 "link" 字段多，先过滤）
         var lm = P_SHARE_LINK.matcher(body)
         while (lm.find()) {
@@ -452,7 +459,7 @@ object XhsVideoSave {
             val old = noteShares[nid]
             noteShares[nid] = NoteShare(value, old?.token)
             // 批量采集（2026-11-22）：最近一次登记分享链接的 noteId = 刚打开的那篇的笔记
-            recentShareNoteId = nid
+            if (detailEndpoint) recentShareNoteId = nid
         }
         // 同级 xsec_token 兜底（link 缺失的响应形态）
         var tm = P_XSEC_TOKEN.matcher(body)
@@ -467,6 +474,9 @@ object XhsVideoSave {
                 if (noteShares.size > URL_MAP_LIMIT) noteShares.clear()
                 noteShares[nid] = NoteShare(null, tok)
             }
+            // 只有裸 token 的详情响应（真机大多数）也要认「当前这篇」，否则驱动每篇白等 8 秒
+            // （2026-11-22 审计 P0）。
+            if (detailEndpoint) recentShareNoteId = nid
         }
         // 批量采集取证（2026-11-21）：主页列表响应是否自带 share_info/xsec_token —— 决定
         // 「浏览即登记、零长按直下」架构能否成立。只在有新增时打一行，正常使用不刷屏。

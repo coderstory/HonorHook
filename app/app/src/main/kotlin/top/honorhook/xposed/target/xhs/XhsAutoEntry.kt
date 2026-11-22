@@ -51,6 +51,7 @@ object XhsAutoEntry {
     @Volatile private var ticker: Runnable? = null
     /** 面板最近一次内容：面板晚于消息建出来时用它补渲染（首条消息早于注入很常见）。 */
     @Volatile private var lastLines: List<String> = emptyList()
+    @Volatile private var renderedLines: List<String> = emptyList()
     /** 用户点过面板上的 ×：本轮不再自动挂回来，下次点「采集」开新一轮才复位。 */
     @Volatile private var panelDismissed = false
     @Volatile private var lastRunning = false
@@ -64,7 +65,12 @@ object XhsAutoEntry {
     @Volatile private var watchedActivity: Activity? = null
     @Volatile private var lastCheckAt = 0L
 
+    private val installedOnce = java.util.concurrent.atomic.AtomicBoolean(false)
+
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
+        // 进程级只装一次：install 被调两次时生命周期回调与广播会各注册一遍（回调跑两次、
+        // 两条注入轮询、STOP 处理两次），而这两条都没有反注册路径（2026-11-22 审计 P2）。
+        if (!installedOnce.compareAndSet(false, true)) return
         val tracked = java.util.concurrent.atomic.AtomicBoolean(false)
         val main = android.os.Handler(android.os.Looper.getMainLooper())
         main.post(object : Runnable {
@@ -79,9 +85,10 @@ object XhsAutoEntry {
                 }
                 if (!tracked.compareAndSet(false, true)) return
                 // 驱动状态变化 → 按钮文案（驱动在自己的线程里改状态，回主线程刷 View）
-                XhsBatchDriver.stateListener = { main.post { applyLabel(); panelSync() } }
+                // 这里一旦抛就是宿主主线程未捕获异常（本文件其它主线程路径全包了 runCatching）
+                XhsBatchDriver.stateListener = { main.post { runCatching { applyLabel(); panelSync() } } }
                 // 过程消息 → 悬浮面板（不再逐条 Toast：用户 2026-11-22「toast 不太行」）
-                XhsBatchDriver.uiListener = { lines -> main.post { renderLines(lines) } }
+                XhsBatchDriver.uiListener = { lines -> main.post { runCatching { renderLines(lines) } } }
                 runCatching { registerStopReceiver(app, module, main) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 停止接收器注册失败: ${it.message}") }
                 runCatching {
@@ -98,8 +105,10 @@ object XhsAutoEntry {
                             if (watchedActivity === a || watchedDecor === a.window?.decorView) {
                                 unwatch()
                             }
-                            // 只删本页的轮询，不用 removeCallbacksAndMessages(null) 全清（审计 #18）
+                            // 只删本页的轮询，不用 removeCallbacksAndMessages(null) 全清（审计 #18）；
+                            // 删完要清字段，否则静态字段一直握着含 Activity 的闭包（审计 P2）
                             retryRunnable?.let { main.removeCallbacks(it) }
+                            retryRunnable = null
                         }
                         override fun onActivityCreated(a: Activity, b: android.os.Bundle?) {}
                         override fun onActivityStarted(a: Activity) {}
@@ -109,11 +118,14 @@ object XhsAutoEntry {
                             // 宿主 Activity 销毁必须摘按钮并取消未跑的延迟挂载，否则静态引用
                             // 拖住整棵 decor 视图树（2026-11-21 审计 #5）
                             // decorView 可能已被替换/置空，身份比较之外再按 context 判一次（审计 #17）
-                            if (watchedDecor === a.window?.decorView || (watchedDecor?.context as? Activity) === a) {
+                            // decor.context 是 DecorContext，`as? Activity` 恒 null（本文件 38-41 行已实证），
+                            // 身份比较只能用自己记下的 watchedActivity/attachedActivity
+                            if (watchedActivity === a || watchedDecor === a.window?.decorView) {
                                 unwatch()
                             }
                             if (attachedActivity === a || attachedDecor === a.window?.decorView) {
                                 retryRunnable?.let { main.removeCallbacks(it) }
+                                retryRunnable = null
                                 detach()
                             }
                         }
@@ -165,6 +177,10 @@ object XhsAutoEntry {
 
     /** 每 400ms 试一次注入，最多 [attempts] 次（≈6s）：主页渲染慢也能等到，非主页则安静放弃。 */
     private fun retrySync(activity: Activity, module: XposedModule, main: android.os.Handler, attempts: Int, intervalMs: Long) {
+        // 分屏/小窗下两个 Activity 可同时 resumed（没有 onPause），不取消上一条链就会有两条
+        // 6 秒轮询同时改 attachedButton/attachedDecor，把按钮挂到不可见的那一页（审计 P2）
+        retryRunnable?.let { main.removeCallbacks(it) }
+        retryRunnable = null
         val r = object : Runnable {
             private var left = attempts
             override fun run() {
@@ -258,6 +274,10 @@ object XhsAutoEntry {
     private fun syncButton(activity: Activity, module: XposedModule) {
         val decor = activity.window?.decorView as? ViewGroup ?: return
         if (!isProfilePage(decor) && !XhsBatchDriver.isRunning()) {
+            // 判据失效时按钮会静默消失（用户和诊断都看不出原因）：摘除前记一次
+            if (attachedButton != null) {
+                XhsBatchDriver.logEntry("按钮摘除：本页不像作者主页（缺「笔记,」卡片或资料区文案）${activity.javaClass.simpleName}")
+            }
             detach()
             return
         }
@@ -302,18 +322,27 @@ object XhsAutoEntry {
      * 面板右上角「⧉」触发，采集前后都能点。
      */
     private fun copyDiagnostics(activity: Activity) {
-        runCatching {
-            val text = XhsBatchDriver.diagnostics(activity)
-            val cm = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                as? android.content.ClipboardManager
-            cm?.setPrimaryClip(android.content.ClipData.newPlainText("HonorHook诊断", text))
-            runCatching {
-                java.io.File(activity.getExternalFilesDir(null), "xhs_diag.txt").writeText(text)
+        // 读最多 512KB 的日志 + 写盘都是外部存储 I/O：主线程做会掉帧甚至 ANR（审计 P2）。
+        // 后台拼好文本，再回主线程写剪贴板 + 提示。
+        val app = activity.applicationContext
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        Thread({
+            val text = runCatching { XhsBatchDriver.diagnostics(app) }.getOrNull()
+            main.post {
+                if (text == null) {
+                    runCatching {
+                        android.widget.Toast.makeText(app, "诊断生成失败", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    return@post
+                }
+                runCatching {
+                    val cm = app.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as? android.content.ClipboardManager
+                    cm?.setPrimaryClip(android.content.ClipData.newPlainText("HonorHook诊断", text))
+                    android.widget.Toast.makeText(app, "诊断信息已复制（${text.length} 字符）", android.widget.Toast.LENGTH_SHORT).show()
+                }
             }
-            android.widget.Toast.makeText(activity, "诊断信息已复制（${text.length} 字符）", android.widget.Toast.LENGTH_SHORT).show()
-        }.onFailure {
-            android.widget.Toast.makeText(activity, "复制失败：${it.javaClass.simpleName}", android.widget.Toast.LENGTH_SHORT).show()
-        }
+        }, "HonorHook-xhs-diag").start()
     }
 
     private fun applyLabel() {
@@ -426,7 +455,11 @@ object XhsAutoEntry {
             elevation = (12 * dp)
         }
         val added = runCatching { decor.addView(box) }
-        added.onFailure { XhsBatchDriver.logEntry("面板 addView 失败：${it.javaClass.simpleName}: ${it.message}") }
+        if (added.isFailure) {
+            // 挂失败就别登记为「已挂」：否则 panelSync 认为在树上，本轮面板永远不再重建
+            XhsBatchDriver.logEntry("面板 addView 失败：${added.exceptionOrNull()?.javaClass?.simpleName}: ${added.exceptionOrNull()?.message}")
+            return
+        }
         added.onSuccess {
             XhsBatchDriver.logEntry(
                 "面板已挂：${box.width}x${box.height} 父=${decor.javaClass.simpleName} 父宽高=${decor.width}x${decor.height} " +
@@ -448,6 +481,8 @@ object XhsAutoEntry {
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val r = object : Runnable {
             override fun run() {
+                // 只认「当前这一条」心跳：换页会重建面板，旧 Runnable 不能复活
+                if (ticker !== this) return
                 runCatching { panelHeader?.text = XhsBatchDriver.header() }
                 if (attachedPanel != null) handler.postDelayed(this, 1000) else ticker = null
             }
@@ -456,8 +491,14 @@ object XhsAutoEntry {
         handler.postDelayed(r, 1000)
     }
 
+    /**
+     * 真取消：只置 null 的话旧 Runnable 到点还会跑，且它看的是共享的 attachedPanel
+     * （新面板已挂上就 postDelayed 自己），每翻一页多一条 1s 心跳（2026-11-22 审计 P1）。
+     */
     private fun stopTicker() {
+        val r = ticker
         ticker = null
+        if (r != null) android.os.Handler(android.os.Looper.getMainLooper()).removeCallbacks(r)
     }
 
     /** 行级配色：嗅探/落盘失败红、跳过黄、成功绿、其余白。 */
@@ -469,6 +510,13 @@ object XhsAutoEntry {
     }
 
     private fun renderLines(lines: List<String>) {
+        // 同一份列表每秒会被 header 心跳重复推一遍：内容没变就别 removeAllViews 重建
+        // （重建会触发下一次 onGlobalLayout，形成 4Hz 自激全量重建，长跑后主线程掉帧）
+        if (lines === renderedLines) {
+            runCatching { panelHeader?.text = XhsBatchDriver.header() }
+            return
+        }
+        renderedLines = lines
         lastLines = lines
         runCatching { panelHeader?.text = XhsBatchDriver.header() }
         val box = panelLog ?: return

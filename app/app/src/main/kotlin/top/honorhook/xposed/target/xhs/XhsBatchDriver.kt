@@ -69,7 +69,6 @@ object XhsBatchDriver {
     private val HEX24 = Regex("[0-9a-f]{24}")
 
     /** 当前这轮「扫到过卡片的那一页」，返回时用来判「同一列表页重绘」与「能不能 finish」。 */
-    @Volatile private var listActivity: Activity? = null
 
     /**
      * 列表页的 Activity **类名**（2026-11-22 审计修正）：详情页的「相关推荐」也是 desc 以
@@ -81,6 +80,8 @@ object XhsBatchDriver {
     private const val CARD_DESC_PREFIX = "笔记,"
 
     @Volatile private var running = false
+    /** 轮次令牌：旧线程的收尾（finish）不能覆盖新一轮的运行时状态。 */
+    private val runGen = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var stopRequested = false
 
     /** 已处理篇数（成功+跳过），给悬浮按钮做进度显示用。 */
@@ -153,7 +154,7 @@ object XhsBatchDriver {
         failedCount = failed
         pendingNow = pending
         if (discovered > discoveredCount) discoveredCount = discovered
-        processed = ok + skipped
+        processed = ok + skipped + failed
     }
 
     /** 面板顶栏文本：两行（窄屏一排放不下五项）。 */
@@ -186,8 +187,10 @@ object XhsBatchDriver {
         syncStats(0, 0, 0, 0, 0)
         discoveredCount = 0
         startedAt = System.currentTimeMillis()
-        listActivity = null
-        listClassName = null
+        // 列表页类名在 start 就锁成「当前这页」：等到第一次扫到卡片才学，会在首屏重绘/切 tab 的
+        // 空窗里对着作者主页按返回，退出后把首页 feed 学成列表页 → 把别人的笔记当目标作品（审计 P0）。
+        listClassName = runCatching { XhsBatchSave.activityOrNull()?.javaClass?.name }.getOrNull()
+        val gen = runGen.incrementAndGet()
         val app = ctx.applicationContext
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")
         xlog(app, "采集开始")
@@ -196,7 +199,7 @@ object XhsBatchDriver {
         // 驱动线程是裸 Thread：任何逃出去的 Throwable 会走默认 UncaughtExceptionHandler
         // **直接杀宿主进程**（且 running 卡在 true，按钮永远显示「取消」）。双重兜底（2026-11-22 审计 #1）。
         val worker = Thread({
-            runCatching { loop(module, app) }.onFailure {
+            runCatching { loop(module, app, gen) }.onFailure {
                 running = false
                 stopRequested = true
                 runCatching { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 驱动线程异常: ${it.javaClass.simpleName}: ${it.message}") }
@@ -207,14 +210,25 @@ object XhsBatchDriver {
             stopRequested = true
             runCatching { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 驱动线程未捕获: ${e.javaClass.simpleName}") }
         }
-        worker.start()
+        runCatching { worker.start() }.onFailure {
+            running = false
+            stopRequested = true
+            runCatching { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 驱动线程启动失败: ${it.message}") }
+            stateListener?.invoke()
+            return
+        }
         stateListener?.invoke()
         toast(ctx, "开始采集：逐篇打开下载，可随时点取消")
         notifyModule(app, AutoActions.STATE, true, "开始采集…")
     }
 
     fun stop(module: XposedModule?, ctx: Context?) {
-        if (!running || stopRequested) return   // 用户会连点「取消」：只认第一次，别刷屏
+        if (!running) return
+        if (stopRequested) {
+            // 用户会连点：只认第一次，但别静默——正在收尾时点按钮没反应最像「坏了」
+            ctx?.let { toast(it, "正在收尾，请稍候…") }
+            return
+        }
         stopRequested = true
         // 立即回写状态：下载/解析可能还要几秒到几十秒，按钮不刷新用户会以为没点中而连点（审计 #21）
         stateListener?.invoke()
@@ -234,7 +248,7 @@ object XhsBatchDriver {
      * （noteId 优先、退化用 contentDescription）：只要这一屏还有没见过的卡，就一定要处理它，
      * 不看序号，所以重排、复用、返回后轻微位移都不会漏。
      */
-    private fun loop(module: XposedModule, ctx: Context) {
+    private fun loop(module: XposedModule, ctx: Context, gen: Int) {
         var ok = 0
         var skipped = 0
         var failed = 0
@@ -251,8 +265,16 @@ object XhsBatchDriver {
         // 本轮已处理过的卡片身份。noteId 拿不到时退化成 contentDescription（「笔记, 标题…」）。
         // 上限兜底：超长主页会把集合撑大，超过就整体清空（清空只会导致重复去重查询，不会漏）。
         val seen = HashSet<String>()
+        // 「已发现」= 本轮扫到过的不同卡片（不是已处理数）：否则首屏 30 张时面板显示「已发现 0」
+        val discoveredKeys = HashSet<String>()
         try {
             while (!stopRequested) {
+                // 看门狗必须在循环最外层：act==null（用户切走）与 !scanned（主线程卡）这两条
+                // continue 原来永不超时，表现是「一直采集中、零日志」（2026-11-22 审计 P1）。
+                if (System.currentTimeMillis() - lastProgressAt > NO_PROGRESS_LIMIT_MS) {
+                    xlog(ctx, "连续 ${NO_PROGRESS_LIMIT_MS / 1000} 秒没有进展，收工")
+                    break
+                }
                 // 每轮都重新取前台 Activity：详情页/列表页可能是不同实例，抱死一个会对着
                 // 已销毁的视图树空转。
                 val act = XhsBatchSave.activityOrNull()
@@ -261,7 +283,9 @@ object XhsBatchDriver {
                     continue
                 }
                 val (scanned, cardList) = onMainOrTimeout {
-                    findCards(act).map { v -> v to (noteIdOfCard(v) ?: v.contentDescription?.toString().orEmpty()) }
+                    // key = 描述 + 屏内 top：不同笔记可能描述完全相同（同标题系列/无标题），
+                    // 只按描述去重会把第二篇永远判成「已处理」（2026-11-22 审计 P2）
+                    findCards(act).map { v -> v to (v.contentDescription?.toString().orEmpty() + "#" + v.top()) }
                 }
                 if (!scanned) {
                     // 主线程卡住：视图树这一刻不可信，等它缓过来，绝不据此按返回（审计 #8）
@@ -286,6 +310,11 @@ object XhsBatchDriver {
                     }
                 }
                 if (cards.isEmpty()) {
+                    if (listClassName == null) {
+                        // 还没锁定列表页：这页可能是过场/占位，按返回只会把作者主页关掉（审计 P0）
+                        Thread.sleep(700)
+                        continue
+                    }
                     // 扫到过卡片的同一页现在空 = 宿主重绘/占位中，**绝不能按返回**（2026-11-22 真机：
                     // 连按 3 次把小红书一路退到桌面，整轮就这么收工了）。等它画出来。
                     if (act.javaClass.name == listClassName) {
@@ -299,7 +328,7 @@ object XhsBatchDriver {
                     // 确实离开了列表（停在详情/弹层）：整轮只允许按两次返回，按完就等
                     offList++
                     xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 无卡片")
-                    if (offList == 1) dumpViews(ctx, "返回后无卡片", act.window?.decorView)
+                    if (offList == 1) dumpViews(ctx, "返回后无卡片", act)
                     if (offList > MAX_BACK_PRESSES) break
                     pressBack(act)
                     Thread.sleep(900)
@@ -308,18 +337,14 @@ object XhsBatchDriver {
                 offList = 0
                 redrawWaits = 0
                 scrollIdle = 0
-                listActivity = act
                 if (seen.size > SEEN_LIMIT) seen.clear()
 
+                cards.forEach { discoveredKeys.add(it.second) }
                 val pending = cards.filter { it.second !in seen }
                 val keysPreview = cards.take(3).joinToString("|") { it.second.take(14) }
                 vlog(ctx, "扫描[${act.javaClass.simpleName}] 卡=${cards.size} 未处理=${pending.size} 已见=${seen.size} " +
                     "首top=${cards.first().first.top()} 键=$keysPreview")
-                syncStats(ok, skipped, failed, pending.size, seen.size)
-                if (System.currentTimeMillis() - lastProgressAt > NO_PROGRESS_LIMIT_MS) {
-                    xlog(ctx, "连续 ${NO_PROGRESS_LIMIT_MS / 1000} 秒没有进展，收工")
-                    break
-                }
+                syncStats(ok, skipped, failed, pending.size, discoveredKeys.size)
                 if (pending.isEmpty()) {
                     // 这一屏没有新卡了：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
                     val beforeTop = cards.first().first.top()
@@ -345,7 +370,10 @@ object XhsBatchDriver {
                 // 先标记再处理：处理失败也不该在同一屏反复点它（失败的账已经记在 failed 里）
                 seen.add(key)
                 handled++
-                val known = onMain { noteIdOfCard(card) }
+                // 反射只对「马上要处理的那张」做；整屏几十张全反射是纯主线程浪费（审计 P2）
+                val cardNoteId = runCatching { onMain { noteIdOfCard(card) } }.getOrNull()
+                if (cardNoteId != null) seen.add(cardNoteId)
+                val known = cardNoteId
                 // 整条 share link 已经在表里（homefeed/上一屏响应登记过）⇒ 根本不用点开这篇：
                 // 零详情页、零等待，直接解析直下。这是最快也最稳的一条路（2026-11-22）。
                 if (known != null && XhsVideoSave.shareLinkOf(known) != null) {
@@ -362,9 +390,20 @@ object XhsBatchDriver {
                         SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                     }
                     xlog(ctx, dt)
-                    syncStats(ok, skipped, failed, pending.size - 1, seen.size)
+                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, dt, ok, skipped, failed, cardsTotal)
+                    sleepPace()
+                    continue
+                }
+                // 台账先查：已知这篇下过就直接跳过（不点开、不等网络），否则每篇白开一次详情页
+                // 还要等 8~23 秒，且反射失败时会记成「失败」而不是「跳过」（2026-11-22 审计 P1）
+                if (known != null && runCatching { XhsDownloadLedger.downloaded(ctx, known).first }.getOrDefault(0) > 0) {
+                    skipped++
+                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
+                    stateListener?.invoke()
+                    notifyModule(ctx, AutoActions.PROGRESS, true, "已下载过，跳过", ok, skipped, failed, cardsTotal)
+                    xlog(ctx, "已下载过，跳过 noteId=$known（免点开）")
                     sleepPace()
                     continue
                 }
@@ -373,7 +412,7 @@ object XhsBatchDriver {
                 val prev = XhsVideoSave.lastShareNoteId()
                 if (onMain { clickView(card) } != true) {
                     failed++
-                    syncStats(ok, skipped, failed, pending.size - 1, seen.size)
+                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
                     xlog(ctx, "卡片点不动（本屏剩 ${pending.size - 1} 张）")
@@ -393,20 +432,20 @@ object XhsBatchDriver {
                 }
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX $text")
                 xlog(ctx, "$text（本屏剩 ${pending.size - 1} 张）")
-                syncStats(ok, skipped, failed, pending.size - 1, seen.size)
+                syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
                 stateListener?.invoke()
                 notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $ok · 跳过 $skipped · 失败 $failed）", ok, skipped, failed, cardsTotal)
                 backToList()
                 sleepPace()
             }
             if (cardsTotal == 0) {
-                dumpViews(ctx, "一张卡片都没扫到", XhsBatchSave.activityOrNull()?.window?.decorView)
+                dumpViews(ctx, "一张卡片都没扫到", XhsBatchSave.activityOrNull())
             }
         } catch (t: Throwable) {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 采集中断: ${t.javaClass.simpleName}: ${t.message}")
             xlog(ctx, "采集中断 ${t.javaClass.simpleName}: ${t.message}")
         } finally {
-            finish(module, ctx, ok, skipped, failed, null)
+            finish(module, ctx, ok, skipped, failed, null, gen)
         }
     }
 
@@ -426,14 +465,18 @@ object XhsBatchDriver {
         val knownReady = known != null &&
             (XhsVideoSave.shareLinkOf(known) != null || XhsVideoSave.tokenOf(known) != null)
         val registered = if (knownReady) null
-        else await(NOTE_ID_WAIT_MS) { XhsVideoSave.lastShareNoteId()?.takeIf { it != prev } }
+        // 有卡片反射出来的 id 时，详情页登记的必须是**同一篇**才算命中：详情页的评论/推荐响应也会
+        // 改最近登记值，取错了就「把 A 的图存成 B 的 noteId」（2026-11-22 审计 P0）。
+        else await(NOTE_ID_WAIT_MS) {
+            XhsVideoSave.lastShareNoteId()?.takeIf { it != prev && (known == null || it == known) }
+        }
         val noteId = registered ?: known
         if (!knownReady && registered == null && known != null) {
             vlog(ctx, "详情页没登记，用卡片反射的 noteId=$known 兜底")
         }
         if (noteId == null) {
             xlog(ctx, "详情页没拿到 noteId（没人登记分享链）")
-            dumpViews(ctx, "详情页", XhsBatchSave.activityOrNull()?.window?.decorView)
+            dumpViews(ctx, "详情页", XhsBatchSave.activityOrNull())
             return SaveOutcome.FAIL
         }
         // noteId 有了不代表凭据有了：宿主命中本地缓存时不发 imagefeed，分享链永远不会落表。
@@ -448,17 +491,45 @@ object XhsBatchDriver {
             xlog(ctx, "已下载过，跳过 noteId=$noteId")
             return SaveOutcome.SKIPPED
         }
-        val activity = XhsBatchSave.activityOrNull() ?: return SaveOutcome.FAIL
-        xlog(ctx, "noteId=$noteId 链=${if (XhsVideoSave.shareLinkOf(noteId) != null) "share_info" else "token合成"} " +
-            "token=${XhsVideoSave.tokenOf(noteId) != null}")
-        val urls = runCatching {
-            val note = kotlinx.coroutines.runBlocking {
+        val activity = XhsBatchSave.activityOrNull()
+        if (activity == null) {
+            xlog(ctx, "落盘前没有可用的 Activity（宿主退到后台？）noteId=$noteId")
+            return SaveOutcome.FAIL
+        }
+        val linkKind = when {
+            XhsVideoSave.shareLinkOf(noteId) != null -> "share_info"
+            XhsVideoSave.tokenOf(noteId) != null -> "token合成"
+            else -> "无凭据"
+        }
+        xlog(ctx, "noteId=$noteId 链=$linkKind")
+        if (stopRequested) {
+            xlog(ctx, "已取消，这一篇不再解析 noteId=$noteId")
+            return SaveOutcome.FAIL
+        }
+        val note = try {
+            kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) { XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true) }
             }
-            xhsContentImageUrls(note, noteId)
-        }.getOrNull().orEmpty()
+        } catch (t: kotlinx.coroutines.TimeoutCancellationException) {
+            // 超时 ≠ 这篇没图：网络/上游解析挂住时下一轮还可能成功，必须和「解析不出」分开记
+            xlog(ctx, "解析超时 ${NOTE_RESOLVE_MS / 1000}s noteId=$noteId")
+            return SaveOutcome.FAIL
+        } catch (t: Throwable) {
+            xlog(ctx, "解析异常 ${t.javaClass.simpleName}: ${t.message} noteId=$noteId")
+            return SaveOutcome.FAIL
+        }
+        if (note == null) {
+            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind）")
+            return SaveOutcome.FAIL
+        }
+        if (note.images.isEmpty() && note.livePhotos.isEmpty() && note.videos.isNotEmpty()) {
+            // 图片轨没东西、视频轨有：按「原图采集」的口径算跳过，记失败会让人以为坏了
+            xlog(ctx, "纯视频笔记，跳过 noteId=$noteId（视频 ${note.videos.size} 个）")
+            return SaveOutcome.SKIPPED
+        }
+        val urls = runCatching { xhsContentImageUrls(note, noteId) }.getOrNull().orEmpty()
         if (urls.isEmpty()) {
-            xlog(ctx, "解析不出图片 noteId=$noteId")
+            xlog(ctx, "解析结果没有可下载文件 noteId=$noteId")
             return SaveOutcome.FAIL
         }
         val t0 = System.currentTimeMillis()
@@ -467,7 +538,7 @@ object XhsBatchDriver {
         val ok = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId) }.getOrDefault(false)
         vlog(ctx, "落盘结束 noteId=$noteId 成功=$ok 耗时=${System.currentTimeMillis() - t0}ms " +
             "台账=${runCatching { XhsDownloadLedger.downloaded(ctx, noteId).first }.getOrNull()}")
-        if (!ok && XhsBatchSave.lastQuietFiltered > 0) {
+        if (!ok && XhsBatchSave.lastQuietFiltered > 0 && XhsBatchSave.lastQuietFailed == 0) {
             // 不是失败：这篇的图/视频全部没过画质门槛（≤720p 或 <5MB）
             xlog(ctx, "全部低于画质门槛，跳过 $noteId（滤掉 ${XhsBatchSave.lastQuietFiltered} 张）")
             return SaveOutcome.SKIPPED
@@ -546,14 +617,22 @@ object XhsBatchDriver {
         if (listClassName == null || activity.javaClass.name == listClassName) return
         // 只对「详情类」页 finish：配置变更/用户切换主页会造出新实例，误判会把用户主页关掉（审计 #9）
         val name = activity.javaClass.simpleName
-        if (!name.contains("Detail", ignoreCase = true) && !name.contains("Note", ignoreCase = true)) return
+        if (!name.contains("Detail", ignoreCase = true) && !name.contains("Note", ignoreCase = true)) {
+            xlog(activity.applicationContext, "三级返回均无效（不进 finish 兜底）class=$name", toast = false)
+            return
+        }
         onMain { runCatching { activity.finish() }; true }
+        Thread.sleep(300)
+        if (XhsBatchSave.activityOrNull() === activity) {
+            xlog(activity.applicationContext, "三级返回均无效 class=$name", toast = false)
+        }
     }
 
-    private fun finish(module: XposedModule, ctx: Context, ok: Int, skipped: Int, failed: Int, note: String?) {
+    private fun finish(module: XposedModule, ctx: Context, ok: Int, skipped: Int, failed: Int, note: String?, gen: Int) {
+        // 旧线程的收尾不能覆盖新一轮的状态（用户 stop 后立刻再点「采集」时会出现）
+        if (gen != runGen.get()) return
         running = false
         // 不置空会一直静态持有宿主 Activity + 整棵 decor 视图树到下次启动（审计 #16）
-        listActivity = null
         listClassName = null
         runCatching { stateListener?.invoke() }
         val summary = note ?: "采集结束：成功 $ok · 跳过 $skipped · 失败 $failed"
@@ -623,21 +702,39 @@ object XhsBatchDriver {
             (k.contains("noteid") || k == "id" || k.endsWith("noteid")) && !k.contains("userid")
         }
         namedHex(l, likeNoteId)?.let { return it }
-        // 一跳：监听器自身的 String 字段
+        // 一跳：监听器自身「名字像 noteId」的 String 字段
+        namedHex(l, likeNoteId)?.let { return it }
+        // 两跳：监听器持有的 bean —— **必须先按字段名命中**。bean 里同时有笔记 id 与作者 userid
+        // （都是 24hex），取「任意一个 24hex」会拿到作者 id：同作者所有卡片 key 相同 →
+        // 整页只剩第一张能处理，其余静默漏下（2026-11-22 审计 P0）。
         l.javaClass.declaredFields.forEach { f ->
-            runCatching { f.isAccessible = true; hexOf(f.get(l)) }.getOrNull()?.let { return it }
+            val bean = runCatching { f.isAccessible = true; f.get(l) }.getOrNull() ?: return@forEach
+            namedHex(bean, likeNoteId)?.let { return it }
         }
-        // 两跳：监听器持有的 bean 里的 String / id 字段
+        // 兜底：bean 里任意 24hex 只有在「这个 id 已经带着凭据」时才能当 noteId 用
+        // （凭据是我们从响应里按同一 noteId 记的，等价于外键校验）
         l.javaClass.declaredFields.forEach { f ->
             val bean = runCatching { f.isAccessible = true; f.get(l) }.getOrNull() ?: return@forEach
             bean.javaClass.declaredFields.forEach { bf ->
-                runCatching { bf.isAccessible = true; hexOf(bf.get(bean)) }.getOrNull()?.let { return it }
+                val cand = runCatching { bf.isAccessible = true; hexOf(bf.get(bean)) }.getOrNull() ?: return@forEach
+                if (XhsVideoSave.shareLinkOf(cand) != null || XhsVideoSave.tokenOf(cand) != null) return cand
             }
         }
         null
     } catch (t: Throwable) {
+        // 反射断了要能看出来：否则调用方只能写「没人登记分享链」，无法区分「宿主改字段」和
+        // 「宿主真没发」（2026-11-22 审计 P2）。节流：最多每 10 秒一行。
+        val now = System.currentTimeMillis()
+        if (now - lastReflectLogAt > 10_000) {
+            lastReflectLogAt = now
+            XhsBatchSave.activityOrNull()?.applicationContext?.let {
+                logEntry("卡片反射失败：${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
         null
     }
+
+    @Volatile private var lastReflectLogAt = 0L
 
     private fun View.getLocationOnScreenInts(): Pair<Int, Int> {
         val xy = IntArray(2)
@@ -667,14 +764,17 @@ object XhsBatchDriver {
             val from = h * 0.75f
             val to = h * 0.30f
             val t0 = android.os.SystemClock.uptimeMillis()
-            var ok = decor.dispatchTouchEvent(MotionEvent.obtain(t0, t0, MotionEvent.ACTION_DOWN, x, from, 0))
             val steps = 12
-            for (i in 1..steps) {
-                val t = t0 + i * 16L
-                val y = from + (to - from) * i / steps
-                ok = decor.dispatchTouchEvent(MotionEvent.obtain(t0, t, MotionEvent.ACTION_MOVE, x, y, 0)) || ok
+            // MotionEvent 全部 recycle（每篇滚一次，原来 14 个事件都靠 GC 兜底）
+            fun send(t: Long, action: Int, y: Float): Boolean {
+                val e = MotionEvent.obtain(t0, t, action, x, y, 0)
+                return try { decor.dispatchTouchEvent(e) } finally { e.recycle() }
             }
-            ok = decor.dispatchTouchEvent(MotionEvent.obtain(t0, t0 + steps * 16L, MotionEvent.ACTION_UP, x, to, 0)) || ok
+            var ok = send(t0, MotionEvent.ACTION_DOWN, from)
+            for (i in 1..steps) {
+                ok = send(t0 + i * 16L, MotionEvent.ACTION_MOVE, from + (to - from) * i / steps) || ok
+            }
+            ok = send(t0 + steps * 16L, MotionEvent.ACTION_UP, to) || ok
             ok
         } == true
     }
@@ -699,8 +799,16 @@ object XhsBatchDriver {
     }
 
     /** 失败点转储可见文案，便于按真机结构收敛锚点（仅写文件日志，不刷 modlog）。 */
-    private fun dumpViews(ctx: Context, why: String, root: View?) {
-        if (root == null) { xlog(ctx, "$why: 无视图树"); return }
+    private fun dumpViews(ctx: Context, why: String, activity: Activity?) {
+        // 视图树只能在主线程读：驱动线程直接 walk 会与 layout/复用并发，可能抛异常把宿主带走
+        // （2026-11-22 审计 P1）。decorView 也在主线程取（window 本身也不是跨线程安全的）。
+        // 读失败也要留一行，否则「为什么没转储」永远查不到。
+        val text = onMainOrTimeout { buildDump(why, activity?.window?.decorView) }.second
+        xlog(ctx, text ?: "$why 视图转储：主线程 3s 未响应", toast = false)
+    }
+
+    private fun buildDump(why: String, root: View?): String? {
+        if (root == null) return "$why: 无视图树"
         val sb = StringBuilder("$why 视图转储：")
         var n = 0
         walk(root) { v ->
@@ -712,7 +820,7 @@ object XhsBatchDriver {
                 n++
             }
         }
-        xlog(ctx, sb.toString(), toast = false)
+        return sb.toString()
     }
 
     // ---- 线程与通道 ----
@@ -732,10 +840,13 @@ object XhsBatchDriver {
      */
     private fun <T> onMainOrTimeout(f: () -> T?): Pair<Boolean, T?> {
         val holder = arrayOfNulls<Any>(1)
+        // 三态握手 0=待跑 / 1=已认领 / 2=作废。原来「先读 abandoned 再执行」两步不原子：
+        // 驱动线程恰在两步之间超时置位，主线程仍会把 performClick/onBackPressed 全跑完，
+        // 而调用方已按「没执行」继续下一张 → 迟到的点击打开别的笔记（2026-11-22 审计 P1）。
+        val state = java.util.concurrent.atomic.AtomicInteger(0)
         val done = java.util.concurrent.atomic.AtomicBoolean(false)
-        val abandoned = java.util.concurrent.atomic.AtomicBoolean(false)
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            if (abandoned.get()) {
+            if (!state.compareAndSet(0, 1)) {
                 done.set(true)
                 return@post
             }
@@ -745,7 +856,7 @@ object XhsBatchDriver {
         val deadline = System.currentTimeMillis() + 3000
         while (!done.get() && System.currentTimeMillis() < deadline) Thread.sleep(10)
         val ran = done.get()
-        if (!ran) abandoned.set(true)
+        if (!ran) state.compareAndSet(0, 2)
         @Suppress("UNCHECKED_CAST")
         return ran to (holder[0] as T?)
     }
