@@ -43,6 +43,18 @@ object XhsAutoEntry {
 
     /** 过程消息面板（同一个 View 持续刷新，替代逐条 Toast）；只在采集期间显示。 */
     @Volatile private var attachedPanel: View? = null
+
+    /**
+     * 面板跟随看门狗（2026-11-22 用户：「信息窗时不时就消失」）。
+     *
+     * 面板挂在**某一个 Activity 的 decorView** 上：宿主每次换页（列表 ↔ 详情）都是新 decor，旧的随
+     * Activity 销毁。原来只靠 onResume + 布局监听补挂，中间有几百 ms 空窗，看起来就是「时不时消失」。
+     * 这里每 500ms 比一次「当前前台 Activity 的 decor」与「面板所在 decor」，不一致立刻摘掉重挂；
+     * 只在运行期间跑，收工即停（不额外耗电）。
+     */
+    @Volatile private var panelGuard: Runnable? = null
+    @Volatile private var mainHandler: android.os.Handler? = null
+    @Volatile private var installedModule: XposedModule? = null
     /** 消息容器：每行一个 TextView，按成败上色（用户 2026-11-22：嗅探失败的要用红色系）。 */
     @Volatile private var panelLog: android.widget.LinearLayout? = null
     @Volatile private var panelHeader: TextView? = null
@@ -88,7 +100,9 @@ object XhsAutoEntry {
                 if (!tracked.compareAndSet(false, true)) return
                 // 驱动状态变化 → 按钮文案（驱动在自己的线程里改状态，回主线程刷 View）
                 // 这里一旦抛就是宿主主线程未捕获异常（本文件其它主线程路径全包了 runCatching）
-                XhsBatchDriver.stateListener = { main.post { runCatching { applyLabel(); panelSync() } } }
+                mainHandler = main
+                installedModule = module
+                XhsBatchDriver.stateListener = { main.post { runCatching { applyLabel(); panelSync(); ensurePanelGuard(module) } } }
                 // 过程消息 → 悬浮面板（不再逐条 Toast：用户 2026-11-22「toast 不太行」）
                 XhsBatchDriver.uiListener = { lines -> main.post { runCatching { renderLines(lines) } } }
                 runCatching { registerStopReceiver(app, module, main) }
@@ -363,6 +377,8 @@ object XhsAutoEntry {
             runCatching { panelHeader?.text = XhsBatchDriver.header() }
         }
         lastRunning = running
+        // 运行中保证看门狗在跑；收工后它会自己退出（见 ensurePanelGuard）
+        if (running) installedModule?.let { ensurePanelGuard(it) }
         val btn = attachedButton ?: return
         runCatching {
             val n = XhsBatchDriver.processedCount()
@@ -380,6 +396,27 @@ object XhsAutoEntry {
      * 面板跟随运行态与当前页：采集期间每翻一页都可能换 decor，面板要跟过去。
      * **关闭只由用户点面板上的 × 决定**（2026-11-22 用户：别自动隐藏/关闭），收工后也留在屏幕上。
      */
+    /** 运行期间持续把面板跟到当前前台页（见 [panelGuard] 注释）。 */
+    private fun ensurePanelGuard(module: XposedModule) {
+        if (panelGuard != null || !XhsBatchDriver.isRunning()) return
+        val main = mainHandler ?: return
+        val r = object : Runnable {
+            override fun run() {
+                if (!XhsBatchDriver.isRunning()) {
+                    panelGuard = null
+                    return
+                }
+                runCatching {
+                    val act = XhsBatchSave.activityOrNull()
+                    if (act != null && !act.isFinishing) syncButton(act, module)
+                }
+                main.postDelayed(this, 500)
+            }
+        }
+        panelGuard = r
+        main.postDelayed(r, 500)
+    }
+
     private fun panelSync() {
         val decor = attachedDecor
         val act = attachedActivity
@@ -587,6 +624,7 @@ object XhsAutoEntry {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 启停失败: ${it.javaClass.simpleName}: ${it.message}")
         }
         runCatching { applyLabel() }
+        mainHandler?.let { ensurePanelGuard(module) }
     }
 
 }
