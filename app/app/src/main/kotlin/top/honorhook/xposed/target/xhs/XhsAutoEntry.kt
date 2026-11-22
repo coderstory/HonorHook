@@ -55,6 +55,8 @@ object XhsAutoEntry {
     /** 用户点过面板上的 ×：本轮不再自动挂回来，下次点「采集」开新一轮才复位。 */
     @Volatile private var panelDismissed = false
     @Volatile private var lastRunning = false
+    /** 上一次点击按钮的时刻（双击防抖，避免 start 后第二下立刻 stop）。 */
+    @Volatile private var lastToggleAt = 0L
 
     /** 当前挂着的全局布局观察者（哪棵 decor、哪个 listener、上次检查时间）。 */
     @Volatile private var watchedDecor: ViewGroup? = null
@@ -175,7 +177,7 @@ object XhsAutoEntry {
         watchedActivity = null
     }
 
-    /** 每 400ms 试一次注入，最多 [attempts] 次（≈6s）：主页渲染慢也能等到，非主页则安静放弃。 */
+    /** 每 [intervalMs] 试一次注入，最多 [attempts] 次（现在 30×500ms ≈15s）：主页渲染慢也能等到。 */
     private fun retrySync(activity: Activity, module: XposedModule, main: android.os.Handler, attempts: Int, intervalMs: Long) {
         // 分屏/小窗下两个 Activity 可同时 resumed（没有 onPause），不取消上一条链就会有两条
         // 6 秒轮询同时改 attachedButton/attachedDecor，把按钮挂到不可见的那一页（审计 P2）
@@ -209,21 +211,27 @@ object XhsAutoEntry {
     private fun registerStopReceiver(app: android.app.Application, module: XposedModule, main: android.os.Handler) {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: android.content.Intent) {
-                when (i.action) {
-                    AutoActions.STOP -> {
-                        XhsBatchDriver.stop(module, app)
-                        main.post { applyLabel() }
+                // 广播线程兜底：onReceive 里任何异常都会以「未捕获异常」杀掉宿主进程
+                // （stop() 里要打 module.log，模块日志一抛就带崩小红书）——2026-11-22 审计 #1
+                runCatching {
+                    when (i.action) {
+                        AutoActions.STOP -> {
+                            XhsBatchDriver.stop(module, app)
+                            main.post { applyLabel() }
+                        }
+                        AutoActions.QUERY -> {
+                            // 模块侧进程与驱动不同进程：面板每次进页都问一次真实状态
+                            XhsBatchDriver.publishState()
+                        }
+                        AutoActions.CONFIG -> {
+                            XhsBatchDriver.setPace(
+                                i.getIntExtra(AutoActions.EXTRA_PACE_MIN_DS, 20),
+                                i.getIntExtra(AutoActions.EXTRA_PACE_MAX_DS, 40),
+                            )
+                        }
                     }
-                    AutoActions.QUERY -> {
-                        // 模块侧进程与驱动不同进程：面板每次进页都问一次真实状态（审计 #13）
-                        XhsBatchDriver.publishState()
-                    }
-                    AutoActions.CONFIG -> {
-                        XhsBatchDriver.setPace(
-                            i.getIntExtra(AutoActions.EXTRA_PACE_MIN_DS, 20),
-                            i.getIntExtra(AutoActions.EXTRA_PACE_MAX_DS, 40),
-                        )
-                    }
+                }.onFailure {
+                    runCatching { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 广播处理异常: ${it.javaClass.simpleName}") }
                 }
             }
         }
@@ -348,6 +356,12 @@ object XhsAutoEntry {
     private fun applyLabel() {
         val running = XhsBatchDriver.isRunning()
         if (running && !lastRunning) panelDismissed = false   // 新一轮：面板重新回来
+        if (!running && lastRunning) {
+            // 收工：心跳停掉 + 顶栏立刻刷一次（header 在 !running 时用 endedAt 冻住用时，
+            // 否则面板会永远显示「已结束 · 用时 3:41 还在涨」——2026-11-22 审计 #13）
+            stopTicker()
+            runCatching { panelHeader?.text = XhsBatchDriver.header() }
+        }
         lastRunning = running
         val btn = attachedButton ?: return
         runCatching {
@@ -471,12 +485,12 @@ object XhsAutoEntry {
         panelHeader = header
         panelDecor = decor
         renderLines(lastLines)
-        startTicker(activity)
+        startTicker()
         XhsBatchDriver.logEntry("悬浮面板已注入 ${activity.javaClass.simpleName}（汇总顶栏 + 过程消息）")
     }
 
     /** 顶栏每秒刷一次（用时在走，其余数字由驱动事件刷新）。 */
-    private fun startTicker(activity: Activity) {
+    private fun startTicker() {
         stopTicker()
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         val r = object : Runnable {
@@ -543,6 +557,9 @@ object XhsAutoEntry {
 
     private fun removePanel() {
         stopTicker()
+        // 去重游标必须一起清：不清的话重建面板时 renderLines(lastLines) 传进来的还是同一个
+        // List 实例，直接 return，新面板只有顶栏、日志区空白（2026-11-22 审计 #14）
+        renderedLines = emptyList()
         runCatching { panelDecor?.let { d -> attachedPanel?.let { d.removeView(it) } } }
         attachedPanel = null
         panelLog = null
@@ -559,6 +576,10 @@ object XhsAutoEntry {
     }
 
     private fun toggle(ctx: android.content.Context, module: XposedModule) {
+        // 双击防抖：start 是同步置 running=true，第二下点击会立刻走 stop，变成「刚开就收尾」
+        val now = System.currentTimeMillis()
+        if (now - lastToggleAt < 600) return
+        lastToggleAt = now
         // 这是宿主主线程的点击回调：抛出去就是宿主崩溃（2026-11-22 审计 #2）
         runCatching {
             if (XhsBatchDriver.isRunning()) XhsBatchDriver.stop(module, ctx) else XhsBatchDriver.start(module, ctx)

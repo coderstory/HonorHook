@@ -148,6 +148,15 @@ object XhsBatchDriver {
     @Volatile private var discoveredCount = 0
     @Volatile private var startedAt = 0L
 
+    /** 收工时刻：收工后「用时」要冻住，不能继续涨（看起来像还在跑）。 */
+    @Volatile private var endedAt = 0L
+
+    /** 本轮 `XhsBatchSave` 的下载代次：旧线程看到代次过期立刻退出（取消后立刻重启不复活）。 */
+    @Volatile private var dlGen = 0
+
+    /** 本轮是否已把列表滚到顶：从中途位置开始采会永久漏掉上方笔记（2026-11-22 审计 #9）。 */
+    @Volatile private var atTop = false
+
     private fun syncStats(ok: Int, skipped: Int, failed: Int, pending: Int, discovered: Int = 0) {
         okCount = ok
         skippedCount = skipped
@@ -159,7 +168,8 @@ object XhsBatchDriver {
 
     /** 面板顶栏文本：两行（窄屏一排放不下五项）。 */
     fun header(): String {
-        val secs = if (startedAt == 0L) 0L else (System.currentTimeMillis() - startedAt) / 1000
+        val endAt = if (!running && endedAt > 0) endedAt else System.currentTimeMillis()
+        val secs = if (startedAt == 0L) 0L else (endAt - startedAt) / 1000
         val ss = (secs % 60).toString().padStart(2, '0')
         val state = when {
             !running -> "已结束"
@@ -180,7 +190,12 @@ object XhsBatchDriver {
     fun start(module: XposedModule, ctx: Context) {
         if (running) return
         currentApp = ctx.applicationContext
-        XhsBatchSave.clearCancel()
+        // 换代次（不是在旧代次上「清取消」）：上一轮还在网络读里的线程会看到自己过期并退出
+        dlGen = XhsBatchSave.beginRun()
+        atTop = false
+        endedAt = 0L
+        // 面板消息清空：不清的话第二轮面板里混着上一轮的「已保存/失败」（审计 #15）
+        synchronized(logLock) { logLines.clear() }
         running = true
         stopRequested = false
         processed = 0
@@ -337,6 +352,25 @@ object XhsBatchDriver {
                 offList = 0
                 redrawWaits = 0
                 scrollIdle = 0
+                // 用户可能已经翻到半截才点「采集」：不先回顶，上方笔记永远采不到，
+                // 面板「已发现」也只从当前位置算（2026-11-22 审计 #9）。
+                if (!atTop && act.javaClass.name == listClassName) {
+                    var guard = 0
+                    var lastTop = cards.first().first.top()
+                    var lastSize = cards.size
+                    while (guard++ < 30 && !stopRequested) {
+                        swipeDown(act)
+                        Thread.sleep(700)
+                        val cur = onMain { findCards(act) }.orEmpty()
+                        val top = cur.firstOrNull()?.top() ?: -1
+                        if (top == lastTop && cur.size == lastSize) break   // 到顶了（滚了没变化）
+                        lastTop = top
+                        lastSize = cur.size
+                    }
+                    atTop = true
+                    xlog(ctx, "已滚到列表顶部，从头开始")
+                    continue
+                }
                 if (seen.size > SEEN_LIMIT) seen.clear()
 
                 cards.forEach { discoveredKeys.add(it.second) }
@@ -351,10 +385,21 @@ object XhsBatchDriver {
                     val beforeSize = cards.size
                     xlog(ctx, "本屏 ${cards.size} 张都处理过，向上滚一屏")
                     swipeUp(act)
-                    Thread.sleep(1200)
-                    val after = onMain { findCards(act) }.orEmpty()
+                    // 分页慢：固定 sleep(1200) 只判一次，网络稍慢服务端没追加就被算「滚不动」，
+                    // 连续 3 次约 3.6s 就收工，后半页全漏（2026-11-22 审计 #10）。
+                    // 改成递增等待（1.2/2/3/4s）时每次都可能出现新卡，等满仍没动才算一次 idle。
+                    var after = emptyList<View>()
+                    var moved = false
+                    for (waitMs in longArrayOf(1200, 2000, 3000, 4000)) {
+                        if (stopRequested) break
+                        Thread.sleep(waitMs)
+                        after = onMain { findCards(act) }.orEmpty()
+                        if (after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop) {
+                            moved = true
+                            break
+                        }
+                    }
                     vlog(ctx, "滚动后：${beforeSize}张/top=$beforeTop → ${after.size}张/top=${after.firstOrNull()?.top() ?: -1}")
-                    val moved = after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop
                     if (moved) {
                         scrollIdle = 0
                         lastProgressAt = System.currentTimeMillis()
@@ -416,7 +461,7 @@ object XhsBatchDriver {
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
                     xlog(ctx, "卡片点不动（本屏剩 ${pending.size - 1} 张）")
-                    Thread.sleep(paceMs())
+                    sleepPace()   // 原来 sleep(paceMs())：节奏配到 120s 时取消要等两分钟才生效
                     continue
                 }
                 val saved = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
@@ -533,17 +578,29 @@ object XhsBatchDriver {
             return SaveOutcome.FAIL
         }
         val t0 = System.currentTimeMillis()
-        vlog(ctx, "开始落盘 noteId=$noteId 文件数=${urls.size} 首个=${urls.firstOrNull()?.take(60)}")
-        XhsBatchSave.lastQuietFiltered = 0
-        val ok = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId) }.getOrDefault(false)
-        vlog(ctx, "落盘结束 noteId=$noteId 成功=$ok 耗时=${System.currentTimeMillis() - t0}ms " +
-            "台账=${runCatching { XhsDownloadLedger.downloaded(ctx, noteId).first }.getOrNull()}")
-        if (!ok && XhsBatchSave.lastQuietFiltered > 0 && XhsBatchSave.lastQuietFailed == 0) {
-            // 不是失败：这篇的图/视频全部没过画质门槛（≤720p 或 <5MB）
-            xlog(ctx, "全部低于画质门槛，跳过 $noteId（滤掉 ${XhsBatchSave.lastQuietFiltered} 张）")
+        // 只记域名级片段：完整 URL 带 xsec_token，进了诊断文本就等于把凭据复制进剪贴板（审计 #18）
+        val hostOnly = urls.firstOrNull()?.let { u -> runCatching { java.net.URI(u).host }.getOrNull() } ?: "-"
+        vlog(ctx, "开始落盘 noteId=$noteId 文件数=${urls.size} 域名=$hostOnly")
+        val result = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId, dlGen) }
+            .onFailure { xlog(ctx, "落盘调用异常 ${it.javaClass.simpleName} noteId=$noteId") }
+            .getOrNull()
+        vlog(ctx, "落盘结束 noteId=$noteId 结果=${result?.let { "存${it.ok}/滤${it.filtered}/败${it.failed}/取消${it.canceled}" } ?: "无结果"} " +
+            "耗时=${System.currentTimeMillis() - t0}ms 台账=${runCatching { XhsDownloadLedger.downloaded(ctx, noteId).first }.getOrNull()}")
+        if (result == null) {
+            // 没拿到结果 = 线程没跑完（超时/异常）：记失败，下次重试
+            xlog(ctx, "没有拿到落盘结果 noteId=$noteId")
+            return SaveOutcome.FAIL
+        }
+        if (!result.savedAny && result.filtered > 0 && result.failed == 0) {
+            // 不是失败：这篇的图全部没过画质门槛（≤720p）
+            xlog(ctx, "全部低于画质门槛，跳过 $noteId（滤掉 ${result.filtered} 张）")
             return SaveOutcome.SKIPPED
         }
-        return if (ok) SaveOutcome.OK else SaveOutcome.FAIL
+        if (result.canceled && !result.savedAny) {
+            xlog(ctx, "已取消，本篇未落盘 noteId=$noteId")
+            return SaveOutcome.FAIL
+        }
+        return if (result.savedAny) SaveOutcome.OK else SaveOutcome.FAIL
     }
 
     /** 等探针在**当前前台 Activity** 上返回非空（每 200ms 一次）；超时或被取消返回 null。 */
@@ -632,6 +689,9 @@ object XhsBatchDriver {
         // 旧线程的收尾不能覆盖新一轮的状态（用户 stop 后立刻再点「采集」时会出现）
         if (gen != runGen.get()) return
         running = false
+        endedAt = System.currentTimeMillis()
+        pendingNow = 0
+        atTop = false
         // 不置空会一直静态持有宿主 Activity + 整棵 decor 视图树到下次启动（审计 #16）
         listClassName = null
         runCatching { stateListener?.invoke() }
@@ -766,6 +826,31 @@ object XhsBatchDriver {
             val t0 = android.os.SystemClock.uptimeMillis()
             val steps = 12
             // MotionEvent 全部 recycle（每篇滚一次，原来 14 个事件都靠 GC 兜底）
+            fun send(t: Long, action: Int, y: Float): Boolean {
+                val e = MotionEvent.obtain(t0, t, action, x, y, 0)
+                return try { decor.dispatchTouchEvent(e) } finally { e.recycle() }
+            }
+            var ok = send(t0, MotionEvent.ACTION_DOWN, from)
+            for (i in 1..steps) {
+                ok = send(t0 + i * 16L, MotionEvent.ACTION_MOVE, from + (to - from) * i / steps) || ok
+            }
+            ok = send(t0 + steps * 16L, MotionEvent.ACTION_UP, to) || ok
+            ok
+        } == true
+    }
+
+    /** 向下滚一屏（回顶用）；与 [swipeUp] 手序相反。 */
+    private fun swipeDown(activity: Activity): Boolean {
+        val decor = activity.window?.decorView ?: return false
+        return onMain {
+            val w = decor.width
+            val h = decor.height
+            if (w <= 0 || h <= 0) return@onMain false
+            val x = w / 2f
+            val from = h * 0.30f
+            val to = h * 0.78f
+            val t0 = android.os.SystemClock.uptimeMillis()
+            val steps = 12
             fun send(t: Long, action: Int, y: Float): Boolean {
                 val e = MotionEvent.obtain(t0, t, action, x, y, 0)
                 return try { decor.dispatchTouchEvent(e) } finally { e.recycle() }
