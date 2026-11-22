@@ -39,6 +39,9 @@ object XhsBatchDriver {
 
     private const val LOG_LINES = 6
 
+    /** 已处理卡片身份的集合上限（超长主页兜底，清空只是重复查询，不漏）。 */
+    private const val SEEN_LIMIT = 4000
+
     private const val JUDGE_PREFIX = "XhsHook·Batch"
     private const val TAG = "HonorHookXhsBatch"
 
@@ -197,34 +200,41 @@ object XhsBatchDriver {
         ctx?.let { xlog(it, "收到取消", toast = true) }
     }
 
+    /**
+     * 主循环：逐张点开 → 取分享链 → 直下 → 返回 → 下一张；本屏没有未处理的卡再滚一屏。
+     *
+     * 2026-11-22 用户反馈「翻页的时候，会漏掉几篇」——根因是旧的**屏内序号游标** `index`：
+     * 每次从详情页返回，宿主会重排/复用卡片 View，序号指到的已经不是原来那一张，
+     * 于是夹在中间的两张谁都没处理就被下一次滚动带走了。现在改成**按卡片身份去重**
+     * （noteId 优先、退化用 contentDescription）：只要这一屏还有没见过的卡，就一定要处理它，
+     * 不看序号，所以重排、复用、返回后轻微位移都不会漏。
+     */
     private fun loop(module: XposedModule, ctx: Context) {
         var ok = 0
         var skipped = 0
         var failed = 0
-        var idle = 0
+        var handled = 0
         // 滚动「没动」的独立计数：不能复用 idle——它在每轮有卡片时都被清零，++
         // 永远攒不到 IDLE_LIMIT，手势失效时就会**每 1.2s 空滚一次、永不收工**（2026-11-22 审计 #4）。
         var scrollIdle = 0
         var redrawWaits = 0
         var offList = 0
         var cardsTotal = 0
-        // 本屏已处理到第几张（按当前屏的排序索引）。**不能按 view 实例记**（宿主回收复用），
-        // 也不能只记上一次的 top（同排两张卡 top 相同，会被自己反复选中）——2026-11-22 真机：
-        // 记 top 的版本处理完第一篇后就再也选不出下一张，12 秒 3 次「滚不动」直接收工。
-        var index = 0
+        // 本轮已处理过的卡片身份。noteId 拿不到时退化成 contentDescription（「笔记, 标题…」）。
+        // 上限兜底：超长主页会把集合撑大，超过就整体清空（清空只会导致重复去重查询，不会漏）。
+        val seen = HashSet<String>()
         try {
             while (!stopRequested) {
                 // 每轮都重新取前台 Activity：详情页/列表页可能是不同实例，抱死一个会对着
-                // 已销毁的视图树空转（上一版就是这样在第一条之后收工的）。
+                // 已销毁的视图树空转。
                 val act = XhsBatchSave.activityOrNull()
                 if (act == null) {
                     Thread.sleep(500)
                     continue
                 }
-                if (act !== listActivity && listActivity != null) {
-                    index = 0
+                val (scanned, cardList) = onMainOrTimeout {
+                    findCards(act).map { v -> v to (noteIdOfCard(v) ?: v.contentDescription?.toString().orEmpty()) }
                 }
-                val (scanned, cardList) = onMainOrTimeout { findCards(act) }
                 if (!scanned) {
                     // 主线程卡住：视图树这一刻不可信，等它缓过来，绝不据此按返回（审计 #8）
                     Thread.sleep(500)
@@ -245,7 +255,7 @@ object XhsBatchDriver {
                     }
                     // 确实离开了列表（停在详情/弹层）：整轮只允许按两次返回，按完就等
                     offList++
-                    xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 无卡片（index=$index）")
+                    xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 无卡片")
                     if (offList == 1) dumpViews(ctx, "返回后无卡片", act.window?.decorView)
                     if (offList > MAX_BACK_PRESSES) break
                     pressBack(act)
@@ -253,19 +263,21 @@ object XhsBatchDriver {
                     continue
                 }
                 offList = 0
-                idle = 0
                 redrawWaits = 0
                 scrollIdle = 0
                 listActivity = act
-                if (index >= cards.size) {
-                    // 本屏处理完：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
-                    val beforeTop = cards.first().top()
+                if (seen.size > SEEN_LIMIT) seen.clear()
+
+                val pending = cards.filter { it.second !in seen }
+                syncStats(ok, skipped, failed, pending.size)
+                if (pending.isEmpty()) {
+                    // 这一屏没有新卡了：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
+                    val beforeTop = cards.first().first.top()
                     val beforeSize = cards.size
-                    xlog(ctx, "本屏 ${cards.size} 张处理完，向上滚一屏", toast = true)
+                    xlog(ctx, "本屏 ${cards.size} 张都处理过，向上滚一屏")
                     swipeUp(act)
                     Thread.sleep(1200)
                     val after = onMain { findCards(act) }.orEmpty()
-                    index = 0
                     val moved = after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop
                     if (moved) {
                         scrollIdle = 0
@@ -275,9 +287,11 @@ object XhsBatchDriver {
                     }
                     continue
                 }
-                idle = 0
-                val card = cards[index]
-                index++
+
+                val (card, key) = pending.first()
+                // 先标记再处理：处理失败也不该在同一屏反复点它（失败的账已经记在 failed 里）
+                seen.add(key)
+                handled++
                 val known = onMain { noteIdOfCard(card) }
                 // 整条 share link 已经在表里（homefeed/上一屏响应登记过）⇒ 根本不用点开这篇：
                 // 零详情页、零等待，直接解析直下。这是最快也最稳的一条路（2026-11-22）。
@@ -294,21 +308,21 @@ object XhsBatchDriver {
                         SaveOutcome.SKIPPED -> "已下载过，跳过"
                         SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                     }
-                    xlog(ctx, dt, toast = true)
-                    syncStats(ok, skipped, failed, maxOf(cards.size - index, 0))
+                    xlog(ctx, dt)
+                    syncStats(ok, skipped, failed, pending.size - 1)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, dt, ok, skipped, failed, cardsTotal)
                     sleepPace()
                     continue
                 }
-                xlog(ctx, "点开第 $index/${cards.size} 张（noteId=${known ?: "待取"}）", toast = true)
+                xlog(ctx, "点开第 $handled 张（本屏剩 ${pending.size} 张，noteId=${known ?: "待取"}）")
                 val prev = XhsVideoSave.lastShareNoteId()
                 if (onMain { clickView(card) } != true) {
                     failed++
-                    syncStats(ok, skipped, failed, maxOf(cards.size - index, 0))
+                    syncStats(ok, skipped, failed, pending.size - 1)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
-                    xlog(ctx, "卡片点不动（第 $index 张）", toast = true)
+                    xlog(ctx, "卡片点不动（本屏剩 ${pending.size - 1} 张）")
                     Thread.sleep(paceMs())
                     continue
                 }
@@ -324,8 +338,8 @@ object XhsBatchDriver {
                     SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                 }
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX $text")
-                xlog(ctx, "$text（本屏第 $index/${cards.size} 张）", toast = true)
-                syncStats(ok, skipped, failed, maxOf(cards.size - index, 0))
+                xlog(ctx, "$text（本屏剩 ${pending.size - 1} 张）")
+                syncStats(ok, skipped, failed, pending.size - 1)
                 stateListener?.invoke()
                 notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $ok · 跳过 $skipped · 失败 $failed）", ok, skipped, failed, cardsTotal)
                 backToList()
@@ -336,7 +350,7 @@ object XhsBatchDriver {
             }
         } catch (t: Throwable) {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 采集中断: ${t.javaClass.simpleName}: ${t.message}")
-            xlog(ctx, "采集中断 ${t.javaClass.simpleName}: ${t.message}", toast = true)
+            xlog(ctx, "采集中断 ${t.javaClass.simpleName}: ${t.message}")
         } finally {
             finish(module, ctx, ok, skipped, failed, null)
         }
