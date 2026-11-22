@@ -1162,7 +1162,14 @@ object XhsBatchSave {
         done: java.util.concurrent.CountDownLatch? = null,
         gen: Int = downloadGen.get(),
         slot: Int = 0,
-        skipIndexes: Set<Int> = emptySet(),
+        /**
+         * 只下这几张（补齐场景）。空集 = 全下。
+         *
+         * 2026-11-22 修正：这里原来是「跳过这几张」语义，而驱动传进来的是「缺的那几张」，
+         * 于是整篇一张都不下、失败数却按全篇算 ⇒ 面板「全部失败」。改成只放行这些序号，
+         * 失败数按**实际尝试数**算。
+         */
+        onlyIndexes: Set<Int> = emptySet(),
     ) {
         // 入口清零只对「新一轮」生效：驱动已经在取消（cancelRequested=true）时不能把它擦掉，
         // 否则取消落在等链/等 id 阶段，等待结束后照样整篇下完（2026-11-22 审计 P1）。
@@ -1184,10 +1191,12 @@ object XhsBatchSave {
             var ok = 0
             var bytes = 0L
             var filtered = 0   // 画质过滤张数（2026-11-21）：短边≤720 删行跳过，不计失败
+            var attempted = 0  // 真正发起下载的张数（onlyIndexes 过滤后），失败数按它算
             try {
                 for ((i, raw) in urls.withIndex()) {
                     // 相册里已经有这一张（补齐场景）：跳过，不产生重复文件，也不计入成功/失败
-                    if (i in skipIndexes) continue
+                    if (onlyIndexes.isNotEmpty() && i !in onlyIndexes) continue
+                    attempted++
                     // 取消（本张之前就点了）或**新一代下载已开始**（用户取消后又立刻点采集）时立刻退出：
                     // 旧线程不退出会和新一轮并发写同一篇，并且把 ok/计数写乱（2026-11-22 审计 #3）。
                     if (imageCancelRequested || gen != downloadGen.get()) break
@@ -1267,7 +1276,7 @@ object XhsBatchSave {
             if (quiet) {
                 quietResults[slot] = QuietResult(
                     ok = ok,
-                    failed = urls.size - ok - filtered,
+                    failed = attempted - ok - filtered,
                     filtered = filtered,
                     canceled = canceled,
                 )
@@ -1277,8 +1286,8 @@ object XhsBatchSave {
             // 只有「零真实失败」才记账：100 张里 3 张成功 97 张 404 时若记账，下次采集会
             // 「已下载过，跳过」，缺的图永远补不回来（2026-11-22 审计 P1）。
             // 静默批量路径的台账改由 XhsBatchDriver 记（它才知道视频轨结果），这里只服务交互路径。
-            if (!quiet && !canceled && (ok > 0 || skipIndexes.isNotEmpty()) && noteId != null &&
-                urls.size - ok - filtered - skipIndexes.size == 0
+            if (!quiet && !canceled && ok > 0 && noteId != null &&
+                attempted - ok - filtered == 0
             ) {
                 runCatching { XhsDownloadLedger.record(activity.applicationContext, noteId, count = urls.size) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 去重记账失败: ${it.message}") }
@@ -1319,13 +1328,13 @@ object XhsBatchSave {
         module: XposedModule,
         noteId: String,
         gen: Int = downloadGen.get(),
-        skipIndexes: Set<Int> = emptySet(),
+        onlyIndexes: Set<Int> = emptySet(),
     ): QuietResult? {
         val latch = java.util.concurrent.CountDownLatch(1)
         // **每次落盘一个独立槽位**：早先用代次当键，同一轮第二篇会立刻读到上一篇刚写好的结果
         // （表现：`耗时=2ms 存4`，计数翻倍、真实下载还在后台跑就开了下一篇）——2026-11-22 真机诊断实证。
         val slot = resultSlot.incrementAndGet()
-        downloadAll(activity, urls, module, noteId, quiet = true, done = latch, gen = gen, slot = slot, skipIndexes = skipIndexes)
+        downloadAll(activity, urls, module, noteId, quiet = true, done = latch, gen = gen, slot = slot, onlyIndexes = onlyIndexes)
         val deadline = System.currentTimeMillis() + NOTE_SAVE_LIMIT_MS
         var waited = 0L
         while (true) {
