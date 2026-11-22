@@ -1250,6 +1250,9 @@ object XhsBatchSave {
                 showOnTrackedActivity(module, "完成卡") { showBatchSavedDialog(it, ok, urls.size, bytes, canceled, filtered) }
             }
             module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 外挂直下完成 $ok/${urls.size}${if (filtered > 0) " 过滤$filtered" else ""}")
+            // 静默模式下把「本轮被画质规则滤掉几张」交给驱动：全被滤掉不算失败（用户 2026-11-21 的过滤规则
+            // 是对的，判成失败会让人误以为功能坏了）
+            if (quiet) lastQuietFiltered = filtered
             // 去重记账（2026-11-21）：有成功落盘才记（全失败/取消不记，重试不误拦）；
             // 写宿主 filesDir 台账文件（XhsDownloadLedger，相册文件删除/改名不影响）
             if (!canceled && ok > 0 && noteId != null) {
@@ -1279,6 +1282,9 @@ object XhsBatchSave {
 
     /** 批量采集的「取消」= 置位本张取消旗标（下载循环每张前查它）。 */
     @Volatile private var cancelRequested = false
+
+    /** 最近一次静默下载里被画质规则过滤掉的张数（驱动据此把「全滤掉」记成跳过而不是失败）。 */
+    @Volatile internal var lastQuietFiltered = 0
 
     internal fun requestCancel() {
         cancelRequested = true

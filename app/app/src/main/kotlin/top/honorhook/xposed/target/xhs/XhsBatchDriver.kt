@@ -67,6 +67,13 @@ object XhsBatchDriver {
 
     /** 当前这轮「扫到过卡片的那一页」，返回时用来判「同一列表页重绘」与「能不能 finish」。 */
     @Volatile private var listActivity: Activity? = null
+
+    /**
+     * 列表页的 Activity **类名**（2026-11-22 审计修正）：详情页的「相关推荐」也是 desc 以
+     * 「笔记,」开头的卡片，若「有卡片就扫」会把**别人的笔记**当成该作者作品下进相册。
+     * 锁定类名后只有列表页才处理卡片；用类名而非实例，宿主重建 Activity 也不会误判。
+     */
+    @Volatile private var listClassName: String? = null
     /** 卡片锚点：desc 前缀（同 XhsAutoEntry 的主页判据）。 */
     private const val CARD_DESC_PREFIX = "笔记,"
 
@@ -177,6 +184,7 @@ object XhsBatchDriver {
         discoveredCount = 0
         startedAt = System.currentTimeMillis()
         listActivity = null
+        listClassName = null
         val app = ctx.applicationContext
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")
         xlog(app, "采集开始")
@@ -256,10 +264,25 @@ object XhsBatchDriver {
                 }
                 val cards = cardList.orEmpty()
                 cardsTotal = maxOf(cardsTotal, cards.size)
+                if (cards.isNotEmpty()) {
+                    val cls = act.javaClass.name
+                    val locked = listClassName
+                    if (locked == null) {
+                        listClassName = cls
+                    } else if (locked != cls) {
+                        // 非列表页的卡片（详情页相关推荐等）：不是目标作者的作品，绝不下、只退回列表
+                        offList++
+                        xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 有卡片但不是列表页")
+                        if (offList > MAX_BACK_PRESSES) break
+                        pressBack(act)
+                        Thread.sleep(900)
+                        continue
+                    }
+                }
                 if (cards.isEmpty()) {
                     // 扫到过卡片的同一页现在空 = 宿主重绘/占位中，**绝不能按返回**（2026-11-22 真机：
                     // 连按 3 次把小红书一路退到桌面，整轮就这么收工了）。等它画出来。
-                    if (act === listActivity) {
+                    if (act.javaClass.name == listClassName) {
                         if (++redrawWaits >= LIST_REDRAW_WAIT) {
                             xlog(ctx, "列表页一直没卡片，收工")
                             break
@@ -384,7 +407,18 @@ object XhsBatchDriver {
      * 所以「上一篇的值」必须由调用方传进来比对，否则会把上一篇的 noteId 当成这一篇。
      */
     private fun collect(module: XposedModule, ctx: Context, prev: String?, known: String? = null): SaveOutcome {
-        val noteId = known ?: await(NOTE_ID_WAIT_MS) { XhsVideoSave.lastShareNoteId()?.takeIf { it != prev } }
+        // 优先级：详情页自己登记的 > 卡片反射的。反射可能拿到同一 bean 里的别的 24hex（作者 id 等），
+        // 一旦错位就会「把 A 的图存成 B 的 noteId」，所以只作兜底（2026-11-22 审计）。
+        // 卡片反射出来的 id 已经带凭据（share_info 或 xsec_token）时不必等：等也是等同一篇，
+        // 白等 8 秒换每篇多一次卡顿（2026-11-22 审计）。凭据缺失才等详情页登记。
+        val knownReady = known != null &&
+            (XhsVideoSave.shareLinkOf(known) != null || XhsVideoSave.tokenOf(known) != null)
+        val registered = if (knownReady) null
+        else await(NOTE_ID_WAIT_MS) { XhsVideoSave.lastShareNoteId()?.takeIf { it != prev } }
+        val noteId = registered ?: known
+        if (!knownReady && registered == null && known != null) {
+            vlog(ctx, "详情页没登记，用卡片反射的 noteId=$known 兜底")
+        }
         if (noteId == null) {
             xlog(ctx, "详情页没拿到 noteId（没人登记分享链）")
             dumpViews(ctx, "详情页", XhsBatchSave.activityOrNull()?.window?.decorView)
@@ -407,7 +441,7 @@ object XhsBatchDriver {
             "token=${XhsVideoSave.tokenOf(noteId) != null}")
         val urls = runCatching {
             val note = kotlinx.coroutines.runBlocking {
-                kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) { XhsSavePivot.resolveByShareLink(noteId, module) }
+                kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) { XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true) }
             }
             xhsContentImageUrls(note, noteId)
         }.getOrNull().orEmpty()
@@ -417,9 +451,15 @@ object XhsBatchDriver {
         }
         val t0 = System.currentTimeMillis()
         vlog(ctx, "开始落盘 noteId=$noteId 文件数=${urls.size} 首个=${urls.firstOrNull()?.take(60)}")
+        XhsBatchSave.lastQuietFiltered = 0
         val ok = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId) }.getOrDefault(false)
         vlog(ctx, "落盘结束 noteId=$noteId 成功=$ok 耗时=${System.currentTimeMillis() - t0}ms " +
             "台账=${runCatching { XhsDownloadLedger.downloaded(ctx, noteId).first }.getOrNull()}")
+        if (!ok && XhsBatchSave.lastQuietFiltered > 0) {
+            // 不是失败：这篇的图/视频全部没过画质门槛（≤720p 或 <5MB）
+            xlog(ctx, "全部低于画质门槛，跳过 $noteId（滤掉 ${XhsBatchSave.lastQuietFiltered} 张）")
+            return SaveOutcome.SKIPPED
+        }
         return if (ok) SaveOutcome.OK else SaveOutcome.FAIL
     }
 
@@ -449,9 +489,9 @@ object XhsBatchDriver {
         while (System.currentTimeMillis() < deadline) {
             if (stopRequested) return
             val cur = XhsBatchSave.activityOrNull() ?: run { Thread.sleep(400); continue }
-            if (onMain { findCards(cur) }.orEmpty().isNotEmpty()) return
+            if (cur.javaClass.name == listClassName && onMain { findCards(cur) }.orEmpty().isNotEmpty()) return
             // 已经回到列表页、只是还在重绘：再给一轮时间，别因为慢半拍就结束整轮（审计 #11）
-            if (!extended && cur === listActivity) {
+            if (!extended && cur.javaClass.name == listClassName) {
                 extended = true
                 deadline += LIST_BACK_MS
             }
@@ -490,7 +530,8 @@ object XhsBatchDriver {
         if (!activity.isFinishing) onMain { runCatching { activity.onBackPressed() }; true }
         Thread.sleep(400)
         if (XhsBatchSave.activityOrNull() !== activity) return
-        if (listActivity == null || activity === listActivity) return
+        // 列表页本身绝不能 finish（会把用户主页关掉）：类名一致即视为列表页
+        if (listClassName == null || activity.javaClass.name == listClassName) return
         // 只对「详情类」页 finish：配置变更/用户切换主页会造出新实例，误判会把用户主页关掉（审计 #9）
         val name = activity.javaClass.simpleName
         if (!name.contains("Detail", ignoreCase = true) && !name.contains("Note", ignoreCase = true)) return
@@ -501,6 +542,7 @@ object XhsBatchDriver {
         running = false
         // 不置空会一直静态持有宿主 Activity + 整棵 decor 视图树到下次启动（审计 #16）
         listActivity = null
+        listClassName = null
         runCatching { stateListener?.invoke() }
         val summary = note ?: "采集结束：成功 $ok · 跳过 $skipped · 失败 $failed"
         // finish 在 finally 里调用：这里再抛异常就没人接了（审计 #1），逐步 runCatching

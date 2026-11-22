@@ -96,13 +96,13 @@ internal object XhsDownloadLedger {
         return Triple(maxOf(msCount, if (ledTs > 0) 1 else 0), maxOf(msLast, ledTs), source)
     }
 
-    /** 「MM-dd HH:mm」展示（DATE_ADDED 秒）；解析失败兜底空串（调用方据此省略时间括号）。 */
     /** 台账总行数——驱动用它判断「这一次保存有没有真的落盘」（不解析内容，只要单调性）。 */
     internal fun stamp(context: android.content.Context): Long = runCatching {
         val f = java.io.File(context.filesDir, LEDGER_FILE)
         if (!f.isFile) 0L else f.readLines().count { it.isNotBlank() }.toLong()
     }.getOrDefault(0L)
 
+    /** 「MM-dd HH:mm」展示（DATE_ADDED 秒）；解析失败兜底空串（调用方据此省略时间括号）。 */
     internal fun fmtTime(addedSec: Long): String = runCatching {
         val cal = java.util.Calendar.getInstance().apply { timeInMillis = addedSec * 1000 }
         "%02d-%02d %02d:%02d".format(

@@ -60,6 +60,8 @@ object XhsAutoEntry {
     /** 当前那次注入轮询的 Runnable（销毁时精确取消，不误伤别的定时器）。 */
     @Volatile private var retryRunnable: Runnable? = null
     @Volatile private var watchedListener: android.view.ViewTreeObserver.OnGlobalLayoutListener? = null
+    /** 监听器所属的 Activity：decor.context 是 DecorContext，反推不回 Activity，只能自己记。 */
+    @Volatile private var watchedActivity: Activity? = null
     @Volatile private var lastCheckAt = 0L
 
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
@@ -93,7 +95,7 @@ object XhsAutoEntry {
                         }
 
                         override fun onActivityPaused(a: Activity) {
-                            if (watchedDecor === a.window?.decorView || (watchedDecor?.context as? Activity) === a) {
+                            if (watchedActivity === a || watchedDecor === a.window?.decorView) {
                                 unwatch()
                             }
                             // 只删本页的轮询，不用 removeCallbacksAndMessages(null) 全清（审计 #18）
@@ -110,7 +112,7 @@ object XhsAutoEntry {
                             if (watchedDecor === a.window?.decorView || (watchedDecor?.context as? Activity) === a) {
                                 unwatch()
                             }
-                            if (attachedDecor === a.window?.decorView || (attachedDecor?.context as? Activity) === a) {
+                            if (attachedActivity === a || attachedDecor === a.window?.decorView) {
                                 retryRunnable?.let { main.removeCallbacks(it) }
                                 detach()
                             }
@@ -144,6 +146,7 @@ object XhsAutoEntry {
             decor.viewTreeObserver.addOnGlobalLayoutListener(listener)
             watchedDecor = decor
             watchedListener = listener
+            watchedActivity = activity
         }
     }
 
@@ -157,6 +160,7 @@ object XhsAutoEntry {
         }
         watchedDecor = null
         watchedListener = null
+        watchedActivity = null
     }
 
     /** 每 400ms 试一次注入，最多 [attempts] 次（≈6s）：主页渲染慢也能等到，非主页则安静放弃。 */
@@ -166,7 +170,7 @@ object XhsAutoEntry {
             override fun run() {
                 if (left-- <= 0) return
                 // 页已退出/被替换就不必再试
-                if (activity.isFinishing || attachedDecor === activity.window?.decorView && attachedButton != null) return
+                if (activity.isFinishing || (attachedDecor === activity.window?.decorView && attachedButton != null)) return
                 val hit = runCatching {
                     syncButton(activity, module)
                     attachedButton != null
@@ -219,18 +223,31 @@ object XhsAutoEntry {
     }
 
     /** 主页判据：decorView 内存在 desc 以「笔记,」开头的视图（瀑布流卡片）。深度优先，找到即返回。 */
-    private fun isProfilePage(root: View, depth: Int = 0): Boolean {
-        // 挂在 OnGlobalLayout 上每 250ms 走一遍整棵树：必须限深 + 只认可见节点，
-        // 否则首页瀑布流这种超深树会持续吃掉主线程（审计 #15）
-        if (depth > 30) return false
-        if (root.isShown && root.contentDescription?.startsWith(CARD_DESC_PREFIX) == true) return true
-        if (root is ViewGroup) {
-            for (i in 0 until root.childCount) {
-                val c = root.getChildAt(i) ?: continue
-                if (isProfilePage(c, depth + 1)) return true
+    /**
+     * 判「这是作者主页」：既要有笔记卡片（desc「笔记,」），又要有主页资料区（「粉丝」/「获赞与收藏」）。
+     *
+     * 只有卡片判据不够（2026-11-22 审计）：详情页的「相关推荐」同样是「笔记,」卡片，于是详情页也冒出
+     * 「采集」按钮，一键下去就把**别人的笔记**当目标作者的作品装了。加上资料区标记后，详情页不再有按钮。
+     * 单次 DFS 同时收集两个标记，限深 30、只看可见节点（本页挂在 OnGlobalLayout 上每 250ms 跑一次）。
+     */
+    private fun isProfilePage(root: View): Boolean {
+        var cards = false
+        var profileStats = false
+        fun dfs(v: View, depth: Int) {
+            if (depth > 30 || (cards && profileStats)) return
+            if (v.isShown) {
+                if (!cards && v.contentDescription?.startsWith(CARD_DESC_PREFIX) == true) cards = true
+                if (!profileStats) {
+                    val t = (v as? TextView)?.text?.toString().orEmpty()
+                    if (t == "粉丝" || t.startsWith("粉丝") || t.endsWith("粉丝") || t.contains("获赞与收藏")) {
+                        profileStats = true
+                    }
+                }
             }
+            if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i)?.let { dfs(it, depth + 1) }
         }
-        return false
+        runCatching { dfs(root, 0) }
+        return cards && profileStats
     }
 
     /**

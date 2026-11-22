@@ -194,16 +194,21 @@ object XhsSavePivot {
      * 抓取 / 解析异常 / 图视频 live 全空）= WARN + 记 [parsedEmptyNotes] + 返 null——失败卡由
      * XhsBatchSave 弹，下次点击 [availableShareLink] 返 null 放行宿主。
      */
-    suspend fun resolveByShareLink(noteId: String, module: XposedModule): ResolvedNote? = withContext(Dispatchers.IO) {
+    /**
+     * [fromBatch] = 批量采集调用：**不进 [parsedEmptyNotes] 黑名单**（2026-11-22 审计）。
+     * 黑名单是给「用户点一次保存就失败」的交互路径用的（下次点击放行宿主原生保存）；
+     * 批量采集时一篇只试一次，把网络抖动写成永久拉黑会让同一篇在本次会话里再也下不了。
+     */
+    suspend fun resolveByShareLink(noteId: String, module: XposedModule, fromBatch: Boolean = false): ResolvedNote? = withContext(Dispatchers.IO) {
         // 整条链优先；只有裸 xsec_token 时合成一条（2026-11-22：批量采集逐篇打开时响应多为 token-only）
         val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId) ?: run {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 无 share link noteId=$noteId，解析跳过")
-            parsedEmptyNotes.add(noteId)
+            if (!fromBatch) parsedEmptyNotes.add(noteId)
             return@withContext null
         }
         val shortUrl = hostShortUrl(longUrl, module) ?: run {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX getShortUrl 失败 noteId=$noteId")
-            parsedEmptyNotes.add(noteId)
+            if (!fromBatch) parsedEmptyNotes.add(noteId)
             return@withContext null
         }
         try {
@@ -211,7 +216,7 @@ object XhsSavePivot {
             if (note.videos.isEmpty() && note.images.isEmpty() && note.livePhotos.isEmpty()) {
                 module.log(Log.WARN, MountEngine.TAG,
                     "$JUDGE_PREFIX 解析成功但图/视频/live 全空 noteId=$noteId $lastFetchDiag")
-                parsedEmptyNotes.add(noteId)
+                if (!fromBatch) parsedEmptyNotes.add(noteId)
                 return@withContext null
             }
             // 可下 N = 图片分支合并后 URL 数（images + livePhotos 静帧原图；videos 图片分支不消费，
@@ -235,7 +240,7 @@ object XhsSavePivot {
                 ?: "无 message"
             module.log(Log.WARN, MountEngine.TAG,
                 "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId ${t.javaClass.simpleName}: $detail")
-            parsedEmptyNotes.add(noteId)
+            if (!fromBatch) parsedEmptyNotes.add(noteId)
             null
         }
     }
