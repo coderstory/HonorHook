@@ -84,7 +84,20 @@ object XhsBatchDriver {
      */
     @Volatile private var listClassName: String? = null
     /** 卡片锚点：desc 前缀（同 XhsAutoEntry 的主页判据）。 */
-    private const val CARD_DESC_PREFIX = "笔记,"
+    /**
+     * 卡片判据（唯一口径，按钮注入与驱动共用）。
+     * 宿主给卡片的无障碍描述是「<类型>,<标题…>,来自<作者>」：图文=「笔记,」，视频=「视频,」。
+     * 只认「笔记,」时，整页都是视频笔记的作者主页连「这页有卡片」都判不出来（2026-11-22
+     * 用户实测：主页头部全是视频 ⇒ 采集按钮不出现）。除类型前缀外再兜一条「含『来自』且够长」，
+     * 免得宿主把视频卡换成别的类型词时又全线失判。
+     */
+    private val CARD_DESC_PREFIXES = arrayOf("笔记,", "视频,", "图文,")
+
+    internal fun isCardDesc(desc: String?): Boolean {
+        if (desc.isNullOrEmpty()) return false
+        if (CARD_DESC_PREFIXES.any { desc.startsWith(it) }) return true
+        return desc.length >= 12 && desc.contains("来自")
+    }
 
     @Volatile private var running = false
     /** 轮次令牌：旧线程的收尾（finish）不能覆盖新一轮的运行时状态。 */
@@ -1019,7 +1032,8 @@ object XhsBatchDriver {
     private fun findCards(activity: Activity): List<View> {
         val out = ArrayList<View>()
         walk(activity.window?.decorView) { v ->
-            if (v.isShown && v.contentDescription?.startsWith(CARD_DESC_PREFIX) == true) out += v
+            val desc = v.contentDescription?.toString()
+            if (v.isShown && isCardDesc(desc)) out += v
         }
         // 排序键先取一次：比较器里每比一次都 getLocationOnScreen（每次 new IntArray）+ 调用系统，很贵
         return out.map { it to it.getLocationOnScreenInts() }

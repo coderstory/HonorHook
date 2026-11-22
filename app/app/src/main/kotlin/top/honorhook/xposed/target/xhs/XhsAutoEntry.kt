@@ -31,7 +31,9 @@ import top.honorhook.xposed.data.RemoteConfig
 object XhsAutoEntry {
 
     private const val JUDGE_PREFIX = "XhsHook·Auto"
-    private const val CARD_DESC_PREFIX = "笔记,"
+    // 卡片判据与驱动共用一份：只认「笔记,」时整页视频的作者主页判不出「有卡片」，
+    // 按钮不出现（2026-11-22 用户实测）。口径见 XhsBatchDriver.isCardDesc。
+
 
     /** 当前按钮宿主（activity 的 decorView）；离开主页/页销毁即摘除。 */
     @Volatile private var attachedButton: TextView? = null
@@ -281,7 +283,7 @@ object XhsAutoEntry {
         fun dfs(v: View, depth: Int) {
             if (depth > 30 || (cards && profileStats)) return
             if (v.isShown) {
-                if (!cards && v.contentDescription?.startsWith(CARD_DESC_PREFIX) == true) cards = true
+                if (!cards && XhsBatchDriver.isCardDesc(v.contentDescription?.toString())) cards = true
                 if (!profileStats) {
                     val t = (v as? TextView)?.text?.toString().orEmpty()
                     if (t == "粉丝" || t.startsWith("粉丝") || t.endsWith("粉丝") || t.contains("获赞与收藏")) {
