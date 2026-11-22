@@ -36,8 +36,12 @@ object TamerWakeHooks : TargetHook {
             pending += listOf(
                 task("market-tamer:wake.powerRecv", "$PKG.receiver.PowerConnectedReceiver", "onReceive", 2, "void", "插电广播唤醒市场→null"),
                 task("market-tamer:wake.wifiRecv", "$PKG.receiver.wifi.WifiStateChangeReceiver", "onReceive", 2, "void", "连 Wi-Fi 广播唤醒市场→null"),
-                task("market-tamer:wake.bootController", "$PKG.boot.BootController", "J", 3, "void", "开机广播控制器（hookAll argc==3）→null"),
-                task("market-tamer:wake.providerCall", "$PKG.boot.provider.WakeMarketProvider", "call", 3, "java.lang.Object", "外部唤醒 provider call→null"),
+                // 16.1.11.302 实测返回类型（jadx：boot/BootController.java:174 是
+                // `public static Object J(rv, boolean, SuspendLambda)`；boot/provider/WakeMarketProvider.java:26
+                // 是 `public final Bundle call(String, String, Bundle)`）。原来声明的 void/Object 与本版不符，
+                // returnType 是解析硬条件 ⇒ 两点一直挂着 null（真机 installed 7/9）。
+                task("market-tamer:wake.bootController", "$PKG.boot.BootController", "J", 3, "java.lang.Object", "开机广播控制器（hookAll argc==3）→null"),
+                task("market-tamer:wake.providerCall", "$PKG.boot.provider.WakeMarketProvider", "call", 3, "android.os.Bundle", "外部唤醒 provider call→null"),
                 task("market-tamer:wake.providerCreate", "$PKG.boot.provider.WakeMarketProvider", "onCreate", 0, "boolean", "provider 创建返 false"),
             )
         } else {

@@ -25,9 +25,11 @@ object TamerPushHooks : TargetHook {
 
     private const val PKG = "com.hihonor.appmarket"
 
-    private fun task(id: String, cls: String, method: String, argc: Int, desc: String) =
+    // returnType 是解析硬条件，必须与宿主真实签名一致：16.1.11.302 的 msgcenterview.repository.a#y
+    // 是 `Object y(List, ContinuationImpl)`（suspend），原先一律写 void ⇒ 该点永远挂不上。
+    private fun task(id: String, cls: String, method: String, argc: Int, desc: String, ret: String = "void") =
         MountEngine.SimpleTask(
-            id = id, className = cls, methodName = method, paramCount = argc, returnType = "void",
+            id = id, className = cls, methodName = method, paramCount = argc, returnType = ret,
             description = desc,
         )
 
@@ -50,7 +52,7 @@ object TamerPushHooks : TargetHook {
                 // 16.1.11.302：tp5/rk4/v56 类已删（混淆名复用）、MsgGroupViewModel#l 已消失——只留两个活点
                 // + Activity 级封锁（TamerActivityBlocker msg_center 表）。
                 task("market-tamer:msgc.mgvm.k", "$PKG.msgcenterview.MsgGroupViewModel", "k", 1, "消息分组→null"),
-                task("market-tamer:msgc.repo.y", "$PKG.msgcenterview.repository.a", "y", 2, "消息仓库→null"),
+                task("market-tamer:msgc.repo.y", "$PKG.msgcenterview.repository.a", "y", 2, "消息仓库→null", ret = "java.lang.Object"),
             )
         } else {
             logDisabled(module, FeatureCatalog.KEY_MARKET_PURIFY_MSG_CENTER, "TamerPushHooks")

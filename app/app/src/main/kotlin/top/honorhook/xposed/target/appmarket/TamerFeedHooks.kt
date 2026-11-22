@@ -49,7 +49,10 @@ object TamerFeedHooks : TargetHook {
                 // 16.1.11.302（adapt-report.md §11）：请求源 = I(MutableLiveData,I,String,Z)（锚串
                 // realRequestRecommend/R232）；应答汇 = m2(BaseResp,Z,Z,Z)（锚串 setRecommendResponseData）。
                 // 旧 o/n/Z1/W1/V1 形状已消失。
-                task("market-tamer:feed.mine.I", MINE_VM, "I", 4, "java.lang.Object", "我的推荐流请求源→null"),
+                // 16.1.11.302：MarketManageViewModel#I 由 void 改成返回 kotlinx.coroutines.s（即 Job 形态的
+                // 启动器）——返 null = 根本没起协程，正是「请求源拦掉」的原意；但 returnType 必须写对，
+                // 否则解析阶段就被判 miss（真机 6/9 的三点之一）。
+                task("market-tamer:feed.mine.I", MINE_VM, "I", 4, "kotlinx.coroutines.s", "我的推荐流请求源→null"),
                 task("market-tamer:feed.mine.m2", MINE_FRAG, "m2", 4, "void", "我的推荐流应答汇（args[0]=空 BaseResp）"),
             )
         } else {
@@ -67,7 +70,8 @@ object TamerFeedHooks : TargetHook {
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_MARKET_PURIFY_UPDATE_FEED)) {
             pending += listOf(
                 // setRecommendResponseData(3) 旧形已并入 access$ 点（suspend 化），不重复挂。
-                task("market-tamer:feed.upd.bridge", UPDATE_ACT, "access\$setRecommendResponseData", 4, "void", "更新页推荐 bridge args[1]=null"),
+                // 16.1.11.302 实测返回 Object（suspend lambda；jadx appupdate/UpdateManagerActivity.java:731）。
+                task("market-tamer:feed.upd.bridge", UPDATE_ACT, "access\$setRecommendResponseData", 4, "java.lang.Object", "更新页推荐 bridge args[1]=null"),
                 task("market-tamer:feed.upd.discover", UPDATE_DISCOVER, "getItemCount", 0, "int", "更新页「发现更多」卡 after→0"),
             )
         } else {
@@ -76,7 +80,8 @@ object TamerFeedHooks : TargetHook {
         if (RemoteConfig.isEnabled(FeatureCatalog.KEY_MARKET_PURIFY_DETAIL_REC)) {
             pending += listOf(
                 // 16.1.11.302 仅剩 h(11) 重载（h(12) 已消失）。
-                task("market-tamer:feed.det.h", DETAIL_VM, "h", 11, "void", "详情页推荐请求（11 参形态）→null+空 Success"),
+                // 16.1.11.302：AppDetailRecommendViewModel#h 由 void 改成返回 kotlinx.coroutines.s。
+                task("market-tamer:feed.det.h", DETAIL_VM, "h", 11, "kotlinx.coroutines.s", "详情页推荐请求（11 参形态）→null+空 Success"),
                 task("market-tamer:feed.det.bridge", DETAIL_BRIDGE, "invokeSuspend", 1, "java.lang.Object", "详情页推荐协程桥→null+空 Success"),
             )
         } else {

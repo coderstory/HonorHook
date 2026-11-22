@@ -117,6 +117,8 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 > 2026-11-14 20:27 实测 `installed 6/3`（第 4 组挂载后待复采 7/3）：N 全 OK，judge 均已命中；分母 3 是
 > attemptMount 多批次下汇总 M 只认首轮 pending 表的历史口径（begin 只在 retryRounds==0 首批执行），非缺挂。
 >
+> **最近一次重采：2026-11-22 21:00**（模块 1.3.6+，`bash tools/dev.sh hook-status`）：**appmarket tamer 三个 hook 从长期缺 6 点修到全绿**——`TamerWakeHooks` 7/9→**9/9**、`TamerPushHooks` 7/8→**8/8**、`TamerFeedHooks` 6/9→**9/9**（宿主 16.1.11.302，主进程判据行；push_remote 进程当日未拉起，下次自然唤起时同一判据复核）。根因是**挂载点声明的 returnType 与宿主真实签名不符**（returnType 是解析硬条件，不符即判「类/方法不存在」），不是类/方法真的没了：`boot.BootController#J` 实为 `Object`、`boot.provider.WakeMarketProvider#call` 实为 `Bundle`、`msgcenterview.repository.a#y` 实为 `Object`（suspend）、`MarketManageViewModel#I` / `AppDetailRecommendViewModel#h` 实为 `kotlinx.coroutines.s`、`UpdateManagerActivity.access$setRecommendResponseData` 实为 `Object`。同日其余判据：xhs X1 3/3·X2 3/3·X4 1/1·X5 5/5·Auto 1/1（9.54.0）、installer 11/11、settings 2/2、sysmgr 3/3；AppMarketHook 7/7（16.1.11.302）。
+>
 > **最近一次重采：2026-11-07 23:21**（模块 v1.2.8，`bash tools/dev.sh hook-status` 一条命令取，日志 `modules_2026-11-07T21:14:09.531743.log`）：**全绿**——ThemeStoreHook **52/52**（theme 20.1.67.303，新表 `ThemeStoreMap_20_1_67_303`）、MmsHook 2/2（插件 10.0.44.309，T3 双轨 b(4参)/c(5参) 命中 c）、xhs X1 3/3·X2 3/3·X4 1/1·X5 5/5（9.53.3）、AppMarket 7/7（16.1.10.302）、Sysmr 3/3（473，仅 WARN）、Ime 12/12、launcher 5/5、ouc 11/11、settings 2/2、systemui 4/4·U6 3/3·U7 3/3、天气 ads 2/2·tracking 3/3（18.1.7.314）。行为层：小红书保存全链、短信「打开应用」按钮隐藏均由用户真机确认（2026-11-07）。
 >
 > **查自己机器还差哪些版本 → `bash tools/dev.sh versions`**（实装 versionName vs `FeatureCatalog`，未适配则非 0 退出）。
@@ -156,6 +158,9 @@ settings 14.0.0.210 / ouc 18.0.3.230 / mms 19.0.9.306 / systemui 17.0.0.1）。
 | `LauncherHook` | 5/5 | 宿主 `18.0.0.259`（超基线，仅 WARN）；同包 `HonorAdsHook` 2/2、`HonorTrackingHook` 2/3 |
 | `SystemUiHook` | 4/4 | v1.2.2 起单行新口径（极客中心图标点并入，M 3→4）；宿主 17.0.0.1 未变，2026-10-27 实测 |
 | `AppMarketHook` | 7/7 | 宿主 `16.1.10.302`（2026-11-07 实测；基线 16.1.9.302，两端已入 `extraVersions`） |
+| `TamerWakeHooks` | **9/9** | 宿主 `16.1.11.302`（2026-11-22 21:00；修前长期 7/9，根因 = 两点 returnType 声明错） |
+| `TamerPushHooks` | **8/8** | 宿主 `16.1.11.302`（同日；修前 7/8） |
+| `TamerFeedHooks` | **9/9** | 宿主 `16.1.11.302`（同日；修前 6/9，三点 returnType 声明错） |
 | `JdHook` / `MfaAuthHook` | 1/1 / 1/1 | 京东宿主 `16.1.50`（2026-10-27 21:51，6 进程各一行 1/1；仅版本 WARN vs 基线 16.1.0）；MFA 1.0.5 未变 |
 | `SysmgrHook` | 3/3 | 宿主 `17.0.0.473`（2026-11-07 实测；挂载全活，仅版本自检 WARN vs 基线 414） |
 | `XhsHook` | X1 3/3 · X2 3/3 · X4 1/1 · X5 5/5 | 宿主 **9.53.3**（2026-11-07，`XhsPoints` 9.53.3 覆盖套：saveClick `gr9.b`、x2b `jm8.j`、noteSaveEntry `vj9.q1`、aigcEdit `gq4.b`、downloader `tg5.h`、videoStore `l79.s`；videoClick/h0/e0 起 9.51 显式缺席 ⇒ X5 M=5）。上一版口径： X5 的 4/5 已随 v1.1.6 修复；2026-10-20 16:48 换版本源（`resolveHostVersion`）后**复测逐字一致**（宿主 9.50.0，走基线坐标不变）。**M 按宿主版本分档**：9.50.0 = 上表数值；**9.49.1 覆盖套只有 X5 变 ⇒ X5 M=4**（noteSave / aigcEdit / downloader 三点该版本无此坐标 ⇒ 显式缺席，不是失效；X1/X2/X4 与版本无关，M 不变）——旧宿主自查时勿把 N<M 判成宿主版本错位 |

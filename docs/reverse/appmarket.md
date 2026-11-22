@@ -23,6 +23,27 @@
 - B/C/D 是 R8 单字母名（OTA 必漂移），每点带 `dexStrings`（各方法独占日志串）走 DexKit 宽松轨兜底
 - 弹窗三点 k0/g0/h 为 show 入口短路（void 不执行 = 不展示）；Runnable 参数是点击行为，不 show 不消费，无泄漏面
 
+## 16.1.11.302 补充：tamer 六个虚挂点的真因是 returnType（2026-11-22）
+
+现象：`TamerWakeHooks 7/9`、`TamerPushHooks 7/8`、`TamerFeedHooks 6/9` 长期不变，失败清单写「类/方法不存在」。
+实证：这些类和方法**都在**（jadx 全量产物可逐个核），错的是挂载点声明的 `returnType` —— `MountEngine`
+的解析把 returnType 当**硬条件**（`xposed/core/MethodResolver.kt` 精确比对 canonical 名），不符即 miss，
+汇总行却统一显示成「类/方法不存在」，很容易误导成宿主删点。
+
+| 点 | 声明（错） | 宿主真实签名（jadx 实证） |
+|---|---|---|
+| `boot.BootController#J` | void | `public static Object J(rv, boolean, SuspendLambda)` — `boot/BootController.java:174` |
+| `boot.provider.WakeMarketProvider#call` | Object | `public final Bundle call(String, String, Bundle)` — `boot/provider/WakeMarketProvider.java:26` |
+| `msgcenterview.repository.a#y` | void | `Object y(List, ContinuationImpl)` — `msgcenterview/repository/a.java:509` |
+| `mine.viewmodel.MarketManageViewModel#I` | Object | `kotlinx.coroutines.s I(MutableLiveData, int, String, boolean)` — `mine/viewmodel/MarketManageViewModel.java:249` |
+| `appupdate.UpdateManagerActivity#access$setRecommendResponseData` | void | `Object access$setRecommendResponseData(UpdateManagerActivity, BaseResp, boolean, nv2)` — `appupdate/UpdateManagerActivity.java:731` |
+| `base.details.recommend.AppDetailRecommendViewModel#h` | void | `kotlinx.coroutines.s h(11 参)` — `base/details/recommend/AppDetailRecommendViewModel.java:32` |
+
+修法：声明改成宿主真实返回类型（`kotlinx.coroutines.s` 照写全名即可，解析按字符串比对）。改后真机
+`installed 9/9 · 8/8 · 9/9`（2026-11-22，主进程判据行）。**教训**：汇总行把「解析 miss」写成
+「类/方法不存在」；遇到 N<M 且失败清单点得（类名/方法名清楚）时，先用 jadx 核 returnType 与参数个数，
+再怀疑宿主删点。
+
 ## §16.1.11.302 版本适配（2026-11-19，MT MCP outline 实证）
 
 OTA 后 `installed 5/7`，失败两点均为 R8 重命名（通知族三点 dexStrings 兜底坐标全中，未漂移）：
