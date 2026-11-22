@@ -572,7 +572,7 @@ object XhsBatchDriver {
     private val hexId = Regex("^[0-9a-f]{24}$")
 
     /** 每个 Activity 类上「能问出 noteId」的方法缓存（name=null 表示该类没有）。 */
-    private val idMethodCache = HashMap<String, java.lang.reflect.Method?>()
+    private val idCandidates = HashMap<String, List<java.lang.reflect.Method>>()
 
     /**
      * 直接从**当前详情页 Activity** 问 noteId（2026-11-22 用户实测：缓存命中的笔记详情页不发
@@ -631,23 +631,20 @@ object XhsBatchDriver {
             }
         }
         val cls = activity.javaClass
-        val cached = idMethodCache[cls.name]
-        if (cached != null) {
-            runCatching { cached.invoke(activity) as? String }
-                .getOrNull()?.takeIf { hexId.matches(it) }?.let { return it }
-        } else if (!idMethodCache.containsKey(cls.name)) {
-            var found: java.lang.reflect.Method? = null
-            for (m in cls.methods) {
-                if (m.parameterCount != 0 || m.returnType != String::class.java) continue
-                if (m.declaringClass == android.app.Activity::class.java) continue
-                val v = runCatching { m.invoke(activity) as? String }.getOrNull() ?: continue
-                if (hexId.matches(v)) {
-                    found = m
-                    idMethodCache[cls.name] = m
-                    return v
-                }
-            }
-            if (found == null) idMethodCache[cls.name] = null
+        // 早先只在第一次扫到 id 后缓存那个方法、扫不到就缓存 null —— 一旦首轮 controller 还没就绪
+        // 就永久认定「这类 Activity 没有 id 方法」，后面 8 秒里一次都不再试（真机日志：「方法扫描缓存=无」）。
+        // 现在缓存的是**候选方法列表**，每轮都 invoke 一遍，直到拿到 24 位串。
+        val cands = idCandidates.getOrPut(cls.name) {
+            runCatching {
+                cls.methods.filter {
+                    it.parameterCount == 0 && it.returnType == String::class.java &&
+                        it.declaringClass != android.app.Activity::class.java
+                }.take(80)
+            }.getOrDefault(emptyList())
+        }
+        for (m in cands) {
+            val v = runCatching { m.invoke(activity) as? String }.getOrNull() ?: continue
+            if (hexId.matches(v)) return v
         }
         return null
     }
@@ -700,7 +697,7 @@ object XhsBatchDriver {
             xlog(
                 ctx,
                 "详情页没拿到 noteId（活动方法/Intent/分享链登记都没给出 24 位 id）" +
-                    " 前台=${act?.javaClass?.simpleName} 方法扫描缓存=${idMethodCache[act?.javaClass?.name] ?: "无"}"
+                    " 前台=${act?.javaClass?.simpleName} 候选方法=${idCandidates[act?.javaClass?.name]?.size ?: 0}"
             )
             dumpViews(ctx, "详情页", act)
             return SaveOutcome.FAIL
@@ -1060,6 +1057,24 @@ object XhsBatchDriver {
             val bean = runCatching { f.isAccessible = true; f.get(l) }.getOrNull() ?: return@forEach
             namedHex(bean, likeNoteId)?.let { return it }
         }
+        // 三层递归：bean 里真正存 noteId 的往往是「bean → item → note」这种链条，
+        // 两跳够不到就一直是 noteId=待取（真机 17:47/18:00 全是这种）。同样只认名字像 noteId 的字段。
+        fun deepNamed(o: Any?, depth: Int): String? {
+            if (o == null || depth < 0) return null
+            if (o is String) return hexOf(o)
+            if (o is View || o is android.content.Context || o is android.app.Activity) return null
+            val c = o.javaClass
+            if (c.isArray || c.name.startsWith("java.util.")) return null
+            namedHex(o, likeNoteId)?.let { return it }
+            var scanned = 0
+            for (f in c.declaredFields) {
+                if (scanned++ > 40) break
+                val v = runCatching { f.isAccessible = true; f.get(o) }.getOrNull() ?: continue
+                deepNamed(v, depth - 1)?.let { return it }
+            }
+            return null
+        }
+        deepNamed(l, 3)?.let { return it }
         // 兜底：bean 里任意 24hex 只有在「这个 id 已经带着凭据」时才能当 noteId 用
         // （凭据是我们从响应里按同一 noteId 记的，等价于外键校验）
         l.javaClass.declaredFields.forEach { f ->
