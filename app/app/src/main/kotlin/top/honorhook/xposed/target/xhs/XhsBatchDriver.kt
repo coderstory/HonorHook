@@ -163,7 +163,29 @@ object XhsBatchDriver {
      */
     @Volatile private var lockedAuthor: String? = null
 
-    private fun syncStats(ok: Int, skipped: Int, failed: Int, pending: Int, discovered: Int = 0) {
+    /** 累计落盘**文件**数（不是篇数）：用户 2026-11-22 要求面板同时给出「篇」与「资源」两个口径。 */
+    @Volatile private var resourceCount = 0
+
+    /** 当前正在处理的那篇有多少个资源（图片 + 视频）；空闲为 0。 */
+    @Volatile private var currentNoteRes = 0
+
+    /** collect 用：本篇预计有多少资源（面板「当前文章 N 个资源」）。 */
+    private fun noteResources(total: Int) { currentNoteRes = total }
+
+    /** collect 用：累计真实落盘文件数。 */
+    private fun addResources(n: Int) { if (n > 0) resourceCount += n }
+
+    private fun syncStats(
+        ok: Int,
+        skipped: Int,
+        failed: Int,
+        pending: Int,
+        discovered: Int = 0,
+        resources: Int = resourceCount,
+        noteRes: Int = currentNoteRes,
+    ) {
+        resourceCount = resources
+        currentNoteRes = noteRes
         okCount = ok
         skippedCount = skipped
         failedCount = failed
@@ -182,8 +204,9 @@ object XhsBatchDriver {
             stopRequested -> "收尾中"
             else -> "采集中"
         }
-        return "$state · 已发现 $discoveredCount 篇 · 已存 $okCount · 失败 $failedCount\n" +
-            "本屏待处理 $pendingNow · 跳过 $skippedCount · 用时 ${secs / 60}:$ss"
+        // 用户 2026-11-22 指定的口径：处理 N 篇 / 累计下载 N 个资源 / 当前文章 N 个资源
+        return "$state · 已处理 $okCount 篇 · 累计下载 $resourceCount 个 · 失败 $failedCount\n" +
+            "当前文章 $currentNoteRes 个资源 · 本屏待处理 $pendingNow · 跳过 $skippedCount · 用时 ${secs / 60}:$ss"
     }
 
     /** 回答模块面板的状态查询（跨进程，面板进页时问一次）。 */
@@ -207,7 +230,7 @@ object XhsBatchDriver {
         running = true
         stopRequested = false
         processed = 0
-        syncStats(0, 0, 0, 0, 0)
+        syncStats(0, 0, 0, 0, 0, resources = 0, noteRes = 0)
         discoveredCount = 0
         startedAt = System.currentTimeMillis()
         // 列表页类名在 start 就锁成「当前这页」：等到第一次扫到卡片才学，会在首屏重绘/切 tab 的
@@ -451,7 +474,7 @@ object XhsBatchDriver {
                         SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                     }
                     xlog(ctx, dt)
-                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
+                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, dt, ok, skipped, failed, cardsTotal)
                     sleepPace()
@@ -461,7 +484,7 @@ object XhsBatchDriver {
                 // 还要等 8~23 秒，且反射失败时会记成「失败」而不是「跳过」（2026-11-22 审计 P1）
                 if (known != null && runCatching { XhsDownloadLedger.downloaded(ctx, known).first }.getOrDefault(0) > 0) {
                     skipped++
-                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
+                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "已下载过，跳过", ok, skipped, failed, cardsTotal)
                     xlog(ctx, "已下载过，跳过 noteId=$known（免点开）")
@@ -473,7 +496,7 @@ object XhsBatchDriver {
                 val prev = XhsVideoSave.lastShareNoteId()
                 if (onMain { clickView(card) } != true) {
                     failed++
-                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
+                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
                     xlog(ctx, "卡片点不动（本屏剩 ${pending.size - 1} 张）")
@@ -622,6 +645,7 @@ object XhsBatchDriver {
         if (missingIdx.size < urls.size) {
             xlog(ctx, "补齐缺失 noteId=$noteId 已有 ${urls.size - missingIdx.size}/${urls.size} 张")
         }
+        noteResources(urls.size + videos.size)
         val t0 = System.currentTimeMillis()
         // 只记域名级片段：完整 URL 带 xsec_token，进了诊断文本就等于把凭据复制进剪贴板（审计 #18）
         val hostOnly = urls.firstOrNull()?.let { u -> runCatching { java.net.URI(u).host }.getOrNull() } ?: "-"
@@ -652,6 +676,7 @@ object XhsBatchDriver {
         if (videos.isNotEmpty()) {
             xlog(ctx, "视频落盘 noteId=$noteId 存$videoOk/小$videoSmall/败$videoFail")
         }
+        addResources(result.ok + videoOk)
         val savedAny = result.savedAny || videoOk > 0
         val filteredAll = result.filtered > 0 && result.failed == 0
         val videoAllSmall = videos.isNotEmpty() && videoOk == 0 && videoFail == 0 && videoSmall > 0
@@ -755,6 +780,7 @@ object XhsBatchDriver {
         running = false
         endedAt = System.currentTimeMillis()
         pendingNow = 0
+        currentNoteRes = 0
         atTop = false
         // 不置空会一直静态持有宿主 Activity + 整棵 decor 视图树到下次启动（审计 #16）
         listClassName = null
