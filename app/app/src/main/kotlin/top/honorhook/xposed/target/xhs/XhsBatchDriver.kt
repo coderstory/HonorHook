@@ -118,6 +118,33 @@ object XhsBatchDriver {
     /** 已收到取消、正在等当前这篇收尾（按钮显示「收尾」）。 */
     fun isStopping(): Boolean = stopRequested
 
+    // ── 面板汇总统计（用户在 2026-11-22 指定要看的：处理/已存/待处理/失败/用时）──
+    @Volatile private var okCount = 0
+    @Volatile private var skippedCount = 0
+    @Volatile private var failedCount = 0
+    @Volatile private var pendingNow = 0
+    @Volatile private var startedAt = 0L
+
+    private fun syncStats(ok: Int, skipped: Int, failed: Int, pending: Int) {
+        okCount = ok
+        skippedCount = skipped
+        failedCount = failed
+        pendingNow = pending
+        processed = ok + skipped
+    }
+
+    /** 面板顶栏文本：两行（窄屏一排放不下五项）。 */
+    fun header(): String {
+        val secs = if (startedAt == 0L) 0L else (System.currentTimeMillis() - startedAt) / 1000
+        val ss = (secs % 60).toString().padStart(2, '0')
+        val state = when {
+            !running -> "已结束"
+            stopRequested -> "收尾中"
+            else -> "采集中"
+        }
+        return "$state · 已处理 $processed 篇 · 已存 $okCount · 失败 $failedCount\n待处理 $pendingNow · 用时 ${secs / 60}:$ss"
+    }
+
     /** 回答模块面板的状态查询（跨进程，面板进页时问一次）。 */
     fun publishState() {
         val app = currentApp ?: return
@@ -132,6 +159,8 @@ object XhsBatchDriver {
         running = true
         stopRequested = false
         processed = 0
+        syncStats(0, 0, 0, 0)
+        startedAt = System.currentTimeMillis()
         listActivity = null
         val app = ctx.applicationContext
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")
@@ -266,7 +295,7 @@ object XhsBatchDriver {
                         SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                     }
                     xlog(ctx, dt, toast = true)
-                    processed = ok + skipped
+                    syncStats(ok, skipped, failed, maxOf(cards.size - index, 0))
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, dt, ok, skipped, failed, cardsTotal)
                     sleepPace()
@@ -276,7 +305,7 @@ object XhsBatchDriver {
                 val prev = XhsVideoSave.lastShareNoteId()
                 if (onMain { clickView(card) } != true) {
                     failed++
-                    processed = ok + skipped
+                    syncStats(ok, skipped, failed, maxOf(cards.size - index, 0))
                     stateListener?.invoke()
                     notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
                     xlog(ctx, "卡片点不动（第 $index 张）", toast = true)
@@ -296,7 +325,7 @@ object XhsBatchDriver {
                 }
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX $text")
                 xlog(ctx, "$text（本屏第 $index/${cards.size} 张）", toast = true)
-                processed = ok + skipped
+                syncStats(ok, skipped, failed, maxOf(cards.size - index, 0))
                 stateListener?.invoke()
                 notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $ok · 跳过 $skipped · 失败 $failed）", ok, skipped, failed, cardsTotal)
                 backToList()

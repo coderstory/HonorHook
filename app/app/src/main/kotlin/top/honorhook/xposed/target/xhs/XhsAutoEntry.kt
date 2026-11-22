@@ -38,7 +38,10 @@ object XhsAutoEntry {
     /** 过程消息面板（同一个 View 持续刷新，替代逐条 Toast）；只在采集期间显示。 */
     @Volatile private var attachedPanel: View? = null
     @Volatile private var panelText: TextView? = null
+    @Volatile private var panelHeader: TextView? = null
     @Volatile private var panelDecor: ViewGroup? = null
+    /** 用时每秒都在变，顶栏靠一个 1 秒心跳刷新（其余数字由驱动事件驱动）。 */
+    @Volatile private var ticker: Runnable? = null
     /** 面板最近一次内容：面板晚于消息建出来时用它补渲染（首条消息早于注入很常见）。 */
     @Volatile private var lastLines: List<String> = emptyList()
 
@@ -290,6 +293,10 @@ object XhsAutoEntry {
         if (XhsBatchDriver.isRunning()) ensurePanel(act, decor) else schedulePanelRemoval()
     }
 
+    /**
+     * 面板布局（2026-11-22 用户指定）：**顶栏是汇总**（状态/已处理/已存/失败，第二行待处理/用时），
+     * 下面才是滚动的过程消息。汇总常驻不滚，过程消息只留最近 6 条自动滚到底。
+     */
     private fun ensurePanel(activity: Activity, decor: ViewGroup) {
         if (attachedPanel != null && panelDecor === decor) {
             renderLines(lastLines)
@@ -297,56 +304,98 @@ object XhsAutoEntry {
         }
         removePanel()
         val dp = activity.resources.displayMetrics.density
+        val header = TextView(activity).apply {
+            textSize = 12.5f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            text = XhsBatchDriver.header()
+        }
+        val divider = View(activity).apply {
+            setBackgroundColor(0x33FFFFFF)
+            layoutParams = android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1)
+        }
         val tv = TextView(activity).apply {
             textSize = 11f
-            setTextColor(Color.WHITE)
-            setPadding((10 * dp).toInt(), (8 * dp).toInt(), (10 * dp).toInt(), (8 * dp).toInt())
+            setTextColor(0xCCFFFFFF.toInt())
             text = lastLines.joinToString("\n")
         }
         val scroll = android.widget.ScrollView(activity).apply {
             isVerticalScrollBarEnabled = false
-            addView(tv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            addView(tv, android.widget.FrameLayout.LayoutParams(android.widget.FrameLayout.LayoutParams.MATCH_PARENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT))
+            // 面板不抢触摸：用户还要在上面点卡片
+            isClickable = false
+            isFocusable = false
+        }
+        val box = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((10 * dp).toInt(), (8 * dp).toInt(), (10 * dp).toInt(), (8 * dp).toInt())
             background = GradientDrawable().apply {
                 cornerRadius = 10 * dp
                 setColor(0xB3000000.toInt())
             }
+            addView(header)
+            addView(divider, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = (4 * dp).toInt(); bottomMargin = (4 * dp).toInt() })
+            addView(scroll, android.widget.LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             val w = (activity.resources.displayMetrics.widthPixels * 0.62f).toInt()
-            layoutParams = FrameLayout.LayoutParams(w, (106 * dp).toInt()).apply {
+            layoutParams = FrameLayout.LayoutParams(w, (150 * dp).toInt()).apply {
                 gravity = android.view.Gravity.START or android.view.Gravity.BOTTOM
                 leftMargin = (14 * dp).toInt()
                 bottomMargin = (120 * dp).toInt()
             }
-            isClickable = false
-            // 面板不抢触摸：用户还要在上面点卡片
-            isFocusable = false
         }
-        runCatching { decor.addView(scroll) }
-        attachedPanel = scroll
+        runCatching { decor.addView(box) }
+        attachedPanel = box
         panelText = tv
+        panelHeader = header
         panelDecor = decor
         renderLines(lastLines)
+        startTicker(activity)
+    }
+
+    /** 顶栏每秒刷一次（用时在走，其余数字由驱动事件刷新）。 */
+    private fun startTicker(activity: Activity) {
+        stopTicker()
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val r = object : Runnable {
+            override fun run() {
+                runCatching { panelHeader?.text = XhsBatchDriver.header() }
+                if (XhsBatchDriver.isRunning()) handler.postDelayed(this, 1000) else ticker = null
+            }
+        }
+        ticker = r
+        handler.postDelayed(r, 1000)
+    }
+
+    private fun stopTicker() {
+        ticker = null   // Runnable 自己会看到 running=false 退出；置空即断开引用
     }
 
     private fun renderLines(lines: List<String>) {
         lastLines = lines
+        runCatching { panelHeader?.text = XhsBatchDriver.header() }
         val tv = panelText ?: return
         runCatching {
             tv.text = lines.joinToString("\n")
-            (attachedPanel as? android.widget.ScrollView)?.post {
-                runCatching { (attachedPanel as? android.widget.ScrollView)?.fullScroll(View.FOCUS_DOWN) }
+            (attachedPanel as? ViewGroup)?.post {
+                runCatching {
+                    val sv = (attachedPanel as? ViewGroup)?.getChildAt(2) as? android.widget.ScrollView
+                    sv?.fullScroll(View.FOCUS_DOWN)
+                }
             }
         }
     }
 
     private fun schedulePanelRemoval() {
-        val main = android.os.Handler(android.os.Looper.getMainLooper())
-        main.postDelayed({ if (!XhsBatchDriver.isRunning()) removePanel() }, 4000)
+        android.os.Handler(android.os.Looper.getMainLooper())
+            .postDelayed({ if (!XhsBatchDriver.isRunning()) removePanel() }, 4000)
     }
 
     private fun removePanel() {
+        stopTicker()
         runCatching { panelDecor?.let { d -> attachedPanel?.let { d.removeView(it) } } }
         attachedPanel = null
         panelText = null
+        panelHeader = null
         panelDecor = null
     }
 
