@@ -157,6 +157,12 @@ object XhsBatchDriver {
     /** 本轮是否已把列表滚到顶：从中途位置开始采会永久漏掉上方笔记（2026-11-22 审计 #9）。 */
     @Volatile private var atTop = false
 
+    /**
+     * 本轮锁定的作者。`listClassName` 只说明「这是作者主页这个页面」，不说明「这是同一个作者」——
+     * 所有作者主页共用同一个 Activity 类（2026-11-22 审计 #11）。来源见 [XhsAuthorTrack]。
+     */
+    @Volatile private var lockedAuthor: String? = null
+
     private fun syncStats(ok: Int, skipped: Int, failed: Int, pending: Int, discovered: Int = 0) {
         okCount = ok
         skippedCount = skipped
@@ -193,6 +199,8 @@ object XhsBatchDriver {
         // 换代次（不是在旧代次上「清取消」）：上一轮还在网络读里的线程会看到自己过期并退出
         dlGen = XhsBatchSave.beginRun()
         atTop = false
+        // 点「采集」这一刻的前台作者就是本轮目标；拿不到就在首篇解析结果里学习（collect）
+        lockedAuthor = XhsAuthorTrack.authorId
         endedAt = 0L
         // 面板消息清空：不清的话第二轮面板里混着上一轮的「已保存/失败」（审计 #15）
         synchronized(logLock) { logLines.clear() }
@@ -288,6 +296,14 @@ object XhsBatchDriver {
                 // continue 原来永不超时，表现是「一直采集中、零日志」（2026-11-22 审计 P1）。
                 if (System.currentTimeMillis() - lastProgressAt > NO_PROGRESS_LIMIT_MS) {
                     xlog(ctx, "连续 ${NO_PROGRESS_LIMIT_MS / 1000} 秒没有进展，收工")
+                    break
+                }
+                // 换作者 = 立刻收工：下面的卡片已经是别人的笔记，继续跑就是「把 B 的作品存成 A 的」
+                val latestAuthor = XhsAuthorTrack.authorId
+                if (lockedAuthor == null) {
+                    lockedAuthor = latestAuthor
+                } else if (latestAuthor != null && latestAuthor != lockedAuthor) {
+                    xlog(ctx, "作者变了（$lockedAuthor → $latestAuthor），停止采集，避免混入别人的笔记")
                     break
                 }
                 // 每轮都重新取前台 Activity：详情页/列表页可能是不同实例，抱死一个会对着
@@ -566,6 +582,15 @@ object XhsBatchDriver {
         if (note == null) {
             xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind）")
             return SaveOutcome.FAIL
+        }
+        // 第二道作者校验：就算页面树里混进了别人的卡片，解析结果里的 authorId 也不会撒谎。
+        // 首篇解析成功后顺带学习锁定值（作者主页列表接口被缓存、没发请求时的兜底）。
+        val noteAuthor = note.authorId
+        if (lockedAuthor == null) {
+            lockedAuthor = noteAuthor
+        } else if (noteAuthor != null && noteAuthor != lockedAuthor) {
+            xlog(ctx, "noteId=$noteId 属于作者 $noteAuthor，不是本轮锁定的 $lockedAuthor，跳过")
+            return SaveOutcome.SKIPPED
         }
         val urls = runCatching { xhsContentImageUrls(note, noteId) }.getOrNull().orEmpty()
         // 视频轨（用户 2026-11-22「视频也要下载的」）：分享页解析出的视频候选另走一条静默落盘，

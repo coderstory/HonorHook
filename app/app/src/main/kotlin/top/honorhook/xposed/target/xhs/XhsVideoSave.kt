@@ -415,6 +415,9 @@ object XhsVideoSave {
             val code = runCatching { response.callMethod("code") }.getOrNull()
             val success = runCatching { response.callMethod("success") }.getOrNull()
             val result = runCatching { response.callMethod("result") }.getOrNull()
+            // 作者身份锁定源：宿主每次进作者主页都会发这个请求，query 里的 user_id 就是「现在看的是谁」。
+            // 批量采集靠它发现「用户中途换了作者」（2026-11-22 审计 #11）。
+            runCatching { XhsAuthorTrack.onPostedRequest(url) }
             module.log(Log.INFO, MountEngine.TAG,
                 "$JUDGE_PREFIX 主页列表 code=$code success=$success result=$result len=${body.length}")
         }
