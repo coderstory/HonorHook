@@ -567,21 +567,20 @@ object XhsBatchDriver {
             xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind）")
             return SaveOutcome.FAIL
         }
-        if (note.images.isEmpty() && note.livePhotos.isEmpty() && note.videos.isNotEmpty()) {
-            // 图片轨没东西、视频轨有：按「原图采集」的口径算跳过，记失败会让人以为坏了
-            xlog(ctx, "纯视频笔记，跳过 noteId=$noteId（视频 ${note.videos.size} 个）")
-            return SaveOutcome.SKIPPED
-        }
         val urls = runCatching { xhsContentImageUrls(note, noteId) }.getOrNull().orEmpty()
-        if (urls.isEmpty()) {
+        // 视频轨（用户 2026-11-22「视频也要下载的」）：分享页解析出的视频候选另走一条静默落盘，
+        // 与图片共用同一 noteId 前缀，所以台账/去重/相册查重对视频同样成立。
+        val videos = note.videos
+        if (urls.isEmpty() && videos.isEmpty()) {
             xlog(ctx, "解析结果没有可下载文件 noteId=$noteId")
             return SaveOutcome.FAIL
         }
         val t0 = System.currentTimeMillis()
         // 只记域名级片段：完整 URL 带 xsec_token，进了诊断文本就等于把凭据复制进剪贴板（审计 #18）
         val hostOnly = urls.firstOrNull()?.let { u -> runCatching { java.net.URI(u).host }.getOrNull() } ?: "-"
-        vlog(ctx, "开始落盘 noteId=$noteId 文件数=${urls.size} 域名=$hostOnly")
-        val result = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId, dlGen) }
+        vlog(ctx, "开始落盘 noteId=$noteId 图=${urls.size} 视频=${videos.size} 域名=$hostOnly")
+        val result = if (urls.isEmpty()) XhsBatchSave.QuietResult(0, 0, 0, false)
+        else runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, noteId, dlGen) }
             .onFailure { xlog(ctx, "落盘调用异常 ${it.javaClass.simpleName} noteId=$noteId") }
             .getOrNull()
         vlog(ctx, "落盘结束 noteId=$noteId 结果=${result?.let { "存${it.ok}/滤${it.filtered}/败${it.failed}/取消${it.canceled}" } ?: "无结果"} " +
@@ -591,16 +590,33 @@ object XhsBatchDriver {
             xlog(ctx, "没有拿到落盘结果 noteId=$noteId")
             return SaveOutcome.FAIL
         }
-        if (!result.savedAny && result.filtered > 0 && result.failed == 0) {
-            // 不是失败：这篇的图全部没过画质门槛（≤720p）
-            xlog(ctx, "全部低于画质门槛，跳过 $noteId（滤掉 ${result.filtered} 张）")
+        var videoOk = 0
+        var videoSmall = 0
+        var videoFail = 0
+        for (v in videos) {
+            if (stopRequested) break
+            when (XhsBatchVideo.save(ctx, noteId, v, { XhsBatchSave.canceled() })) {
+                XhsBatchVideo.Outcome.OK -> videoOk++
+                XhsBatchVideo.Outcome.TOO_SMALL -> videoSmall++
+                XhsBatchVideo.Outcome.FAIL -> videoFail++
+            }
+        }
+        if (videos.isNotEmpty()) {
+            xlog(ctx, "视频落盘 noteId=$noteId 存$videoOk/小$videoSmall/败$videoFail")
+        }
+        val savedAny = result.savedAny || videoOk > 0
+        val filteredAll = result.filtered > 0 && result.failed == 0
+        val videoAllSmall = videos.isNotEmpty() && videoOk == 0 && videoFail == 0 && videoSmall > 0
+        if (!savedAny && (filteredAll || videoAllSmall) && videoFail == 0) {
+            // 不是失败：这篇的图/视频全部没过画质门槛（≤720p / <5MB）
+            xlog(ctx, "全部低于画质门槛，跳过 $noteId（图滤${result.filtered} 视频小$videoSmall）")
             return SaveOutcome.SKIPPED
         }
-        if (result.canceled && !result.savedAny) {
+        if (result.canceled && !savedAny && videoFail == 0) {
             xlog(ctx, "已取消，本篇未落盘 noteId=$noteId")
             return SaveOutcome.FAIL
         }
-        return if (result.savedAny) SaveOutcome.OK else SaveOutcome.FAIL
+        return if (savedAny) SaveOutcome.OK else SaveOutcome.FAIL
     }
 
     /** 等探针在**当前前台 Activity** 上返回非空（每 200ms 一次）；超时或被取消返回 null。 */

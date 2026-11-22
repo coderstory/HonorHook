@@ -1357,6 +1357,9 @@ object XhsBatchSave {
         return cur
     }
 
+    /** 视频轨（XhsBatchVideo）用它和自己那条写循环对齐取消语义。 */
+    internal fun canceled(): Boolean = imageCancelRequested || cancelRequested
+
     internal fun requestCancel() {
         cancelRequested = true
         imageCancelRequested = true
