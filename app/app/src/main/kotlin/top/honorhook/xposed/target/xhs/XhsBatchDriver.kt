@@ -249,6 +249,19 @@ object XhsBatchDriver {
     fun start(module: XposedModule, ctx: Context) {
         if (running) return
         currentApp = ctx.applicationContext
+        // 起跑页校验（2026-11-22 根因）：本功能只能在**作者主页**起跑。以前直接把「当前这页」
+        // 的类名锁成列表页 ⇒ 用户在详情页（或残留的悬浮按钮上）点采集时，列表页 = NoteDetailActivity，
+        // 于是详情页底部的「相关推荐」被别人当成目标作者的笔记：反复采同一批、越滚越乱、
+        // 还会把从没打开过的篇当已下载（真机日志 `启动参数：… 前台=NoteDetailActivity`）。
+        // 判据与按钮注入共用 XhsAutoEntry.isProfilePage（卡片 + 粉丝/获赞资料区）。
+        val front = XhsBatchSave.activityOrNull()
+        val frontDecor = runCatching { front?.window?.decorView }.getOrNull()
+        if (frontDecor == null || !runCatching { XhsAutoEntry.isProfilePage(frontDecor) }.getOrDefault(false)) {
+            val where = runCatching { front?.javaClass?.simpleName }.getOrNull() ?: "无前台页面"
+            xlog(ctx.applicationContext, "没有开始：当前页不是作者主页（前台=$where）")
+            toast(ctx, "请先打开作者主页再点采集（当前停在$where）")
+            return
+        }
         // 换代次（不是在旧代次上「清取消」）：上一轮还在网络读里的线程会看到自己过期并退出
         dlGen = XhsBatchSave.beginRun()
         atTop = false
@@ -265,7 +278,7 @@ object XhsBatchDriver {
         startedAt = System.currentTimeMillis()
         // 列表页类名在 start 就锁成「当前这页」：等到第一次扫到卡片才学，会在首屏重绘/切 tab 的
         // 空窗里对着作者主页按返回，退出后把首页 feed 学成列表页 → 把别人的笔记当目标作品（审计 P0）。
-        listClassName = runCatching { XhsBatchSave.activityOrNull()?.javaClass?.name }.getOrNull()
+        listClassName = runCatching { front?.javaClass?.name }.getOrNull()
         val gen = runGen.incrementAndGet()
         val app = ctx.applicationContext
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")

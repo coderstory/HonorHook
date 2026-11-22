@@ -275,7 +275,7 @@ object XhsAutoEntry {
      * 「采集」按钮，一键下去就把**别人的笔记**当目标作者的作品装了。加上资料区标记后，详情页不再有按钮。
      * 单次 DFS 同时收集两个标记，限深 30、只看可见节点（本页挂在 OnGlobalLayout 上每 250ms 跑一次）。
      */
-    private fun isProfilePage(root: View): Boolean {
+    internal fun isProfilePage(root: View): Boolean {
         var cards = false
         var profileStats = false
         fun dfs(v: View, depth: Int) {
