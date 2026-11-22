@@ -645,21 +645,37 @@ object XhsBatchDriver {
         // 白等 8 秒换每篇多一次卡顿（2026-11-22 审计）。凭据缺失才等详情页登记。
         val knownReady = known != null &&
             (XhsVideoSave.shareLinkOf(known) != null || XhsVideoSave.tokenOf(known) != null)
-        val registered = if (knownReady) null
         // 有卡片反射出来的 id 时，详情页登记的必须是**同一篇**才算命中：详情页的评论/推荐响应也会
         // 改最近登记值，取错了就「把 A 的图存成 B 的 noteId」（2026-11-22 审计 P0）。
-        // 详情页自己知道本篇 id（方法/Intent）⇒ 先问它，不必等那 8 秒、也不必依赖 imagefeed
-        else XhsBatchSave.activityOrNull()?.let { noteIdFromActivity(it) }?.takeIf { it != prev }
-            ?: await(NOTE_ID_WAIT_MS) {
+        // 详情页自己知道本篇 id（方法/Intent）⇒ 每 200ms 问一次，直到拿到的或超时：
+        // 早先只在点完卡片那一下问一次，那会儿详情页还没 resume（controller 还没挂上），
+        // 之后就只轮询分享链登记，缓存命中的笔记永远等不到 ⇒ 「详情页没拿到 noteId」（2026-11-22 真机 17:47）。
+        // 只问类名像 Detail 的页面：列表页上某些方法也可能返回 24 位串（作者 id），认错就串篇。
+        var byActivity = false
+        val registered = if (knownReady) null else await(NOTE_ID_WAIT_MS) { a ->
+            val fromAct = if (a.javaClass.simpleName.contains("Detail")) noteIdFromActivity(a) else null
+            if (fromAct != null && fromAct != prev) {
+                byActivity = true
+                fromAct
+            } else {
                 XhsVideoSave.lastShareNoteId()?.takeIf { it != prev && (known == null || it == known) }
             }
+        }
         val noteId = registered ?: known
+        if (noteId != null && registered != null) {
+            vlog(ctx, "noteId 来源=${if (byActivity) "详情页方法/Intent" else "分享链登记"} noteId=$registered")
+        }
         if (!knownReady && registered == null && known != null) {
             vlog(ctx, "详情页没登记，用卡片反射的 noteId=$known 兜底")
         }
         if (noteId == null) {
-            xlog(ctx, "详情页没拿到 noteId（活动方法/Intent/分享链登记都没给出 24 位 id）")
-            dumpViews(ctx, "详情页", XhsBatchSave.activityOrNull())
+            val act = XhsBatchSave.activityOrNull()
+            xlog(
+                ctx,
+                "详情页没拿到 noteId（活动方法/Intent/分享链登记都没给出 24 位 id）" +
+                    " 前台=${act?.javaClass?.simpleName} 方法扫描缓存=${idMethodCache[act?.javaClass?.name] ?: "无"}"
+            )
+            dumpViews(ctx, "详情页", act)
             return SaveOutcome.FAIL
         }
         // noteId 有了不代表凭据有了：宿主命中本地缓存时不发 imagefeed，分享链永远不会落表。
