@@ -245,6 +245,11 @@ object XhsVideoSave {
                     } else {
                         null
                     }
+                    // 页面上下文信号挂在**请求**上（2026-11-22 审计 P0）：响应为空 / peekBodyString
+                    // 失败（宿主「服务异常」时就是这样）会让信号整条丢失，按钮与起跑判据随之失灵。
+                    runCatching {
+                        XhsAuthorTrack.onRequest(reqUrl)
+                    }
                     if (patched != null) {
                         patched
                     } else {
@@ -466,6 +471,9 @@ object XhsVideoSave {
         // 若它们也能改 recentShareNoteId，批量采集就会拿别的笔记的 id 落盘并记错台账
         // （2026-11-22 审计 P0）。
         val detailEndpoint = url != null && (url.contains("imagefeed") || url.contains("/note/detail"))
+        // 详情端点 = 用户已经在看某一篇笔记 ⇒ 告诉 XhsAuthorTrack「现在不在主页」。
+        // 页面身份只能靠这种宿主请求信号判断：本机作者主页与详情页同名同类同结构（2026-11-22 真机截图）。
+        if (detailEndpoint) runCatching { XhsAuthorTrack.onDetailRequest() }
         // share_info.link 优先（值须含 xsec_token 才算分享链——普通 "link" 字段多，先过滤）
         var lm = P_SHARE_LINK.matcher(body)
         while (lm.find()) {

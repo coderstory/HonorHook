@@ -82,7 +82,6 @@ object XhsBatchDriver {
      * 「笔记,」开头的卡片，若「有卡片就扫」会把**别人的笔记**当成该作者作品下进相册。
      * 锁定类名后只有列表页才处理卡片；用类名而非实例，宿主重建 Activity 也不会误判。
      */
-    @Volatile private var listClassName: String? = null
     /** 卡片锚点：desc 前缀（同 XhsAutoEntry 的主页判据）。 */
     /**
      * 卡片判据（唯一口径，按钮注入与驱动共用）。
@@ -178,10 +177,13 @@ object XhsBatchDriver {
     @Volatile private var atTop = false
 
     /**
-     * 本轮锁定的作者。`listClassName` 只说明「这是作者主页这个页面」，不说明「这是同一个作者」——
+     * 本轮锁定的作者。页面身份不再参与判断（本机主页与详情页同类名同结构）——
      * 所有作者主页共用同一个 Activity 类（2026-11-22 审计 #11）。来源见 [XhsAuthorTrack]。
      */
     @Volatile private var lockedAuthor: String? = null
+
+    /** 作者 id 口径是否已核对过一次（列表接口与分享页可能不同口径，见 collect）。 */
+    @Volatile private var authorGateLearned = false
     /** 本轮已「成功或跳过」的 noteId：同轮不重复处理同一篇（滚屏后卡片会以不同 top 再次出现）。 */
     private val finishedIds = HashSet<String>()
     /** collect 最近一次解析到的 noteId；循环据此登记 finishedIds。 */
@@ -262,22 +264,14 @@ object XhsBatchDriver {
     fun start(module: XposedModule, ctx: Context) {
         if (running) return
         currentApp = ctx.applicationContext
-        // 起跑页校验（2026-11-22 根因）：本功能只能在**作者主页**起跑。以前直接把「当前这页」
-        // 的类名锁成列表页 ⇒ 用户在详情页（或残留的悬浮按钮上）点采集时，列表页 = NoteDetailActivity，
-        // 于是详情页底部的「相关推荐」被别人当成目标作者的笔记：反复采同一批、越滚越乱、
-        // 还会把从没打开过的篇当已下载（真机日志 `启动参数：… 前台=NoteDetailActivity`）。
-        // 判据与按钮注入共用 XhsAutoEntry.isProfilePage（卡片 + 粉丝/获赞资料区）。
-        val front = XhsBatchSave.activityOrNull()
-        val frontDecor = runCatching { front?.window?.decorView }.getOrNull()
-        // 先看页面身份（类名），再看内容：详情页/首页的 decor 里同样有「粉丝」和卡片，
-        // 只靠内容判定会让用户在详情页起跑（真机 22:42–22:45：整轮在详情↔首页之间空转）。
-        val byClass = front != null && runCatching { XhsAutoEntry.looksLikeProfileActivity(front!!) }.getOrDefault(false)
-        if (frontDecor == null || !byClass ||
-            !runCatching { XhsAutoEntry.isProfilePage(frontDecor) }.getOrDefault(false)
-        ) {
-            val where = runCatching { front?.javaClass?.simpleName }.getOrNull() ?: "无前台页面"
-            xlog(ctx.applicationContext, "没有开始：当前页不是作者主页（前台=$where）")
-            toast(ctx, "请先打开作者主页再点采集（当前停在$where）")
+        // 起跑校验（2026-11-22 第四次改判据后的定案）：不看页面。
+        // 本机作者主页的 Activity 叫 NoteDetailActivity，视图中「粉丝/获赞与收藏」「笔记,」卡片
+        // 与详情页完全重叠（用户截图为证）——任何「看页面」的判据都会误判，一天里错了三次。
+        // 唯一可靠的信号是宿主自己发的请求：主页 → /note/user/posted；点开笔记 → imagefeed/note/detail。
+        if (!XhsAuthorTrack.isProfileContextOrQuiet()) {
+            val where = runCatching { XhsBatchSave.activityOrNull()?.javaClass?.simpleName }.getOrNull() ?: "未知"
+            xlog(ctx.applicationContext, "没有开始：现在不在作者主页（前台=$where，最近请求不是主页列表）")
+            toast(ctx, "请先打开作者主页、等笔记列表刷出来，再点采集")
             return
         }
         // 换代次（不是在旧代次上「清取消」）：上一轮还在网络读里的线程会看到自己过期并退出
@@ -285,6 +279,7 @@ object XhsBatchDriver {
         atTop = false
         // 点「采集」这一刻的前台作者就是本轮目标；拿不到就在首篇解析结果里学习（collect）
         lockedAuthor = XhsAuthorTrack.authorId
+        authorGateLearned = false
         endedAt = 0L
         // 面板消息清空：不清的话第二轮面板里混着上一轮的「已保存/失败」（审计 #15）
         synchronized(logLock) { logLines.clear() }
@@ -294,14 +289,12 @@ object XhsBatchDriver {
         syncStats(0, 0, 0, 0, 0, resources = 0, noteRes = 0)
         discoveredCount = 0
         startedAt = System.currentTimeMillis()
-        // 列表页类名在 start 就锁成「当前这页」：等到第一次扫到卡片才学，会在首屏重绘/切 tab 的
-        // 空窗里对着作者主页按返回，退出后把首页 feed 学成列表页 → 把别人的笔记当目标作品（审计 P0）。
-        listClassName = runCatching { front?.javaClass?.name }.getOrNull()
         val gen = runGen.incrementAndGet()
         val app = ctx.applicationContext
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")
         xlog(app, "采集开始")
-        vlog(app, "启动参数：节奏 ${paceMinMs}~${paceMaxMs}ms 线程=${Thread.currentThread().name} " +
+        vlog(app, "启动参数：上下文=${XhsAuthorTrack.snapshot()} pid=${android.os.Process.myPid()} " +
+            "节奏 ${paceMinMs}~${paceMaxMs}ms 线程=${Thread.currentThread().name} " +
             "前台=${runCatching { XhsBatchSave.activityOrNull()?.javaClass?.simpleName }.getOrNull()}")
         // 驱动线程是裸 Thread：任何逃出去的 Throwable 会走默认 UncaughtExceptionHandler
         // **直接杀宿主进程**（且 running 卡在 true，按钮永远显示「取消」）。双重兜底（2026-11-22 审计 #1）。
@@ -415,54 +408,14 @@ object XhsBatchDriver {
                 }
                 val cards = cardList.orEmpty()
                 cardsTotal = maxOf(cardsTotal, cards.size)
-                if (cards.isNotEmpty()) {
-                    val cls = act.javaClass.name
-                    val locked = listClassName
-                    if (locked == null) {
-                        listClassName = cls
-                    } else if (locked != cls) {
-                        // 非列表页的卡片（详情页相关推荐等）：不是目标作者的作品，绝不下、只退回列表
-                        if (isAppRoot(act)) {
-                            xlog(ctx, "已回到首页（${act.javaClass.simpleName}），本轮结束（不按返回，避免把 App 退掉）")
-                            break
-                        }
-                        offList++
-                        xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 有卡片但不是列表页")
-                        if (offList > MAX_BACK_PRESSES) break
-                        pressBack(act)
-                        Thread.sleep(900)
-                        continue
-                    }
-                }
                 if (cards.isEmpty()) {
-                    if (listClassName == null) {
-                        // 还没锁定列表页：这页可能是过场/占位，按返回只会把作者主页关掉（审计 P0）
-                        Thread.sleep(700)
-                        continue
+                    // 卡片为空：可能只是宿主在重绘（滚动一下、切 tab 之后常见）。
+                    // 这里**绝不按返回**——按返回只会把作者主页关掉，甚至把 App 退掉（2026-11-22 真机）。
+                    if (++redrawWaits >= LIST_REDRAW_WAIT) {
+                        xlog(ctx, "列表一直没有卡片，收工")
+                        break
                     }
-                    // 扫到过卡片的同一页现在空 = 宿主重绘/占位中，**绝不能按返回**（2026-11-22 真机：
-                    // 连按 3 次把小红书一路退到桌面，整轮就这么收工了）。等它画出来。
-                    // 「同类的页」不等于「作者主页」：小红书详情页是盖在主页上的浮层，同一个
-                    // Activity 里可能一张卡都没有（2026-11-22 真机：这样会被当成「主页没卡片」，
-                    // 10 轮后提前宣布采集完成）。所以这里还要看资料区标记（粉丝 / 获赞与收藏）。
-                    val stillGrid = act.javaClass.name == listClassName &&
-                        onMainOrTimeout { act.window?.decorView?.let { XhsAutoEntry.hasProfileMarkers(it) } }
-                            .second != false
-                    if (stillGrid) {
-                        if (++redrawWaits >= LIST_REDRAW_WAIT) {
-                            xlog(ctx, "作者主页一直没卡片，收工")
-                            break
-                        }
-                        Thread.sleep(700)
-                        continue
-                    }
-                    // 确实离开了列表（停在详情/弹层）：整轮只允许按两次返回，按完就等
-                    offList++
-                    xlog(ctx, "第 $offList 次返回：${act.javaClass.simpleName} 无卡片")
-                    if (offList == 1) dumpViews(ctx, "返回后无卡片", act)
-                    if (offList > MAX_BACK_PRESSES) break
-                    pressBack(act)
-                    Thread.sleep(900)
+                    Thread.sleep(700)
                     continue
                 }
                 offList = 0
@@ -470,7 +423,7 @@ object XhsBatchDriver {
                 scrollIdle = 0
                 // 用户可能已经翻到半截才点「采集」：不先回顶，上方笔记永远采不到，
                 // 面板「已发现」也只从当前位置算（2026-11-22 审计 #9）。
-                if (!atTop && act.javaClass.name == listClassName) {
+                if (!atTop) {
                     var guard = 0
                     var lastTop = cards.first().first.top()
                     var lastSize = cards.size
@@ -595,6 +548,12 @@ object XhsBatchDriver {
                     sleepPace()   // 原来 sleep(paceMs())：节奏配到 120s 时取消要等两分钟才生效
                     continue
                 }
+                // 点开这一篇之前，记下本屏第一张卡的指纹：返回后用它确认「真的回到刚才那个列表」。
+                // 不能用「页面上有卡片」当判据——详情页的相关推荐卡片走同一个 isCardDesc，
+                // 那样 backToList 会在详情页第一圈就 return，一次返回都不按（2026-11-22 审计 P0）。
+                val listSig = onMainOrTimeout {
+                    findCards(act).firstOrNull()?.let { it.contentDescription?.toString() + "@" + it.top() }
+                }.second
                 val saved = collectWithRetry(module, ctx, prev, known)
                 if (saved != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                 when (saved) {
@@ -612,7 +571,7 @@ object XhsBatchDriver {
                 syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
                 stateListener?.invoke()
                 notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $ok · 跳过 $skipped · 失败 $failed）", ok, skipped, failed, cardsTotal)
-                backToList()
+                backToList(listSig)
                 sleepPace()
             }
             if (cardsTotal == 0) {
@@ -833,6 +792,15 @@ object XhsBatchDriver {
         val noteAuthor = note.authorId
         if (lockedAuthor == null) {
             lockedAuthor = noteAuthor
+        } else if (noteAuthor != null && noteAuthor != lockedAuthor && !authorGateLearned) {
+            // 首篇就对不上，多半是**口径不同**（列表接口的 user_id vs 分享页的 note.user.userId），
+            // 不是「别人的笔记」。这时直接拦会把整轮全判成别人的（日志看起来像「全是别人的」）。
+            // 以分享页为准、只纠正一次，之后才真拦（2026-11-22 审计 P1）。
+            authorGateLearned = true
+            xlog(ctx, "作者 id 口径核对：列表=$lockedAuthor 分享页=$noteAuthor —— 以分享页为准，后续按分享页比对")
+            lockedAuthor = noteAuthor
+        } else if (noteAuthor == null && lockedAuthor != null) {
+            xlog(ctx, "noteId=$noteId 解析结果没有 authorId（分享页缺 user），归属未校验", toast = false)
         } else if (noteAuthor != null && noteAuthor != lockedAuthor) {
             xlog(ctx, "noteId=$noteId 属于作者 $noteAuthor，不是本轮锁定的 $lockedAuthor，跳过")
             return SaveOutcome.SKIPPED
@@ -949,49 +917,33 @@ object XhsBatchDriver {
      * 回到笔记列表：一直按返回，直到当前页能扫到卡片（或超时）。
      * 判据不用「=== 原 Activity 实例」——宿主可能换实例，抱旧实例会白等满超时。
      */
-    private fun backToList() {
-        var deadline = System.currentTimeMillis() + LIST_BACK_MS
-        var extended = false
-        var presses = 0
-        while (System.currentTimeMillis() < deadline) {
-            if (stopRequested) return
-            val cur = XhsBatchSave.activityOrNull() ?: run { Thread.sleep(400); continue }
-            if (cur.javaClass.name == listClassName && onMain { findCards(cur) }.orEmpty().isNotEmpty()) return
-            // 已经回到列表页、只是还在重绘：再给一轮时间，别因为慢半拍就结束整轮（审计 #11）
-            if (!extended && cur.javaClass.name == listClassName) {
-                extended = true
-                deadline += LIST_BACK_MS
-            }
-            // 回到列表期间列表在重绘，空视图是常态；只有迟迟回不来才再补一次返回，且最多两次
-            if (presses == 0 || System.currentTimeMillis() > deadline - LIST_BACK_MS / 2) {
-                if (presses < MAX_BACK_PRESSES) {
-                    presses++
-                    pressBack(cur)
-                }
-            }
-            Thread.sleep(700)
-        }
-    }
-
     /**
-     * 退回上一层。三级兜底：派发 BACK 键 → onBackPressed → finish。
+     * 从详情页回到列表：**按一次返回**，然后等「点开前那屏的首卡指纹」回来。
      *
-     * 2026-11-22 真机：详情页上 `dispatchKeyEvent(BACK)` 返回 false 且页面纹丝不动 ⇒ 只发键根本退不出来，
-     * 整轮卡在 NoteDetailActivity 到收工。这里每级都等 300ms 看有没有真的换页，仍在原地才降级；
-     * **列表页本身绝不 finish**（不然就把用户主页关掉了）。
+     * 为什么不看页面内容：详情页的相关推荐和作者主页的网格用同一套卡片描述，任何「有卡片=已在列表」
+     * 的判据都会在详情页立刻命中（2026-11-22 审计 P0，上一版就是这样一次返回都不按）。
+     * 返回后确认不了就收工——宁可少采，也不要把推荐流当成目标作者的作品继续采。
      */
-    /**
-     * 是不是小红书自己的**首页/根页**（IndexActivityV2 之类）。
-     * 2026-11-22 用户反馈「采集中小红书被关了」：`dumpsys activity exit-info` 里那条是
-     * `reason=10 (USER REQUESTED) subreason=22 (REMOVE TASK)`——不是崩溃，是我们按返回把
-     * 任务栈整个弹空了，系统于是移除任务，观感就是「小红书自己关了」。
-     * 根页永远不能按返回：再按一下就是退出 App。
-     */
-    private fun isAppRoot(activity: Activity): Boolean {
-        val n = activity.javaClass.simpleName
-        if (n.contains("Index") || n.contains("Splash") || n.contains("Main")) return true
-        // 兜底：任务根 Activity 且不是我们锁定的列表页（作者主页是从别处 push 上来的，不会是 task root）
-        return activity.isTaskRoot && listClassName != null && activity.javaClass.name != listClassName
+    private fun backToList(sig: String?) {
+        val cur = XhsBatchSave.activityOrNull() ?: return
+        pressBack(cur)
+        val deadline = System.currentTimeMillis() + LIST_BACK_MS
+        while (System.currentTimeMillis() < deadline && !stopRequested) {
+            Thread.sleep(300)
+            val a = XhsBatchSave.activityOrNull() ?: return
+            val back = onMainOrTimeout {
+                val first = findCards(a).firstOrNull()
+                first != null && sig != null &&
+                    (first.contentDescription?.toString() + "@" + first.top()) == sig
+            }.second == true
+            if (back) {
+                // 回到列表 = 现在确实在主页：把上下文信号顶到当下，按钮/后续起跑才不会被判成详情页
+                XhsAuthorTrack.markProfile()
+                return
+            }
+        }
+        xlog(cur.applicationContext, "按返回后没回到刚才的列表（首卡指纹未回来），本轮收工", toast = false)
+        stopRequested = true
     }
 
     private fun pressBack(activity: Activity) {
@@ -1015,8 +967,7 @@ object XhsBatchDriver {
         if (!activity.isFinishing) onMain { runCatching { activity.onBackPressed() }; true }
         Thread.sleep(400)
         if (XhsBatchSave.activityOrNull() !== activity) return
-        // 列表页本身绝不能 finish（会把用户主页关掉）：类名一致即视为列表页
-        if (listClassName == null || activity.javaClass.name == listClassName) return
+        // 作者主页本身绝不能 finish（会把用户主页关掉）。类名判不出来（主页和详情页同类名），只能看内容
         // 只对「详情类」页 finish：配置变更/用户切换主页会造出新实例，误判会把用户主页关掉（审计 #9）
         val name = activity.javaClass.simpleName
         if (!name.contains("Detail", ignoreCase = true) && !name.contains("Note", ignoreCase = true)) {
@@ -1039,7 +990,6 @@ object XhsBatchDriver {
         currentNoteRes = 0
         atTop = false
         // 不置空会一直静态持有宿主 Activity + 整棵 decor 视图树到下次启动（审计 #16）
-        listClassName = null
         runCatching { stateListener?.invoke() }
         val summary = note ?: "采集结束：成功 $ok · 跳过 $skipped · 失败 $failed"
         // finish 在 finally 里调用：这里再抛异常就没人接了（审计 #1），逐步 runCatching
@@ -1066,6 +1016,19 @@ object XhsBatchDriver {
      * 主页瀑布流卡片：desc 以「笔记,」开头（宿主自己设的无障碍描述，跨版本稳 —— 无障碍时代实测
      * 的同一锚点）。按「先上后左」排序 = 与视觉顺序一致。
      */
+    /**
+     * 是不是小红书自己的**首页/根页**。
+     * 2026-11-22 用户反馈「采集中小红书被关了」：`dumpsys activity exit-info` 是
+     * `reason=10 (USER REQUESTED) subreason=22 (REMOVE TASK)`——不是崩溃，是我们按返回把任务栈
+     * 整个弹空了，系统于是移除任务。根页永远不能按返回：再按一下就是退出 App。
+     */
+    private fun isAppRoot(activity: Activity): Boolean {
+        // 只看类名。不能用 `isTaskRoot`：从分享链/通知直达笔记时 NoteDetailActivity 就是 task root，
+        // 那样返回键会被永久锁死（2026-11-22 审计 P0）。
+        val n = activity.javaClass.simpleName
+        return n.contains("Index") || n.contains("Splash") || n.contains("Main")
+    }
+
     private fun findCards(activity: Activity): List<View> {
         val out = ArrayList<View>()
         walk(activity.window?.decorView) { v ->

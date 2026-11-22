@@ -89,6 +89,12 @@ object XhsAutoEntry {
     private val installedOnce = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun install(module: XposedModule, param: XposedModuleInterface.PackageLoadedParam) {
+        // 主页列表请求常在首屏渲染**之后**才回来：那之后没有新布局事件，光靠 globalLayout
+        // 注入会永远等不到按钮（2026-11-22 审计 P1 + 用户实测「按钮出现又立马隐藏」）。
+        val ui = android.os.Handler(android.os.Looper.getMainLooper())
+        XhsAuthorTrack.onProfileSignal = {
+            ui.post { runCatching { XhsBatchSave.activityOrNull()?.let { a -> syncButton(a, module) } } }
+        }
         // 进程级只装一次：install 被调两次时生命周期回调与广播会各注册一遍（回调跑两次、
         // 两条注入轮询、STOP 处理两次），而这两条都没有反注册路径（2026-11-22 审计 P2）。
         if (!installedOnce.compareAndSet(false, true)) return
@@ -277,58 +283,6 @@ object XhsAutoEntry {
      * 「采集」按钮，一键下去就把**别人的笔记**当目标作者的作品装了。加上资料区标记后，详情页不再有按钮。
      * 单次 DFS 同时收集两个标记，限深 30、只看可见节点（本页挂在 OnGlobalLayout 上每 250ms 跑一次）。
      */
-    /**
-     * 只看**页面身份**：作者主页 vs 详情页/首页。
-     *
-     * 2026-11-22 真机（22:42–22:45 日志）：详情页盖在主页上，decor 里既有「粉丝」资料区、
-     * 又有「笔记,」卡片 ⇒ 光看视图内容永远分不清，于是「采集」按钮出现在详情页上，
-     * 一点就把详情页当成作者主页开始跑，最后只会在首页和详情页之间来回按返回、一篇不采
-     * （`起跑页不是作者主页（NoteDetailActivity …），退一页` → `起跑页是首页（IndexActivityV2）`）。
-     * 类名是唯一可靠的区分：小红书作者主页是 `…profile.newpage.NewOtherUserActivity`，
-     * 详情页是 `…notedetail.NoteDetailActivity` / `DetailFeedActivity`，首页是 `IndexActivityV2`。
-     */
-    internal fun looksLikeProfileActivity(activity: Activity): Boolean {
-        val n = activity.javaClass.simpleName
-        if (n.contains("Detail", ignoreCase = true)) return false
-        if (n.contains("Index", ignoreCase = true) || n.contains("Splash", ignoreCase = true)) return false
-        return n.contains("User", ignoreCase = true) || n.contains("Profile", ignoreCase = true)
-    }
-
-    internal fun isProfilePage(root: View): Boolean {
-        var cards = false
-        var profileStats = false
-        fun dfs(v: View, depth: Int) {
-            if (depth > 30 || (cards && profileStats)) return
-            if (v.isShown) {
-                if (!cards && XhsBatchDriver.isCardDesc(v.contentDescription?.toString())) cards = true
-                if (!profileStats) profileStats = isStatsText((v as? TextView)?.text?.toString())
-            }
-            if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i)?.let { dfs(it, depth + 1) }
-        }
-        runCatching { dfs(root, 0) }
-        return cards && profileStats
-    }
-
-    /**
-     * 只看「资料区」标记（粉丝 / 获赞与收藏），不看卡片。
-     * 驱动用它区分「作者主页正在重绘」与「其实已经翻进详情页了」——2026-11-22 真机：
-     * 详情页是盖在主页上的浮层，同一个 Activity 里既有相关推荐卡片、又可能一张卡都没有；
-     * 只按类名判断会把「停在详情页」当成「主页没卡片」，于是提前宣布采集完成。
-     */
-    internal fun hasProfileMarkers(root: View): Boolean {
-        var found = false
-        fun dfs(v: View, depth: Int) {
-            if (depth > 30 || found) return
-            if (v.isShown && isStatsText((v as? TextView)?.text?.toString())) {
-                found = true
-                return
-            }
-            if (v is ViewGroup) for (i in 0 until v.childCount) v.getChildAt(i)?.let { dfs(it, depth + 1) }
-        }
-        runCatching { dfs(root, 0) }
-        return found
-    }
-
     private fun isStatsText(t: String?): Boolean {
         val s = t.orEmpty()
         return s == "粉丝" || s.startsWith("粉丝") || s.endsWith("粉丝") || s.contains("获赞与收藏")
@@ -340,8 +294,6 @@ object XhsAutoEntry {
      * 那几页也要留按钮，否则跑到一半没地方取消。
      */
     private fun syncButton(activity: Activity, module: XposedModule) {
-        // 类名硬门（见 looksLikeProfileActivity）：详情页/首页即使视图里能看到资料区，
-        // 也不注入「采集」——否则用户会在详情页上点采集，然后整轮空转。运行中仍允许（要能取消）。
         // 功能开关（FeatureCatalog.KEY_XHS_BATCH，默认关）：关着就彻底不注入按钮/面板，
         // 也不参与驱动——宿主页面零改动（2026-11-22 用户要求「还缺了功能开关，默认关闭」）。
         if (!RemoteConfig.isEnabled(FeatureCatalog.KEY_XHS_BATCH)) {
@@ -349,10 +301,12 @@ object XhsAutoEntry {
             return
         }
         val decor = activity.window?.decorView as? ViewGroup ?: return
-        if (!looksLikeProfileActivity(activity) && !isProfilePage(decor) && !XhsBatchDriver.isRunning()) {
+        if (!XhsAuthorTrack.isProfileContextOrQuiet() && !XhsBatchDriver.isRunning()) {
             // 判据失效时按钮会静默消失（用户和诊断都看不出原因）：摘除前记一次
             if (attachedButton != null) {
-                XhsBatchDriver.logEntry("按钮摘除：本页不像作者主页（缺「笔记,」卡片或资料区文案）${activity.javaClass.simpleName}")
+                XhsBatchDriver.logEntry(
+                    "按钮摘除：最近一次宿主请求不是作者主页列表（${XhsAuthorTrack.snapshot()} 前台=${activity.javaClass.simpleName}）"
+                )
             }
             detach()
             return
@@ -762,6 +716,7 @@ object XhsAutoEntry {
     }
 
     private fun detach() {
+        XhsAuthorTrack.onProfileSignal = null
         runCatching { attachedDecor?.let { d -> attachedButton?.let { d.removeView(it) } } }
         attachedButton = null
         attachedDecor = null
