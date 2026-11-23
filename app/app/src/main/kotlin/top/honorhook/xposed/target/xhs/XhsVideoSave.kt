@@ -438,8 +438,12 @@ object XhsVideoSave {
             val result = runCatching { response.callMethod("result") }.getOrNull()
             // 作者身份锁定源：宿主每次进作者主页都会发这个请求，query 里的 user_id 就是「现在看的是谁」。
             // 批量采集靠它发现「用户中途换了作者」（2026-11-22 审计 #11）。
+            // 标题→noteId 索引（2026-11-23）：详情页缓存命中时既没有 imagefeed 分享链、
+            // Activity 上也读不到 id（真机日志「候选方法=0」），但列表响应本身有
+            // id + display_title，卡片描述就是「笔记,<标题>,来自…」，靠标题能反查。
+            val titled = runCatching { XhsFeedTitles.harvest(url, body) }.getOrDefault(0)
             module.log(Log.INFO, MountEngine.TAG,
-                "$JUDGE_PREFIX 主页列表 code=$code success=$success result=$result len=${body.length}")
+                "$JUDGE_PREFIX 主页列表 code=$code success=$success result=$result len=${body.length} 标题索引+$titled 共${XhsFeedTitles.size()}")
         }
         if (url.contains("/note/videofeed")) queryParam(url, "note_id")?.let { lastVideoNoteId = it }
         harvestNoteShare(body, module, url)

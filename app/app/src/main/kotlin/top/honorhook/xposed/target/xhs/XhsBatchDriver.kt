@@ -591,8 +591,16 @@ object XhsBatchDriver {
                 handled++
                 // 反射只对「马上要处理的那张」做；整屏几十张全反射是纯主线程浪费（审计 P2）
                 val cardNoteId = runCatching { onMain { noteIdOfCard(card) } }.getOrNull()
-                if (cardNoteId != null) seen.add(cardNoteId)
-                val known = cardNoteId
+                // 反射拿不到时用「列表标题索引」兜底（2026-11-23 真机：缓存命中的详情页既无
+                // imagefeed 分享链、Activity 也读不到 id ⇒ 以前整篇直接判失败）。
+                val titleNoteId = cardNoteId ?: runCatching {
+                    XhsFeedTitles.idForDesc(card.contentDescription?.toString())
+                }.getOrNull()
+                if (titleNoteId != null) seen.add(titleNoteId)
+                val known = titleNoteId
+                if (cardNoteId == null && titleNoteId != null) {
+                    vlog(ctx, "noteId 由列表标题索引补齐：$titleNoteId（反射失败）")
+                }
                 if (known != null && XhsVideoSave.shareLinkOf(known) == null) {
                     val tok = runCatching { onMain { tokenOfCard(card, known) } }.getOrNull()
                     if (!tok.isNullOrBlank()) {
