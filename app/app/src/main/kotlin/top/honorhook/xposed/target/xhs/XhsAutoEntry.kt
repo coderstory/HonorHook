@@ -62,6 +62,8 @@ object XhsAutoEntry {
     /** 消息容器：每行一个 TextView，按成败上色（用户 2026-11-22：嗅探失败的要用红色系）。 */
     @Volatile private var panelLog: android.widget.LinearLayout? = null
     @Volatile private var panelStatus: TextView? = null
+    /** 暂停/继续按钮（用户 2026-11-23 要求），文案随状态切 ⏸/▶。 */
+    @Volatile private var panelPause: TextView? = null
     @Volatile private var panelStatValues: List<TextView> = emptyList()
     @Volatile private var panelDetail: TextView? = null
     @Volatile private var panelScroll: android.widget.ScrollView? = null
@@ -247,6 +249,13 @@ object XhsAutoEntry {
                         AutoActions.STOP -> {
                             XhsBatchDriver.stop(module, app)
                             main.post { applyLabel() }
+                        }
+                        AutoActions.PAUSE -> {
+                            XhsBatchDriver.togglePause()
+                            main.post { runCatching { applyLabel() } }
+                        }
+                        AutoActions.RETRY -> {
+                            XhsBatchDriver.retryFailed(module, app)
                         }
                         AutoActions.QUERY -> {
                             // 模块侧进程与驱动不同进程：面板每次进页都问一次真实状态
@@ -470,6 +479,31 @@ object XhsAutoEntry {
             letterSpacing = 0.04f
             text = "采集中"
         }
+        val pause = TextView(activity).apply {
+            text = if (XhsBatchDriver.isPaused()) "▶" else "⏸"
+            textSize = 15f
+            setTextColor(0xEEFFFFFF.toInt())
+            setPadding(px(9f), px(2f), px(9f), px(2f))
+            setOnClickListener {
+                val nowPaused = XhsBatchDriver.togglePause()
+                text = if (nowPaused) "▶" else "⏸"
+                refreshPanel()
+            }
+        }
+        val retry = TextView(activity).apply {
+            text = "↻"
+            textSize = 16f
+            setTextColor(0xEEFFFFFF.toInt())
+            setPadding(px(9f), px(2f), px(9f), px(2f))
+            setOnClickListener {
+                val m = installedModule
+                if (m == null) {
+                    android.widget.Toast.makeText(activity, "模块未就绪，无法重试", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    XhsBatchDriver.retryFailed(m, activity)
+                }
+            }
+        }
         val copy = TextView(activity).apply {
             text = "⧉"
             textSize = 17f
@@ -491,6 +525,8 @@ object XhsAutoEntry {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             addView(status, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(pause)
+            addView(retry)
             addView(copy)
             addView(close)
         }
@@ -591,6 +627,7 @@ object XhsAutoEntry {
         attachedPanel = box
         panelLog = linesBox
         panelStatus = status
+        panelPause = pause
         panelStatValues = statValues
         panelDetail = detail
         panelScroll = scroll
@@ -605,6 +642,7 @@ object XhsAutoEntry {
     private fun refreshPanel() {
         runCatching {
             val st = XhsBatchDriver.stats()
+            panelPause?.text = if (XhsBatchDriver.isPaused()) "▶" else "⏸"
             panelStatus?.apply {
                 text = XhsBatchDriver.stateLabel()
                 setTextColor(
@@ -700,6 +738,7 @@ object XhsAutoEntry {
         attachedPanel = null
         panelLog = null
         panelStatus = null
+        panelPause = null
         panelStatValues = emptyList()
         panelDetail = null
         panelScroll = null

@@ -53,6 +53,9 @@ object XhsBatchDriver {
     private const val PACE_MAX_MS = 4000L
     private const val IDLE_LIMIT = 3
 
+    /** 连续这么多篇「抓到的是反爬壳页」就自动暂停（风控特征，继续只会越撞越死）。 */
+    private const val SHELL_STREAK_PAUSE = 3
+
     /**
      * 单篇最多尝试次数（用户 2026-11-22：「下载失败最多重试三次」）。
      * 单文件级重试另有 `XhsBatchSave.FETCH_MAX_ATTEMPTS = 3`；这里管「整篇重来」——
@@ -275,6 +278,16 @@ object XhsBatchDriver {
     /** collect 最近一次解析到的 noteId；循环据此登记 finishedIds。 */
     @Volatile private var lastNoteId: String? = null
 
+    /** 暂停（用户 2026-11-23：信息窗加暂停按钮）。暂停只是不再取下一篇，线程与常亮锁都留着。 */
+    @Volatile private var paused = false
+    /** 暂停原因（自动暂停时写给人看）。 */
+    @Volatile private var pauseReason: String? = null
+    /** 连续多少篇失败原因是「反爬壳页」。到阈值自动暂停（用户 2026-11-23：被风控了）。 */
+    private var shellStreak = 0
+    /** 本轮失败的 noteId（重试按钮的输入；LinkedHashSet 保序去重）。 */
+    private val failedNoteIds = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    @Volatile private var retrying = false
+
     /** 累计落盘**文件**数（不是篇数）：用户 2026-11-22 要求面板同时给出「篇」与「资源」两个口径。 */
     @Volatile private var resourceCount = 0
 
@@ -314,12 +327,33 @@ object XhsBatchDriver {
     )
 
     fun stateLabel(): String = when {
+        paused && running -> "已暂停"
         !running -> if (endedAt > 0) "已结束" else "空闲"
         stopRequested -> "收尾中"
         else -> "采集中"
     }
 
     fun isStoppingNow(): Boolean = stopRequested
+
+    fun isPaused(): Boolean = paused
+
+    fun pauseReason(): String? = pauseReason
+
+    /** 暂停/继续。返回新的 paused 值（面板据此切图标）。 */
+    fun togglePause(): Boolean {
+        paused = !paused
+        if (!paused) pauseReason = null
+        stateListener?.invoke()
+        return paused
+    }
+
+    fun setPaused(value: Boolean, reason: String? = null) {
+        paused = value
+        pauseReason = if (value) reason else null
+        runCatching { stateListener?.invoke() }
+    }
+
+    fun failedNoteCount(): Int = failedNoteIds.size
 
     private fun elapsedSec(): Long {
         val endAt = if (!running && endedAt > 0) endedAt else System.currentTimeMillis()
@@ -466,6 +500,12 @@ object XhsBatchDriver {
             while (!stopRequested) {
                 // 换页后窗口会变：每轮补一次「屏幕常亮」（已加过就不重复操作，只在首次写日志）
                 keepScreenOn(ctx)
+                // 暂停：只是不再取下一篇（线程、常亮锁、面板都保留）。必须在看门狗之前，
+                // 否则暂停超过 2 分钟会被「无进展」判成卡死而收工。
+                if (paused || retrying) {
+                    Thread.sleep(250)
+                    continue
+                }
                 // 看门狗必须在循环最外层：act==null（用户切走）与 !scanned（主线程卡）这两条
                 // continue 原来永不超时，表现是「一直采集中、零日志」（2026-11-22 审计 P1）。
                 if (System.currentTimeMillis() - lastProgressAt > NO_PROGRESS_LIMIT_MS) {
@@ -617,9 +657,9 @@ object XhsBatchDriver {
                     val direct = collectWithRetry(module, ctx, prev = null, known = known)
                     if (direct != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                     when (direct) {
-                        SaveOutcome.OK -> ok++
-                        SaveOutcome.SKIPPED -> skipped++
-                        SaveOutcome.FAIL -> failed++
+                        SaveOutcome.OK -> { ok++; noteSuccess() }
+                        SaveOutcome.SKIPPED -> { skipped++; noteSuccess() }
+                        SaveOutcome.FAIL -> { failed++; noteFailure(ctx, known ?: lastNoteId) }
                     }
                     val dt = when (direct) {
                         SaveOutcome.OK -> "已保存 1 篇（免点开）"
@@ -663,9 +703,9 @@ object XhsBatchDriver {
                 val saved = collectWithRetry(module, ctx, prev, known)
                 if (saved != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                 when (saved) {
-                    SaveOutcome.OK -> ok++
-                    SaveOutcome.SKIPPED -> skipped++
-                    SaveOutcome.FAIL -> failed++
+                    SaveOutcome.OK -> { ok++; noteSuccess() }
+                    SaveOutcome.SKIPPED -> { skipped++; noteSuccess() }
+                    SaveOutcome.FAIL -> { failed++; noteFailure(ctx, known ?: lastNoteId) }
                 }
                 val text = when (saved) {
                     SaveOutcome.OK -> "已保存 1 篇"
@@ -854,6 +894,111 @@ object XhsBatchDriver {
      * 整篇级重试：失败不是终点，最多 [ITEM_MAX_ATTEMPTS] 次（取消时不重试）。
      * 「刷新即失败」多半是解析超时/凭据还没登记，隔一拍再试常常就好了。
      */
+    /**
+     * 重试本轮失败的篇（用户 2026-11-23：「重试是重新解析一下和下载本次失败的文章」）。
+     *
+     * 只在**暂停中或已结束**时执行：正在跑的时候重试会和当前那篇抢同一份台账/文件。
+     * 重试复用正常链路（解析 → 落盘），成功就从失败清单里移除；失败保留，供下一次重试。
+     */
+    fun retryFailed(module: XposedModule, ctx: Context) {
+        if (retrying) return
+        val ids = synchronized(failedNoteIds) { failedNoteIds.toList() }
+        if (ids.isEmpty()) {
+            xlog(ctx, "没有失败篇可重试")
+            runCatching { toast(ctx, "本轮没有失败篇") }
+            return
+        }
+        if (running && !isPaused()) {
+            xlog(ctx, "先点「暂停」再点「重试」——和正在下载的那篇抢文件会互相打断")
+            runCatching { toast(ctx, "先暂停，再点重试") }
+            return
+        }
+        retrying = true
+        val app = ctx.applicationContext
+        xlog(app, "开始重试 ${ids.size} 篇失败笔记")
+        runCatching {
+            Thread({
+                var okR = 0
+                var failR = 0
+                for (id in ids) {
+                    if (stopRequested) break
+                    val activity = XhsBatchSave.activityOrNull()
+                    if (activity == null) {
+                        failR++
+                        xlog(app, "重试跳过 noteId=$id（宿主没有可用 Activity）")
+                        continue
+                    }
+                    val note = try {
+                        kotlinx.coroutines.runBlocking {
+                            kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
+                                XhsSavePivot.resolveByShareLink(id, module, fromBatch = true, webViewFallback = false)
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        null
+                    }
+                    if (note == null) {
+                        failR++
+                        xlog(app, "重试仍失败 noteId=$id（原因=${runCatching { XhsSavePivot.lastFailure() }.getOrNull() ?: "未知"}）")
+                        continue
+                    }
+                    val urls = runCatching { xhsContentImageUrls(note, id) + XhsCommentHarvest.urlsOf(id) }
+                        .getOrDefault(emptyList())
+                    if (urls.isEmpty()) {
+                        failR++
+                        xlog(app, "重试拿不到图链 noteId=$id")
+                        continue
+                    }
+                    val gen = XhsBatchSave.beginRun()
+                    // 主循环醒来后要用同一个新代次，否则它的 downloadAll 会在循环首行
+                    // `gen != downloadGen.get()` 直接 break（表现为「每篇 0 张、全失败」）。
+                    dlGen = gen
+                    val result = runCatching { XhsBatchSave.downloadNoteQuiet(activity, urls, module, id, gen) }.getOrNull()
+                    if (result != null && result.savedAny) {
+                        okR++
+                        failedNoteIds.remove(id)
+                        addResources(result.ok)
+                        okCount++
+                        failedCount = (failedCount - 1).coerceAtLeast(0)
+                        xlog(app, "重试成功 noteId=$id（存 ${result.ok} 张）")
+                    } else {
+                        failR++
+                        xlog(app, "重试未成功 noteId=$id（存 ${result?.ok ?: 0}/败 ${result?.failed ?: 0}）")
+                    }
+                    syncStats(okCount, skippedCount, failedCount, pendingNow, discoveredCount)
+                    runCatching { stateListener?.invoke() }
+                }
+                retrying = false
+                xlog(app, "重试结束：成功 $okR · 仍失败 $failR（剩余失败 ${failedNoteIds.size} 篇）")
+                runCatching { toast(app, "重试完成：成功 $okR · 仍失败 $failR") }
+            }, "honorhook-xhs-retry").start()
+        }.onFailure {
+            retrying = false
+            xlog(app, "重试线程启动失败：${it.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * 记一次失败，并判断是不是「风控特征」——连续 [SHELL_STREAK_PAUSE] 篇都只拿到反爬壳页就自动暂停。
+     * 用户 2026-11-23：「如果连续三次都是抓失败，返回的是页面，则自动暂停」。
+     */
+    private fun noteFailure(ctx: Context, noteId: String?) {
+        if (noteId != null) failedNoteIds.add(noteId)
+        val shell = runCatching { XhsSavePivot.lastFailureIsShell() }.getOrDefault(false)
+        shellStreak = if (shell) shellStreak + 1 else 0
+        if (shellStreak >= SHELL_STREAK_PAUSE) {
+            shellStreak = 0
+            setPaused(true, "连续 $SHELL_STREAK_PAUSE 篇都只拿到反爬壳页，疑似被风控")
+            xlog(ctx, "连续 $SHELL_STREAK_PAUSE 篇都只拿到反爬壳页（风控特征），已自动暂停；" +
+                "等一会儿点「继续」或「重试」失败篇（本轮已失败 ${failedNoteIds.size} 篇）")
+            runCatching { toast(ctx, "疑似被风控：已自动暂停") }
+        }
+    }
+
+    private fun noteSuccess() {
+        shellStreak = 0
+    }
+
     private fun collectWithRetry(module: XposedModule, ctx: Context, prev: String?, known: String?): SaveOutcome {
         var outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
         var attempt = 1

@@ -13,7 +13,7 @@ package top.honorhook
  * 通道方向：
  *  - 宿主进程（小红书）→ 模块进程：ACTION_XHS_AUTO_TOGGLE（启停滚动）
  *  - 宿主进程 → 模块进程：ACTION_XHS_AUTO_STATE / _PROGRESS / _DONE（进度与状态回传）
- *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_STOP（UI 页停止按钮）
+ *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_STOP（停止）/ _PAUSE（暂停·继续）/ _RETRY（重试失败篇）
  *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_QUERY（注入后对准真实状态）
  *  - 模块进程 → 宿主进程：ACTION_XHS_AUTO_CONFIG（每篇之间的随机节奏范围，分秒）
  */
@@ -27,6 +27,10 @@ object AutoActions {
     const val PROGRESS = "top.honorhook.action.XHS_AUTO_PROGRESS"
     const val DONE = "top.honorhook.action.XHS_AUTO_DONE"
     const val STOP = "top.honorhook.action.XHS_AUTO_STOP"
+    /** 暂停/继续（模块进程 → 宿主进程）。 */
+    const val PAUSE = "top.honorhook.action.XHS_AUTO_PAUSE"
+    /** 重试本轮失败的篇（模块进程 → 宿主进程）。 */
+    const val RETRY = "top.honorhook.action.XHS_AUTO_RETRY"
     const val CONFIG = "top.honorhook.action.XHS_AUTO_CONFIG"
 
     const val EXTRA_RUNNING = "top.honorhook.extra.RUNNING"

@@ -208,6 +208,13 @@ object XhsSavePivot {
 
     internal fun lastFailure(): String? = lastFailureDetail
 
+    /**
+     * 上一次失败是不是「拿到的是反爬壳页」。
+     * 批量采集用它识别风控特征：连续几篇都是壳页 ⇒ 大概率被限流，继续只会越撞越死。
+     */
+    internal fun lastFailureIsShell(): Boolean =
+        lastFailureDetail?.contains("RequiresWebView") == true || lastFailureDetail?.contains("网页渲染") == true
+
     suspend fun resolveByShareLink(
         noteId: String,
         module: XposedModule,
