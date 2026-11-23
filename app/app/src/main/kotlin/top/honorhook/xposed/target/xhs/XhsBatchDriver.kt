@@ -37,7 +37,7 @@ import top.honorhook.xposed.core.MountEngine
  */
 object XhsBatchDriver {
 
-    private const val LOG_LINES = 10
+    private const val LOG_LINES = 24
 
     /** 已处理卡片身份的集合上限（超长主页兜底，清空只是重复查询，不漏）。 */
     private const val SEEN_LIMIT = 4000
@@ -280,6 +280,13 @@ object XhsBatchDriver {
 
     /** 暂停（用户 2026-11-23：信息窗加暂停按钮）。暂停只是不再取下一篇，线程与常亮锁都留着。 */
     @Volatile private var paused = false
+
+    /** 累计暂停时长（毫秒）与本次暂停的起点：面板「用时」要停住，不能把暂停算成处理时间。 */
+    @Volatile private var pausedAccumMs = 0L
+    @Volatile private var pausedAtMs = 0L
+
+    /** 暂停时被打断的那张卡片 key：继续后要重采它（补下没下完的那几张），而不是直接跳到下一篇。 */
+    @Volatile private var pausedKey: String? = null
     /** 暂停原因（自动暂停时写给人看）。 */
     @Volatile private var pauseReason: String? = null
     /** 连续多少篇失败原因是「反爬壳页」。到阈值自动暂停（用户 2026-11-23：被风控了）。 */
@@ -372,6 +379,11 @@ object XhsBatchDriver {
     }
 
     fun setPaused(value: Boolean, reason: String? = null) {
+        if (value && !paused) pausedAtMs = System.currentTimeMillis()
+        if (!value && paused && pausedAtMs > 0) {
+            pausedAccumMs += System.currentTimeMillis() - pausedAtMs
+            pausedAtMs = 0L
+        }
         paused = value
         pauseReason = if (value) reason else null
         runCatching { stateListener?.invoke() }
@@ -380,8 +392,16 @@ object XhsBatchDriver {
     fun failedNoteCount(): Int = failedNoteIds.size
 
     private fun elapsedSec(): Long {
-        val endAt = if (!running && endedAt > 0) endedAt else System.currentTimeMillis()
-        return if (startedAt == 0L) 0L else (endAt - startedAt) / 1000
+        if (startedAt == 0L) return 0L
+        val endAt = when {
+            !running && endedAt > 0 -> endedAt
+            else -> System.currentTimeMillis()
+        }
+        // 暂停中：算到「开始暂停」那一刻；恢复后把暂停时长从总时长里扣掉。
+        val effectiveEnd = if (running && paused && pausedAtMs > 0) minOf(endAt, pausedAtMs) else endAt
+        val wall = (effectiveEnd - startedAt).coerceAtLeast(0)
+        val pausedSoFar = if (running && paused && pausedAtMs > 0) pausedAccumMs else pausedAccumMs
+        return (wall - pausedSoFar).coerceAtLeast(0) / 1000
     }
 
     fun header(): String {
@@ -429,6 +449,9 @@ object XhsBatchDriver {
         // 面板永远显示「已暂停」（只能手点 ▶ 救）。新一轮必须以「运行中」开始。
         paused = false
         pauseReason = null
+        pausedAccumMs = 0L
+        pausedAtMs = 0L
+        pausedKey = null
         retrying = false
         busy = false
         shellStreak = 0
@@ -536,6 +559,18 @@ object XhsBatchDriver {
                     // 审计 A1：暂停期间不刷新基准，恢复后第一轮就被看门狗判「120 秒没有进展」收工
                     lastProgressAt = System.currentTimeMillis()
                     Thread.sleep(250)
+                    continue
+                }
+                // 暂停恢复后的第一件事：退回列表页并重新处理被打断的那一篇
+                if (pausedKey != null) {
+                    val k = pausedKey
+                    pausedKey = null
+                    if (k != null) {
+                        seen.remove(k)
+                        finishedIds.remove(k)
+                        xlog(ctx, "继续：先补完被打断的那一篇（补下缺的几张）", toast = false)
+                    }
+                    backToList(emptySet())
                     continue
                 }
                 // 看门狗必须在循环最外层：act==null（用户切走）与 !scanned（主线程卡）这两条
@@ -737,6 +772,15 @@ object XhsBatchDriver {
                     continue
                 }
                 val saved = collectWithRetry(module, ctx, prev, known)
+                if (paused) {
+                    // 暂停打断了这一篇（下载被 requestCancel 掐断、已下好的保留）。
+                    // 不能算成功/失败，也不能把它留成「已处理」——记下 key，恢复后重采它，
+                    // 靠相册已有文件的序号补齐缺的那几张（用户 2026-11-23 实测：原来会直接跳到下一篇）。
+                    pausedKey = key
+                    busy = false
+                    xlog(ctx, "已暂停：这一篇下到一半，继续后会先把它补完", toast = false)
+                    continue
+                }
                 if (saved != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                 when (saved) {
                     SaveOutcome.OK -> { okCount++; noteSuccess() }
@@ -1048,12 +1092,25 @@ object XhsBatchDriver {
         if (noteId != null) failedNoteIds.add(noteId)
         val shell = runCatching { XhsSavePivot.lastFailureIsShell() }.getOrDefault(false)
         shellStreak = if (shell) shellStreak + 1 else 0
-        if (shellStreak >= SHELL_STREAK_PAUSE) {
-            shellStreak = 0
-            setPaused(true, "连续 $SHELL_STREAK_PAUSE 篇都只拿到反爬壳页，疑似被风控")
-            xlog(ctx, "连续 $SHELL_STREAK_PAUSE 篇都只拿到反爬壳页（风控特征），已自动暂停；" +
-                "等一会儿点「继续」或「重试」失败篇（本轮已失败 ${failedNoteIds.size} 篇）")
+        // 架构审计（b0280e13）：壳页本身就是服务端模板，甚至带全量图链，把它当「被风控」会误停。
+        // 只有明确的拒绝信号（验证码跳转 / 403 / 429 / 461）才算风控。
+        val risk = runCatching { XhsSavePivot.lastFailureIsRisk() }.getOrDefault(false)
+        if (risk) {
+            setPaused(true, "服务端返回风控拒绝（验证码/403/429），已暂停")
+            xlog(ctx, "检测到风控拒绝，已暂停；过一会儿点 ▶ 继续，或点 ↻ 重试失败篇")
             runCatching { toast(ctx, "疑似被风控：已自动暂停") }
+            val captcha = runCatching { XhsWebFetch.captchaUrl() }.getOrNull()
+            if (captcha != null) {
+                xlog(ctx, "把验证码页交给用户处理：$captcha", toast = false)
+                runCatching { captchaPrompt?.invoke(captcha) }
+            }
+            return
+        }
+        if (shell && shellStreak >= SHELL_STREAK_PAUSE) {
+            shellStreak = 0
+            // 不暂停：这类是「分享页模板没有 noteId」，重开同一篇也是同一份 HTML，暂停没意义。
+            xlog(ctx, "已连续 $SHELL_STREAK_PAUSE 篇遇到壳页型分享页（解析模板没覆盖），继续下一篇；" +
+                "本轮已失败 ${failedNoteIds.size} 篇")
             val captcha = runCatching { XhsWebFetch.captchaUrl() }.getOrNull()
             if (captcha != null) {
                 xlog(ctx, "把验证码页交给用户处理：$captcha", toast = false)
@@ -1077,6 +1134,12 @@ object XhsBatchDriver {
             if (paused) {
                 xlog(ctx, "已暂停，本篇不再重试（继续后会重新处理这一张）", toast = false)
                 return SaveOutcome.SKIPPED
+            }
+            // 架构审计结论（2026-11-23）：`RequiresWebView` 是「分享页模板没有 noteId」这一类，
+            // 同一个 URL 再抓一次还是同一份 HTML，重试纯粹放大请求（实测 24 篇 ×3 = 72 次 GET）。
+            if (runCatching { XhsSavePivot.lastFailureIsShell() }.getOrDefault(false)) {
+                xlog(ctx, "壳页型失败不再重试（同 URL 重试无收益，只会多打请求）", toast = false)
+                return SaveOutcome.FAIL
             }
             attempt++
             runCatching { XhsSavePivot.clearLastFailure() }

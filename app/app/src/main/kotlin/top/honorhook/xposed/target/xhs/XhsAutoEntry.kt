@@ -64,6 +64,14 @@ object XhsAutoEntry {
     @Volatile private var panelStatus: TextView? = null
     /** 暂停/继续按钮（用户 2026-11-23 要求），文案随状态切 ⏸/▶。 */
     @Volatile private var panelPause: TextView? = null
+
+    /** 面板里的「采集/取消」按钮（2026-11-23 用户：删掉悬浮按钮，用信息窗替代）。 */
+    @Volatile private var panelStart: TextView? = null
+
+    /** 折叠开关与折叠态：折叠后只留标题行（用户 2026-11-23「信息窗需要能折叠和展开」）。 */
+    @Volatile private var panelCollapse: TextView? = null
+    @Volatile private var panelBody: List<View> = emptyList()
+    @Volatile private var collapsed = false
     @Volatile private var panelStatValues: List<TextView> = emptyList()
     @Volatile private var panelDetail: TextView? = null
     @Volatile private var panelScroll: android.widget.ScrollView? = null
@@ -574,6 +582,29 @@ object XhsAutoEntry {
             setPadding(px(9f), px(2f), px(9f), px(2f))
             setOnClickListener { copyDiagnostics(activity) }
         }
+        val start = TextView(activity).apply {
+            text = if (XhsBatchDriver.isRunning()) "取消" else "采集"
+            textSize = 13f
+            setTextColor(0xFFFFFFFF.toInt())
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(px(10f), px(3f), px(10f), px(3f))
+            background = GradientDrawable().apply {
+                cornerRadius = 9 * dp
+                setColor(if (XhsBatchDriver.isRunning()) 0xFF8E1B1B.toInt() else 0xFFFF2E4D.toInt())
+            }
+            setOnClickListener { installedModule?.let { m -> toggle(activity, m) } }
+        }
+        val collapse = TextView(activity).apply {
+            text = if (collapsed) "▸" else "▾"
+            textSize = 15f
+            setTextColor(0xEEFFFFFF.toInt())
+            setPadding(px(8f), px(2f), px(8f), px(2f))
+            setOnClickListener {
+                collapsed = !collapsed
+                text = if (collapsed) "▸" else "▾"
+                applyCollapsed()
+            }
+        }
         val close = TextView(activity).apply {
             text = "×"
             textSize = 19f
@@ -588,9 +619,11 @@ object XhsAutoEntry {
             orientation = android.widget.LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             addView(status, android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(start)
             addView(pause)
             addView(retry)
             addView(copy)
+            addView(collapse)
             addView(close)
         }
 
@@ -688,8 +721,11 @@ object XhsAutoEntry {
             )
         }
         attachedPanel = box
+        panelBody = listOf(statRow, detail, scroll)
         panelLog = linesBox
         panelStatus = status
+        panelStart = start
+        panelCollapse = collapse
         panelPause = pause
         panelStatValues = statValues
         panelDetail = detail
@@ -702,10 +738,47 @@ object XhsAutoEntry {
 
     /** 顶栏每秒刷一次（用时在走，其余数字由驱动事件刷新）。 */
     /** 顶栏（状态/四列数字/当前文章）统一从这里刷，ticker 与数据事件共用。 */
+    /**
+     * 折叠/展开：折叠只留标题行（状态 + 按钮），展开恢复统计/明细/日志。
+     * 用户 2026-11-23：「信息窗需要能折叠和展开」。
+     */
+    private fun applyCollapsed() {
+        panelBody.forEach { v -> runCatching { v.visibility = if (collapsed) View.GONE else View.VISIBLE } }
+        runCatching {
+            val box = attachedPanel ?: return@runCatching
+            val act = attachedActivity ?: return@runCatching
+            val metrics = act.resources.displayMetrics
+            val dp = metrics.density
+            box.layoutParams = (box.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                height = if (collapsed) {
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                } else {
+                    (metrics.heightPixels * 0.42f).toInt()
+                }
+                bottomMargin = (60 * dp).toInt()
+                leftMargin = (10 * dp).toInt()
+            }
+            box.requestLayout()
+            panelCollapse?.text = if (collapsed) "▸" else "▾"
+        }
+    }
+
     private fun refreshPanel() {
         runCatching {
             val st = XhsBatchDriver.stats()
             panelPause?.text = if (XhsBatchDriver.isPaused()) "▶" else "⏸"
+            panelStart?.apply {
+                val r = XhsBatchDriver.isRunning()
+                text = when {
+                    !r -> "采集"
+                    XhsBatchDriver.isStopping() -> "收尾"
+                    else -> "取消"
+                }
+                background = GradientDrawable().apply {
+                    cornerRadius = 9 * resources.displayMetrics.density
+                    setColor(if (r) 0xFF8E1B1B.toInt() else 0xFFFF2E4D.toInt())
+                }
+            }
             panelStatus?.apply {
                 text = XhsBatchDriver.stateLabel()
                 setTextColor(
@@ -802,6 +875,9 @@ object XhsAutoEntry {
         panelLog = null
         panelStatus = null
         panelPause = null
+        panelStart = null
+        panelCollapse = null
+        panelBody = emptyList()
         panelStatValues = emptyList()
         panelDetail = null
         panelScroll = null

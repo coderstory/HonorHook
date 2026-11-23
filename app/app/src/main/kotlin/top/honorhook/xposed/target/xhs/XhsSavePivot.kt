@@ -206,6 +206,16 @@ object XhsSavePivot {
     @Volatile
     private var lastFailureDetail: String? = null
 
+    /**
+     * 是不是「服务端明确拒绝」：验证码跳转 / 403 / 429 / 461。
+     * 2026-11-23 架构审计：壳页（模板没有 noteId）不是风控，只有这一类才算，避免误停。
+     */
+    internal fun lastFailureIsRisk(): Boolean {
+        val d = lastFailureDetail ?: return false
+        return d.contains("captcha", ignoreCase = true) || d.contains("website-login", ignoreCase = true) ||
+            d.contains("403") || d.contains("429") || d.contains("461")
+    }
+
     /** 清掉上一篇的失败原因（[lastFailureIsShell] 读的就是它，清掉才不会跨篇误判风控）。 */
     internal fun clearLastFailure() {
         lastFailureDetail = null
