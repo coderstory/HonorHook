@@ -194,6 +194,11 @@ object XhsBatchDriver {
     @Volatile var stateListener: (() -> Unit)? = null
 
     /** 最近若干条过程消息（宿主内悬浮面板显示用，替代逐条 Toast——用户 2026-11-22「toast 不太行」）。 */
+    /** 采集期间的常亮锁（用户 2026-11-23：「批量采集的时候，阻止锁屏」）。 */
+    @Volatile private var wakeLock: android.os.PowerManager.WakeLock? = null
+
+    private val MAIN = android.os.Handler(android.os.Looper.getMainLooper())
+
     private val logLines = ArrayDeque<String>()
     private val logLock = Any()
 
@@ -379,6 +384,7 @@ object XhsBatchDriver {
         startedAt = System.currentTimeMillis()
         val gen = runGen.incrementAndGet()
         val app = ctx.applicationContext
+        acquireStayAwake(app)
         module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX 采集开始（逐篇点开取分享链直下）")
         xlog(app, "采集开始")
         vlog(app, "启动参数：上下文=${XhsAuthorTrack.snapshot()} pid=${android.os.Process.myPid()} " +
@@ -458,6 +464,8 @@ object XhsBatchDriver {
         val discoveredKeys = HashSet<String>()
         try {
             while (!stopRequested) {
+                // 换页后窗口会变：每轮补一次「屏幕常亮」（已加过就不重复操作，只在首次写日志）
+                keepScreenOn(ctx)
                 // 看门狗必须在循环最外层：act==null（用户切走）与 !scanned（主线程卡）这两条
                 // continue 原来永不超时，表现是「一直采集中、零日志」（2026-11-22 审计 P1）。
                 if (System.currentTimeMillis() - lastProgressAt > NO_PROGRESS_LIMIT_MS) {
@@ -1176,6 +1184,7 @@ object XhsBatchDriver {
         // 旧线程的收尾不能覆盖新一轮的状态（用户 stop 后立刻再点「采集」时会出现）
         if (gen != runGen.get()) return
         running = false
+        releaseStayAwake()
         endedAt = System.currentTimeMillis()
         pendingNow = 0
         currentNoteRes = 0
@@ -1567,6 +1576,42 @@ object XhsBatchDriver {
      * 只进文件的详细日志（2026-11-22 用户要求「所有数据和情况都打印」）：
      * 面板只有 6 行，细节全塞进去就没法看了，所以决策链路一律走这里。
      */
+    /**
+     * 采集期间阻止锁屏（用户 2026-11-23：「批量采集的时候，阻止锁屏」）。
+     *
+     * 双保险，因为两条机制管的是不同东西：
+     * - `PARTIAL_WAKE_LOCK`：保证 CPU 不被休眠（宿主自己的 WAKE_LOCK 已授权，实测 granted=true）；
+     * - `FLAG_KEEP_SCREEN_ON`：屏幕不熄灭（不需要权限，挂在当前页面窗口上，跟着页面走）。
+     * 两者都失败也不影响采集，只在日志留一行，不抛给宿主。
+     */
+    private fun acquireStayAwake(ctx: Context) {
+        runCatching {
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock?.let { if (it.isHeld) return }
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "HonorHook:xhs-batch").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.onFailure { vlog(ctx, "常亮锁获取失败：${it.javaClass.simpleName}: ${it.message}") }
+        keepScreenOn(ctx)
+    }
+
+    /** 给当前宿主页面加 FLAG_KEEP_SCREEN_ON（幂等；页面换了会在下一轮补上）。 */
+    private fun keepScreenOn(ctx: Context) {
+        val activity = XhsBatchSave.activityOrNull() ?: return
+        val win = runCatching { activity.window }.getOrNull() ?: return
+        val flag = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        val added = runCatching { win.attributes.flags and flag != 0 }.getOrDefault(true)
+        if (added) return
+        MAIN.post { runCatching { win.addFlags(flag) } }
+        vlog(ctx, "已开启页面常亮（${activity.javaClass.simpleName}）")
+    }
+
+    private fun releaseStayAwake() {
+        runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
+        wakeLock = null
+    }
+
     private fun vlog(ctx: Context, msg: String) = xlog(ctx, msg, toast = false)
 
     /**
