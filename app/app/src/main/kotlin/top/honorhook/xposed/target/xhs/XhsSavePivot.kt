@@ -206,6 +206,11 @@ object XhsSavePivot {
     @Volatile
     private var lastFailureDetail: String? = null
 
+    /** 清掉上一篇的失败原因（[lastFailureIsShell] 读的就是它，清掉才不会跨篇误判风控）。 */
+    internal fun clearLastFailure() {
+        lastFailureDetail = null
+    }
+
     internal fun lastFailure(): String? = lastFailureDetail
 
     /**

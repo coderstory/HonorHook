@@ -288,6 +288,9 @@ object XhsBatchDriver {
     private val failedNoteIds = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
     @Volatile private var retrying = false
 
+    /** 本篇是否正在处理（点开到落盘结束）。重试线程靠它避免打断在途的一篇（审计 B3）。 */
+    @Volatile private var busy = false
+
     /** 累计落盘**文件**数（不是篇数）：用户 2026-11-22 要求面板同时给出「篇」与「资源」两个口径。 */
     @Volatile private var resourceCount = 0
 
@@ -300,10 +303,12 @@ object XhsBatchDriver {
     /** collect 用：累计真实落盘文件数。 */
     private fun addResources(n: Int) { if (n > 0) resourceCount += n }
 
+    /**
+     * 只同步「本屏待处理/已发现」等派生量，三个计数直接读字段。
+     * 2026-11-23 审计 B1：原来 loop 用局部 var ok/skipped/failed 每轮回写，
+     * 「重试失败篇」线程加的成功数会被下一轮循环整片冲掉（用户看到失败数永不下降）。
+     */
     private fun syncStats(
-        ok: Int,
-        skipped: Int,
-        failed: Int,
         pending: Int,
         discovered: Int = 0,
         resources: Int = resourceCount,
@@ -311,12 +316,9 @@ object XhsBatchDriver {
     ) {
         resourceCount = resources
         currentNoteRes = noteRes
-        okCount = ok
-        skippedCount = skipped
-        failedCount = failed
         pendingNow = pending
         if (discovered > discoveredCount) discoveredCount = discovered
-        processed = ok + skipped + failed
+        processed = okCount + skippedCount + failedCount
     }
 
     /** 面板顶栏文本：两行（窄屏一排放不下五项）。 */
@@ -327,6 +329,7 @@ object XhsBatchDriver {
     )
 
     fun stateLabel(): String = when {
+        stopRequested -> "收尾中"
         paused && running -> "已暂停"
         !running -> if (endedAt > 0) "已结束" else "空闲"
         stopRequested -> "收尾中"
@@ -339,10 +342,31 @@ object XhsBatchDriver {
 
     fun pauseReason(): String? = pauseReason
 
+    /**
+     * 需要人工过验证码时的回调（模块进程? 不，宿主进程内的 UI 侧注册）。
+     * 用户 2026-11-23：「这个验证码页面能显示出来吗？做一个弹窗，让用户处理」。
+     */
+    @Volatile
+    var captchaPrompt: ((String) -> Unit)? = null
+
     /** 暂停/继续。返回新的 paused 值（面板据此切图标）。 */
     fun togglePause(): Boolean {
         paused = !paused
-        if (!paused) pauseReason = null
+        if (paused) {
+            // 用户 2026-11-23「点了暂停，没效果，还在继续」：只在 loop 顶部检查，一次 collect 里
+            // 还有 3 次重试 + 一整套下载，能再跑几十秒。这里顺手中止当前这张的传输。
+            runCatching { XhsBatchSave.requestCancel() }
+            val ctx = currentApp
+            if (ctx != null) xlog(ctx, "已暂停：当前这张的下载已中止（已下好的会保留），点 ▶ 继续")
+        } else {
+            pauseReason = null
+            // 继续时要换代次并清取消旗标，否则 downloadAll 首行就被取消旗标拦住（每篇「存 0」）。
+            runCatching { dlGen = XhsBatchSave.beginRun() }
+            // 审计 A5：暂停期间用户可能自己滑走了，恢复后必须重新回顶，否则上方笔记永久漏采
+            atTop = false
+            val ctx = currentApp
+            if (ctx != null) xlog(ctx, "已继续采集")
+        }
         stateListener?.invoke()
         return paused
     }
@@ -401,6 +425,15 @@ object XhsBatchDriver {
             return
         }
         dlGen = XhsBatchSave.beginRun()
+        // 审计 A2：上一轮在「暂停」状态下取消收工后 paused 恒 true，下一轮一点就 250ms 空转、
+        // 面板永远显示「已暂停」（只能手点 ▶ 救）。新一轮必须以「运行中」开始。
+        paused = false
+        pauseReason = null
+        retrying = false
+        busy = false
+        shellStreak = 0
+        // 审计 B6：失败清单只属于本轮；不清会把上一轮（甚至别人主页）的 noteId 拿来重试
+        runCatching { failedNoteIds.clear() }
         atTop = false
         // 点「采集」这一刻的前台作者就是本轮目标；拿不到就在首篇解析结果里学习（collect）
         lockedPostedAuthor = XhsAuthorTrack.authorId
@@ -413,7 +446,7 @@ object XhsBatchDriver {
         running = true
         stopRequested = false
         processed = 0
-        syncStats(0, 0, 0, 0, 0, resources = 0, noteRes = 0)
+        syncStats(0, 0, resources = 0, noteRes = 0)
         discoveredCount = 0
         startedAt = System.currentTimeMillis()
         val gen = runGen.incrementAndGet()
@@ -477,9 +510,6 @@ object XhsBatchDriver {
      * 不看序号，所以重排、复用、返回后轻微位移都不会漏。
      */
     private fun loop(module: XposedModule, ctx: Context, gen: Int) {
-        var ok = 0
-        var skipped = 0
-        var failed = 0
         var handled = 0
         // 滚动「没动」的独立计数：不能复用 idle——它在每轮有卡片时都被清零，++
         // 永远攒不到 IDLE_LIMIT，手势失效时就会**每 1.2s 空滚一次、永不收工**（2026-11-22 审计 #4）。
@@ -503,6 +533,8 @@ object XhsBatchDriver {
                 // 暂停：只是不再取下一篇（线程、常亮锁、面板都保留）。必须在看门狗之前，
                 // 否则暂停超过 2 分钟会被「无进展」判成卡死而收工。
                 if (paused || retrying) {
+                    // 审计 A1：暂停期间不刷新基准，恢复后第一轮就被看门狗判「120 秒没有进展」收工
+                    lastProgressAt = System.currentTimeMillis()
                     Thread.sleep(250)
                     continue
                 }
@@ -597,7 +629,7 @@ object XhsBatchDriver {
                 val keysPreview = cards.take(3).joinToString("|") { it.second.take(14) }
                 vlog(ctx, "扫描[${act.javaClass.simpleName}] 卡=${cards.size} 未处理=${pending.size} 已见=${seen.size} " +
                     "首top=${cards.first().first.top()} 键=$keysPreview")
-                syncStats(ok, skipped, failed, pending.size, discoveredKeys.size)
+                syncStats(pending.size, discoveredKeys.size)
                 if (pending.isEmpty()) {
                     // 这一屏没有新卡了：往上滚一屏。
                     // 判「滚不动」的口径 = **滚完有没有出现没见过的新卡**（用户 2026-11-23：
@@ -621,7 +653,7 @@ object XhsBatchDriver {
                         // 有新卡但还没处理：不算「有进展」，看门狗照样要能兜住
                         scrollIdle = 0
                     } else if (++scrollIdle >= IDLE_LIMIT) {
-                        xlog(ctx, "连续 $scrollIdle 次下滑都没有新笔记了，收工（共 ${ok + skipped + failed} 篇）")
+                        xlog(ctx, "连续 $scrollIdle 次下滑都没有新笔记了，收工（共 ${okCount + skippedCount + failedCount} 篇）")
                         break
                     }
                     continue
@@ -657,9 +689,9 @@ object XhsBatchDriver {
                     val direct = collectWithRetry(module, ctx, prev = null, known = known)
                     if (direct != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                     when (direct) {
-                        SaveOutcome.OK -> { ok++; noteSuccess() }
-                        SaveOutcome.SKIPPED -> { skipped++; noteSuccess() }
-                        SaveOutcome.FAIL -> { failed++; noteFailure(ctx, known ?: lastNoteId) }
+                        SaveOutcome.OK -> { okCount++; noteSuccess() }
+                        SaveOutcome.SKIPPED -> { skippedCount++; noteSuccess() }
+                        SaveOutcome.FAIL -> { failedCount++; noteFailure(ctx, known ?: lastNoteId) }
                     }
                     val dt = when (direct) {
                         SaveOutcome.OK -> "已保存 1 篇（免点开）"
@@ -667,23 +699,26 @@ object XhsBatchDriver {
                         SaveOutcome.FAIL -> "这篇没保存成功，跳过"
                     }
                     xlog(ctx, dt)
-                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
+                    busy = false
+                    syncStats(pending.size - 1, discoveredKeys.size, resources = resourceCount)
                     stateListener?.invoke()
-                    notifyModule(ctx, AutoActions.PROGRESS, true, dt, ok, skipped, failed, cardsTotal)
+                    notifyModule(ctx, AutoActions.PROGRESS, true, dt, okCount, skippedCount, failedCount, cardsTotal)
                     sleepPace()
                     continue
                 }
                 // 台账先查：已知这篇下过就直接跳过（不点开、不等网络），否则每篇白开一次详情页
                 // 还要等 8~23 秒，且反射失败时会记成「失败」而不是「跳过」（2026-11-22 审计 P1）
                 if (known != null && runCatching { XhsDownloadLedger.downloaded(ctx, known).first }.getOrDefault(0) > 0) {
-                    skipped++
-                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
+                    skippedCount++
+                    syncStats(pending.size - 1, discoveredKeys.size, resources = resourceCount)
                     stateListener?.invoke()
-                    notifyModule(ctx, AutoActions.PROGRESS, true, "已下载过，跳过", ok, skipped, failed, cardsTotal)
+                    notifyModule(ctx, AutoActions.PROGRESS, true, "已下载过，跳过", okCount, skippedCount, failedCount, cardsTotal)
+                    noteSuccess()
                     xlog(ctx, "已下载过，跳过 noteId=$known（免点开）")
                     sleepPace()
                     continue
                 }
+                busy = true
                 xlog(ctx, "点开第 $handled 张（本屏剩 ${pending.size} 张，noteId=${known ?: "待取"}）")
                 vlog(ctx, "卡片详情：key=${key.take(30)} bounds=${runCatching { card.let { v -> val r = android.graphics.Rect(); v.getGlobalVisibleRect(r); r.toString() } }.getOrNull()} 可点=${card.isClickable} 可见=${card.isShown}")
                 val prev = XhsVideoSave.lastShareNoteId()
@@ -692,20 +727,21 @@ object XhsBatchDriver {
                 // （2026-11-22 复核 P0-1）。
                 val listSig = onMainOrTimeout { sigKeys(act) }.second.orEmpty()
                 if (onMain { clickView(card) } != true) {
-                    failed++
-                    syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
+                    failedCount++
+                    syncStats(pending.size - 1, discoveredKeys.size, resources = resourceCount)
                     stateListener?.invoke()
-                    notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", ok, skipped, failed, cardsTotal)
+                    notifyModule(ctx, AutoActions.PROGRESS, true, "卡片点不动", okCount, skippedCount, failedCount, cardsTotal)
                     xlog(ctx, "卡片点不动（本屏剩 ${pending.size - 1} 张）")
+                    busy = false
                     sleepPace()   // 原来 sleep(paceMs())：节奏配到 120s 时取消要等两分钟才生效
                     continue
                 }
                 val saved = collectWithRetry(module, ctx, prev, known)
                 if (saved != SaveOutcome.FAIL) lastNoteId?.let { finishedIds.add(it) }
                 when (saved) {
-                    SaveOutcome.OK -> { ok++; noteSuccess() }
-                    SaveOutcome.SKIPPED -> { skipped++; noteSuccess() }
-                    SaveOutcome.FAIL -> { failed++; noteFailure(ctx, known ?: lastNoteId) }
+                    SaveOutcome.OK -> { okCount++; noteSuccess() }
+                    SaveOutcome.SKIPPED -> { skippedCount++; noteSuccess() }
+                    SaveOutcome.FAIL -> { failedCount++; noteFailure(ctx, known ?: lastNoteId) }
                 }
                 val text = when (saved) {
                     SaveOutcome.OK -> "已保存 1 篇"
@@ -714,9 +750,10 @@ object XhsBatchDriver {
                 }
                 module.log(Log.INFO, MountEngine.TAG, "$JUDGE_PREFIX $text")
                 xlog(ctx, "$text（本屏剩 ${pending.size - 1} 张）")
-                syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size)
+                busy = false
+                syncStats(pending.size - 1, discoveredKeys.size)
                 stateListener?.invoke()
-                notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $ok · 跳过 $skipped · 失败 $failed）", ok, skipped, failed, cardsTotal)
+                notifyModule(ctx, AutoActions.PROGRESS, true, "$text（成功 $okCount · 跳过 $skippedCount · 失败 $failedCount）", okCount, skippedCount, failedCount, cardsTotal)
                 // 「有没有真的离开列表」只认两个硬证据：前台换了 Activity，或详情端点登记了新 id。
                 // 不能用 lastNoteId：collect 里无条件赋值，noteId 为 null 时会把「什么都没打开」判成打开，
                 // 随后在作者主页上按一次返回 —— 那正是把用户主页关掉的路径（2026-11-22 复核 B1/B2）。
@@ -743,7 +780,7 @@ object XhsBatchDriver {
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 采集中断: ${t.javaClass.simpleName}: ${t.message}")
             xlog(ctx, "采集中断 ${t.javaClass.simpleName}: ${t.message}")
         } finally {
-            finish(module, ctx, ok, skipped, failed, null, gen)
+            finish(module, ctx, okCount, skippedCount, failedCount, null, gen)
         }
     }
 
@@ -913,15 +950,25 @@ object XhsBatchDriver {
             runCatching { toast(ctx, "先暂停，再点重试") }
             return
         }
+        if (busy) {
+            // 审计 B3：暂停只是「不再取下一张」，手上这一篇可能还在解析/落盘；
+            // 此时换代次会把它打断并抹掉它正在等的槽位（最坏让主循环空等 5 分钟）。
+            xlog(ctx, "这一篇还没处理完，等它结束后再点重试")
+            runCatching { toast(ctx, "等这一篇收尾后再重试") }
+            return
+        }
         retrying = true
         val app = ctx.applicationContext
         xlog(app, "开始重试 ${ids.size} 篇失败笔记")
         runCatching {
-            Thread({
+            val t = Thread({
                 var okR = 0
                 var failR = 0
+                try {
                 for (id in ids) {
-                    if (stopRequested) break
+                    // 审计 B2：已结束的轮次里 stopRequested 一直是 true，直接 break 会让「重试」
+                    // 静默 0 篇结束（用户只看到「剩余失败 N 篇」却什么都没做）。运行中才算数。
+                    if (stopRequested && running) break
                     val activity = XhsBatchSave.activityOrNull()
                     if (activity == null) {
                         failR++
@@ -965,13 +1012,28 @@ object XhsBatchDriver {
                         failR++
                         xlog(app, "重试未成功 noteId=$id（存 ${result?.ok ?: 0}/败 ${result?.failed ?: 0}）")
                     }
-                    syncStats(okCount, skippedCount, failedCount, pendingNow, discoveredCount)
+                    syncStats(pendingNow, discoveredCount)
                     runCatching { stateListener?.invoke() }
                 }
+                } catch (th: Throwable) {
+                    // 审计 B5：裸线程里逃出的 Throwable 会走默认处理器**直接杀宿主**，
+                    // 而且 retrying 会永远停在 true（此后 loop 空转、重试按钮全拒）。
+                    xlog(app, "重试线程异常：${th.javaClass.simpleName}: ${th.message}")
+                } finally {
+                    retrying = false
+                    // 审计 B4：重试里最后一次 downloadNoteQuiet 超时会 requestCancel()，
+                    // 取消旗标残留会让主循环此后每篇都「没有拿到落盘结果」。换代次把旗标清干净。
+                    runCatching { dlGen = XhsBatchSave.beginRun() }
+                    xlog(app, "重试结束：成功 $okR · 仍失败 $failR（剩余失败 ${failedNoteIds.size} 篇）")
+                    runCatching { toast(app, "重试完成：成功 $okR · 仍失败 $failR") }
+                    runCatching { stateListener?.invoke() }
+                }
+            }, "honorhook-xhs-retry")
+            t.setUncaughtExceptionHandler { _, e ->
                 retrying = false
-                xlog(app, "重试结束：成功 $okR · 仍失败 $failR（剩余失败 ${failedNoteIds.size} 篇）")
-                runCatching { toast(app, "重试完成：成功 $okR · 仍失败 $failR") }
-            }, "honorhook-xhs-retry").start()
+                runCatching { xlog(app, "重试线程未捕获异常：${e.javaClass.simpleName}") }
+            }
+            t.start()
         }.onFailure {
             retrying = false
             xlog(app, "重试线程启动失败：${it.javaClass.simpleName}")
@@ -992,6 +1054,13 @@ object XhsBatchDriver {
             xlog(ctx, "连续 $SHELL_STREAK_PAUSE 篇都只拿到反爬壳页（风控特征），已自动暂停；" +
                 "等一会儿点「继续」或「重试」失败篇（本轮已失败 ${failedNoteIds.size} 篇）")
             runCatching { toast(ctx, "疑似被风控：已自动暂停") }
+            val captcha = runCatching { XhsWebFetch.captchaUrl() }.getOrNull()
+            if (captcha != null) {
+                xlog(ctx, "把验证码页交给用户处理：$captcha", toast = false)
+                runCatching { captchaPrompt?.invoke(captcha) }
+            } else {
+                xlog(ctx, "没有抓到验证码页地址（这轮不是重定向型风控），只能稍后再试", toast = false)
+            }
         }
     }
 
@@ -1000,10 +1069,17 @@ object XhsBatchDriver {
     }
 
     private fun collectWithRetry(module: XposedModule, ctx: Context, prev: String?, known: String?): SaveOutcome {
+        // 审计 C1：lastFailureDetail 是全局粘滞串，上一篇的壳页标记会被算到本篇 ⇒ 误自动暂停。
+        runCatching { XhsSavePivot.clearLastFailure() }
         var outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
         var attempt = 1
         while (outcome == SaveOutcome.FAIL && attempt < ITEM_MAX_ATTEMPTS && !stopRequested) {
+            if (paused) {
+                xlog(ctx, "已暂停，本篇不再重试（继续后会重新处理这一张）", toast = false)
+                return SaveOutcome.SKIPPED
+            }
             attempt++
+            runCatching { XhsSavePivot.clearLastFailure() }
             xlog(ctx, "本篇第 $attempt/$ITEM_MAX_ATTEMPTS 次重试", toast = false)
             sleepPace()
             outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
@@ -1260,6 +1336,8 @@ object XhsBatchDriver {
 
     /** 等探针在**当前前台 Activity** 上返回非空（每 200ms 一次）；超时或被取消返回 null。 */
     private fun <T : Any> await(timeoutMs: Long, probe: (Activity) -> T?): T? {
+        // 暂停/停止时立刻放弃等待（否则一次 await 最长 5~8s，用户点了暂停看着还在跑）。
+        if (paused || stopRequested) return null
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (stopRequested) return null
@@ -1359,7 +1437,7 @@ object XhsBatchDriver {
     /** 每篇之间的随机停顿，切成 200ms 片检查取消（原来一次 sleep 最长 120s，取消形同虚设）。 */
     private fun sleepPace() {
         var left = paceMs()
-        while (left > 0 && !stopRequested) {
+        while (left > 0 && !stopRequested && !paused) {
             val slice = minOf(left, 200L)
             Thread.sleep(slice)
             left -= slice
@@ -1766,6 +1844,15 @@ object XhsBatchDriver {
     private fun releaseStayAwake() {
         runCatching { wakeLock?.let { if (it.isHeld) it.release() } }
         wakeLock = null
+        // 审计 A4：只 release 了 wakeLock，窗口上的 FLAG_KEEP_SCREEN_ON 没人清 ⇒ 采集结束后
+        // 宿主停在作者主页，屏幕永不熄灭。这里补一次（主线程）。
+        runCatching {
+            MAIN.post {
+                runCatching {
+                    XhsBatchSave.activityOrNull()?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
+        }
     }
 
     private fun vlog(ctx: Context, msg: String) = xlog(ctx, msg, toast = false)

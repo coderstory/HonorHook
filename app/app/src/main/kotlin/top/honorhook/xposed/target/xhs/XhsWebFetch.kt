@@ -31,6 +31,15 @@ internal object XhsWebFetch {
     @Volatile
     var lastDiag: String? = null
 
+    /** 最后一次真正加载完的 URL：风控时 WebView 会被重定向到验证码页，用户要求「弹窗让人自己过」。 */
+    @Volatile
+    var lastUrl: String? = null
+
+    /** 风控/登录重定向的目标（验证码页）；不是反爬页时返回 null。 */
+    fun captchaUrl(): String? = lastUrl?.takeIf {
+        it.contains("captcha", ignoreCase = true) || it.contains("website-login", ignoreCase = true)
+    }
+
     private const val JS_DOM =
         "(function(){try{return document.documentElement.outerHTML||''}catch(e){return ''}})()"
 
@@ -52,6 +61,7 @@ internal object XhsWebFetch {
                 web.webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, finishedUrl: String) {
                         lastDiag = "url=$finishedUrl"
+                        lastUrl = finishedUrl
                         main.postDelayed({ grab(view, box, latch, main) }, RENDER_GRACE_MS)
                     }
                 }

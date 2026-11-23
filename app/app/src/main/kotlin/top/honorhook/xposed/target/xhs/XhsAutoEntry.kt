@@ -120,6 +120,8 @@ object XhsAutoEntry {
                 XhsBatchDriver.stateListener = { main.post { runCatching { applyLabel(); panelSync(); ensurePanelGuard(module) } } }
                 // 过程消息 → 悬浮面板（不再逐条 Toast：用户 2026-11-22「toast 不太行」）
                 XhsBatchDriver.uiListener = { lines -> main.post { runCatching { renderLines(lines) } } }
+                // 用户 2026-11-23：「验证码页面能显示出来吗？做一个弹窗，让用户处理」
+                XhsBatchDriver.captchaPrompt = { url -> main.post { runCatching { showCaptchaDialog(url) } } }
                 runCatching { registerStopReceiver(app, module, main) }
                     .onFailure { module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 停止接收器注册失败: ${it.message}") }
                 runCatching {
@@ -277,6 +279,8 @@ object XhsAutoEntry {
             app, receiver,
             android.content.IntentFilter().apply {
                 addAction(AutoActions.STOP)
+                addAction(AutoActions.PAUSE)
+                addAction(AutoActions.RETRY)
                 addAction(AutoActions.QUERY)
                 addAction(AutoActions.CONFIG)
             },
@@ -405,6 +409,65 @@ object XhsAutoEntry {
      * **关闭只由用户点面板上的 × 决定**（2026-11-22 用户：别自动隐藏/关闭），收工后也留在屏幕上。
      */
     /** 运行期间持续把面板跟到当前前台页（见 [panelGuard] 注释）。 */
+    /**
+     * 风控验证弹窗：把 WebView 重定向到的验证码页直接展示出来，用户在宿主里自己过。
+     * 用户 2026-11-23：「这个验证码页面能显示出来吗？做一个弹窗，让用户处理」。
+     * 验证码只对「真人 + 宿主 cookie」有意义，所以我们不伪造不绕过，只负责展示，
+     * 并在用户点「已验证」后解除暂停（失败篇由用户点面板 ↻ 重试）。
+     */
+    private fun showCaptchaDialog(url: String) {
+        val activity = attachedActivity ?: XhsBatchSave.activityOrNull() ?: return
+        val dp = activity.resources.displayMetrics.density
+        fun px(v: Float): Int = (v * dp).toInt()
+        val root = android.widget.LinearLayout(activity).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(px(14f), px(14f), px(14f), px(10f))
+        }
+        val title = TextView(activity).apply {
+            text = "需要人工验证（小红书风控）"
+            textSize = 15f
+            setTextColor(0xFF1A1A1A.toInt())
+            setPadding(0, 0, 0, px(8f))
+        }
+        val hint = TextView(activity).apply {
+            text = "在下面把验证过掉，然后点「已验证，继续采集」"
+            textSize = 12f
+            setTextColor(0xFF666666.toInt())
+            setPadding(0, 0, 0, px(8f))
+        }
+        val web = android.webkit.WebView(activity).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.userAgentString = XhsVideoSave.XHS_WEB_UA
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT, px(420f),
+            )
+            runCatching { loadUrl(url) }
+        }
+        val dialog = android.app.Dialog(activity, android.R.style.Theme_DeviceDefault_Light_Dialog_NoActionBar)
+        val done = TextView(activity).apply {
+            text = "已验证，继续采集"
+            textSize = 15f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFFEC407A.toInt())
+            setPadding(0, px(10f), 0, px(10f))
+            setOnClickListener {
+                runCatching { dialog.dismiss() }
+                runCatching { XhsBatchDriver.setPaused(false, null) }
+                runCatching { refreshPanel() }
+            }
+        }
+        root.addView(title)
+        root.addView(hint)
+        root.addView(web)
+        root.addView(done)
+        dialog.setContentView(root)
+        dialog.setCancelable(true)
+        dialog.setOnDismissListener { runCatching { web.destroy() } }
+        runCatching { dialog.show() }
+    }
+
     private fun ensurePanelGuard(module: XposedModule) {
         if (panelGuard != null || !XhsBatchDriver.isRunning()) return
         val main = mainHandler ?: return
