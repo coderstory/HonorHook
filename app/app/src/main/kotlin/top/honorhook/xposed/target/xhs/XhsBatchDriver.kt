@@ -97,11 +97,24 @@ object XhsBatchDriver {
     private fun cardKeys(a: Activity): Set<String> =
         runCatching { findCards(a).mapTo(HashSet()) { cardKey(it) } }.getOrDefault(emptySet())
 
+    /**
+     * 「还是原来那屏」的指纹：只取卡片描述前 16 字。
+     * 不能用 [cardKey]——它带屏内 top 与点赞数（描述尾部「,来自X, N赞」随刷新变）：真机 08:54 就是
+     * 因此判成「按返回后没回到列表」而提前收工，卡片其实原地没动。
+     */
+    private fun sigKey(desc: String): String = desc.take(16)
+
+    private fun sigKeys(a: Activity): Set<String> = runCatching {
+        findCards(a).mapNotNullTo(HashSet()) { v ->
+            v.contentDescription?.toString()?.takeIf { it.isNotEmpty() }?.let(::sigKey)
+        }
+    }.getOrDefault(emptySet())
+
     /** 指纹回来 ≥2 个（不足 2 个就 ≥1 个）即认为回到了刚才那屏。 */
     private fun sigMatched(a: Activity, sig: Set<String>): Boolean {
         if (sig.isEmpty()) return false
         val need = minOf(2, sig.size)
-        return cardKeys(a).count { it in sig } >= need
+        return sigKeys(a).count { it in sig } >= need
     }
 
     internal fun isCardDesc(desc: String?): Boolean {
@@ -576,7 +589,7 @@ object XhsBatchDriver {
                 // 指纹必须在**点击之前**取：点开之后前台已换成详情页，findCards 拿到的是「相关推荐」
                 // （同一套 isCardDesc 口径），拿它去等「回到列表」永远等不到 —— 表现是每轮只采一篇就收工
                 // （2026-11-22 复核 P0-1）。
-                val listSig = onMainOrTimeout { cardKeys(act) }.second.orEmpty()
+                val listSig = onMainOrTimeout { sigKeys(act) }.second.orEmpty()
                 if (onMain { clickView(card) } != true) {
                     failed++
                     syncStats(ok, skipped, failed, pending.size - 1, discoveredKeys.size, resources = resourceCount)
