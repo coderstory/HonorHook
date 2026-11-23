@@ -285,6 +285,21 @@ object XhsSavePivot {
                 ?: "无 message"
             module.log(Log.WARN, MountEngine.TAG,
                 "$JUDGE_PREFIX 分享链接解析异常 noteId=$noteId ${t.javaClass.simpleName}: $lastFailureDetail")
+            // 第二选择：上游认不出「无 noteId 的移动分享壳」（RequiresWebView），自己按字段名兜一次。
+            // 真机取证：壳里 noteDetailMap 为 0 处、imageList 1 处、noteId 只出现在无关配置里。
+            if (lastFailureDetail?.contains("RequiresWebView") == true) {
+                val html = runCatching {
+                    fetchOverride?.invoke(shortUrl) ?: XhsVideoSave.fetchNotePageHtml(shortUrl)
+                }.getOrNull()
+                val fb = XhsShareFallback.resolve(html, noteId, shortUrl)
+                if (fb != null) {
+                    module.log(Log.INFO, MountEngine.TAG,
+                        "$JUDGE_PREFIX 分享壳兜底解析成功 noteId=$noteId 图${fb.images.size} 视频${fb.videos.size}（上游认不出该模板）")
+                    return fb
+                }
+                module.log(Log.WARN, MountEngine.TAG,
+                    "$JUDGE_PREFIX 分享壳兜底也没解析出媒体 noteId=$noteId（html=${html?.length ?: 0} 字符）")
+            }
             if (!fromBatch) parsedEmptyNotes.add(noteId)
             null
         }
