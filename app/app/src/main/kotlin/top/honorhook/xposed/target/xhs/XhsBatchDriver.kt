@@ -681,6 +681,51 @@ object XhsBatchDriver {
         return null
     }
 
+    /** 探针只跑一次：日志里出现「note 模型探测」，就能按真实字段名把图集/视频读出来。 */
+    @Volatile private var probedModel = false
+
+    /**
+     * 只读对象图探测：从 Activity 里找「类名像笔记模型」的对象，打印它的字段名/类型/短值。
+     * 限深 2、限 200 个对象、限 40 字段，全部 runCatching —— 只为了拿字段名，绝不改宿主状态。
+     */
+    private fun modelProbe(root: Activity): String {
+        val sb = StringBuilder("note 模型探测：")
+        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+        var visited = 0
+        fun interesting(c: Class<*>): Boolean {
+            val n = c.name
+            return !(n.startsWith("java.") || n.startsWith("android.") || n.startsWith("androidx.") ||
+                n.startsWith("kotlin.") || n.startsWith("kotlinx.") || n.startsWith("com.xingin.android"))
+        }
+        fun walk(o: Any?, depth: Int, path: String) {
+            if (o == null || depth > 2 || visited > 200 || sb.length > 6000) return
+            if (!interesting(o.javaClass) || !seen.add(o)) return
+            visited++
+            val c = o.javaClass
+            if (c.simpleName.contains("note", true)) {
+                sb.append("\n  [").append(path).append("] ").append(c.name)
+                c.declaredFields.take(40).forEach { f ->
+                    runCatching {
+                        f.isAccessible = true
+                        val v = f.get(o)
+                        sb.append("\n    ").append(f.name).append(": ").append(f.type.simpleName)
+                        if (v is String) sb.append("=\"").append(v.take(40)).append("\"")
+                    }
+                }
+            }
+            if (depth == 2) return
+            c.declaredFields.take(40).forEach { f ->
+                runCatching {
+                    f.isAccessible = true
+                    val v = f.get(o)
+                    if (v != null && v !is String && !v.javaClass.isPrimitive) walk(v, depth + 1, "$path.${f.name}")
+                }
+            }
+        }
+        walk(root, 0, "activity")
+        return if (visited == 0) "" else sb.toString()
+    }
+
     private fun noteIdFromActivity(activity: Activity): String? {
         // **先看 Intent**：详情页的 `getIntent().getStringExtra("id")` 是它被创建时那一篇的 id，权威且不会串；
         // Activity 上的方法可能是 controller/adapter 的残留值（2026-11-22 真机：不同卡片拿到同一个 id，
@@ -760,6 +805,16 @@ object XhsBatchDriver {
         }
         if (noteId != null && registered != null) {
             vlog(ctx, "noteId 来源=详情页/分享链轮询 noteId=$registered")
+        }
+        // 一次性探针：把详情页里「像笔记模型」的对象字段打出来（每轮只探一次）。
+        // 目标是拿到宿主内存里现成的图集/视频直链，从而彻底不走分享页（RequiresWebView 的死路）。
+        if (noteId != null && !probedModel) {
+            probedModel = true
+            val act = XhsBatchSave.activityOrNull()
+            if (act != null) {
+                val dump = onMainOrTimeout { modelProbe(act) }.second
+                if (!dump.isNullOrBlank()) vlog(ctx, dump)
+            }
         }
         if (!knownReady && registered == null && known != null) {
             vlog(ctx, "详情页没登记，用卡片反射的 noteId=$known 兜底")
