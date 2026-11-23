@@ -548,32 +548,29 @@ object XhsBatchDriver {
                     "首top=${cards.first().first.top()} 键=$keysPreview")
                 syncStats(ok, skipped, failed, pending.size, discoveredKeys.size)
                 if (pending.isEmpty()) {
-                    // 这一屏没有新卡了：滚一屏，滚完确认列表真的动了，否则「一直滚不动」会空转
-                    val beforeTop = cards.first().first.top()
+                    // 这一屏没有新卡了：往上滚一屏。
+                    // 判「滚不动」的口径 = **滚完有没有出现没见过的新卡**（用户 2026-11-23：
+                    // 「下滑找不到新的内容，试几次就可以结束了啊」）。旧口径看 top/size 变化，
+                    // 到底部时列表回弹/追加推荐位都会让 top 变，于是永远算「滚动了」，空转不收工。
                     val beforeSize = cards.size
                     xlog(ctx, "本屏 ${cards.size} 张都处理过，向上滚一屏")
                     swipeUp(act)
-                    // 分页慢：固定 sleep(1200) 只判一次，网络稍慢服务端没追加就被算「滚不动」，
-                    // 连续 3 次约 3.6s 就收工，后半页全漏（2026-11-22 审计 #10）。
-                    // 改成递增等待（1.2/2/3/4s）时每次都可能出现新卡，等满仍没动才算一次 idle。
-                    var after = emptyList<View>()
-                    var moved = false
-                    // 每 400ms 探一次，最多 4s：翻页通常 1~2s 就回来，等满 10 秒纯浪费
+                    var freshCount = 0
+                    var afterSize = beforeSize
                     for (round in 0 until 10) {
                         if (stopRequested) break
                         Thread.sleep(400)
-                        after = onMain { findCards(act) }.orEmpty()
-                        if (after.size != beforeSize || (after.firstOrNull()?.top() ?: -1) != beforeTop) {
-                            moved = true
-                            break
-                        }
+                        val now = onMainOrTimeout { findCards(act) }.second ?: emptyList()
+                        afterSize = now.size
+                        freshCount = now.count { cardKey(it) !in seen }
+                        if (freshCount > 0) break
                     }
-                    vlog(ctx, "滚动后：${beforeSize}张/top=$beforeTop → ${after.size}张/top=${after.firstOrNull()?.top() ?: -1}")
-                    if (moved) {
+                    vlog(ctx, "滚动后：${beforeSize}张 → ${afterSize}张，新卡=$freshCount（连续无新内容 $scrollIdle/$IDLE_LIMIT）")
+                    if (freshCount > 0) {
                         scrollIdle = 0
                         lastProgressAt = System.currentTimeMillis()
                     } else if (++scrollIdle >= IDLE_LIMIT) {
-                        xlog(ctx, "列表滚不动了，收工")
+                        xlog(ctx, "连续 $scrollIdle 次下滑都没有新笔记了，收工（共 ${ok + skipped + failed} 篇）")
                         break
                     }
                     continue
