@@ -884,8 +884,12 @@ object XhsBatchDriver {
             probedModel = true
             val act = XhsBatchSave.activityOrNull()
             if (act != null) {
-                val dump = onMainOrTimeout { modelProbe(act) }.second
-                if (!dump.isNullOrBlank()) vlog(ctx, dump)
+                val (ran, dump) = onMainOrTimeout { modelProbe(act) }
+                when {
+                    !ran -> vlog(ctx, "note 模型探测：主线程超时，没探到")
+                    dump.isNullOrBlank() -> vlog(ctx, "note 模型探测：对象图里没有可选对象（${act.javaClass.name}）")
+                    else -> vlog(ctx, dump)
+                }
             }
         }
         if (!knownReady && registered == null && known != null) {
@@ -947,7 +951,7 @@ object XhsBatchDriver {
         val note = try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
-                    XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webViewFallback = true)
+                    XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webViewFallback = false)
                 }
             }
         } catch (t: kotlinx.coroutines.TimeoutCancellationException) {
@@ -959,8 +963,9 @@ object XhsBatchDriver {
             return SaveOutcome.FAIL
         }
         if (note == null) {
-            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=${XhsSavePivot.lastFailure() ?: "未知"}" +
-                " 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}）")
+            val why = XhsSavePivot.lastFailure() ?: "未知"
+            val kind = if (why.contains("RequiresWebView")) "需网页渲染（反爬壳页，批量不走网页）" else why
+            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=$kind 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}）")
             return SaveOutcome.FAIL
         }
         // 第二道作者校验：就算页面树里混进了别人的卡片，解析结果里的 authorId 也不会撒谎。
