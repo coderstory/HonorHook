@@ -123,6 +123,44 @@ object XhsBatchDriver {
         return desc.length >= 12 && desc.contains("来自")
     }
 
+    /** 屏内是否有瀑布流卡片（desc 判据同 [isCardDesc]）。 */
+    internal fun hasCardsOnScreen(root: android.view.View): Boolean {
+        var found = false
+        fun walk(v: android.view.View, depth: Int) {
+            if (found || depth > 30) return
+            if (v.isShown && isCardDesc(v.contentDescription?.toString())) { found = true; return }
+            val g = v as? android.view.ViewGroup ?: return
+            for (i in 0 until g.childCount) walk(g.getChildAt(i), depth + 1)
+        }
+        runCatching { walk(root, 0) }
+        return found
+    }
+
+    /** 资料区标记：作者主页才有「粉丝 / 获赞与收藏」这类计数（详情页没有）。 */
+    private fun hasStatsOnScreen(root: android.view.View): Boolean {
+        var found = false
+        fun walk(v: android.view.View, depth: Int) {
+            if (found || depth > 30) return
+            val t = (v as? android.widget.TextView)?.text?.toString()
+            if (v.isShown && t != null && (t.endsWith("粉丝") || t.contains("获赞与收藏"))) {
+                found = true
+                return
+            }
+            val g = v as? android.view.ViewGroup ?: return
+            for (i in 0 until g.childCount) walk(g.getChildAt(i), depth + 1)
+        }
+        runCatching { walk(root, 0) }
+        return found
+    }
+
+    /**
+     * 「这页像作者主页」的唯一判据：**有卡片 + 有资料区计数**。
+     * 2026-11-23 用户实测反馈「旧版本能识别主页」：请求信号判据（XhsAuthorTrack）在缓存命中、
+     * 列表不发请求时永远为假，按钮直接不出现。信号只留作日志/作者锁，不再当门。
+     */
+    internal fun looksLikeProfileContent(root: android.view.View): Boolean =
+        hasCardsOnScreen(root) && hasStatsOnScreen(root)
+
     @Volatile private var running = false
     /** 轮次令牌：旧线程的收尾（finish）不能覆盖新一轮的运行时状态。 */
     private val runGen = java.util.concurrent.atomic.AtomicInteger(0)
@@ -304,17 +342,17 @@ object XhsBatchDriver {
         // 本机作者主页的 Activity 叫 NoteDetailActivity，视图中「粉丝/获赞与收藏」「笔记,」卡片
         // 与详情页完全重叠（用户截图为证）——任何「看页面」的判据都会误判，一天里错了三次。
         // 唯一可靠的信号是宿主自己发的请求：主页 → /note/user/posted；点开笔记 → imagefeed/note/detail。
-        val strictCtx = XhsAuthorTrack.isProfileContext()
-        if (!strictCtx && !XhsAuthorTrack.isProfileContextOrQuiet()) {
-            val where = runCatching { XhsBatchSave.activityOrNull()?.javaClass?.simpleName }.getOrNull() ?: "未知"
-            xlog(ctx.applicationContext, "没有开始：现在不在作者主页（前台=$where，最近请求不是主页列表）")
+        // 起跑门 = 内容判据（卡片 + 资料区计数），不再是请求信号：信号在缓存命中时永远是假，
+        // 表现为「按钮不出现/点了没反应」（2026-11-23 用户实测）。信号只用于日志与作者锁。
+        val front = XhsBatchSave.activityOrNull()
+        val okContent = front != null && runCatching {
+            looksLikeProfileContent(front.window.decorView)
+        }.getOrDefault(false)
+        if (!okContent) {
+            val where = runCatching { front?.javaClass?.simpleName }.getOrNull() ?: "未知"
+            xlog(ctx.applicationContext, "没有开始：这一页既没有卡片也没有资料区计数（前台=$where）")
             toast(ctx, "请先打开作者主页、等笔记列表刷出来，再点采集")
             return
-        }
-        // 换代次（不是在旧代次上「清取消」）：上一轮还在网络读里的线程会看到自己过期并退出
-        if (!strictCtx) {
-            // 宽判据起跑 = 靠「详情静默 8s」猜的，必写日志：逐篇作者校验是唯一兜底（P1-4）
-            xlog(ctx.applicationContext, "以「详情静默 8s」宽判据起跑（没见到新的主页列表请求），逐篇会校验作者")
         }
         dlGen = XhsBatchSave.beginRun()
         atTop = false

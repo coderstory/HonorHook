@@ -290,13 +290,13 @@ object XhsAutoEntry {
             return
         }
         val decor = activity.window?.decorView as? ViewGroup ?: return
-        // 只有「确实见过宿主信号」才允许摘：authorId==null 时 isProfileContextOrQuiet 恒 false，
-        // 冷启动直接落回主页、列表走内存缓存不发请求的情况下会把按钮摘掉再也不回来（P1-8）。
-        if (!XhsAuthorTrack.isProfileContextOrQuiet() && !XhsBatchDriver.isRunning() && XhsAuthorTrack.hasSignal()) {
+        // 判据 = 内容（卡片 + 资料区计数），不再依赖宿主请求信号：信号在列表来自缓存时为假，
+        // 按钮会永不出现（2026-11-23 用户实测「旧版本能识别主页」）。运行中一律保留（取消入口）。
+        if (!XhsBatchDriver.isRunning() && !XhsBatchDriver.looksLikeProfileContent(decor)) {
             // 判据失效时按钮会静默消失（用户和诊断都看不出原因）：摘除前记一次
             if (attachedButton != null) {
                 XhsBatchDriver.logEntry(
-                    "按钮摘除：最近一次宿主请求不是作者主页列表（${XhsAuthorTrack.snapshot()} 前台=${activity.javaClass.simpleName}）"
+                    "按钮摘除：这页不像作者主页（无卡片或无资料区计数；${XhsAuthorTrack.snapshot()} 前台=${activity.javaClass.simpleName}）"
                 )
             }
             detach()
