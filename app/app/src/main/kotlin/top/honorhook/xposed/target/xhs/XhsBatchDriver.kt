@@ -779,7 +779,8 @@ object XhsBatchDriver {
         fun walk(o: Any?, depth: Int, path: String) {
             if (o == null || depth > 3 || visited > 60 || lines > 120) return
             val c = o.javaClass
-            if (!interesting(c) || c.isArray || o is android.view.View || o is android.content.Context) return
+            // 注意：Activity 自己就是 Context，只有**下一层开始**的 Context 才要跳过，否则探针永远 0 个对象。
+            if (!interesting(c) || c.isArray || o is android.view.View || (depth > 0 && o is android.content.Context)) return
             if (!seen.add(o)) return
             visited++
             dump(o, path, "d$depth")
