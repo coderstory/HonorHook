@@ -92,7 +92,14 @@ object XhsBatchDriver {
     private val CARD_DESC_PREFIXES = arrayOf("笔记,", "视频,", "图文,")
 
     /** 卡片指纹：描述 + 屏内 top（同标题系列靠 top 区分）。 */
-    private fun cardKey(v: View): String = (v.contentDescription?.toString() ?: "") + "@" + v.top()
+    /**
+     * 卡片身份 = **noteId 优先**，拿不到才退回描述前 16 字。
+     * 原来用「完整描述 @ top」：描述尾部带点赞数（`,来自X, 93赞`）且 top 随滚动变化，
+     * 同一张卡每轮都是新 key ⇒ 已见集合永远拦不住，日志表现为「已见 30→38，未处理恒为 1，
+     * 点开全是本篇本轮已处理过」（2026-11-23 09:26 用户诊断）。
+     */
+    private fun cardKey(v: View): String =
+        noteIdOfCard(v) ?: (v.contentDescription?.toString() ?: "").take(16)
 
     private fun cardKeys(a: Activity): Set<String> =
         runCatching { findCards(a).mapTo(HashSet()) { cardKey(it) } }.getOrDefault(emptySet())
@@ -743,33 +750,47 @@ object XhsBatchDriver {
         val sb = StringBuilder("note 模型探测：")
         val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
         var visited = 0
+        var lines = 0
         fun interesting(c: Class<*>): Boolean {
             val n = c.name
             return !(n.startsWith("java.") || n.startsWith("android.") || n.startsWith("androidx.") ||
                 n.startsWith("kotlin.") || n.startsWith("kotlinx.") || n.startsWith("com.xingin.android"))
         }
-        fun walk(o: Any?, depth: Int, path: String) {
-            if (o == null || depth > 2 || visited > 200 || sb.length > 6000) return
-            if (!interesting(o.javaClass) || !seen.add(o)) return
-            visited++
+        /** 打印一个对象的类名 + 字段名/类型（限 12 个），最多 120 行。 */
+        fun dump(o: Any, path: String, tag: String) {
+            if (lines > 120) return
             val c = o.javaClass
-            if (c.simpleName.contains("note", true)) {
-                sb.append("\n  [").append(path).append("] ").append(c.name)
-                c.declaredFields.take(40).forEach { f ->
-                    runCatching {
-                        f.isAccessible = true
-                        val v = f.get(o)
-                        sb.append("\n    ").append(f.name).append(": ").append(f.type.simpleName)
-                        if (v is String) sb.append("=\"").append(v.take(40)).append("\"")
-                    }
-                }
-            }
-            if (depth == 2) return
-            c.declaredFields.take(40).forEach { f ->
+            sb.append("\n  [").append(path).append("] ").append(tag).append(" ").append(c.name)
+            lines++
+            c.declaredFields.take(12).forEach { f ->
+                if (lines > 120) return@forEach
                 runCatching {
                     f.isAccessible = true
                     val v = f.get(o)
-                    if (v != null && v !is String && !v.javaClass.isPrimitive) walk(v, depth + 1, "$path.${f.name}")
+                    sb.append("\n    ").append(f.name).append(": ").append(f.type.simpleName)
+                    when {
+                        v is String -> sb.append("=\"").append(v.take(30)).append("\"")
+                        v is Collection<*> -> sb.append("(size=").append(v.size).append(")")
+                    }
+                    lines++
+                }
+            }
+        }
+        fun walk(o: Any?, depth: Int, path: String) {
+            if (o == null || depth > 3 || visited > 60 || lines > 120) return
+            val c = o.javaClass
+            if (!interesting(c) || c.isArray || o is android.view.View || o is android.content.Context) return
+            if (!seen.add(o)) return
+            visited++
+            dump(o, path, "d$depth")
+            if (depth == 3) return
+            c.declaredFields.take(20).forEach { f ->
+                runCatching {
+                    f.isAccessible = true
+                    val v = f.get(o)
+                    if (v != null && v !is String && !v.javaClass.isPrimitive && v !is Collection<*>) {
+                        walk(v, depth + 1, "$path.${f.name}")
+                    }
                 }
             }
         }
@@ -938,7 +959,8 @@ object XhsBatchDriver {
             return SaveOutcome.FAIL
         }
         if (note == null) {
-            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=${XhsSavePivot.lastFailure() ?: "未知"}）")
+            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=${XhsSavePivot.lastFailure() ?: "未知"}" +
+                " 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}）")
             return SaveOutcome.FAIL
         }
         // 第二道作者校验：就算页面树里混进了别人的卡片，解析结果里的 authorId 也不会撒谎。

@@ -27,6 +27,10 @@ internal object XhsWebFetch {
 
     private const val TIMEOUT_MS = 12_000L
     private const val RENDER_GRACE_MS = 900L
+    /** 最近一次抓取的取证串（长度 / 是否带 __INITIAL_STATE__ / 最终 URL），失败时由驱动写进日志。 */
+    @Volatile
+    var lastDiag: String? = null
+
     private const val JS_DOM =
         "(function(){try{return document.documentElement.outerHTML||''}catch(e){return ''}})()"
 
@@ -47,6 +51,7 @@ internal object XhsWebFetch {
                 web.settings.userAgentString = XhsVideoSave.XHS_WEB_UA
                 web.webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, finishedUrl: String) {
+                        lastDiag = "url=$finishedUrl"
                         main.postDelayed({ grab(view, box, latch, main) }, RENDER_GRACE_MS)
                     }
                 }
@@ -65,6 +70,8 @@ internal object XhsWebFetch {
         }
         val done = runCatching { latch.await(timeoutMs + 3_000L, TimeUnit.MILLISECONDS) }.getOrDefault(false)
         val out = if (done) box[0] else null
+        val init = out?.contains("__INITIAL_STATE__") == true
+        lastDiag = "len=${out?.length ?: 0} initState=$init ${lastDiag ?: "url=未完成加载"}"
         return out?.takeIf { it.length > 2048 }
     }
 
