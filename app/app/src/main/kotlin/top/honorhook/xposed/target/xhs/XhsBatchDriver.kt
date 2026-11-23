@@ -517,7 +517,10 @@ object XhsBatchDriver {
                     continue
                 }
                 redrawWaits = 0
-                scrollIdle = 0
+                // 注意：scrollIdle **不能**在这里清零。这个分支每轮都会进来（列表有卡片），
+                // 清零后「连续 3 次没有新卡」永远攒不满，表现就是无限「本屏 6 张都处理过，向上滚一屏」
+                // （用户 2026-11-23 截图：27 分钟、已处理 50、待处理 0、日志刷同一行）。
+                // 只有真的处理掉一张、或滚出了新卡时才清零（见下方两处）。
                 // 用户可能已经翻到半截才点「采集」：不先回顶，上方笔记永远采不到，
                 // 面板「已发现」也只从当前位置算（2026-11-22 审计 #9）。
                 if (!atTop) {
@@ -575,8 +578,8 @@ object XhsBatchDriver {
                     }
                     vlog(ctx, "滚动后：${beforeSize}张 → ${afterSize}张，新卡=$freshCount（连续无新内容 $scrollIdle/$IDLE_LIMIT）")
                     if (freshCount > 0) {
+                        // 有新卡但还没处理：不算「有进展」，看门狗照样要能兜住
                         scrollIdle = 0
-                        lastProgressAt = System.currentTimeMillis()
                     } else if (++scrollIdle >= IDLE_LIMIT) {
                         xlog(ctx, "连续 $scrollIdle 次下滑都没有新笔记了，收工（共 ${ok + skipped + failed} 篇）")
                         break
