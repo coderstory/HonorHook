@@ -44,6 +44,15 @@ internal object XhsWebFetch {
         "(function(){try{return document.documentElement.outerHTML||''}catch(e){return ''}})()"
 
     fun html(activity: Activity?, url: String, timeoutMs: Long = TIMEOUT_MS): String? {
+        // 诊断串与落点都是全局粘滞的：不在入口重置的话，「没 Activity / 空 URL / 未完成加载」会沿用
+        // 上一篇的结论，日志会骗人（2026-11-24 按日志排查壳页失败时踩到过）。重置后 lastUrl 只反映
+        // 本次真正加载到的落点，captchaUrl() 才不会拿上一篇的验证码页误触发弹窗。
+        lastDiag = when {
+            activity == null -> "无可用 Activity（宿主没有前台页，网页兜底跳过）"
+            url.isEmpty() -> "分享链为空，网页兜底跳过"
+            else -> "url=未完成加载"
+        }
+        lastUrl = null
         if (activity == null || url.isEmpty()) return null
         val latch = CountDownLatch(1)
         val box = arrayOfNulls<String>(1)

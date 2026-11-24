@@ -472,7 +472,11 @@ object XhsAutoEntry {
         root.addView(done)
         dialog.setContentView(root)
         dialog.setCancelable(true)
-        dialog.setOnDismissListener { runCatching { web.destroy() } }
+        // 不管用户是点「已验证」还是直接关掉，都清掉去重标记：同一页真再撞上还要能弹出来。
+        dialog.setOnDismissListener {
+            runCatching { web.destroy() }
+            runCatching { XhsBatchDriver.clearCaptchaPrompt() }
+        }
         runCatching { dialog.show() }
     }
 

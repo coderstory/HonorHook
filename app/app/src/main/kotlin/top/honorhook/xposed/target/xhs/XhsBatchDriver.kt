@@ -356,6 +356,19 @@ object XhsBatchDriver {
     @Volatile
     var captchaPrompt: ((String) -> Unit)? = null
 
+    /**
+     * 已经弹过窗的验证码页。`XhsWebFetch.captchaUrl()` 读的是「最后真正加载完的地址」，全局粘滞；
+     * 不去重的话连续 N 篇撞同一个验证码页会叠 N 个窗（2026-11-24 补弹窗出口时一并防叠）。
+     * 用户关掉/过了验证后由 `clearCaptchaPrompt()` 清空，真再撞上还能再弹。
+     */
+    @Volatile
+    private var captchaPromptedUrl: String? = null
+
+    /** 验证码弹窗已关闭（不管过没过）——清去重标记，下次真撞上还能弹。 */
+    fun clearCaptchaPrompt() {
+        captchaPromptedUrl = null
+    }
+
     /** 暂停/继续。返回新的 paused 值（面板据此切图标）。 */
     fun togglePause(): Boolean {
         paused = !paused
@@ -1022,7 +1035,9 @@ object XhsBatchDriver {
                     val note = try {
                         kotlinx.coroutines.runBlocking {
                             kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
-                                XhsSavePivot.resolveByShareLink(id, module, fromBatch = true, webViewFallback = false)
+                                // 与采集主流程同口径：手点「↻ 重试失败篇」时也要走网页兜底，
+                                // 否则重试只是再抓一遍同一份 reqJson，壳页永远救不回来（2026-11-24）。
+                                XhsSavePivot.resolveByShareLink(id, module, fromBatch = true, webViewFallback = true)
                             }
                         }
                     } catch (t: Throwable) {
@@ -1085,11 +1100,30 @@ object XhsBatchDriver {
     }
 
     /**
+     * 任何一次失败后都查一次：最后加载的页面是不是验证码页，是就弹窗交给用户并暂停。
+     *
+     * 2026-11-24 起批量也开网页兜底（`webViewFallback = true`），WebView 比 okhttp 更容易被重定向到
+     * `captcha` / `website-login`。用户 2026-11-24 原话「遇到这种情况，你没弹窗啊」——这就是那个出口：
+     * 壳页 / 风控 / 兜底失败，只要有验证码落点就弹。同一 URL 只弹一次（防叠窗）。
+     */
+    private fun promptCaptchaIfAny(ctx: Context) {
+        val url = runCatching { XhsWebFetch.captchaUrl() }.getOrNull() ?: return
+        if (url == captchaPromptedUrl) return
+        captchaPromptedUrl = url
+        xlog(ctx, "把验证码页交给用户处理：$url", toast = false)
+        setPaused(true, "小红书要求人工验证，已暂停")
+        runCatching { toast(ctx, "小红书要求人工验证：点弹窗里的「已验证，继续采集」") }
+        runCatching { captchaPrompt?.invoke(url) }
+    }
+
+    /**
      * 记一次失败，并判断是不是「风控特征」——连续 [SHELL_STREAK_PAUSE] 篇都只拿到反爬壳页就自动暂停。
      * 用户 2026-11-23：「如果连续三次都是抓失败，返回的是页面，则自动暂停」。
      */
     private fun noteFailure(ctx: Context, noteId: String?) {
         if (noteId != null) failedNoteIds.add(noteId)
+        // 先看落点：只要最后加载的是验证码页，不分壳页/风控/兜底失败，一律弹窗交用户。
+        promptCaptchaIfAny(ctx)
         val shell = runCatching { XhsSavePivot.lastFailureIsShell() }.getOrDefault(false)
         shellStreak = if (shell) shellStreak + 1 else 0
         // 架构审计（b0280e13）：壳页本身就是服务端模板，甚至带全量图链，把它当「被风控」会误停。
@@ -1099,24 +1133,19 @@ object XhsBatchDriver {
             setPaused(true, "服务端返回风控拒绝（验证码/403/429），已暂停")
             xlog(ctx, "检测到风控拒绝，已暂停；过一会儿点 ▶ 继续，或点 ↻ 重试失败篇")
             runCatching { toast(ctx, "疑似被风控：已自动暂停") }
-            val captcha = runCatching { XhsWebFetch.captchaUrl() }.getOrNull()
-            if (captcha != null) {
-                xlog(ctx, "把验证码页交给用户处理：$captcha", toast = false)
-                runCatching { captchaPrompt?.invoke(captcha) }
-            }
             return
         }
         if (shell && shellStreak >= SHELL_STREAK_PAUSE) {
             shellStreak = 0
-            // 不暂停：这类是「分享页模板没有 noteId」，重开同一篇也是同一份 HTML，暂停没意义。
-            xlog(ctx, "已连续 $SHELL_STREAK_PAUSE 篇遇到壳页型分享页（解析模板没覆盖），继续下一篇；" +
-                "本轮已失败 ${failedNoteIds.size} 篇")
-            val captcha = runCatching { XhsWebFetch.captchaUrl() }.getOrNull()
-            if (captcha != null) {
-                xlog(ctx, "把验证码页交给用户处理：$captcha", toast = false)
-                runCatching { captchaPrompt?.invoke(captcha) }
-            } else {
+            if (runCatching { XhsWebFetch.captchaUrl() }.getOrNull() == null) {
+                // 不暂停：这类是「分享页模板没有 noteId」，重开同一篇也是同一份 HTML，暂停没意义。
+                xlog(ctx, "已连续 $SHELL_STREAK_PAUSE 篇遇到壳页型分享页（解析模板没覆盖），继续下一篇；" +
+                    "本轮已失败 ${failedNoteIds.size} 篇")
                 xlog(ctx, "没有抓到验证码页地址（这轮不是重定向型风控），只能稍后再试", toast = false)
+            } else {
+                // 弹窗 + 暂停已由 promptCaptchaIfAny 做了；这里不能再写「继续下一篇」（其实已停住）。
+                xlog(ctx, "已连续 $SHELL_STREAK_PAUSE 篇失败，本篇落在验证码页，等人工验证后再继续；" +
+                    "本轮已失败 ${failedNoteIds.size} 篇", toast = false)
             }
         }
     }
@@ -1249,10 +1278,12 @@ object XhsBatchDriver {
         }
         // webViewFallback = 分享页需要 JS 渲染（RequiresWebView）时由 XhsSavePivot 内部用内置
         // WebView 再取一次；手点保存走的是同一个函数、同一个兜底（2026-11-22 用户要求代码共享）。
+        // 2026-11-24 起批量**默认开启**兜底（原为 false）：连续几篇壳页全失败时用户没有补救路径，
+        // 代价是每篇最多 +12s，只在第一次解析报 RequiresWebView 时才会真的开 WebView。
         val note = try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
-                    XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webViewFallback = false)
+                    XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webViewFallback = true)
                 }
             }
         } catch (t: kotlinx.coroutines.TimeoutCancellationException) {
@@ -1265,7 +1296,9 @@ object XhsBatchDriver {
         }
         if (note == null) {
             val why = XhsSavePivot.lastFailure() ?: "未知"
-            val kind = if (why.contains("RequiresWebView")) "需网页渲染（反爬壳页，批量不走网页）" else why
+            // 2026-11-24 起批量也开网页兜底，所以 RequiresWebView 现在意味着「跑过 JS 仍然没有
+            // __INITIAL_STATE__」——不能再写「批量不走网页」；兜底过程直接读 XhsWebFetch.lastDiag 取证。
+            val kind = if (why.contains("RequiresWebView")) "需网页渲染（分享页得跑 JS）" else why
             xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=$kind 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}）")
             return SaveOutcome.FAIL
         }
