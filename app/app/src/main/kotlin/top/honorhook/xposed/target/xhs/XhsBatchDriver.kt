@@ -1032,7 +1032,7 @@ object XhsBatchDriver {
                         xlog(app, "重试跳过 noteId=$id（宿主没有可用 Activity）")
                         continue
                     }
-                    val note = try {
+                    var note = try {
                         kotlinx.coroutines.runBlocking {
                             kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
                                 // 与采集主流程同口径：手点「↻ 重试失败篇」时也要走网页兜底，
@@ -1042,6 +1042,17 @@ object XhsBatchDriver {
                         }
                     } catch (t: Throwable) {
                         null
+                    }
+                    // 2026-11-24 审计：无凭据那类失败在重试路径同样没得走（分享链根本没登记），
+                    // 与 collect() 同一条内存兜底；当前页不是这一篇时 id 对不上，如实返回 null。
+                    if (note == null && runCatching { XhsSavePivot.lastFailure() }.getOrNull() == "无凭据") {
+                        val mem = onMainOrTimeout { XhsNoteMemory.resolve(activity, id) }.second
+                        if (mem != null) {
+                            note = mem
+                            xlog(app, "重试：无凭据 → 详情页内存取图 ${mem.images.size} 张 noteId=$id")
+                        } else {
+                            vlog(app, "重试：无凭据，详情页内存里也没取到 noteId=$id（${XhsNoteMemory.lastDiag ?: "未命中"}）")
+                        }
                     }
                     if (note == null) {
                         failR++
@@ -1280,7 +1291,7 @@ object XhsBatchDriver {
         // WebView 再取一次；手点保存走的是同一个函数、同一个兜底（2026-11-22 用户要求代码共享）。
         // 2026-11-24 起批量**默认开启**兜底（原为 false）：连续几篇壳页全失败时用户没有补救路径，
         // 代价是每篇最多 +12s，只在第一次解析报 RequiresWebView 时才会真的开 WebView。
-        val note = try {
+        var note = try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(NOTE_RESOLVE_MS) {
                     XhsSavePivot.resolveByShareLink(noteId, module, fromBatch = true, webViewFallback = true)
@@ -1294,6 +1305,19 @@ object XhsBatchDriver {
             xlog(ctx, "解析异常 ${t.javaClass.simpleName}: ${t.message} noteId=$noteId")
             return SaveOutcome.FAIL
         }
+        // 无凭据 = 分享链那条路彻底没得走（缓存命中的详情页不发 imagefeed）。但这一刻详情页已经把
+        // 图渲染出来了：宿主的 note 模型就在对象图里，图集直链不需要凭据（2026-11-24 用户选题 A；
+        // 字段口径与边界见 [XhsNoteMemory] 注释）。取不到就照旧判失败，不编造内容。
+        if (note == null && linkKind == "无凭据") {
+            val act = XhsBatchSave.activityOrNull()
+            val mem = onMainOrTimeout { XhsNoteMemory.resolve(act, noteId) }.second
+            if (mem != null) {
+                xlog(ctx, "无凭据 → 详情页内存取图 ${mem.images.size} 张 noteId=$noteId")
+                note = mem
+            } else {
+                vlog(ctx, "无凭据，详情页内存里也没取到这一篇的图集 noteId=$noteId（${XhsNoteMemory.lastDiag ?: "未命中"}）")
+            }
+        }
         if (note == null) {
             val why = XhsSavePivot.lastFailure() ?: "未知"
             // 2026-11-24 起批量也开网页兜底，所以 RequiresWebView 现在意味着「跑过 JS 仍然没有
@@ -1302,6 +1326,8 @@ object XhsBatchDriver {
             xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=$kind 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}）")
             return SaveOutcome.FAIL
         }
+        // 内存兜底可能替换过 note（无凭据那一路），下面统一用这一份。
+        val work = note
         // 第二道作者校验：就算页面树里混进了别人的卡片，解析结果里的 authorId 也不会撒谎。
         // 首篇解析成功后顺带学习锁定值（作者主页列表接口被缓存、没发请求时的兜底）。
         // 单看一篇分不出「口径不同」与「别人的笔记」，所以用**上一篇**做交叉验证
@@ -1309,7 +1335,7 @@ object XhsBatchDriver {
         // 作者闸门只做「拦」，不做「以分享页为准的翻转」：翻转曾把推荐流里连续两篇同作者
         // 认成目标作者（复核 B4），代价是存了别人的图；拦错的代价只是少采几篇，日志会写清原因。
         // 口径若真有差异（列表 user_id vs 分享页 note.user.userId），同一个外作者连续出现 3 次就收工留痕。
-        val noteAuthor = note.authorId
+        val noteAuthor = work.authorId
         when {
             lockedAuthor == null -> lockedAuthor = noteAuthor
             noteAuthor == null ->
@@ -1337,10 +1363,25 @@ object XhsBatchDriver {
                 return SaveOutcome.SKIPPED
             }
         }
-        val urls = runCatching { xhsContentImageUrls(note, noteId) }.getOrNull().orEmpty()
+        var urls = runCatching { xhsContentImageUrls(work, noteId) }.getOrNull().orEmpty()
         // 视频轨（用户 2026-11-22「视频也要下载的」）：分享页解析出的视频候选另走一条静默落盘，
         // 与图片共用同一 noteId 前缀，所以台账/去重/相册查重对视频同样成立。
-        val videos = note.videos
+        var videos = work.videos
+        if (urls.isEmpty() && videos.isEmpty()) {
+            // 解析「成功」却一根直链都没有（壳页模板没覆盖时上游会给出空列表）：再用详情页内存兜一次。
+            // 命中就是白赚，命不中也不改变结论——这条只读路径与凭据无关（2026-11-24）。
+            val act = XhsBatchSave.activityOrNull()
+            val mem = onMainOrTimeout { XhsNoteMemory.resolve(act, noteId) }.second
+            if (mem != null) {
+                urls = runCatching { xhsContentImageUrls(mem, noteId) }.getOrNull().orEmpty()
+                videos = mem.videos
+                if (urls.isNotEmpty()) {
+                    xlog(ctx, "分享页没有可下载直链 → 详情页内存取图 ${urls.size} 张 noteId=$noteId")
+                }
+            } else {
+                vlog(ctx, "分享页没有可下载直链，详情页内存也没取到 noteId=$noteId（${XhsNoteMemory.lastDiag ?: "未命中"}）")
+            }
+        }
         if (urls.isEmpty() && videos.isEmpty()) {
             xlog(ctx, "解析结果没有可下载文件 noteId=$noteId")
             return SaveOutcome.FAIL

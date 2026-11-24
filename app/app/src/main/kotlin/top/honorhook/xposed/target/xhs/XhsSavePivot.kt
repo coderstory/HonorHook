@@ -238,6 +238,9 @@ object XhsSavePivot {
     ): ResolvedNote? = withContext(Dispatchers.IO) {
         // 整条链优先；只有裸 xsec_token 时合成一条（2026-11-22：批量采集逐篇打开时响应多为 token-only）
         val longUrl = XhsVideoSave.shareLinkOf(noteId) ?: XhsVideoSave.synthShareLinkOf(noteId) ?: run {
+            // 显式留因：这条早退既不抛异常也不写 lastFailureDetail，驱动侧只能显示「原因=未知」，
+            // 用户看不出到底是风控、壳页还是没凭据（2026-11-24 真机截图「链=无凭据 原因=未知」）。
+            lastFailureDetail = "无凭据"
             module.log(Log.WARN, MountEngine.TAG, "$JUDGE_PREFIX 无 share link noteId=$noteId，解析跳过")
             if (!fromBatch) parsedEmptyNotes.add(noteId)
             return@withContext null

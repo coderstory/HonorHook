@@ -500,3 +500,34 @@ LCBBottomSheetDialog → AppCompatDialog;->dismiss()`）。controller 字段一�
 
 **修法**：dismissHostPanel 下钻改逐层全字段 BFS（depth<3、每字段≤64、visited 去重），
 任一层命中 Dialog 即 dismiss——不再赌字段顺序。
+
+## 无凭据失败 → 详情页内存取图（2026-11-24）
+
+**现象**：批量采集日志 `链=无凭据` → `解析不出图片（链=无凭据 原因=未知 网页兜底=未尝试）`，
+这一篇直接失败，网页兜底也不走（截图 noteId 23 位是用户截图里少一位，实际 id 24 位）。
+
+**根因**：`XhsSavePivot.resolveByShareLink` 开头要 `shareLinkOf(noteId) ?: synthShareLinkOf(noteId)`，
+双空即 return null——连 `RequiresWebView` 都到不了，所以「网页兜底=未尝试」是正确表达。
+凭据登记靠拦截 `/api/sns/` 响应的 `share_info`（含 `xsec_token`）；宿主**命中详情页本地缓存时不发
+imagefeed**，卡片 token 反射也偶发读不出 ⇒ 9 篇里有 1 篇没凭据。
+
+**修法（用户 2026-11-24 选 A）**：这一刻详情页已把图渲染在屏上，宿主 note 模型就在对象图里，
+图集直链与凭据无关。新增 `XhsNoteMemory`：从 Activity 起 BFS（深 6 / 500 对象 / 每对象 300 字段），
+只认「带 24 位 id == noteId 的对象」，取 `imageList`/`images` 每项直链：
+`urlDefault` > `url` > `urlPre` > `infoList[].url`（`imageScene` 优先 `WB_DFT`）。
+字段名口径来自上游 `XhsNoteParser`（reference/xhs 1.4.1）对同一份接口 JSON 的消费方式——
+宿主模型与该 JSON 同源。**视频笔记整篇拒绝**（内存里往往只剩封面，存错比失败糟）。
+
+**边界与判据**：
+- 接在 `XhsBatchDriver.collect()`：`note == null && linkKind == "无凭据"` 与「解析成功但直链为空」两处；
+  「↻ 重试失败篇」同样接了（页面不是那一篇时 id 对不上，如实失败）。
+- 命中日志 `无凭据 → 详情页内存取图 N 张`；落空日志带 `XhsNoteMemory.lastDiag`（没找到对象 / 命中但字段口径不符 / 视频笔记）。
+- `XhsSavePivot` 该早退路径的失败原因由「未知」改写为「无凭据」。
+
+**审计（同日）收紧四点**：图集只认第一个抽得出直链的字段并跳过 user/comment/video 字段（否则评论配图、
+头像会混进图集）；直链必须落在 `xhscdn.com` / `xiaohongshu.com`（下游 `toBare` 不适用会原样下载）；
+空容器 `video: {}` 不再误判为视频；字段表按 Class 缓存（主线程 3s 预算内）。契约钉
+`XhsNoteMemoryTest`（9 条）。
+
+**未验证风险**：宿主模型字段名是否被 R8 改名（`@SerializedName` 只保注解值，不一定保字段名）与本 ROM
+对象图可达性都还没真机实证——落空时日志会写 `lastDiag`，据此再决定是加「列表 adapter 取」还是换锚点。
