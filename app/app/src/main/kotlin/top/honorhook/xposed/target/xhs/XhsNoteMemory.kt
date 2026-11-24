@@ -50,11 +50,11 @@ internal object XhsNoteMemory {
 
     /** 对象图遍历上限：详情页对象图可到上万节点，老探针的 60×40 口径太窄，但也不能无限走。
      *  字段上限放宽到 300：宿主 NoteBean 字段数 60+，`imageList` 可能排在后面，卡 60 会永远取不到图。 */
-    private const val MAX_DEPTH = 6
-    private const val MAX_VISITED = 500
+    private const val MAX_DEPTH = 7
+    private const val MAX_VISITED = 1200
     private const val MAX_FIELDS = 300
-    /** 遍历时只看前 80 个字段：500 个对象 × 全字段反射会让主线程 3s 预算不够，取值仓不在后段。 */
-    private const val TRAVERSE_FIELDS = 80
+    /** 遍历时只看前 120 个字段：千级对象 × 全字段反射会顶满主线程 3s 预算，取值仓不在后段。 */
+    private const val TRAVERSE_FIELDS = 120
     private const val MAX_COLLECTION = 40
 
     /** `urlDefault` > `url` > `urlPre`；`infoList` 里优先这几个场景（与上游选档口径一致）。 */
@@ -72,10 +72,14 @@ internal object XhsNoteMemory {
             lastDiag = if (root == null) "没有可用的 Activity" else "noteId 不是 24 位 id"
             null
         } else {
-            val bean = findBean(root, noteId)
+            val samples = ArrayList<String>(3)
+            val bean = findBean(root, noteId, samples)
             when {
                 bean == null -> {
-                    lastDiag = "对象图里没有 id=$noteId 的对象"
+                    // 真机（2026-11-24 22:42）`链=无凭据` 就落在这里：把图里见到的其它 id 一并打出来，
+                    // 「一个 id 都对不上」（多半是驱动侧 noteId 认错）与「对上了但抽不出图」修法完全不同。
+                    val hint = if (samples.isEmpty()) "" else "（疑似 id：${samples.joinToString("，")}）"
+                    lastDiag = "对象图里没有 id=$noteId 的对象$hint"
                     null
                 }
                 looksVideo(bean) -> {
@@ -114,8 +118,16 @@ internal object XhsNoteMemory {
 
     // ---- 找 bean ----
 
-    /** 广度优先：先近后远；只有「带同一个 24 位 id 且抽得出图」的对象才算命中。 */
-    private fun findBean(root: Any, noteId: String): Any? {
+    /**
+     * 广度优先：先近后远；先按 24 位 id **精确**匹配，落空再松一档按「String 字段里包含该 id」匹配
+     * （有的模型把 id 拼进分享链/url 字段）。命中也要真抽得出图才算数。
+     * [samples] 顺手收集对象图里见到的其它 24 位 id（限 3 条），落空时写进 [lastDiag] 供取证。
+     */
+    private fun findBean(root: Any, noteId: String, samples: MutableList<String>): Any? =
+        bfs(root, noteId, exact = true, samples = samples)
+            ?: bfs(root, noteId, exact = false, samples = null)
+
+    private fun bfs(root: Any, noteId: String, exact: Boolean, samples: MutableList<String>?): Any? {
         val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
         var frontier = listOf(root)
         var depth = 0
@@ -129,10 +141,11 @@ internal object XhsNoteMemory {
                 if (depth > 0 && !expandable(o.javaClass)) continue
                 if (!seen.add(o)) continue
                 visited++
-                if (hasNoteId(o, noteId)) {
+                if (hasNoteId(o, noteId, exact)) {
                     if (imagesOf(o, 0).isNotEmpty()) return o
                     if (fallback == null) fallback = o
                 }
+                if (samples != null) sampleIds(o, samples)
                 next.addAll(linksOf(o))
             }
             frontier = next
@@ -141,17 +154,33 @@ internal object XhsNoteMemory {
         return fallback
     }
 
-    private fun hasNoteId(o: Any, noteId: String): Boolean {
+    private fun hasNoteId(o: Any, noteId: String, exact: Boolean = true): Boolean {
         // 认全字段：宿主 note bean 字段数 100+，id 可能排在 120 之后（字段表已按 Class 缓存，扫全不贵）。
         for (f in fieldsOf(o.javaClass)) {
             if (f.type != String::class.java) continue
             val v = valueOf(f, o) as? String ?: continue
             if (v == noteId) return true
+            if (!exact && v.length in 24..400 && v.contains(noteId)) return true
         }
         return false
     }
 
-    /** 能继续往下走的对象引用：集合/数组元素 + 自定义类的字段值（框架类靠 [expandable] 挡掉）。 */
+    /** 取证：记下对象图里出现的其它 24 位 id（同一个类只留一条，最多 3 条）。 */
+    private fun sampleIds(o: Any, out: MutableList<String>) {
+        if (out.size >= 3) return
+        val simple = o.javaClass.simpleName
+        if (out.any { it.startsWith("$simple.") }) return
+        for (f in fieldsOf(o.javaClass, TRAVERSE_FIELDS)) {
+            if (f.type != String::class.java) continue
+            val v = valueOf(f, o) as? String ?: continue
+            if (!HEX24.matches(v)) continue
+            out.add("$simple.${f.name}=${v.take(8)}…")
+            return
+        }
+    }
+
+    /** 能继续往下走的对象引用：集合/数组元素 + 自定义类的字段值（框架类靠 [expandable] 挡掉）。
+     *  模型类（Note/Feed/Detail/Bean）排在队头：同样的 visited 预算里先挖它们，少被外围对象吃掉。 */
     private fun linksOf(o: Any): List<Any> {
         val out = ArrayList<Any>()
         for (f in fieldsOf(o.javaClass, TRAVERSE_FIELDS)) {
@@ -185,7 +214,20 @@ internal object XhsNoteMemory {
                 expandable(v.javaClass) -> out.add(v)
             }
         }
+        if (out.size > 1) {
+            val hot = ArrayList<Any>(out.size)
+            val cold = ArrayList<Any>(out.size)
+            for (e in out) if (modelish(e.javaClass)) hot.add(e) else cold.add(e)
+            if (hot.isNotEmpty()) { hot.addAll(cold); return hot }
+        }
         return out
+    }
+
+    /** 类名像业务模型（R8 后名字多半是 a1b，命中不了也无害，只是当个优先级的弱信号）。 */
+    private fun modelish(c: Class<*>): Boolean {
+        val n = c.simpleName
+        return n.contains("Note") || n.contains("note") || n.contains("Feed") ||
+            n.contains("Detail") || n.contains("Bean") || n.contains("Model")
     }
 
     /** 只展开「可能是业务模型/容器」的类：框架类（View/Context/Bitmap…）一律不碰。 */

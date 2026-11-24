@@ -25,6 +25,12 @@ class XhsNoteMemoryTest {
         val infoList: List<FakeVariant> = emptyList(),
     )
 
+    /** 只在 url 字段里带 id 的模型（部分宿主把 id 只拼在分享链里）。 */
+    private class SciNote(
+        val shareUrl: String,
+        val imageList: List<FakeImage> = emptyList(),
+    )
+
     private class FakeUser(val nickname: String? = null, val userId: String? = null)
 
     private class FakeNote(
@@ -186,6 +192,31 @@ class XhsNoteMemoryTest {
             "原因应指向「命中了但抽不到图」：${XhsNoteMemory.lastDiag}",
             XhsNoteMemory.lastDiag.orEmpty().contains("没抽出"),
         )
+    }
+
+    @Test
+    fun idInsideUrlStillMatches() {
+        // 有的模型不存裸 id，只在分享链里带：精确匹配落空后要能靠「包含」这一档认出来。
+        val note = SciNote(
+            shareUrl = "https://www.xiaohongshu.com/discovery/item/$noteId?xsec_token=abc",
+            imageList = listOf(FakeImage(urlDefault = "https://sns-img.xhscdn.com/wrapped")),
+        )
+        assertEquals(
+            listOf("https://sns-img.xhscdn.com/wrapped"),
+            XhsNoteMemory.extractFrom(note, noteId)?.images?.map { it.originalUrl },
+        )
+    }
+
+    @Test
+    fun missReportsOtherIdsSeen() {
+        // 驱动侧拿错 id（真机 2026-11-24：标题索引把三张卡映射成同一篇）时，日志要能看出
+        // 图里其实是别的 id —— 否则「没找到对象」和「id 认错了」永远分不清。
+        val other = "5f1b2c3d4e5f6a7b8c9d0e1f"
+        val note = FakeNote(id = other, imageList = listOf(FakeImage(urlDefault = "https://sns-img.xhscdn.com/x")))
+        assertNull(XhsNoteMemory.extractFrom(note, noteId))
+        val diag = XhsNoteMemory.lastDiag.orEmpty()
+        assertTrue("应带疑似 id：$diag", diag.contains("疑似 id"))
+        assertTrue("应指出真实 id 的前缀：$diag", diag.contains("5f1b2c3d"))
     }
 
     @Test

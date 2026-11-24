@@ -1308,6 +1308,7 @@ object XhsBatchDriver {
         // 无凭据 = 分享链那条路彻底没得走（缓存命中的详情页不发 imagefeed）。但这一刻详情页已经把
         // 图渲染出来了：宿主的 note 模型就在对象图里，图集直链不需要凭据（2026-11-24 用户选题 A；
         // 字段口径与边界见 [XhsNoteMemory] 注释）。取不到就照旧判失败，不编造内容。
+        var memDiag: String? = null
         if (note == null && linkKind == "无凭据") {
             val act = XhsBatchSave.activityOrNull()
             val mem = onMainOrTimeout { XhsNoteMemory.resolve(act, noteId) }.second
@@ -1315,7 +1316,10 @@ object XhsBatchDriver {
                 xlog(ctx, "无凭据 → 详情页内存取图 ${mem.images.size} 张 noteId=$noteId")
                 note = mem
             } else {
-                vlog(ctx, "无凭据，详情页内存里也没取到这一篇的图集 noteId=$noteId（${XhsNoteMemory.lastDiag ?: "未命中"}）")
+                // 面板上只看得见 xlog：内存这条为什么没成（没找到对象 / 命中了但字段口径不符 /
+                // 视频笔记）必须带进失败行，否则用户截图里只有一句「解析不出图片」，等于没有线索。
+                memDiag = XhsNoteMemory.lastDiag ?: "未命中"
+                vlog(ctx, "无凭据，详情页内存里也没取到这一篇的图集 noteId=$noteId（$memDiag）")
             }
         }
         if (note == null) {
@@ -1323,7 +1327,8 @@ object XhsBatchDriver {
             // 2026-11-24 起批量也开网页兜底，所以 RequiresWebView 现在意味着「跑过 JS 仍然没有
             // __INITIAL_STATE__」——不能再写「批量不走网页」；兜底过程直接读 XhsWebFetch.lastDiag 取证。
             val kind = if (why.contains("RequiresWebView")) "需网页渲染（分享页得跑 JS）" else why
-            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=$kind 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}）")
+            val mem = memDiag?.let { " 内存兜底=$it" }.orEmpty()
+            xlog(ctx, "解析不出图片 noteId=$noteId（链=$linkKind 原因=$kind 网页兜底=${XhsWebFetch.lastDiag ?: "未尝试"}$mem）")
             return SaveOutcome.FAIL
         }
         // 内存兜底可能替换过 note（无凭据那一路），下面统一用这一份。
