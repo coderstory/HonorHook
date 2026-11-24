@@ -1175,6 +1175,12 @@ object XhsBatchSave {
          */
         onlyIndexes: Set<Int> = emptySet(),
     ) {
+        // 手点「保存原图」不属于任何一轮：批量没在跑（或停在暂停）时，上一轮「暂停/取消/超时」
+        // 留下的旗标不许拦它——否则第一张就 break，完成卡写「已取消 0/N」（2026-11-24 真机）。
+        if (!quiet && !XhsBatchDriver.isRunningActive()) {
+            cancelRequested = false
+            imageCancelRequested = false
+        }
         // 入口清零只对「新一轮」生效：驱动已经在取消（cancelRequested=true）时不能把它擦掉，
         // 否则取消落在等链/等 id 阶段，等待结束后照样整篇下完（2026-11-22 审计 P1）。
         if (!cancelRequested) imageCancelRequested = false
@@ -1390,6 +1396,16 @@ object XhsBatchSave {
     internal fun requestCancel() {
         cancelRequested = true
         imageCancelRequested = true
+    }
+
+    /**
+     * 一轮结束（正常收工/取消/异常）后清掉取消旗标。取消是「本轮」语义：残留到下一轮会让
+     * downloadAll 入口的复位被 `if (!cancelRequested)` 挡掉，之后**手点保存原图**第一张就 break，
+     * 完成卡显示「已取消 0/N」（2026-11-24 真机：批量点过取消，再单独保存原图必现）。
+     */
+    internal fun finishRun() {
+        cancelRequested = false
+        imageCancelRequested = false
     }
 
 

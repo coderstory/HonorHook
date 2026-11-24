@@ -230,6 +230,12 @@ object XhsBatchDriver {
 
     fun isRunning(): Boolean = running
 
+    /**
+     * 批量在跑且没暂停。手点「保存原图」时用它判「这一轮还归批量管」：否则不能清取消旗标，
+     * 清早了会让正在收尾的批量继续下完。
+     */
+    fun isRunningActive(): Boolean = running && !paused
+
     fun processedCount(): Int = processed
 
     /** 已收到取消、正在等当前这篇收尾（按钮显示「收尾」）。 */
@@ -1560,6 +1566,8 @@ object XhsBatchDriver {
         // 旧线程的收尾不能覆盖新一轮的状态（用户 stop 后立刻再点「采集」时会出现）
         if (gen != runGen.get()) return
         running = false
+        // 取消旗标属于本轮：不清掉，之后单独「保存原图」会被判成已取消（见 XhsBatchSave.finishRun）
+        runCatching { XhsBatchSave.finishRun() }
         releaseStayAwake()
         endedAt = System.currentTimeMillis()
         pendingNow = 0
