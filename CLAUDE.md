@@ -48,6 +48,8 @@ am start -a android.intent.action.VIEW \
 
 MT 弹安装面板，用户手点确认；装后 LSPosed 会停用模块 → `dev.sh enable-module`（桌面）或用户手动重启用 + force-stop 宿主。判据：`dumpsys package io.github.coderstory.honorhook | grep lastUpdateTime`。
 
+**`dev.sh install-local` 报 `INSTALL_FAILED_ABORTED: User rejected permissions` = 屏幕锁着**（确认弹窗无法显示，安装会话被中止），解锁后原样重跑即可；2026-11-25 实证（`mDreamingLockscreen=true` 时必失败，唤醒+解锁后 `Success`）。`install -r` 语义下 LSPosed 启用态与作用域不掉。
+
 自写脚本：`dev.sh`（构建/安装/日志/UI 自动化/反编译统一入口）、`adapt_new_version.py`
 （宿主新版本适配校验：从 hook 源码+数据表抽取挂载点声明，对反编译产物核对类/方法存活；口径见 docs/hook-inventory-audit.md §一；逐包归属用 tools/adapt_mt.py）、
 `rain-decrypt.py`（Rain 参考模块字符串解密，逆向期）。

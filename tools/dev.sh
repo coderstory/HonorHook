@@ -87,6 +87,16 @@ dev_root() {
   if have_adb; then "$ADB" shell "su 0 sh -c \"$1\""; else su -c "$1"; fi
 }
 
+# ---- 屏幕是否「亮着且已解锁」（荣耀包安装器的硬前置）----
+# 2026-11-25 实证：锁屏/息屏时 `cmd package install` 起的 PackageInstallerActivity 一启动就被判
+# `[PackageInstallerActivity_]ADB block reject because activity go paused.`，框架随即把会话销毁成
+# `Failure [INSTALL_FAILED_ABORTED: User rejected permissions]`——看着像权限问题，其实只是屏幕没解锁。
+# 参数 = 最长等待秒数（省略 = 只查一次）；输出 YES / NO。
+install_unlocked() {
+  local wait_s="${1:-0}"
+  dev_root "i=0; while :; do l=\$(dumpsys window | grep -m1 -o \"mDreamingLockscreen=[a-z]*\"); w=\$(dumpsys power | grep -m1 -o \"mWakefulness=[A-Za-z]*\"); if [ \"\$l\" = \"mDreamingLockscreen=false\" ] && [ \"\$w\" = \"mWakefulness=Awake\" ]; then echo YES; exit 0; fi; [ \$i -ge ${wait_s} ] && { echo NO; exit 1; }; input keyevent KEYCODE_WAKEUP >/dev/null 2>&1; sleep 2; i=\$((i+1)); done" 2>/dev/null | tr -d '\r' | tail -1
+}
+
 # ---- 安装确认弹窗代点（install / install-root 共用；T-1，2026-10-14）----
 # 场景：荣耀 ROM 对 `adb install` 与 root `pm install` 都弹确认（纯净模式 / USB 安装管控），
 # 两段式（先「继续 / 仍要安装」，再「继续安装 / 确定」）；实测按钮文本出现过：
@@ -695,7 +705,37 @@ EOF
     info "on-device 静默安装: $(basename "$apk") ($(du -h "$apk" | cut -f1))"
     dev_root "cp '$apk' /data/local/tmp/honorhook-install.apk && chmod 644 /data/local/tmp/honorhook-install.apk" \
       || die "中转 /data/local/tmp 失败（su 不可用？）"
-    dev_root "cmd package install -r -d /data/local/tmp/honorhook-install.apk" | tr -d '\r'
+    # 前置判据 `mDreamingLockscreen` 在本 ROM 有假阳性（2026-11-25 实测：它报 false 时安装照样被判
+    # `User rejected permissions`），所以只当软提示、不拦安装；真正的兜底是下面 ABORTED 分支的
+    # 「等解锁 + 自动重试一次」。
+    if [ "$(install_unlocked)" != "YES" ]; then
+      info "屏幕锁定 → 先唤醒，等你解锁（最长 60s；荣耀安装器对锁屏/息屏的安装会话直接判 User rejected permissions）"
+      install_unlocked 60 >/dev/null || warn "60s 内没等到解锁；先试装，失败会自动等你解锁再重试一次"
+    else
+      dev_root "input keyevent KEYCODE_WAKEUP >/dev/null 2>&1" || true
+    fi
+    OUT="$(dev_root "cmd package install -r -d /data/local/tmp/honorhook-install.apk" 2>&1 | tr -d '\r' || true)"
+    printf '%s\n' "$OUT"
+    case "$OUT" in
+      *INSTALL_FAILED_ABORTED*)
+        # 2026-11-25 实测：预检查与安装之间有竞态——屏幕正回锁、或有浮窗抢焦点，安装页都会一启动就
+        # paused（PackageInstaller 日志 `ADB block reject because activity go paused.`）。与其让用户
+        # 对着 User rejected permissions 发呆，这里再等一次解锁并自动重试一轮。
+        warn "安装会话被荣耀安装器中止（屏幕锁着或被窗口抢焦点）；解锁后自动重试一次"
+        if [ "$(install_unlocked 120)" = "YES" ]; then
+          sleep 1
+          OUT="$(dev_root "cmd package install -r -d /data/local/tmp/honorhook-install.apk" 2>&1 | tr -d '\r' || true)"
+          printf '%s\n' "$OUT"
+          case "$OUT" in
+            *Success*) info "已安装；LSPosed 启用态不必重设（install -r 语义），宿主进程要重启才注入新代码" ;;
+            *) die "重试仍失败：$OUT" ;;
+          esac
+        else
+          die "屏幕仍锁定：解锁屏幕后再跑 tools/dev.sh install-local"
+        fi ;;
+      *Success*)
+        info "已安装；LSPosed 启用态不必重设（install -r 语义），宿主进程要重启才注入新代码" ;;
+    esac
     ;;
 
   stop-app)
