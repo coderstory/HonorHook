@@ -531,3 +531,70 @@ imagefeed**，卡片 token 反射也偶发读不出 ⇒ 9 篇里有 1 篇没凭�
 
 **未验证风险**：宿主模型字段名是否被 R8 改名（`@SerializedName` 只保注解值，不一定保字段名）与本 ROM
 对象图可达性都还没真机实证——落空时日志会写 `lastDiag`，据此再决定是加「列表 adapter 取」还是换锚点。
+
+## 批量解析失败 → 宿主长按保存兜底（2026-11-25，用户拍板）
+
+**现象**：批量采集里总有几篇 `解析不出图片` / `链=无凭据` 一路 FAIL（本轮失败计数 +1），
+但那一刻**详情页的图已经渲染在屏上**——用户的原话是「你直接模拟长按，然后点击保存按钮不行吗？
+你的解析逻辑又不完善」，于是把「解析不出来」的处置从「如实失败」改成「退给宿主自己存一张」。
+
+**为什么不改解析链**：解析（分享链 `/api/sns/` 取 `share_info`、无凭据走内存对象图、网页兜底）
+每一步都可能空手，这是宿主侧（缓存命中不发 imagefeed、反爬壳页、字段改名）决定的，不是我们的 bug。
+继续加解析路径只会越堆越脆；宿主自己的长按面板本来就具备保存能力，兜底只需要**点两下**。
+
+**实现**：`app/app/src/main/kotlin/top/honorhook/xposed/target/xhs/XhsHostNativeSave.kt`
+（`internal object`，进程内 UI 驱动，无输入注入、无 root）：
+1. 记录 MediaStore 图片表最大 `_id` 作为基线；
+2. 在 decor 视图树里挑**面积最大且 ≥1/6 屏**的图片类视图（ImageView 子类 / 类名含 Image、Drawee，
+   即 Fresco 的 DraweeView 与各种 PhotoView），`getLocationInWindow` 取中心点；
+3. 发真实 `MotionEvent` DOWN → 600ms → UP（`longPressTimeout` 500ms + 余量）给 decor，走宿主自己的
+   手势识别——**不用 `performLongClick`**：宿主的长按监听挂在容器/GestureDetector 上，直接调控件的多半没人接；
+4. 轮询 2.5s 在**全部窗口根视图**里找「保存」（`保存` 精确优先，`保存图片/保存到相册/保存原图/存图` 前缀次之，
+   `取消/举报/不感兴趣/删除/分享` 一律不点），命中后依次试「isClickable 祖先 ≤4 层 → `performClick` → 坐标触摸」；
+5. 轮询 10s 比 MediaStore 最大 `_id` 是否增长（**相册口径判据**，不猜回调）；
+6. 收面板（见下），写 modlog `XhsHook·Fallback 长按保存成功/未成 noteId=… · <诊断>`。
+
+**面板在独立窗口里**（承 2026-11-22 实证）：详情页长按弹的是 `LCBBottomSheetDialog` 一类 Dialog，
+**不在 Activity 视图树里**（转储只看到详情页）。所以根视图枚举 = decor + 反射
+`WindowManagerGlobal.getInstance().mViews`（hidden API 拦了就退到「从 Activity 对象图里找 Dialog 的窗口
+根视图」，按类型认、BFS 只跑一次；都拿不到才只剩 decor，只记诊断不阻断）。
+
+**面板必须自己收掉**：`XhsBatchDriver.backToList` 只按一次返回，`pressBack` 打的是 **Activity 窗口**，
+对独立 Window 上的 Dialog 无效 ⇒ 面板吃掉这次返回就判「没回到列表，本轮收工」。
+故：先等宿主自己关 1.5s，还开着就从 Activity 起按字段 BFS（深 5 / 600 对象 / 每对象 48 字段，按类型认
+`android.app.Dialog`）找实例 dismiss——与 `XhsBatchSave.dismissHostPanel` 同一口径，不赌混淆字段名。
+找不到只记 `面板未关`，这一次兜底仍算成功。
+
+**接在哪**：`XhsBatchDriver.collectWithRetry` 的**最后一次失败之后**、`return outcome` 之前，条件
+`outcome == FAIL && !stopRequested && !paused && hostFallback`；成功则返回 `SaveOutcome.OK`（相册确实多了一张）。
+重试期间不做（会把图点开、弹面板，干扰下一跳的解析与回列表判定）；壳页型失败（`lastFailureIsShell()`）
+在重试循环里就已 `return FAIL`，走不到这里——壳页没有图可长按，这是有意的。
+
+**两道防线（审计后加，防误存）**：
+1. `hostFallback` 只由「点开过卡片」那条调用点传 `true`。「免点开」直下路径（分享链已在表里、
+   零详情页）根本不传，否则长按会落到 feed 卡片上。
+2. 命令时刻再验一次「真的进过详情页」，口径与主循环 `opened` 相同：前台 Activity 实例变了，
+   或详情端点登记了新的 `lastShareNoteId()`。没离开列表就记「前台还在列表，跳过长按兜底」并维持失败——
+   **把无关的图存进相册再记成功，比失败糟得多**（同 `XhsNoteMemory` 拒绝视频笔记的口径）。
+
+**判据只认「宿主写的那张」**：相册 `_id` 变大如果发生在别的 App 存图的那一刻，会被误判成本篇成功。
+所以先按 `owner_package_name = com.xingin.xhs` / `relative_path LIKE %小红书%` 过滤再看增长（其中一条
+数据库不认这列就试下一条）；宿主是自己写文件再扫描入库、这两列空着的时候，才退回「全量增长 + 最新一张
+归属」判定（最新那张能查到是别的 App 就**不算**成功）。都读不到只记「相册查询不可用」，不猜成功。
+
+**同一篇不重复长按**：兜底成功会往宿主 `filesDir/xhs_host_saved.tsv` 记一行 `noteId\tts`
+（独立文件，**不写** `xhs_download_ledger.tsv`——那张表第二列是落盘时间，`downloaded()` 见 ts>0 就返 1，
+会让这篇在「免点开」那条路上永久跳过、再也补不齐张数）。下一批再遇到这篇：解析照常再试（可能这次能拿到
+完整图集），**只是不再长按**——否则相册里会多一张内容相同的压缩图。
+
+**取消响应**：兜底最坏 ~14s（2.5s 等面板 + 10s 等落盘 + 1.5s 收面板）。驱动把 `{ !stopRequested && !paused }`
+作为 `canContinue` 传进来，两段轮询每 250ms 看一次，取消/暂停立刻退（日志「已暂停/取消，放弃兜底」）。
+
+**与 X5 的关系**：详情页面板的「保存」**不走** X5 挂的 `ji9.b` lambda（2026-11-22 modlog 零 X5 行），
+所以这条兜底通常就是宿主原生保存；万一被接管，X5 链接解析失败也会 `proceed()` 回落宿主原生保存。
+**产物口径**：宿主原生保存 = 单张压缩图，不是原图——日志里明写，别拿来当原图链路。
+
+**未验证风险**：① 面板文案/层级随宿主版本漂移（找不到保存按钮 → 记「面板里没找到保存按钮」）；
+② `WindowManagerGlobal.mViews` 在本 ROM 是否被 hidden API 拦（拦了就只能看到 decor）；
+③ 长按坐标落在浮窗/别的 App 上会误触（兜底只在前台是小红书写详情页时有意义，
+`activityOrNull()` 拿不到就直接失败返回）。

@@ -790,7 +790,7 @@ object XhsBatchDriver {
                     sleepPace()   // 原来 sleep(paceMs())：节奏配到 120s 时取消要等两分钟才生效
                     continue
                 }
-                val saved = collectWithRetry(module, ctx, prev, known)
+                val saved = collectWithRetry(module, ctx, prev, known, hostFallback = true)
                 if (paused) {
                     // 暂停打断了这一篇（下载被 requestCancel 掐断、已下好的保留）。
                     // 不能算成功/失败，也不能把它留成「已处理」——记下 key，恢复后重采它，
@@ -1171,7 +1171,19 @@ object XhsBatchDriver {
         shellStreak = 0
     }
 
-    private fun collectWithRetry(module: XposedModule, ctx: Context, prev: String?, known: String?): SaveOutcome {
+    private fun collectWithRetry(
+        module: XposedModule,
+        ctx: Context,
+        prev: String?,
+        known: String?,
+        /**
+         * 允许「解析失败 → 宿主长按保存」兜底。只有**点开过卡片**的那条路传 true：
+         * 「免点开」直下路径根本没开详情页，长按会落到 feed 卡片上（误存无关的图）。
+         */
+        hostFallback: Boolean = false,
+    ): SaveOutcome {
+        // 兜底守卫用：调用时的前台 Activity（之后前台一旦换掉/详情页登记了新 id 才算"真的进过详情页"）。
+        val actAtStart = XhsBatchSave.activityOrNull()
         // 审计 C1：lastFailureDetail 是全局粘滞串，上一篇的壳页标记会被算到本篇 ⇒ 误自动暂停。
         runCatching { XhsSavePivot.clearLastFailure() }
         var outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
@@ -1192,6 +1204,37 @@ object XhsBatchDriver {
             xlog(ctx, "本篇第 $attempt/$ITEM_MAX_ATTEMPTS 次重试", toast = false)
             sleepPace()
             outcome = runCatching { collect(module, ctx, prev, known) }.getOrDefault(SaveOutcome.FAIL)
+        }
+        // 解析彻底失败（分享链 + 详情页内存两条路都没拿到图集，或解析超时）→ **宿主兜底**：
+        // 进程内模拟「长按图片 → 点面板保存」，让宿主用它自己的图存一张（2026-11-25 用户拍板）。
+        // 只在最后一次失败后做一次：重试期间做会把图点开/弹出面板，干扰下一跳的解析与「回列表」判定。
+        // 成功就记 OK（相册确实多了一张），日志写明是宿主原生保存、不是原图。
+        if (outcome == SaveOutcome.FAIL && !stopRequested && !paused && hostFallback) {
+            val noteId = lastNoteId ?: known
+            val act = XhsBatchSave.activityOrNull()
+            // 「有没有真的进过详情页」与主循环 opened 同口径（前台换了 Activity，或详情端点登记了新 id）：
+            // 卡片点不动 / 详情没打开时前台还在列表，长按下去点到的是 feed 卡片 —— 会把无关的图
+            // 存进相册再记成"成功"，比失败糟得多（口径同 XhsNoteMemory「视频笔记整篇拒绝」）。
+            val navigated = act != null && (act !== actAtStart || XhsVideoSave.lastShareNoteId() != prev)
+            val hostSavedBefore = if (noteId != null) {
+                runCatching { XhsDownloadLedger.hostSavedAt(ctx, noteId) }.getOrDefault(0L)
+            } else 0L
+            if (!navigated) {
+                xlog(ctx, "解析失败，但前台还在列表（没打开详情），跳过长按兜底", toast = false)
+            } else if (hostSavedBefore > 0) {
+                // 这篇以前用宿主面板存过一张：再长按一次只会在相册里多一张内容相同的图。
+                // 不跳过整篇——解析本身还值得再试一次（试成功就是完整图集，能补上缺的张数）。
+                xlog(ctx, "解析失败，但这篇以前已用宿主长按存过，不再重复长按 noteId=${noteId ?: "未知"}", toast = false)
+            } else {
+                val ok = runCatching {
+                    XhsHostNativeSave.trySave(act, module, noteId) { !stopRequested && !paused }
+                }.getOrDefault(false)
+                if (ok) {
+                    xlog(ctx, "解析失败 → 宿主长按保存兜底成功 noteId=${noteId ?: "未知"}（宿主原生保存，单张非原图）")
+                    return SaveOutcome.OK
+                }
+                xlog(ctx, "解析失败 → 宿主长按保存兜底也没成（${XhsHostNativeSave.lastDiag ?: "无诊断"}）noteId=${noteId ?: "未知"}", toast = false)
+            }
         }
         return outcome
     }

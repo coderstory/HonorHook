@@ -42,6 +42,42 @@ internal object XhsDownloadLedger {
         }
     }
 
+    /** 宿主原生保存（长按面板）单独记一份：一行 `noteId \t ts`。 */
+    private const val HOST_SAVED_FILE = "xhs_host_saved.tsv"
+
+    /**
+     * 记一笔「这篇用宿主长按面板存过一张」。
+     *
+     * 为什么不写进 [LEDGER_FILE]：那张表第二列是落盘时间、第三列是期望张数，[downloaded] 只要 ts>0
+     * 就返回 1 ⇒ 会在免点开那条路上让这一篇永久跳过、再也补不齐缺的张数（宿主面板只存得到一张压缩图）。
+     * 这份只用来抑制兜底重跑：不然每批都给同一篇再长按一次，相册里留两张一模一样的图。
+     */
+    internal fun recordHostSaved(
+        context: android.content.Context,
+        noteId: String,
+        atSec: Long = System.currentTimeMillis() / 1000,
+    ) {
+        runCatching {
+            java.io.File(context.filesDir, HOST_SAVED_FILE).appendText("$noteId\t$atSec\n")
+        }
+    }
+
+    /** 这篇是否用宿主长按面板存过（0 = 没记过）。 */
+    internal fun hostSavedAt(context: android.content.Context, noteId: String): Long = runCatching {
+        val f = java.io.File(context.filesDir, HOST_SAVED_FILE)
+        if (!f.exists()) return 0L
+        var last = 0L
+        f.useLines { lines ->
+            for (line in lines) {
+                val parts = line.split('\t')
+                if (parts.size >= 2 && parts[0] == noteId) {
+                    parts[1].toLongOrNull()?.let { if (it > last) last = it }
+                }
+            }
+        }
+        last
+    }.getOrDefault(0L)
+
     /**
      * 相册里这篇**已经存在哪些图片序号**（文件名 `xhs_<noteId>_<ts>_<i>.<ext>`）。
      * 用它做「补齐」而不是「整篇重下」：缺 2 张就只下那 2 张，已存在的不再产生重复文件。
