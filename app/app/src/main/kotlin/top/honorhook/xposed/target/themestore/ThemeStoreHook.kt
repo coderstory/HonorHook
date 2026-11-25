@@ -40,6 +40,7 @@ object ThemeStoreHook : TargetHook {
     private val versionTables: List<HostVersion.Table<HookPoint>> = buildList {
         FeatureCatalog.extraVersionsOf(packageName).forEach { version ->
             when (version) {
+                "20.1.69.311" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_69_311 })
                 "20.1.67.303" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_67_303 })
                 "20.1.67.302" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_67_302 })
                 "20.1.65.302" -> add(HostVersion.Table(setOf(version)) { THEME_POINTS_20_1_65_302 })
@@ -81,9 +82,14 @@ object ThemeStoreHook : TargetHook {
                 .map { it.toMountTask() }
             // 解密工具类（源名 ThemeCheckTool）的混淆名随版本绑定：W2 付费壁纸解密要直接调它的
             // getDecryptWallpaperFile。历史版本该方法在独立工具类 gl5；2026-11-07 的 20.1.67.303 实证
-            // gl5 已变成不相关的 Rx 类、方法整体迁进 ThemeCheckTool 本体 b26 ⇒ 只对本表显式指定，
-            // 其余版本保持旧的 gl5（不能拿 DECRYPT_PREPARE 行的类名顶替：老表的 e26 只挂 getDecryptTheme）。
-            decryptToolClass = if (pick.matchedVersion == "20.1.67.303") THEME_DECRYPT_TOOL_67_303 else null
+            // gl5 已变成不相关的 Rx 类、方法整体迁进 ThemeCheckTool 本体 b26；2026-11-25 的 20.1.69.311
+            // 同样在 ThemeCheckTool 本体（z16，全 dex 唯一持有 getDecryptWallpaperFile）⇒ 对这两版显式
+            // 指定，其余版本保持旧的 gl5（不能拿 DECRYPT_PREPARE 行的类名顶替：老表的 e26 只挂 getDecryptTheme）。
+            decryptToolClass = when (pick.matchedVersion) {
+                "20.1.67.303" -> THEME_DECRYPT_TOOL_67_303
+                "20.1.69.311" -> THEME_DECRYPT_TOOL_69_311
+                else -> null
+            }
 
             session.attemptMount(pending, module, loader) { task -> mountOne(session, task, module, loader) }
         }

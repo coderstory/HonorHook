@@ -1088,6 +1088,26 @@ Ex 实例工厂改 `HiAnalyticsManager.getInstanceEx()` 静态方法——HonorT
 「工具类漂移」分支静默放行。现改为 `ThemeStoreHook.decryptToolClass`（从当前命中表的 DECRYPT_PREPARE
 行取），W2 的 `getDecryWallpaperPath` 也从 `task.className` 取，不再写死混淆名。
 
+## 20.1.69.311 适配（2026-11-25，运行期 DexKit 漂移 + 自写 dex 直查）
+
+设备 2026-11-24 21:53 OTA 到 **20.1.69.311**，未登记 ⇒ 按基线 63.305 盲挂，真机判据
+`installed 51/54`：四个混淆类改名（DexKit 宽松轨把其中三点救回，ThemeCheckTool 两点 + F-fallback② 落空）：
+
+| 源名 | 67.303 | **69.311** | 锚 |
+|---|---|---|---|
+| SharepreferenceUtils（云控读点） | xh5 | **yh5** | 双 getBoolean 重载 + getInt/readString/removeKey；DexKit 漂移行实证 |
+| LiveWallpaperHelper | b83 | **j83** | `createApplyWallPaper(WallPaperInfo)V` / `getDecryWallpaperPath(String)`（classes20.dex） |
+| DownloadItemIfVip | vb1 | **zb1** | `downloadItem()V` / `productSendFinish(I,String,String,Pair)V`；DexKit 用基线锚串解析到 zb1 |
+| ThemeCheckTool | b26 | **z16** | 三个解密方法全在此类，**全 dex 唯一持有者**（classes19.dex） |
+
+⇒ 新表 `ThemeStoreMap_20_1_69_311`（取代 67.303 套，后者留给仍停在 .303 的设备）。
+`gl5` 在 .311 里已不含 `getDecryptWallpaperFile`（全 dex 唯一在 z16）⇒ `decryptToolClass` 对 .311 也要
+覆盖成 z16，否则 W2 付费壁纸解密回落 gl5 必失败转「工具类漂移」放行。
+
+静态核对工具：本轮 MT MCP 未起（:8787 拒连）、`dexdump` 是 x86-64 且 /storage noexec ⇒ 改用自写最小
+dex 解析器（header → string/type/proto/method_ids → class_defs → class_data，按**方法名**反查类），
+脚本在会话临时目录 `.buildtmp/theme69/dexlook.py`（未入库；口径同 `tools/adapt_mt.py`：类在 + 方法名 + 参数个数）。
+
 ## §E.6 付费主题 100%「文件已损坏」定案（2026-11-02，诊断点 + smali 实证）
 
 ### 现象

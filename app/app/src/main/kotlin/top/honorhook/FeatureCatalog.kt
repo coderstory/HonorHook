@@ -193,7 +193,7 @@ object FeatureCatalog {
                 Feature(KEY_THEME_AD_OFF, R.string.feature_theme_ad_off_title, R.string.feature_theme_ad_off_desc),
             ),
             baselineVersion = "20.1.63.305",   // aapt2 实证（原 ThemeStoreHook 私有常量上提）
-            extraVersions = setOf("20.1.65.302", "20.1.67.302", "20.1.67.303"),   // 65.302 = 10-23（3 混淆类改名）；67.302 = 11-02（f71→wb1）；67.303 = 11-07 实装（4 混淆类改名，ThemeStoreMap_20_1_67_303）
+            extraVersions = setOf("20.1.65.302", "20.1.67.302", "20.1.67.303", "20.1.69.311"),   // 65.302 = 10-23（3 混淆类改名）；67.302 = 11-02（f71→wb1）；67.303 = 11-07 实装（4 混淆类改名，ThemeStoreMap_20_1_67_303）；69.311 = 11-24 OTA 实装（4 混淆类改名，ThemeStoreMap_20_1_69_311；盲挂判据 installed 51/54）
         ),
         Target(
             "com.android.packageinstaller", R.string.target_name_installer,
@@ -317,7 +317,7 @@ object FeatureCatalog {
                 Feature(KEY_JD_SPLASH, R.string.feature_jd_splash_title, R.string.feature_jd_splash_desc),
             ),
             baselineVersion = "16.1.0",  // dumpsys 实证 2026-10-12（dex 级锚点核对见 docs/reverse/jd.md §二·2）
-            extraVersions = setOf("16.1.50"),  // 2026-10-23 升级版；单点开屏跳过跨版本成立，installed 1/1×6 进程（2026-10-27 真机判据）
+            extraVersions = setOf("16.1.50", "16.2.0"),  // 16.1.50 = 2026-10-23 升级版；单点开屏跳过跨版本成立，installed 1/1×6 进程（2026-10-27 真机判据）；16.2.0 = 2026-11-25 复核，未登记时已 installed 1/1×6 进程（零漂移，纯登记）
         ),
         Target(
             "com.aimazhishi.mfa.authenticator", R.string.target_name_mfa,

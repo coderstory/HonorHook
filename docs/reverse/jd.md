@@ -63,6 +63,13 @@ launchable-activity: com.jingdong.app.mall.MainFrameActivity   (aapt2 badging)
 - 热启动/从后台回来不误伤（hook 点只在 onCreate 链，理论无热路径）。
 - 回归：正常浏览/下单路径无异常（hook 只跳过 add fragment，不碰任何业务方法）。
 
+## 五·2、反 hook 检测面（16.2.0，2026-11-25）
+
+京东自带 `JDMob.Security` 反篡改栈（XposedHookHelper / HookCheckUtil / RootCheckUtils / LSPatchUtil）+ JMA 风控上报 + FireEye + `libAntiCheat.so`，
+Xposed 检测由**服务端 mobile config** 驱动（`lsposedCheck`/`hookkeys`/`hooknum`/`hiddenApiOpen`），16.2.0 已把 `JMA.needXposedDialog()` stub 成恒 false。
+本机实测未命中其多数探针（`/proc/<pid>/maps` 零 `lspd|lspatch|xposed|riru`、无 `/sbin/.magisk`、无 `/data/misc/riru`）。
+检测地图、上报链、分档对抗方案与风险见 [`jd-hook-detect.md`](jd-hook-detect.md)。
+
 ## 六、落地接线（新目标接入，依 `CLAUDE.md` §3.2）
 
 `TargetRegistry` 新建 target（抄最像的现有实现）→ `scope.list` 加 `com.jingdong.app.mall` → `FeatureCatalog` 加开关条目 → 远端 prefs 默认开。挂载点实现放 target 内，混淆方法用「遍历 declaredMethods 按签名匹配」模式（项目已有 DexKit 兜底纪律：签名匹配 = 弱锚点，失败必须 NOT_RESOLVED 显式记日志，不许静默）。
