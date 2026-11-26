@@ -31,6 +31,16 @@ import top.honorhook.xposed.target.logDisabled
  * 无 SDK 的包（如云音乐走 com.hihonor.hms.ads）解析失败 → NOT_RESOLVED，随类加载重试后放弃，不影响注入。
  *
  * 版本漂移风险：SDK 包名/类名稳定，但内部方法签名随 OTA 可能变；以真机 `installed N/M` 与失败清单为准。
+ *
+ * 2026-11-26 浏览器 3.10.1.303 实证（BaseAdView 两点仍 `installed 2/2` 但回调 0 次）：该版浏览器自建
+ * `services.advertisement` provider 层（IAdvertisementService 实现类 = 混淆类 ra1），开屏/信息流/搜索广告
+ * 都绕开了 BaseAdView 渲染层。两条"想当然"的收口点已同日真机证伪，勿重走：
+ *  1) **`HnAds.init` 不能拦**：宿主 init 后照样 `iv20.obtainSplashToCache` → `SplashAdLoad.loadAd` →
+ *     `AdLoadWrap.loadAd` → `com.hihonor.adsdk.base.o.m.<init>` 里 `HnAds.mContext.getApplicationContext()`，
+ *     未初始化即 NPE ⇒ 浏览器 `DefaultDispatcher-worker` 崩溃循环（SDK 自身不 fail-safe）。
+ *  2) **`SplashAdvertisementActivity.onCreate` 不能直接 finish**：该 Activity 参与冷启动流程（finish 后回桌面，
+ *     进程仍活着但无前台 Activity），不是可随手关掉的纯覆盖层。
+ * ⇒ 浏览器仍只有下面 2 点；信息流/搜索/开屏广告的收口点待另找（见 docs/reverse/browser.md）。
  */
 class HonorAdsHook(override val packageName: String) : TargetHook {
 
