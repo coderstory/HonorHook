@@ -1,5 +1,6 @@
 package top.honorhook.ui.screen
 
+import top.honorhook.ui.component.AppIcons
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
@@ -325,7 +326,7 @@ private class DrawablePainter(private val drawable: Drawable) : Painter() {
 @Composable
 private fun vectorForIconKey(key: String?): ImageVector? = when (key) {
     // 原神风格：岩=护盾的语义对位（2026-11-08 图标统一换主题）
-    "shield" -> genshinOr(Icons.Rounded.Shield, GenshinIcons.Geo)
+    "shield" -> genshinOr(AppIcons.Shield, GenshinIcons.Geo)
     else -> null
 }
 

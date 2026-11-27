@@ -152,6 +152,10 @@ dependencies {
     // 批量采集驱动要点宿主的列表（compileOnly：类由宿主提供，不随模块打包）
     compileOnly("androidx.recyclerview:recyclerview:1.3.2")
 
+    // ---- GhostLock 集成（2026-11-03）：Shizuku 授权/绑定，坐标照 ghostlock app/build.gradle.kts:187-188 ----
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
+
     // ---- MFA 验证器扫码（2026-11-03）：zxing 解码 + CameraX 取景 ----
     implementation(libs.zxing.core)
     implementation(libs.camera.core)

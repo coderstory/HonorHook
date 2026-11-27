@@ -1,5 +1,6 @@
 package top.honorhook.ui.photos
 
+import top.honorhook.ui.component.AppIcons
 import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -147,7 +148,7 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                     .padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
             ) {
                 Icon(
-                    Icons.Rounded.FolderOpen,
+                    AppIcons.FolderOpen,
                     contentDescription = null,
                     tint = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(14.dp),
@@ -159,14 +160,14 @@ fun AiImageScreen(bottomInnerPadding: Dp = 0.dp, topInset: Dp = 0.dp, onBack: ()
                     modifier = Modifier.padding(start = 4.dp),
                 )
                 Icon(
-                    Icons.Rounded.ArrowDropDown,
+                    AppIcons.ArrowDropDown,
                     contentDescription = null,
                     tint = colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(16.dp),
                 )
             }
             IconButton(onClick = { scan() }) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                Icon(AppIcons.Refresh, contentDescription = "刷新")
             }
         }
 
@@ -466,7 +467,7 @@ private fun SourceDialog(
         ) {
             if (!atRoot) {
                 Icon(
-                    Icons.Rounded.ArrowUpward,
+                    AppIcons.ArrowUpward,
                     contentDescription = "上一级",
                     tint = colorScheme.primary,
                     modifier = Modifier
@@ -506,7 +507,7 @@ private fun SourceDialog(
                             .padding(horizontal = 14.dp, vertical = 9.dp),
                     ) {
                         Icon(
-                            Icons.Rounded.Folder,
+                            AppIcons.Folder,
                             contentDescription = null,
                             tint = colorScheme.primary,
                             modifier = Modifier.size(16.dp),

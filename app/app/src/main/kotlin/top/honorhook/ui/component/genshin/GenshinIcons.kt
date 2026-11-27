@@ -1,5 +1,6 @@
 package top.honorhook.ui.component.genshin
 
+import top.honorhook.ui.component.AppIcons
 import androidx.compose.runtime.Composable
 
 import androidx.compose.ui.graphics.Color
@@ -18,7 +19,7 @@ import androidx.compose.ui.unit.dp
  * - 官方的元素徽记 / 神之眼 / 原石都是米哈游的美术资产，直接把提取出来的位图打进仓库是侵权；
  *   这里按「元素 → 抽象几何」重画（风=三道弧、岩=六边、雷=折线、草=叶形、水=水滴、
  *   火=焰形、冰=雪晶），能读出元素感，又不复制任何原生线条。
- * - 全部是 24×24 的 `ImageVector`，与 Material 图标同型：调用点只换 `Icons.Rounded.X` →
+ * - 全部是 24×24 的 `ImageVector`，与 Material 图标同型：调用点只换 `AppIcons.X` →
  *   `GenshinIcons.X`，`IconBadge` / `Icon` 的尺寸与 tint 逻辑一行不用改。
  *
  * 约定：所有图形都画在 24×24 视口、四周留 2 单位空隙，保证与 Material 图标并排时视觉重量一致；

@@ -1,5 +1,10 @@
 package top.honorhook.ui.screen
 
+import top.honorhook.ui.AppSettings
+import top.honorhook.ui.component.AppIcons
+import top.honorhook.ui.component.TechGlyph
+import top.honorhook.ui.component.ThemeShape
+import top.honorhook.ui.component.techAccent
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -36,13 +41,8 @@ import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Password
 import androidx.compose.material.icons.rounded.TravelExplore
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.PhotoLibrary
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.Language
-import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.ToggleOn
 import androidx.compose.material3.Icon
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.Composable
@@ -106,9 +106,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * 工具箱 v1.3.5（2026-10-25 用户拍板：工作台模式）：状态摘要 + 2 列功能磁贴 + 两级页面。
- * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 五磁贴（营销推荐/
- *   应用冻结/MFA/远程开发/文件整理，副标题实时计数）。
- * - 2026-11-09 用户指令删除「临时Root」（GhostLock CVE 提权整链，含 Shizuku 通道与 payload assets）。
+ * - 首页：运行状态摘要卡（root/LSPosed/OTA chips）+ 八磁贴（营销推荐/
+ *   应用冻结/MFA/远程开发/临时Root/文件整理/AI 图像工具/批量采集，副标题实时计数）。
+ * - 2026-11-27 用户指令恢复「临时Root」（revert f3f6b874：GhostLock CVE 提权整链 + Shizuku 通道 + payload assets）。
  * - 二级页：磁贴点进、返回栏回台；冻结沿用 v1.3.1 组件，营销页 = 一键卡。
  * - 2026-11-08 用户指令删除「系统开关」整页（连同 18 条非营销开关），不留入口。
  * - 开关行只显「标题 + 功能描述」——key=value 属面板数据不上屏（2026-10-25 拍板：用户看不懂）。
@@ -197,6 +197,9 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
         if (view == HubView.MFA) {
             // MFA 验证器（2026-11-03）：自带 LazyColumn/心跳/对话框的整页，接住返回键回工作台
             MfaScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
+        } else if (view == HubView.GHOSTLOCK) {
+            // GhostLock 临时提权（2026-11-03）：极简整页，接住返回键回工作台
+            GhostLockScreen(bottomInnerPadding = bottomInnerPadding, onBack = { view = HubView.HOME }, topInset = innerPadding.calculateTopPadding())
         } else if (view == HubView.FILES) {
             // 文件整理（2026-11-04）：规则引擎 + 页面见 ui/toolbox/FileOrganizer.kt（规格 project/file-organizer-rules.md v2）
             // FILES 页无顶栏：Miuix Scaffold 不渲染 TopAppBar 时 innerPadding 仍按顶栏高度预留 → 改用纯状态栏高度
@@ -271,6 +274,8 @@ fun ToolboxScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
                 HubView.MFA -> {}
                 HubView.AI_IMAGE -> {}
                 HubView.XHS_AUTO -> {}
+                // GhostLock 页走独立整页分支（见 when 外层）
+                HubView.GHOSTLOCK -> {}
             }
 
             item {
@@ -436,7 +441,7 @@ private fun describeAction(a: ToolAction): String = when (a) {
 /** 工具箱二级视图（v1.3.4）：顶栏标题随视图切换（FeatureListScreen 同款导航）。 */
 private enum class HubView(val title: String) {
     HOME("工具箱"), PURIFY("营销推荐"), FREEZE("应用冻结"), MFA("MFA 验证器"),
-    FILES("文件整理"), AI_IMAGE("AI 图像工具"), XHS_AUTO("批量采集"),
+    GHOSTLOCK("临时Root"), FILES("文件整理"), AI_IMAGE("AI 图像工具"), XHS_AUTO("批量采集"),
 }
 
 /** 冻结页批量勾选项（2026-10-25 拍板：下拉「影响勾选」不过滤列表展示）。 */
@@ -509,7 +514,7 @@ private fun FreezePane(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Icon(
-                        Icons.Rounded.FilterList,
+                        AppIcons.FilterList,
                         contentDescription = null,
                         tint = colorScheme.primary,
                         modifier = Modifier.size(18.dp),
@@ -601,6 +606,7 @@ private fun HubTiles(
     val accentFreeze = Color(0xFF4FA8FF)
     val accentMfa = Color(0xFF35C77E)
     val accentWeb = Color(0xFF2BB3C0)
+    val accentRoot = Color(0xFFF0A93B)
     val accentFiles = Color(0xFF00BFA5)
 
     @Composable
@@ -614,6 +620,8 @@ private fun HubTiles(
         order: Int,
         onClick: () -> Unit,
     ) {
+        // 科技蓝主题下磁贴强调色同样收敛（与 IconBadge 同一套映射）
+        val tint = techAccent(accent)
         Card(
             modifier = Modifier
                 .width(tileWidth)
@@ -632,19 +640,27 @@ private fun HubTiles(
                 // cardClick = clickable + 触感（同 Card(onClick=) 的一档"嗒"）；磁贴把点击挂在 modifier 上
                 .cardClick(onClick = onClick),
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(accent.copy(alpha = 0.30f), accent.copy(alpha = 0.10f)),
+            Column(Modifier.padding(ThemeShape.cardPadding(16.dp))) {
+                // 底块只有科技蓝去掉（2026-11-28「我只让你去掉科技蓝的图标背景」），
+                // 插画 / 花园仍保留 accent 渐变块 + 26dp 字形 —— 这是 2026-11-08「图标要彩色」的口径。
+                if (AppSettings.techSkin) {
+                    Box(Modifier.size(46.dp), contentAlignment = Alignment.Center) {
+                        TechGlyph(icon = icon, size = 32.dp)
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(accent.copy(alpha = 0.30f), accent.copy(alpha = 0.10f)),
+                                ),
+                                RoundedCornerShape(15.dp),
                             ),
-                            RoundedCornerShape(15.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(26.dp))
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(26.dp))
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -661,42 +677,46 @@ private fun HubTiles(
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(genshinOr(Icons.Rounded.Campaign, GenshinIcons.Pyro), "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds, order = 0) { onOpen(HubView.PURIFY) }
+                Tile(genshinOr(AppIcons.Campaign, GenshinIcons.Pyro), "营销推荐", "11 个营销开关 · 当前开 $adsOn", accentAds, order = 0) { onOpen(HubView.PURIFY) }
             }
             Box(Modifier.weight(1f)) {
-                Tile(genshinOr(Icons.Rounded.AcUnit, GenshinIcons.Cryo), "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze, order = 1) { onOpen(HubView.FREEZE) }
+                Tile(genshinOr(AppIcons.AcUnit, GenshinIcons.Cryo), "应用冻结", "已冻结 $frozen · B/C 档", accentFreeze, order = 1) { onOpen(HubView.FREEZE) }
             }
         }
-        // 2026-11-09 删「临时Root」后重排：2 行 4 格 + 文件整理单格（营销推荐|应用冻结、MFA|远程开发）
+        // 2026-11-08 删除「系统开关」整页后重排：4 行 8 格（营销推荐|应用冻结、MFA|远程开发、临时Root|文件整理、AI 图像工具|批量采集）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                Tile(genshinOr(Icons.Rounded.Password, GenshinIcons.Vision), "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa, order = 2) { onOpen(HubView.MFA) }
+                Tile(genshinOr(AppIcons.Password, GenshinIcons.Vision), "MFA 验证器", "TOTP 动态码 · 扫码/导入", accentMfa, order = 2) { onOpen(HubView.MFA) }
             }
             Box(Modifier.weight(1f)) {
                 // 远程开发（2026-11-03）：独立 Activity（扫码开网页，极简白）
-                Tile(genshinOr(Icons.Rounded.TravelExplore, GenshinIcons.Anemo), "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb, order = 3) {
+                Tile(genshinOr(AppIcons.TravelExplore, GenshinIcons.Anemo), "远程开发", "扫码打开网页 · 全屏浏览器", accentWeb, order = 3) {
                     onOpenHubActivity()
                 }
             }
         }
+        // 一行两格，成对排布（2026-11-27 修：revert 合并后这里曾挤成三格一行 —— 水位等宽断言被破坏）
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
-                // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
-                Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 4) { onOpen(HubView.FILES) }
+                // GhostLock（2026-11-03）：payload 不打进 APK，
+                // 运行时从已安装 com.ghostlock.app 解出，经 su 通道投放执行
+                Tile(genshinOr(AppIcons.Terminal, GenshinIcons.Geo), "临时Root", "无 root 提权 · Shizuku", accentRoot, order = 4) { onOpen(HubView.GHOSTLOCK) }
             }
             Box(Modifier.weight(1f)) {
-                val accentAi = Color(0xFF9C6BFF)
-                Tile(genshinOr(Icons.Rounded.AutoAwesome, GenshinIcons.Primogem), "AI 图像工具", "AI 超清 · AI 扩图", accentAi, order = 6) { onOpen(HubView.AI_IMAGE) }
+                // 文件整理（2026-11-04）：规格 project/file-organizer-rules.md v2
+                Tile(genshinOr(AppIcons.PhotoLibrary, GenshinIcons.Primogem), "文件整理", "照片按月归档 · 垃圾清理", accentFiles, order = 5) { onOpen(HubView.FILES) }
             }
         }
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.weight(1f)) {
+                val accentAi = Color(0xFF9C6BFF)
+                Tile(genshinOr(AppIcons.AutoAwesome, GenshinIcons.Primogem), "AI 图像工具", "AI 超清 · AI 扩图", accentAi, order = 6) { onOpen(HubView.AI_IMAGE) }
+            }
+            Box(Modifier.weight(1f)) {
                 val accentAuto = Color(0xFFFF2E4D)
                 // 批量采集（2026-11-21）：入口真身在小红书主页悬浮按钮，这里只做状态/设置页
-                Tile(genshinOr(Icons.Rounded.PhotoLibrary, GenshinIcons.Primogem), "批量采集", "主页自动保存原图", accentAuto, order = 8) { onOpen(HubView.XHS_AUTO) }
+                Tile(genshinOr(AppIcons.PhotoLibrary, GenshinIcons.Primogem), "批量采集", "主页自动保存原图", accentAuto, order = 8) { onOpen(HubView.XHS_AUTO) }
             }
-            // 奇数 tile 撑对：第二格留空
-            Box(Modifier.weight(1f)) {}
         }
     }
 }

@@ -1,5 +1,6 @@
 package top.honorhook.ui
 
+import top.honorhook.ui.component.AppIcons
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -50,6 +51,7 @@ import top.honorhook.ui.component.FloatingBottomBar
 import top.honorhook.ui.component.FloatingBottomBarItem
 import top.honorhook.ui.component.ArtworkBackdrop
 import top.honorhook.ui.component.GardenBackdrop
+import top.honorhook.ui.component.TechBackdrop
 import top.honorhook.ui.component.HonorHookTheme
 import top.honorhook.ui.component.IconBadge
 import top.honorhook.ui.component.isInDarkTheme
@@ -193,11 +195,11 @@ private fun AppRoot() {
     // 列表重建成本可忽略。
     val items =
         listOf(
-            NavigationItem(label = "首页", icon = genshinOr(Icons.Rounded.Cottage, GenshinIcons.Vision)),
-            NavigationItem(label = "功能", icon = genshinOr(Icons.Rounded.Extension, GenshinIcons.Dendro)),
+            NavigationItem(label = "首页", icon = genshinOr(AppIcons.Cottage, GenshinIcons.Vision)),
+            NavigationItem(label = "功能", icon = genshinOr(AppIcons.Extension, GenshinIcons.Dendro)),
             // 第 4 tab：工具箱（28 号规格书 §3）——root 开关/冻结/活性自检
-            NavigationItem(label = "工具箱", icon = genshinOr(Icons.Rounded.Handyman, GenshinIcons.Primogem)),
-            NavigationItem(label = "设置", icon = genshinOr(Icons.Rounded.Settings, GenshinIcons.Mora)),
+            NavigationItem(label = "工具箱", icon = genshinOr(AppIcons.Handyman, GenshinIcons.Primogem)),
+            NavigationItem(label = "设置", icon = genshinOr(AppIcons.Settings, GenshinIcons.Mora)),
         )
 
     // 悬浮底栏是**浮在内容之上**的（不是 Scaffold 那种占据布局高度的 bottomBar），
@@ -224,10 +226,17 @@ private fun AppRoot() {
             // 页面 Scaffold 让出透明底才能看见它；放在 layerBackdrop 里面，玻璃药丸才会把它当成背景折射。
             // 插画背景优先于花园篱笆（2026-11-08 artwork-theme）：绿篱笆 + 紫插画同框互相打架，
             // 开插画时花园让位；关掉插画又没开花园 → 退回纯色底（rootColor）。
+            // 三套皮肤单选，优先级与 AppSettings.init 的收敛逻辑一致：插画 > 花园 > 科技蓝。
+            // 三套都关 = 纯色底（rootColor）。
             if (AppSettings.artworkBackdrop) {
                 ArtworkBackdrop(modifier = Modifier.fillMaxSize())
             } else if (AppSettings.gardenSkin) {
                 GardenBackdrop(
+                    modifier = Modifier.fillMaxSize(),
+                    dark = isInDarkTheme(),
+                )
+            } else if (AppSettings.techSkin) {
+                TechBackdrop(
                     modifier = Modifier.fillMaxSize(),
                     dark = isInDarkTheme(),
                 )

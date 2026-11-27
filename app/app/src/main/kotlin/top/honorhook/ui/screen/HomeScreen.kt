@@ -1,5 +1,6 @@
 package top.honorhook.ui.screen
 
+import top.honorhook.ui.component.AppIcons
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -167,7 +168,12 @@ fun HomeScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp) {
             }
         }
     }
-    Fireflies(Modifier.fillMaxSize())
+    // 科技蓝主题不点萤火虫：那几十个彩色小点是"花园/插画"那套的语言，
+    // 深蓝网格上飘彩点会立刻把界面拉回原来的涂鸦感（2026-11-27 用户要求整套风格切换）。
+    // 科技蓝自己的动效是背景扫描线 + 卡片边缘脉冲，见 TechBackdrop / Card.cardRim。
+    if (!AppSettings.techSkin) {
+        Fireflies(Modifier.fillMaxSize())
+    }
     }
 }
 
@@ -207,8 +213,11 @@ private fun StatusCard(
     // 之前图标单独看 active（初值 false）⇒ 冷启动那一下画的是红色「!」，
     // 底色和文字却是「工作中」——自相矛盾。
     val inactive = confirmed && !active
+    // 未激活不再用红色（2026-11-28 用户：「未激活的卡片，从红色改成别的颜色，不协调」）：
+    // 红色在蓝/绿两套背景上都显得像报错弹窗，改用中性石板灰 —— 状态靠文案与图标区分，
+    // 不靠警示色抢视线；深色主题压成冷灰蓝，浅色主题用浅灰，跟卡片体系一致。
     val containerColor = when {
-        inactive -> Color(0xFFFFDAD6)
+        inactive -> if (isInDarkTheme()) Color(0xFF1E2733) else Color(0xFFE6EBF2)
         else -> when {
             // 卡片配色**跟着背景走**（2026-11-08 用户「刚才那个卡片颜色没切换」）：
             // 插画背景 → 淡紫（用户当天要求加深过一档）；花园背景 / 纯色底 → 花园时代的嫩绿。
@@ -238,9 +247,9 @@ private fun StatusCard(
             ) {
                 Icon(
                     modifier = Modifier.size(66.dp),
-                    imageVector = if (inactive) genshinOr(Icons.Rounded.ErrorOutline, GenshinIcons.Electro) else genshinOr(Icons.Rounded.CheckCircleOutline, GenshinIcons.Vision),
+                    imageVector = if (inactive) genshinOr(AppIcons.ErrorOutline, GenshinIcons.Electro) else genshinOr(AppIcons.CheckCircleOutline, GenshinIcons.Vision),
                     tint = when {
-                        inactive -> Color(0xFFBA1A1A).copy(alpha = 0.28f)
+                        inactive -> Color(0xFF8A93A6).copy(alpha = 0.30f)
                         AppSettings.artworkBackdrop -> Color(0xFF7C6BEA).copy(alpha = 0.34f)
                         else -> Color(0xFF36D167).copy(alpha = 0.34f)
                     },
@@ -323,19 +332,19 @@ private fun InfoRow(
 private fun InfoCard(modifier: Modifier = Modifier) {
     Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
-            InfoRow(Icons.Filled.Tag, Color(0xFF4FA8FF), "模块版本", appVersionLabel(), revealOrder = 0)
-            InfoRow(Icons.Filled.DeveloperBoard, Color(0xFF9B84FF), "模块包名", BuildConfig.APPLICATION_ID, revealOrder = 1)
+            InfoRow(AppIcons.Tag, Color(0xFF4FA8FF), "模块版本", appVersionLabel(), revealOrder = 0)
+            InfoRow(AppIcons.DeveloperBoard, Color(0xFF9B84FF), "模块包名", BuildConfig.APPLICATION_ID, revealOrder = 1)
             InfoRow(
-                Icons.Filled.Smartphone, Color(0xFF2BB3C0), "系统版本",
+                AppIcons.Smartphone, Color(0xFF2BB3C0), "系统版本",
                 "Android ${Build.VERSION.RELEASE}", revealOrder = 2,
             )
             InfoRow(
-                Icons.Filled.Fingerprint, Color(0xFFF0A93B), "设备",
+                AppIcons.Fingerprint, Color(0xFFF0A93B), "设备",
                 "${Build.MANUFACTURER} ${Build.MODEL}", revealOrder = 3,
             )
             // 系统架构原来复用了 DeveloperBoard（与"插件包名"同一个图标），换成 Memory
             InfoRow(
-                Icons.Filled.Memory, Color(0xFF35C77E), "系统架构",
+                AppIcons.Memory, Color(0xFF35C77E), "系统架构",
                 Build.SUPPORTED_ABIS.firstOrNull() ?: "未知",
                 bottomPadding = 0.dp,
                 revealOrder = 4,

@@ -17,13 +17,17 @@ import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Icon
 
 /**
- * 彩色圆角图标块（2026-11-08 用户口径：图标要**彩色**，观感对齐工具箱磁贴）。
+ * 行首图标。
  *
- * 结构 = 半透明 accent 渐变底（0.34 → 0.12，同工具箱 `Tile`）+ accent 字形，
- * 再叠一层顶部白色高光 + 一圈 accent 描边补「质感」（纯色块太平，玻璃感来自这两层）。
+ * 两个形态由主题决定（`ThemeShape.flatBadge`）：
+ * - **插画 / 花园 / 纯色底**：彩色圆角块（2026-11-08 用户口径「图标要彩色」）—— 半透明 accent
+ *   渐变底（0.34 → 0.12，同工具箱 `Tile`）+ accent 字形 + 顶部白色高光 + accent 描边。
+ * - **科技蓝**：只画字形、不垫底块（2026-11-28 用户：「我只让你去掉科技蓝的图标背景」）。
  *
- * 底色刻意用 accent 自身低透明度而不是主题色：深浅色主题下都能透出底下的卡片色，
- * 字形保持 accent 原色（深色主题下也不会糊成灰）。
+ * 边界记清楚：11-28 那句「图标不需要背景色」只针对科技蓝，**别**顺手把另外两套主题的底块
+ * 也删了 —— 那会把插画/花园的观感一起改掉，属于夹带。
+ *
+ * `size`（占位方框）与 `corner` 保留给 16 处调用点排版。
  */
 @Composable
 fun IconBadge(
@@ -35,6 +39,14 @@ fun IconBadge(
     iconSize: Dp = 19.dp,
     corner: Dp = 11.dp,
 ) {
+    val tint = techAccent(accent)
+    if (ThemeShape.flatBadge) {
+        // 科技蓝：无底块、无描边、无高光，字形比原来大一号
+        Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
+            TechGlyph(icon = icon, contentDescription = contentDescription, size = iconSize + 7.dp)
+        }
+        return
+    }
     val shape = RoundedCornerShape(corner)
     Box(
         modifier = modifier
@@ -65,4 +77,26 @@ fun IconBadge(
             modifier = Modifier.size(iconSize),
         )
     }
+}
+
+/**
+ * 科技蓝的字形：**就是图标集本身的样子**——单色、实心、不描边、不加发光、不加投影。
+ *
+ * 2026-11-28 用户：「你别自己挂了，直接去抄吧，太丑陋了」。前两版特效（三层渐变+外发光、
+ * 单色+投影）都是我在图标集之上自己加的，反而把它画丑了。现在不做任何二次加工：
+ * Phosphor fill 的块面 + 一个颜色。
+ */
+@Composable
+fun TechGlyph(
+    icon: ImageVector,
+    contentDescription: String? = null,
+    modifier: Modifier = Modifier,
+    size: Dp = 26.dp,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = contentDescription,
+        tint = Color(0xFF8BE4FF),
+        modifier = modifier.size(size),
+    )
 }

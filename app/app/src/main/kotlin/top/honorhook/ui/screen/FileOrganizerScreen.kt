@@ -1,5 +1,6 @@
 package top.honorhook.ui.screen
 
+import top.honorhook.ui.component.AppIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -264,7 +265,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                 val ui: HeroUi = when {
                     !storageGranted -> HeroUi(
                         light = Color(0xFFFFDAD6), dark = Color(0xFF3A1614),
-                        icon = Icons.Rounded.DeleteOutline,
+                        icon = AppIcons.DeleteOutline,
                         headline = "需要文件访问权限",
                         sub = "授权后才能扫描与整理文件",
                         ctas = listOf(HeroCta("前往系统设置授权", primary = true) {
@@ -279,20 +280,20 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     mode == "dedup" -> when {
                         dedupScanning -> HeroUi(
                             light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
-                            icon = Icons.Rounded.ContentCopy,
+                            icon = AppIcons.ContentCopy,
                             headline = "正在查重…",
                             sub = dedupProgress.first.ifEmpty { "扫描中" },
                         )
                         dedupDone != null -> HeroUi(
                             light = Color(0xFFDFF3E1), dark = Color(0xFF14301F),
-                            icon = Icons.Rounded.CheckCircleOutline,
+                            icon = AppIcons.CheckCircleOutline,
                             headline = "查重完成",
                             sub = dedupDone!!,
                             ctas = listOf(HeroCta("重新扫描") { dedupScan() }),
                         )
                         dedupGroups.isNotEmpty() -> HeroUi(
                             light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
-                            icon = Icons.Rounded.ContentCopy,
+                            icon = AppIcons.ContentCopy,
                             headline = "${dedupGroups.size} 组重复",
                             sub = "每组选一个保留，其余直接删除（不可恢复）",
                             ctas = listOf(
@@ -304,7 +305,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                         )
                         else -> HeroUi(
                             light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
-                            icon = Icons.Rounded.ContentCopy,
+                            icon = AppIcons.ContentCopy,
                             headline = "文件查重",
                             sub = "扫描 >1KB 的重复文件，按首尾内容比对",
                             ctas = listOf(HeroCta("开始扫描", primary = true) { dedupScan() }),
@@ -312,13 +313,13 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     }
                     phase == "scanning" -> HeroUi(
                         light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
-                        icon = Icons.Rounded.FolderCopy,
+                        icon = AppIcons.FolderCopy,
                         headline = "正在扫描…",
                         sub = "列出文件并生成整理计划",
                     )
                     phase == "running" -> HeroUi(
                         light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
-                        icon = Icons.Rounded.FolderCopy,
+                        icon = AppIcons.FolderCopy,
                         headline = "正在执行整理计划 ${runProgress.first}/${runProgress.second}",
                         sub = "移动可撤销 · 删除不可恢复",
                         ctas = listOf(HeroCta("取消执行", danger = true, primary = true) { FileOrganizer.cancelRun() }),
@@ -330,7 +331,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                         HeroUi(
                             light = if (delN > 0) Color(0xFFFFF2D9) else Color(0xFFDDE9FF),
                             dark = if (delN > 0) Color(0xFF332A15) else Color(0xFF1A2A38),
-                            icon = Icons.Rounded.FolderCopy,
+                            icon = AppIcons.FolderCopy,
                             headline = "${ops.size} 项待执行",
                             sub = if (pendingExcluded.isEmpty()) "确认后开始移动/删除" else "已排除 ${pendingExcluded.size} 项，将执行 ${ops.size - pendingExcluded.size} 项",
                             stats = listOf(
@@ -349,7 +350,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                         val bytes = analyzeSummary.sumOf { it.third }
                         HeroUi(
                             light = Color(0xFFDFF3E1), dark = Color(0xFF14301F),
-                            icon = Icons.Rounded.CheckCircleOutline,
+                            icon = AppIcons.CheckCircleOutline,
                             headline = if (total == 0) "全部已是最新状态" else "$total 项可处理",
                             sub = if (total == 0) "没有需要整理的文件" else "共可腾出 ${fmtMb(bytes)} · 仅分析，未动文件",
                             stats = if (total == 0) emptyList() else listOf(bytes to "可腾出"),
@@ -366,7 +367,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                         HeroUi(
                             light = if ((r?.failed ?: 0) > 0) Color(0xFFFFF2D9) else Color(0xFFDFF3E1),
                             dark = if ((r?.failed ?: 0) > 0) Color(0xFF332A15) else Color(0xFF14301F),
-                            icon = Icons.Rounded.CheckCircleOutline,
+                            icon = AppIcons.CheckCircleOutline,
                             headline = "整理完成",
                             sub = "移动可撤销 · 删除不可恢复",
                             stats = listOf(
@@ -396,7 +397,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     }
                     else -> HeroUi(
                         light = Color(0xFFDDE9FF), dark = Color(0xFF1A2A38),
-                        icon = Icons.Rounded.FolderCopy,
+                        icon = AppIcons.FolderCopy,
                         headline = "规则整理就绪",
                         sub = "照片按月归档 · 垃圾清理 · 同类归拢",
                         stats = listOf(
@@ -470,8 +471,8 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                 Spacer(Modifier.height(12.dp))
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        ModeTab(Icons.Rounded.FolderCopy, "规则整理", mode == "organize", Modifier.weight(1f)) { mode = "organize" }
-                        ModeTab(Icons.Rounded.ContentCopy, "文件查重", mode == "dedup", Modifier.weight(1f)) { mode = "dedup" }
+                        ModeTab(AppIcons.FolderCopy, "规则整理", mode == "organize", Modifier.weight(1f)) { mode = "organize" }
+                        ModeTab(AppIcons.ContentCopy, "文件查重", mode == "dedup", Modifier.weight(1f)) { mode = "dedup" }
                     }
                 }
             }
@@ -482,7 +483,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                 items(analyzeSummary, key = { it.first }) { (name, count, bytes) ->
                     Card(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconBadge(rules.find { it.id == name }?.let { actionIcon(it) } ?: Icons.Rounded.Archive)
+                            IconBadge(rules.find { it.id == name }?.let { actionIcon(it) } ?: AppIcons.Archive)
                             Spacer(Modifier.size(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(rules.find { it.id == name }?.name ?: name, fontSize = 14.sp, color = colorScheme.onSurface)
@@ -551,7 +552,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                     Card(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconBadge(Icons.Rounded.Image)
+                                IconBadge(AppIcons.Image)
                                 Spacer(Modifier.size(10.dp))
                                 Text(if (ext == "文件") "${group.entries.size} 个相同大小文件 · 每个 ${fmtMb(group.entries.first().size)}" else "${group.entries.size} 个相同的 $ext · 每个 ${fmtMb(group.entries.first().size)}",
                                     fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
@@ -682,7 +683,7 @@ fun FileOrganizerScreen(bottomInnerPadding: androidx.compose.ui.unit.Dp = 0.dp, 
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                if (isDel) Icons.Rounded.DeleteOutline else Icons.Rounded.CallMerge,
+                                if (isDel) AppIcons.DeleteOutline else AppIcons.CallMerge,
                                 null, Modifier.size(20.dp),
                                 tint = if (isDel) Color(0xFFBA1A1A) else colorScheme.primary,
                             )
@@ -870,11 +871,12 @@ private data class HeroUi(
 private fun fmtCount(v: Long): String =
     if (v >= 1024L * 1024) "${v / 1024 / 1024}MB" else if (v >= 1024) "${v / 1024}KB" else v.toString()
 
-/** 规则/操作的动作图标 */
+/** 规则/操作的动作图标（`AppIcons.*` 是 @Composable getter —— 它要订阅科技蓝主题，故本函数也是 @Composable） */
+@Composable
 private fun actionIcon(r: Rule): ImageVector = when (r.action) {
-    ActionType.ARCHIVE -> Icons.Rounded.Archive
-    ActionType.MERGE -> Icons.Rounded.CallMerge
-    ActionType.DELETE -> Icons.Rounded.CleaningServices
+    ActionType.ARCHIVE -> AppIcons.Archive
+    ActionType.MERGE -> AppIcons.CallMerge
+    ActionType.DELETE -> AppIcons.CleaningServices
 }
 
 /** 彩色圆角图标徽章（HubTiles 同款 36dp） */

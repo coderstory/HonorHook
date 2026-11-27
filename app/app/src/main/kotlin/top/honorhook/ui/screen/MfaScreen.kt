@@ -1,5 +1,6 @@
 package top.honorhook.ui.screen
 
+import top.honorhook.ui.component.AppIcons
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -124,21 +125,21 @@ fun MfaScreen(bottomInnerPadding: Dp = 0.dp, onBack: () -> Unit, topInset: Dp = 
                     horizontalArrangement = Arrangement.End,
                 ) {
                     IconButton(onClick = { confirmBackup = true }) {
-                        Icon(Icons.Rounded.Backup, null, tint = colorScheme.onSurface)
+                        Icon(AppIcons.Backup, null, tint = colorScheme.onSurface)
                     }
                     IconButton(onClick = {
                         importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
                     }) {
-                        Icon(Icons.Rounded.FolderOpen, null, tint = colorScheme.onSurface)
+                        Icon(AppIcons.FolderOpen, null, tint = colorScheme.onSurface)
                     }
                     IconButton(onClick = { showImport = true }) {
-                        Icon(Icons.Rounded.ContentPaste, null, tint = colorScheme.onSurface)
+                        Icon(AppIcons.ContentPaste, null, tint = colorScheme.onSurface)
                     }
                     IconButton(onClick = { showManual = true }) {
-                        Icon(Icons.Rounded.Add, null, tint = colorScheme.onSurface)
+                        Icon(AppIcons.Add, null, tint = colorScheme.onSurface)
                     }
                     IconButton(onClick = { view = MfaView.SCAN }) {
-                        Icon(Icons.Rounded.QrCodeScanner, null, tint = colorScheme.onSurface)
+                        Icon(AppIcons.QrCodeScanner, null, tint = colorScheme.onSurface)
                     }
                 }
             }
@@ -321,10 +322,10 @@ private fun AccountCard(acc: MfaAccount, tick: Long, alias: String?, onClick: ()
                 fontWeight = FontWeight.Bold,
             )
             IconButton(onClick = onRename) {
-                Icon(Icons.Rounded.Edit, null, tint = colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
+                Icon(AppIcons.Edit, null, tint = colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Rounded.Delete, null, tint = colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
+                Icon(AppIcons.Delete, null, tint = colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
             }
         }
     }

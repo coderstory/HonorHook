@@ -46,6 +46,16 @@ Copyright (C) 2026 coderstory (https://github.com/coderstory/HonorHook)
 §6 要求的对应源码由上述公开仓库提供（含 submodule pin 的上游 commit）。
 
 --------------------------------------------------------------------------------
+第三方图标（Phosphor Icons）
+--------------------------------------------------------------------------------
+
+  项目：  https://github.com/phosphor-icons/core
+  许可：  MIT License
+  取用方式：科技蓝主题的图标集（app/app/src/main/kotlin/top/honorhook/ui/component/tech/TechIcons.kt）
+            只内嵌 fill 权重图标（52 个）的 SVG path 数据，运行时用 PathParser 转成
+            ImageVector；未复制其仓库源码结构，未引入字体或任何位图资源。
+
+--------------------------------------------------------------------------------
 商标
 --------------------------------------------------------------------------------
 

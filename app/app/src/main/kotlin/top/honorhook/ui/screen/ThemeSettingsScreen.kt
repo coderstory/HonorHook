@@ -1,5 +1,6 @@
 package top.honorhook.ui.screen
 
+import top.honorhook.ui.component.AppIcons
 import android.annotation.SuppressLint
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
@@ -32,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CallToAction
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Icon
@@ -40,13 +42,19 @@ import androidx.compose.material.icons.rounded.LocalFlorist
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import top.honorhook.ui.component.genshin.GenshinIcons
 import top.honorhook.ui.component.genshin.genshinOr
 import top.honorhook.ui.AppSettings
@@ -62,7 +70,9 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.window.WindowDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -98,6 +108,8 @@ internal fun ThemeSettingsPage(
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val ui = AppSettings.colorMode
+    // 背景主题下拉框（2026-11-27 用户：「三个主题，改成下拉框选择」）
+    var backdropPickerOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         // 透明底：让出 AppRoot 里的背景皮肤（GardenBackdrop）
@@ -192,7 +204,7 @@ internal fun ThemeSettingsPage(
                                     ) {
                                         if (selected) {
                                             Icon(
-                                                Icons.Rounded.Check,
+                                                AppIcons.Check,
                                                 contentDescription = "已选中",
                                                 tint = Color.White,
                                                 modifier = Modifier.size(20.dp),
@@ -220,7 +232,7 @@ internal fun ThemeSettingsPage(
                             summary = "顶栏与底栏的背景模糊",
                             startAction = {
                                 IconBadge(
-                                    icon = genshinOr(Icons.Rounded.BlurOn, GenshinIcons.Hydro),
+                                    icon = genshinOr(AppIcons.BlurOn, GenshinIcons.Hydro),
                                     accent = Color(0xFF4FA8FF),
                                     contentDescription = "启用模糊",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -235,7 +247,7 @@ internal fun ThemeSettingsPage(
                         summary = "关闭则退回贴边导航栏",
                         startAction = {
                             IconBadge(
-                                icon = genshinOr(Icons.Rounded.CallToAction, GenshinIcons.Dendro),
+                                icon = genshinOr(AppIcons.CallToAction, GenshinIcons.Dendro),
                                 accent = Color(0xFF9B84FF),
                                 contentDescription = "悬浮底栏",
                                 modifier = Modifier.padding(end = 10.dp),
@@ -253,7 +265,7 @@ internal fun ThemeSettingsPage(
                             summary = "底栏按钮的立体折射和高光",
                             startAction = {
                                 IconBadge(
-                                    icon = genshinOr(Icons.Rounded.WaterDrop, GenshinIcons.Hydro),
+                                    icon = genshinOr(AppIcons.WaterDrop, GenshinIcons.Hydro),
                                     accent = Color(0xFF2BB3C0),
                                     contentDescription = "启用玻璃",
                                     modifier = Modifier.padding(end = 10.dp),
@@ -279,7 +291,7 @@ internal fun ThemeSettingsPage(
                         onCheckedChange = { AppSettings.setFireflyEnabled(it) },
                         startAction = {
                             IconBadge(
-                                icon = genshinOr(Icons.Rounded.Flare, GenshinIcons.Pyro),
+                                icon = genshinOr(AppIcons.Flare, GenshinIcons.Pyro),
                                 accent = Color(0xFFF0A93B),
                                 contentDescription = "首页萤火虫",
                                 modifier = Modifier.padding(end = 10.dp),
@@ -288,42 +300,47 @@ internal fun ThemeSettingsPage(
                     )
                 }
 
-                // 背景（2026-11-08 用户要求「加一个主题功能」）：插画 / 花园 / 纯色三档。
-                // 两张开关**互斥**（用户 2026-11-08 指出：不能都开，但也不该把另一个灰掉）：
-                // 打开任一档会自动关掉另一档，两个都关 = 纯色底。
+                // 背景主题（2026-11-27 用户：「三个主题，改成下拉框选择」）：
+                // 原来三行互斥 SwitchPreference 改成一行"当前主题 + 点开选"。
+                // 存储仍是三个互斥布尔（键不变、不迁移），第 4 档「纯色」= 三套全关（原有能力保留）。
+                val skin = currentBackdropSkin()
                 Card(
                     modifier = Modifier
                         .padding(top = 12.dp)
                         .fillMaxWidth()
                         .cardEntrance(3, key = "theme.3", edge = EntranceEdge.Bottom),
                 ) {
-                    SwitchPreference(
-                        title = "插画背景",
-                        summary = "整屏蓝紫插画，顶栏是一块更厚的磨砂玻璃（与花园背景二选一）",
-                        checked = AppSettings.artworkBackdrop,
-                        onCheckedChange = { AppSettings.setArtworkBackdrop(it) },
+                    // 用 Miuix 官方 BasicComponent 而不是手搓 Row（2026-11-28 用户：
+                    // 「背景主题的字体大小，左右边距，怎么和别的设置项不同」）：
+                    // 字号/行距/16dp 内边距/56dp 最小行高/图标与文字间距全部由 BasicComponent 决定，
+                    // 和同页的 SwitchPreference 是同一段布局代码，不可能再对不齐。
+                    BasicComponent(
+                        title = "背景主题",
+                        summary = skin.summary,
                         startAction = {
                             IconBadge(
-                                icon = genshinOr(Icons.Rounded.Wallpaper, GenshinIcons.Vision),
-                                accent = Color(0xFF9B84FF),
-                                contentDescription = "插画背景",
+                                icon = skin.badge(),
+                                accent = skin.accent,
+                                contentDescription = "背景主题",
                                 modifier = Modifier.padding(end = 10.dp),
                             )
                         },
-                    )
-                    SwitchPreference(
-                        title = "花园背景",
-                        summary = "页面四周的篱笆与花草（与插画背景二选一）",
-                        checked = AppSettings.gardenSkin,
-                        onCheckedChange = { AppSettings.setGardenSkin(it) },
-                        startAction = {
-                            IconBadge(
-                                icon = genshinOr(Icons.Rounded.LocalFlorist, GenshinIcons.Dendro),
-                                accent = Color(0xFF35C77E),
-                                contentDescription = "花园背景",
-                                modifier = Modifier.padding(end = 10.dp),
+                        endActions = {
+                            Text(
+                                skin.label,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = skin.accent,
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                            Icon(
+                                AppIcons.ChevronRight,
+                                null,
+                                modifier = Modifier.size(18.dp),
+                                tint = colorScheme.onSurfaceVariantSummary,
                             )
                         },
+                        onClick = { backdropPickerOpen = true },
                     )
                 }
 
@@ -337,4 +354,99 @@ internal fun ThemeSettingsPage(
             }
         }
     }
+
+    // 背景主题下拉（与 GhostLock 的「漏洞版本」选择同一套行式弹窗：选中行浅底 + 行尾 ✓）
+    if (backdropPickerOpen) {
+        WindowDialog(
+            show = true,
+            title = "选择背景主题",
+            summary = "四选一，切换后立即生效",
+            onDismissRequest = { backdropPickerOpen = false },
+        ) {
+            val current = currentBackdropSkin()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                BackdropSkin.entries.forEach { item ->
+                    val selected = current == item
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (selected) item.accent.copy(alpha = 0.14f) else Color(0x14000000),
+                                RoundedCornerShape(12.dp),
+                            )
+                            .clickable {
+                                applyBackdropSkin(item)
+                                backdropPickerOpen = false
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                item.label,
+                                fontSize = 14.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = colorScheme.onSurface,
+                            )
+                            Text(
+                                item.summary,
+                                fontSize = 11.sp,
+                                color = colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        if (selected) {
+                            Text("✓", color = item.accent, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
+
+/**
+ * 背景主题四档（2026-11-27 用户「三个主题，改成下拉框选择」）。
+ *
+ * 状态仍由 `AppSettings` 的三个互斥布尔承载（键、互斥规则、落盘都不变），这里只是把它们
+ * 收成"单选"的交互外壳。第 4 档「纯色」= 三套全关，是原有能力，不能删。
+ */
+private enum class BackdropSkin(val label: String, val summary: String) {
+    ARTWORK("插画", "蓝紫插画背景"),
+    GARDEN("花园", "花草篱笆背景"),
+    TECH("科技蓝", "深空网格与线框图标"),
+    PLAIN("纯色", "不叠背景图"),
+}
+
+private fun currentBackdropSkin(): BackdropSkin = when {
+    AppSettings.artworkBackdrop -> BackdropSkin.ARTWORK
+    AppSettings.gardenSkin -> BackdropSkin.GARDEN
+    AppSettings.techSkin -> BackdropSkin.TECH
+    else -> BackdropSkin.PLAIN
+}
+
+private fun applyBackdropSkin(skin: BackdropSkin) {
+    when (skin) {
+        BackdropSkin.ARTWORK -> AppSettings.setArtworkBackdrop(true)
+        BackdropSkin.GARDEN -> AppSettings.setGardenSkin(true)
+        BackdropSkin.TECH -> AppSettings.setTechSkin(true)
+        BackdropSkin.PLAIN -> AppSettings.setPlainBackdrop()
+    }
+}
+
+private val BackdropSkin.accent: Color
+    get() = when (this) {
+        BackdropSkin.ARTWORK -> Color(0xFF9B84FF)
+        BackdropSkin.GARDEN -> Color(0xFF35C77E)
+        BackdropSkin.TECH -> Color(0xFF2F6BFF)
+        BackdropSkin.PLAIN -> Color(0xFF8A8F98)
+    }
+
+@Composable
+private fun BackdropSkin.badge(): ImageVector = when (this) {
+    BackdropSkin.ARTWORK -> genshinOr(AppIcons.Wallpaper, GenshinIcons.Vision)
+    BackdropSkin.GARDEN -> genshinOr(AppIcons.LocalFlorist, GenshinIcons.Dendro)
+    BackdropSkin.TECH -> AppIcons.Bolt
+    BackdropSkin.PLAIN -> AppIcons.BlurOn
+}
+

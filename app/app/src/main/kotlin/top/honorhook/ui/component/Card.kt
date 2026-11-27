@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -52,8 +53,8 @@ fun Card(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     MiuixCard(
-        modifier = modifier.cardRim(cornerRadius),
-        cornerRadius = cornerRadius,
+        modifier = modifier.cardRim(techCornerRadius(cornerRadius)),
+        cornerRadius = techCornerRadius(cornerRadius),
         insideMargin = insideMargin,
         colors = colors,
         content = content,
@@ -96,8 +97,8 @@ fun Card(
 ) {
     val haptics = LocalHapticFeedback.current
     MiuixCard(
-        modifier = modifier.cardRim(cornerRadius),
-        cornerRadius = cornerRadius,
+        modifier = modifier.cardRim(techCornerRadius(cornerRadius)),
+        cornerRadius = techCornerRadius(cornerRadius),
         insideMargin = insideMargin,
         colors = colors,
         pressFeedbackType = pressFeedbackType,
@@ -145,6 +146,19 @@ fun Modifier.cardClick(enabled: Boolean = true, onClick: () -> Unit): Modifier {
  */
 private val RimWidth = 1.dp
 
+/** 卡片几何叠加（2026-11-27 用户「卡片能加背景？几何的图形叠加都行啊」）。 */
+private val TechGridStep = 14.dp
+
+/** 科技蓝包边用的青 / 电蓝；与背景皮肤 `TechBackdrop` 同一组色相。 */
+private val TechRimCyan = Color(0xFF35E0FF)
+private val TechRimBlue = Color(0xFF2E9BFF)
+
+/**
+ * 科技蓝主题下的卡片圆角：比常规大 4dp（用户要「更大圆角」的玻璃感）。
+ * 描边路径与 miuix 填充必须用同一个值，否则四角会露出一圈不贴合的缝。
+ */
+private fun techCornerRadius(base: Dp): Dp = ThemeShape.cardRadius(base)
+
 /** 包边不透明度：浅色卡上要「看得见一条边」但不抢字，深色卡提亮一档才不糊进背景。 */
 private const val RimAlphaLight = 0.40f
 private const val RimAlphaDark = 0.50f
@@ -186,7 +200,12 @@ private fun Modifier.cardRim(cornerRadius: Dp): Modifier {
     // 不能只读 `colorScheme.primary`：主题控制器在部分分支下会回落到 miuix 自带的偏绿 primary，
     // 卡片边缘就会露出一圈绿边（2026-11-08 用户实测反馈）。
     val primary = if (AppSettings.artworkBackdrop) Color(AppSettings.artworkKeyColor) else MiuixTheme.colorScheme.primary
+    // 科技蓝主题（2026-11-27）：包边改青→蓝→青渐变，投影换成同色系外发光，
+    // 亮度由主题层共享的脉动相位驱动（LocalTechPulse，读在 draw 阶段 ⇒ 每帧只重绘不重组）。
+    val tech = AppSettings.techSkin
+    val pulseState = LocalTechPulse.current
     val rim = primary.copy(alpha = if (dark) RimAlphaDark else RimAlphaLight)
+    val techRimColors = listOf(TechRimCyan, TechRimBlue, TechRimCyan)
     val shadow = if (dark) ShadowDark else primary
     val sheenAlpha = if (isInDarkTheme()) SheenAlphaDark else SheenAlphaLight
     val squircle = isSquircleEnabled()
@@ -220,19 +239,52 @@ private fun Modifier.cardRim(cornerRadius: Dp): Modifier {
         }
         val shadowOffsetY = ShadowOffsetY.toPx()
         val cardSize = size
+        // 科技蓝的包边渐变：沿卡片对角线铺，四角各自吃到不同相位，转屏/改尺寸时重算（缓存内）
+        val techRim = if (tech) {
+            Brush.linearGradient(
+                colors = techRimColors,
+                start = Offset.Zero,
+                end = Offset(size.width, size.height),
+            )
+        } else null
+        val techSheen = if (tech) Color(0xFFB7ECFF) else Color.White
         val sheen = Brush.verticalGradient(
             colorStops = arrayOf(
-                0f to Color.White.copy(alpha = sheenAlpha),
+                0f to techSheen.copy(alpha = sheenAlpha),
                 0.6f to Color.White.copy(alpha = 0f),
             ),
             startY = 0f,
             endY = size.height * 0.45f,
         )
         onDrawWithContent {
+            // 科技蓝：三角波脉动（0→1→0），发光在外圈最亮 —— 读 State 发生在 draw 阶段，
+            // 只触发重绘不触发重组。提到最外层是因为发光和卡片底纹都要用同一个相位。
+            val pulse = if (tech) {
+                val t = pulseState?.value ?: 0f
+                1f - kotlin.math.abs(t * 2f - 1f)
+            } else 0f
             if (size.width > 0f && size.height > 0f) {
-                shadows.forEach { (expandPx, alpha, shadowPath) ->
+                shadows.forEachIndexed { index, (expandPx, alpha, shadowPath) ->
                     translate(-expandPx, -expandPx + shadowOffsetY) {
-                        drawPath(path = shadowPath, color = shadow.copy(alpha = alpha))
+                        if (tech) {
+                            // 外发光：同一圈几何，换成青色、最外圈更亮，随脉动 0.6x~1.6x
+                            val glowAlpha = alpha * (0.6f + 0.9f * pulse) * if (index == 0) 2.2f else 1.4f
+                            drawPath(
+                                path = shadowPath,
+                                color = Color(0xFF2E9BFF).copy(alpha = glowAlpha.coerceAtMost(0.5f)),
+                            )
+                        } else {
+                            drawPath(path = shadowPath, color = shadow.copy(alpha = alpha))
+                        }
+                    }
+                }
+            }
+            // 科技蓝：卡片自身的几何底纹（斜向细线 + 右上双圆环 + 网格交点上的电路节点）。
+            // 画在 `drawContent()` 之前、裁剪到同一张 squircle 路径 ⇒ 卡片内边距内的文字仍在最上层。
+            if (tech && drawable) {
+                translate(half, half) {
+                    clipPath(path) {
+                        drawTechGeometry(dark = dark, pulse = pulse)
                     }
                 }
             }
@@ -247,4 +299,64 @@ private fun Modifier.cardRim(cornerRadius: Dp): Modifier {
             }
         }
     }
+}
+
+/**
+ * 卡片上的几何叠加层（科技蓝主题专用，画在内容之下、裁剪在卡片轮廓之内）。
+ *
+ * 为什么是「少量几何」而不是贴图/位图：
+ * - 44 张卡的尺寸各不相同，位图要出多套密度还得平铺裁剪；纯几何按 `size` 现算，任意尺寸都不拉伸。
+ * - 全部只画线/圆/点，没有离屏层，卡片滚动时不额外分配位图。
+ * - 透明度压在 0.05~0.14：底纹是"材质"，不能抢卡片里的字（深色卡上更亮一档才看得见）。
+ *
+ * `pulse` 来自主题层共享时钟（0..1 三角波），只用来让节点轻微呼吸 —— 不引入新的动画。
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTechGeometry(dark: Boolean, pulse: Float) {
+    val w = size.width
+    val h = size.height
+    if (w <= 0f || h <= 0f) return
+
+    // ① 斜向细线：45° 一组，从左上外沿切进来，间距 14dp；线宽 1px 是物理像素级的发丝线
+    val step = TechGridStep.toPx()
+    val lineAlpha = if (dark) 0.075f else 0.055f
+    val lineColor = TechRimCyan.copy(alpha = lineAlpha)
+    var offset = -h
+    while (offset < w) {
+        drawLine(
+            color = lineColor,
+            start = Offset(offset, 0f),
+            end = Offset(offset + h, h),
+            strokeWidth = 1f,
+        )
+        offset += step
+    }
+
+    // ② 右上双圆环：一大一小同心（卡角被裁掉一半，只露内侧弧），给"传感器/雷达"的暗示
+    val ringCenter = Offset(w * 1.02f, -h * 0.06f)
+    val ringAlpha = if (dark) 0.16f else 0.11f
+    drawCircle(
+        color = TechRimBlue.copy(alpha = ringAlpha),
+        radius = w * 0.52f,
+        center = ringCenter,
+        style = Stroke(width = 1f),
+    )
+    drawCircle(
+        color = TechRimCyan.copy(alpha = ringAlpha * 0.8f),
+        radius = w * 0.34f,
+        center = ringCenter,
+        style = Stroke(width = 1f),
+    )
+
+    // ③ 左下电路节点：4 个点 + 一截折线，呼吸幅度 ±40%，几乎察觉不到但扫一眼是"活的"
+    val nodeColor = TechRimCyan.copy(alpha = (if (dark) 0.20f else 0.14f) * (0.8f + 0.4f * pulse))
+    val nodeY = h * 0.82f
+    drawCircle(color = nodeColor, radius = 1.6f, center = Offset(w * 0.10f, nodeY))
+    drawCircle(color = nodeColor, radius = 1.6f, center = Offset(w * 0.22f, nodeY))
+    drawCircle(color = nodeColor, radius = 1.2f, center = Offset(w * 0.30f, nodeY - 8f))
+    drawLine(
+        color = nodeColor.copy(alpha = nodeColor.alpha * 0.65f),
+        start = Offset(w * 0.10f, nodeY),
+        end = Offset(w * 0.30f, nodeY),
+        strokeWidth = 1f,
+    )
 }
